@@ -1,4 +1,5 @@
 import { apiChat } from "../../../utils/apiHelper";
+import { createId as createApplicationId } from "../../../core/id/createId";
 import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import type {
   ForumStory,
@@ -63,12 +64,7 @@ export interface ForumStoryCreationResult {
   candidate: ForumStoryInitialCandidate;
 }
 
-const makeId = (prefix: string): string => {
-  const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return `${prefix}-${suffix}`;
-};
+const makeId = (prefix: string): string => createApplicationId(prefix);
 
 const requireTextAiConfig = (settings: ForumStoryGenerationSettings): void => {
   if (!settings.apiKey?.trim() || !settings.selectedModel?.trim()) {

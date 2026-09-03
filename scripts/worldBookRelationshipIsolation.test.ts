@@ -19,9 +19,14 @@ const publicGlobal = base("public-global", { visibility: "public", purpose: "wor
 const publicCharacter = base("public-character", { characterId: "char-a", visibility: "public", purpose: "persona_rule" });
 const privateIdentity = base("private-identity", { scope: { kind: "identity", userIdentityId: "identity-a" } });
 const privateRelation = base("private-relation", { scope: { kind: "relationship", relationId: "relation-a", characterId: "char-a", userIdentityId: "identity-a" } });
+const multiCharacter = base("multi-character", { characterId: "char-a", characterIds: ["char-a", "char-b"], scope: { kind: "characters", characterIds: ["char-a", "char-b"] } });
 
 assert.equal(resolveWorldBookScope(legacyGlobal).kind, "global");
 assert.equal(resolveWorldBookScope(legacyCharacter).kind, "character");
+assert.equal(resolveWorldBookScope(multiCharacter).kind, "characters");
+assert.equal(isWorldBookEntryVisible(multiCharacter, { scenario: "chat", characterId: "char-a" }), true);
+assert.equal(isWorldBookEntryVisible(multiCharacter, { scenario: "chat", characterId: "char-b" }), true);
+assert.equal(isWorldBookEntryVisible(multiCharacter, { scenario: "chat", characterId: "char-c" }), false);
 assert.equal(isWorldBookEntryVisible(legacyGlobal, { scenario: "chat", characterId: "char-a", userIdentityId: "identity-a" }), true);
 assert.equal(isWorldBookEntryVisible(legacyGlobal, { scenario: "public", characterId: "char-a" }), false, "legacy entries are not inferred public");
 assert.equal(isWorldBookEntryVisible(publicGlobal, { scenario: "public", characterId: "char-a" }), true);

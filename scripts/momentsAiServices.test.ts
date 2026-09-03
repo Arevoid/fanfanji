@@ -3,6 +3,7 @@ import { calculateCharacterMomentOccurredAt, requestCharacterMoment } from "../s
 import { requestAutomaticMomentComment } from "../src/features/moments/services/momentCommentService";
 import { requestMomentCommentReply } from "../src/features/moments/services/momentReplyService";
 import type { Character } from "../src/types";
+import { appendMomentPublicPromptContext } from "../src/features/characterCognitive/promptAdapters/momentPromptAdapter";
 
 const character: Character = { id: "c1", name: "阿岚", avatar: "a.png", personality: "温柔", backstory: "测试" };
 const request = { message: "m", history: [], systemInstruction: "s", apiKey: "", model: "test" };
@@ -16,6 +17,7 @@ assert.equal(post.moment?.content, "你好");
 assert.equal(post.moment?.comments[0].content, "自评");
 assert.ok(post.memory?.content.includes("你好"));
 assert.equal(post.moment?.relationId, "relation-a");
+assert.equal(post.memory?.userIdentityId, "identity-1", "朋友圈记忆必须继承发布关系的身份作用域");
 assert.equal(post.moment?.timestamp, 10);
 assert.equal(post.moment?.comments[0].timestamp, 1010);
 assert.equal(post.memory?.relationId, "relation-a");
@@ -49,4 +51,18 @@ assert.equal(await requestAutomaticMomentComment({ requestAi: emptyRequest, requ
 const reply = await requestMomentCommentReply({ requestAi: async () => ({ text: "回复小林：[voice|6]你好" }), request, character, userName: "小林", cleanText: clean, now: () => 30, random: () => 0.3 });
 assert.equal(reply?.content, "回复小林：你好");
 assert.equal(await requestMomentCommentReply({ requestAi: emptyRequest, request, character, userName: "小林", cleanText: clean }), undefined);
+
+const anchored = appendMomentPublicPromptContext({ ...request, systemInstruction: "BASE\n\n[FINAL OUTPUT LANGUAGE — HIGHEST PRIORITY]\nJapanese only" }, {
+  schemaVersion: 1,
+  createdAt: new Date("2026-08-11T12:00:00+08:00").getTime(),
+  publicCharacterProfile: { name: "阿岚", personality: "温柔", backstory: "测试" },
+  authorizedPublicFacts: [],
+  publicEvents: [],
+  publicMomentHistory: [],
+  publicCommentHistory: [],
+  publicBehaviorConstraints: [],
+  currentTime: { now: new Date("2026-08-11T12:00:00+08:00").getTime(), date: "2026-08-11", time: "12:00" },
+});
+assert.match(anchored.systemInstruction || "", /PUBLIC-SAFE MOMENT COGNITIVE CONTEXT/);
+assert.equal(anchored.systemInstruction?.endsWith("Japanese only"), true, "Moment adapter must keep final language anchor last");
 console.log("PASS character Moment, auto-comment, reply, text-only voice-tag cleanup, empty response, and stable creation checks");

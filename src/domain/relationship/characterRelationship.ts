@@ -14,11 +14,15 @@ export interface CharacterRelationship {
   updatedAt: number;
   lastActiveTime?: number;
   scheduledProactiveTime?: number;
+  /** Whether this relationship may naturally propose an offline meeting. Defaults to false. */
+  enableProactiveOffline?: boolean;
   /** Persisted per relationship so reopening the app cannot reset call throttling. */
   lastProactiveCallAt?: number;
   proactiveCallDayKey?: string;
   proactiveCallCount?: number;
   proactiveCallBackoffUntil?: number;
+  /** Whether one delayed retry is allowed after an emotionally charged hang-up. */
+  proactiveCallRetryAvailable?: boolean;
   lastImmediateSummaryMsgId?: string;
   compressedMemory?: string;
 }
@@ -29,6 +33,8 @@ export const getDefaultRelationId = (characterId: string) => `relation_default_$
 export const getConversationId = (relationId: string) => `direct:${relationId}`;
 export const getOfflineModeStorageKey = (relationId: string) => `offline_mode_active_${relationId}`;
 export const getOfflineStoryStorageKey = (relationId: string) => `offline_story_id_${relationId}`;
+export const getOfflineGroupModeStorageKey = (groupId: string) => `offline_group_mode_active_${groupId}`;
+export const getOfflineGroupStoryStorageKey = (groupId: string) => `offline_group_story_id_${groupId}`;
 
 export function findRelationship(
   relationships: readonly CharacterRelationship[],

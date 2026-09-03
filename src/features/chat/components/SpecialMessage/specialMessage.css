@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Aidian SignatureTi Marker pen -Medium";
+  src: url("../../../../assets/fonts/Aidian-SignatureTi-Marker-pen-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
 .message-quote {
   --quote-bg: color-mix(in srgb, var(--surface-muted) 72%, transparent);
   --quote-border: var(--border-strong);
@@ -65,12 +73,206 @@
   --redpacket-money-color: #ffffff;
   --redpacket-status-color: #d7dde0;
   --redpacket-note-color: rgba(241, 245, 249, 0.88);
+  --redpacket-status-bg: #f5f7f4;
+  --redpacket-status-text: #102124;
   background: var(--redpacket-bg);
   color: var(--redpacket-title-color);
 }
 
-.redpacket-card[data-status="claimed"] { filter: saturate(0.55) opacity(0.75); }
-.redpacket-card[data-status="expired"], .redpacket-card[data-status="refunded"] { --redpacket-bg: linear-gradient(135deg, #475569, #64748b); filter: grayscale(0.45); }
+/* Red packets follow the compact dark card used by the chat composer.  Keep
+ * these dimensions scoped to red packets so transfer cards retain their
+ * existing, smaller presentation. */
+.redpacket-card {
+  --payment-card-width: 175px;
+  --payment-card-height: 92px;
+  width: min(var(--payment-card-width), calc(100vw - 48px));
+  min-width: min(175px, calc(100vw - 48px));
+  height: var(--payment-card-height);
+  min-height: var(--payment-card-height);
+  max-height: var(--payment-card-height);
+  padding: 11px 12px 9px;
+  border-radius: 12px;
+  grid-template-rows: auto auto auto;
+  gap: 0;
+  background: var(--redpacket-bg);
+  text-align: left;
+}
+
+.redpacket-card .special-payment-card__top {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+
+.redpacket-card .special-payment-card__title {
+  font-size: 0.66rem;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.redpacket-card .special-payment-card__status {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--redpacket-status-bg);
+  color: var(--redpacket-status-text);
+  /* The phone shell applies its global font with !important. Protect the
+   * red-packet action label so it keeps the dedicated card font. Characters
+   * missing from that font still fall back normally and remain readable. */
+  font-family: "RedPacketPayFont", "Aidian SignatureTi Marker pen -Medium", "Segoe Script", "Bradley Hand", cursive !important;
+  font-size: 0.46rem;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.redpacket-card .special-payment-card__money {
+  align-self: start;
+  justify-self: start;
+  width: 100%;
+  margin-top: 9px;
+  font-size: 1.3rem;
+  line-height: 0.95;
+  letter-spacing: 0.01em;
+  text-align: left;
+}
+
+.redpacket-card .special-payment-card__note {
+  align-self: start;
+  justify-self: start;
+  width: 100%;
+  margin-top: 4px;
+  font-size: 0.58rem;
+  line-height: 1.2;
+  white-space: normal;
+  text-align: left;
+}
+
+.redpacket-card .redpacket-card__brand {
+  top: 3px;
+  right: 9px;
+  bottom: auto;
+  color: #c7d0cf;
+  font-family: "RedPacketPayFont", "Aidian SignatureTi Marker pen -Medium", "Segoe Script", "Bradley Hand", cursive !important;
+  font-size: 1.75rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1;
+  opacity: 0.72;
+  transform: rotate(-8deg);
+  transform-origin: right top;
+}
+
+.redpacket-card[data-status="claimed"] {
+  --redpacket-bg: linear-gradient(135deg, #4b5757, #687170 72%, #7b8582);
+  --redpacket-title-color: #e8eeee;
+  --redpacket-money-color: #f5f8f7;
+  --redpacket-status-color: #59615f;
+  --redpacket-note-color: rgba(232, 238, 238, 0.86);
+  --redpacket-status-bg: #d7ddda;
+  --redpacket-status-text: #59615f;
+  filter: saturate(0.55) opacity(0.75);
+}
+
+.redpacket-card[data-status="expired"],
+.redpacket-card[data-status="refunded"] {
+  --redpacket-bg: linear-gradient(135deg, #475569, #64748b);
+  --redpacket-title-color: #f1f5f9;
+  --redpacket-money-color: #ffffff;
+  --redpacket-status-color: #e2e8f0;
+  --redpacket-note-color: rgba(241, 245, 249, 0.86);
+  --redpacket-status-bg: #e2e8f0;
+  --redpacket-status-text: #475569;
+  filter: grayscale(0.45);
+}
+
+.location-card {
+  --payment-card-width: 175px;
+  --payment-card-height: 92px;
+  width: min(var(--payment-card-width), calc(100vw - 48px));
+  min-width: min(175px, calc(100vw - 48px));
+  height: var(--payment-card-height);
+  min-height: var(--payment-card-height);
+  max-height: var(--payment-card-height);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 6px;
+  padding: 10px 11px 9px;
+  border-radius: 12px;
+  background: #f7f8f5;
+  color: #1f2933;
+  text-align: left;
+  box-shadow: 0 7px 16px rgba(42, 53, 49, 0.15);
+}
+
+.location-card__address {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-card__map {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 7px;
+  background-color: #dce8dc;
+  background-image:
+    linear-gradient(28deg, transparent 0 36%, rgba(255, 255, 255, 0.92) 37% 42%, transparent 43%),
+    linear-gradient(116deg, transparent 0 43%, rgba(255, 255, 255, 0.88) 44% 48%, transparent 49%),
+    linear-gradient(163deg, transparent 0 57%, rgba(255, 255, 255, 0.7) 58% 61%, transparent 62%),
+    repeating-linear-gradient(0deg, rgba(123, 157, 133, 0.16) 0 1px, transparent 1px 9px),
+    repeating-linear-gradient(90deg, rgba(123, 157, 133, 0.14) 0 1px, transparent 1px 13px);
+}
+
+.location-card__map::before,
+.location-card__map::after {
+  position: absolute;
+  content: "";
+  pointer-events: none;
+}
+
+.location-card__map::before {
+  inset: 8px -10px auto;
+  height: 5px;
+  transform: rotate(-12deg);
+  background: rgba(251, 213, 89, 0.75);
+  box-shadow: 0 1px 0 rgba(170, 143, 44, 0.35);
+}
+
+.location-card__map::after {
+  inset: auto -12px 8px;
+  height: 4px;
+  transform: rotate(15deg);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.location-card__pin {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  width: 17px;
+  height: 17px;
+  border-radius: 50% 50% 50% 0;
+  background: #18c66b;
+  box-shadow: 0 2px 5px rgba(14, 104, 60, 0.3);
+  transform: translate(-50%, -62%) rotate(-45deg);
+}
+
+.location-card__pin::after {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f7fff8;
+  content: "";
+}
 
 .transfer-card {
   --transfer-bg: linear-gradient(135deg, #0f766e, #0891b2);

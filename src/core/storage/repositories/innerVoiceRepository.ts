@@ -17,13 +17,14 @@ export type InnerVoiceScope =
 export const findInnerVoiceByMessage = (
   records: readonly InnerVoiceRecord[],
   scope: InnerVoiceScope,
-): InnerVoiceRecord | undefined => records.find((record) => scope.kind === "direct"
-  ? record.relationId === scope.relationId && record.messageId === scope.messageId
-  : record.groupId === scope.groupId
-    && record.conversationId === scope.conversationId
-    && record.characterId === scope.characterId
-    && record.messageId === scope.messageId,
-);
+): InnerVoiceRecord | undefined => records
+  .filter((record) => scope.kind === "direct"
+    ? record.relationId === scope.relationId && record.messageId === scope.messageId
+    : record.groupId === scope.groupId
+      && record.conversationId === scope.conversationId
+      && record.characterId === scope.characterId
+      && record.messageId === scope.messageId)
+  .sort((left, right) => right.createdAt - left.createdAt)[0];
 
 /** Returns only the newest records needed by the history UI. */
 export const listInnerVoicesByCharacter = (

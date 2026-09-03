@@ -2,7 +2,7 @@ import type { CharacterTruthScope, KnowledgeClaim, KnowledgeSourceRef } from "..
 import {
   appendKnowledgeClaims,
   deduplicateKnowledgeClaims,
-  isSameTruthScope,
+  isExactTruthScope,
   removeKnowledgeClaimsByRelations,
   retractKnowledgeClaimsBySourceMessageIds,
   retractKnowledgeClaimsBySourceStoryIds,
@@ -10,6 +10,7 @@ import {
   supersedeKnowledgeClaim,
 } from "../../../domain/characterKnowledge/knowledgeConflictPolicy";
 import { normalizeKnowledgeClaim } from "../../../domain/characterKnowledge/knowledgeWritePolicy";
+import { markConversationSummariesStaleBySourceClaimIds } from "./conversationSummaryRepository";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readArray, writeArray } from "./repositoryUtils";
@@ -30,10 +31,31 @@ export const loadKnowledgeClaims = (): StorageResult<KnowledgeClaim[]> => {
 export const saveKnowledgeClaims = (claims: readonly KnowledgeClaim[]): StorageWriteResult =>
   writeArray(storageKeys.characterKnowledgeClaims, normalizeKnowledgeClaims(claims));
 
+const saveKnowledgeClaimsAfterMutation = (
+  previous: readonly KnowledgeClaim[],
+  next: readonly KnowledgeClaim[],
+): StorageWriteResult => {
+  const write = saveKnowledgeClaims(next);
+  if (!write.success) return write;
+  const nextById = new Map(next.map((claim) => [claim.id, claim]));
+  const invalidatedSummaryClaimIds = previous
+    .filter((claim) => claim.status === "active" && (!nextById.has(claim.id) || nextById.get(claim.id)?.status === "retracted"))
+    .map((claim) => claim.id);
+  if (invalidatedSummaryClaimIds.length > 0) {
+    const summaryWrite = markConversationSummariesStaleBySourceClaimIds(invalidatedSummaryClaimIds);
+    if (!summaryWrite.success) {
+      // Retrieval also validates source claims, so a cache write failure never
+      // turns a retracted claim back into usable truth.
+      console.warn("[character truth] Failed to mark derived summaries stale:", summaryWrite.error);
+    }
+  }
+  return write;
+};
+
 export const listByRelation = (
   scope: CharacterTruthScope,
   claims: readonly KnowledgeClaim[] = loadKnowledgeClaims().value,
-): KnowledgeClaim[] => claims.filter((claim) => isSameTruthScope(claim, scope));
+): KnowledgeClaim[] => claims.filter((claim) => isExactTruthScope(claim, scope));
 
 export const findBySource = (
   scope: CharacterTruthScope,
@@ -61,25 +83,46 @@ export const supersede = (
   scope: CharacterTruthScope,
   previousClaimId: string,
   replacement: KnowledgeClaim,
-): StorageWriteResult => saveKnowledgeClaims(supersedeKnowledgeClaim(
-  loadKnowledgeClaims().value,
-  scope,
-  previousClaimId,
-  replacement,
-));
+): StorageWriteResult => {
+  const previous = loadKnowledgeClaims().value;
+  return saveKnowledgeClaimsAfterMutation(previous, supersedeKnowledgeClaim(
+    previous,
+    scope,
+    previousClaimId,
+    replacement,
+  ));
+};
 
 export const retract = (
   scope: CharacterTruthScope,
   claimId: string,
   reason: string,
-): StorageWriteResult => saveKnowledgeClaims(retractKnowledgeClaim(loadKnowledgeClaims().value, scope, claimId, reason));
+): StorageWriteResult => {
+  const previous = loadKnowledgeClaims().value;
+  return saveKnowledgeClaimsAfterMutation(previous, retractKnowledgeClaim(previous, scope, claimId, reason));
+};
+
+export const remove = (
+  scope: CharacterTruthScope,
+  claimId: string,
+): StorageWriteResult => {
+  const previous = loadKnowledgeClaims().value;
+  const target = previous.find((claim) => claim.id === claimId && isExactTruthScope(claim, scope));
+  if (!target) return { success: false, error: "missing" };
+  return saveKnowledgeClaimsAfterMutation(previous, previous.filter((claim) => claim.id !== claimId));
+};
 
 export const removeByRelations = (relationIds: readonly string[]): StorageWriteResult =>
   saveKnowledgeClaims(removeKnowledgeClaimsByRelations(loadKnowledgeClaims().value, relationIds));
 export const retractBySourceMessageIds = (messageIds: readonly string[], scope?: CharacterTruthScope): StorageWriteResult =>
-  saveKnowledgeClaims(retractKnowledgeClaimsBySourceMessageIds(loadKnowledgeClaims().value, messageIds, scope));
-export const retractBySourceStoryIds = (storyIds: readonly string[]): StorageWriteResult =>
-  saveKnowledgeClaims(retractKnowledgeClaimsBySourceStoryIds(loadKnowledgeClaims().value, storyIds));
+  (() => {
+    const previous = loadKnowledgeClaims().value;
+    return saveKnowledgeClaimsAfterMutation(previous, retractKnowledgeClaimsBySourceMessageIds(previous, messageIds, scope));
+  })();
+export const retractBySourceStoryIds = (storyIds: readonly string[]): StorageWriteResult => {
+  const previous = loadKnowledgeClaims().value;
+  return saveKnowledgeClaimsAfterMutation(previous, retractKnowledgeClaimsBySourceStoryIds(previous, storyIds));
+};
 
 export const characterKnowledgeRepository = {
   load: loadKnowledgeClaims,
@@ -90,6 +133,7 @@ export const characterKnowledgeRepository = {
   appendMany,
   supersede,
   retract,
+  remove,
   removeByRelations,
   retractBySourceMessageIds,
   retractBySourceStoryIds,

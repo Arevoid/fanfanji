@@ -1,6 +1,7 @@
 import type { UserSettings } from "../../../types";
 
 export const CLASSIC_BUBBLE_PRESET_ID = "p-classic";
+export const CLASSIC_BUBBLE_PALETTE_MIGRATION_VERSION = 1;
 export const CLASSIC_BUBBLE_PRESET_NAME = "温和灰蓝 (Default)";
 
 export const LEGACY_CLASSIC_BUBBLE_CSS = `.chat-bubble-self {
@@ -27,6 +28,36 @@ export const CLASSIC_BUBBLE_STRUCTURED_STYLE = {
 } as const;
 
 const normalizeCss = (value: string): string => value.replace(/\s+/g, " ").trim();
+const normalizeColor = (value?: string): string => (value || "").trim().toLowerCase();
+
+/**
+ * Older liquid-glass builds reused the classic colour fields and could leave
+ * received messages white on white. Repair only that exact unreadable legacy
+ * combination once, while preserving every readable custom palette.
+ */
+export function migrateUnreadableClassicBubblePalette(settings: UserSettings): {
+  settings: UserSettings;
+  migrated: boolean;
+} {
+  if ((settings.classicBubblePaletteMigrationVersion || 0) >= CLASSIC_BUBBLE_PALETTE_MIGRATION_VERSION) {
+    return { settings, migrated: false };
+  }
+
+  const otherBackground = normalizeColor(settings.otherBubbleBg);
+  const otherText = normalizeColor(settings.otherBubbleColor);
+  const whiteBackground = !otherBackground || ["#fff", "#ffffff", "white"].includes(otherBackground);
+  const whiteText = ["#fff", "#ffffff", "white"].includes(otherText);
+  const shouldRepair = whiteBackground && whiteText;
+
+  return {
+    migrated: shouldRepair,
+    settings: {
+      ...settings,
+      ...(shouldRepair ? { otherBubbleColor: "#18181b" } : {}),
+      classicBubblePaletteMigrationVersion: CLASSIC_BUBBLE_PALETTE_MIGRATION_VERSION,
+    },
+  };
+}
 
 export function isLegacyClassicBubblePreset(settings: Pick<UserSettings, "activePreset" | "bubbleCss">): boolean {
   return settings.activePreset === CLASSIC_BUBBLE_PRESET_NAME

@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { buildComposedAiChatRequest, generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../src/features/chat/controllers/chatGenerationController";
+import { buildComposedAiChatRequest, buildContextRecoveryRequests, generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, isContextLengthError, requestDirectChatTurn } from "../src/features/chat/controllers/chatGenerationController";
 import type { Character, UserSettings } from "../src/types";
 import type { apiChat } from "../src/utils/apiHelper";
 
@@ -16,6 +16,50 @@ const directAi = (async (input) => { capturedMessage = input.message; return { t
 assert.equal((await requestDirectChatTurn({ prompt, settings, requestAi: directAi })).text, "回复");
 assert.equal(capturedMessage, "当前");
 
+let formatRecoveryAttempts = 0;
+let formatRecoveryInstruction = "";
+const malformedFormatAi = (async (input) => {
+  formatRecoveryAttempts += 1;
+  formatRecoveryInstruction = input.systemInstruction || "";
+  return formatRecoveryAttempts === 1
+    ? { text: '{"reply":{"unexpected":true}}' }
+    : { text: '{"reply":"格式恢复后的回复","innerVoice":{"content":"暂未说出口","emotionalState":"平静"}}' };
+}) as typeof apiChat;
+const formatRecovered = await requestDirectChatTurn({
+  prompt,
+  settings,
+  requestAi: malformedFormatAi,
+  includeInnerVoice: true,
+});
+assert.equal(formatRecoveryAttempts, 2);
+assert.equal(formatRecovered.text, "格式恢复后的回复");
+assert.deepEqual(formatRecovered.innerVoice, { content: "暂未说出口", emotionalState: "平静" });
+assert.match(formatRecoveryInstruction, /只返回一个合法 JSON 对象/);
+
+assert.equal(isContextLengthError(Object.assign(new Error("request too long"), { code: "context_too_large" })), true);
+assert.equal(isContextLengthError(new Error("invalid api key")), false);
+const contextHistory = Array.from({ length: 8 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", text: `历史消息 ${index}` }));
+const contextRequest = { ...request, history: contextHistory, systemInstruction: "系统" };
+const contextRecoveryRequests = buildContextRecoveryRequests(contextRequest);
+assert.ok(contextRecoveryRequests.length > 0);
+assert.ok(contextRecoveryRequests.every((candidate) => candidate.history.length < contextRequest.history.length));
+assert.equal(contextRequest.history.length, 8, "context recovery must not mutate the original request history");
+
+const contextAttemptHistoryLengths: number[] = [];
+const contextRecoveryAi = (async (input) => {
+  contextAttemptHistoryLengths.push(input.history.length);
+  if (input.history.length > 2) throw Object.assign(new Error("context window exceeded"), { code: "context_too_large" });
+  return { text: "上下文恢复后的回复" };
+}) as typeof apiChat;
+const contextRecovered = await requestDirectChatTurn({
+  prompt: { ...prompt, history: contextHistory },
+  settings,
+  requestAi: contextRecoveryAi,
+});
+assert.equal(contextRecovered.text, "上下文恢复后的回复");
+assert.ok(contextAttemptHistoryLengths[0] > contextAttemptHistoryLengths.at(-1)!);
+assert.equal(contextHistory.length, 8, "context recovery must preserve caller history");
+
 let echoAttempts = 0;
 let retryInstruction = "";
 const echoAi = (async (input) => {
@@ -30,7 +74,7 @@ const corrected = await requestDirectChatTurn({
 });
 assert.equal(echoAttempts, 2);
 assert.equal(corrected.text, "没怪你，过来抱一下");
-assert.match(retryInstruction, /previous draft merely copied/);
+assert.match(retryInstruction, /previous draft was rejected because it copied the user/);
 
 const member = { id: "a", name: "甲", avatar: "", personality: "", backstory: "" } as Character;
 const groupAi = (async () => ({ text: "[SENDER_NAME: 甲]\n你好" })) as typeof apiChat;
@@ -38,7 +82,7 @@ const group = await generateGroupChatTurn({ prompt: { ...prompt, scenario: "grou
 assert.deepEqual(group.messages.map((message) => message.content), ["你好"]);
 assert.deepEqual(group.members.map((item) => item.id), ["a"]);
 
-const regenAi = (async () => ({ text: "第一句\n第二句" })) as typeof apiChat;
+const regenAi = (async () => ({ text: "第一句\n\n第二句" })) as typeof apiChat;
 const regen = await generateRegeneratedChatTurn({ prompt: { ...prompt, scenario: "regenerate" }, settings, candidateContext: { disableBracketActions: false, keepPeriods: true, characterId: "a", allowEmoji: false, createId: (index) => `r${index}`, currentTime: (index) => index }, requestAi: regenAi });
 assert.equal(regen.candidates?.messages.length, 2);
 

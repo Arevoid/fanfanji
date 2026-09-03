@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { UserSettings, StylePreset, ApiPreset, ImageApiPreset, sanitizeChatIcons, type ChatIconKey, type ChatIconOverrides, type HomeScreenItem, type OfflineStory, type UserSettingsUpdate } from "../types";
-import { apiFetchModels, apiTestKey, apiFetchImageModels, apiTestImageConnection } from "../utils/apiHelper";
+import React, { useEffect } from "react";
+import { UserSettings, StylePreset, type ChatIconKey, type ChatIconOverrides, type OfflineStory, type UserSettingsUpdate } from "../types";
 import {
   ChevronLeft,
   ChevronRight,
@@ -20,70 +19,75 @@ import {
   Volume2,
   Monitor,
   Moon,
-  Sun
+  Sun,
+  Type as TypeIcon,
+  Link
 } from "lucide-react";
 
-import {
-  compressImage,
-  compressImagePreservingTransparency,
-  isTransparencyPreservedImage,
-} from "../utils/pngParser";
-import { inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "../features/chat/services/imageProtocol";
-import { applyDesktopModuleBackup, buildDesktopModuleBackup, parseDesktopModuleBackup } from "../features/home/desktopModuleBackup";
-import { normalizeHomeScreenLayout } from "../features/home/homeGrid";
-import { notifyForumStateChanged } from "../core/storage/repositories/forumRepository";
-import { notifyAppearanceSettingsChanged } from "../features/theme/appearanceRepository";
+import { isTransparencyPreservedImage } from "../utils/pngParser";
 import { useTheme } from "../features/theme/ThemeProvider";
-import { sanitizeAppearanceSettings, type ThemeMode } from "../features/theme/theme";
+import { type ThemeMode } from "../features/theme/theme";
 import { hasUserDesktopWallpaper } from "../features/theme/desktopBackground";
+import {
+  DEFAULT_GLOBAL_FONT_SIZE,
+  MAX_GLOBAL_FONT_SIZE,
+  MIN_GLOBAL_FONT_SIZE,
+  sanitizeGlobalFontSize,
+} from "../features/theme/globalTypography";
 import {
   getSettingsBackTarget,
   getSettingsHeaderTitle,
   type SettingsTab,
 } from "../features/settings/settingsNavigation";
-import { clearApplicationData } from "../features/settings/clearApplicationData";
-import { offlineStoryDb } from "../core/storage/offlineStoryDb";
-import { mergeOfflineStoryCollections } from "../core/storage/repositories/offlineRepository";
-import { normalizeMosslandApiEndpoint } from "../features/voice/ttsConfig";
+import { SystemBackupPanel } from "../features/settings/components/SystemBackupPanel";
 import {
   CLASSIC_BUBBLE_PRESET_ID,
   CLASSIC_BUBBLE_PRESET_NAME,
   CLASSIC_BUBBLE_STRUCTURED_STYLE,
 } from "../features/chat/styles/classicBubblePreset";
-import {
-  LIQUID_GLASS_DEFAULT_BUBBLE_COLOR,
-  LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY,
-  LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS,
-  LIQUID_GLASS_DEFAULT_TEXT_COLOR,
-} from "../features/chat/styles/liquidGlassDefaults";
-
-function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-  const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
-  const fullHex = hex.replace(shorthandRegex, (_, r, g, b) => r + r + g + g + b + b);
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(fullHex);
-  return result
-    ? {
-        r: parseInt(result[1], 16),
-        g: parseInt(result[2], 16),
-        b: parseInt(result[3], 16),
-      }
-    : null;
-}
-
-function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): string {
-  const rgb = hexToRgb(hexColor);
-  if (!rgb) return hexColor;
-  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
-}
+import { SYSTEM_BACKUP_VERSION } from "../features/settings/systemBackup";
+import { sanitizeSystemBackupValue } from "../features/settings/systemBackupSanitizer";
+import { storageKeys } from "../core/storage/storageKeys";
+import { StorageDiagnosticsCard } from "../features/settings/components/StorageDiagnosticsCard";
+import { APP_VERSION } from "../core/release/releaseInfo";
+import { useStorageHealthActions } from "../features/settings/hooks/useStorageHealthActions";
+import { useStorageCleanupActions } from "../features/settings/hooks/useStorageCleanupActions";
+import { usePwaInstall } from "../features/settings/hooks/usePwaInstall";
+import { useSettingsApiPresetState } from "../features/settings/hooks/useSettingsApiPresetState";
+import { useSettingsAppearanceDraftState } from "../features/settings/hooks/useSettingsAppearanceDraftState";
+import { useSettingsVoiceConfigState } from "../features/settings/hooks/useSettingsVoiceConfigState";
+import { useSettingsNavigationState } from "../features/settings/hooks/useSettingsNavigationState";
+import { useSettingsProfileDraftState } from "../features/settings/hooks/useSettingsProfileDraftState";
+import { useSettingsStyleDraftState } from "../features/settings/hooks/useSettingsStyleDraftState";
+import { useSettingsTransientUiState } from "../features/settings/hooks/useSettingsTransientUiState";
+import { useSettingsChatIconState } from "../features/settings/hooks/useSettingsChatIconState";
+import { useSettingsBackupUiState } from "../features/settings/hooks/useSettingsBackupUiState";
+import { useSystemBackupActions } from "../features/settings/hooks/useSystemBackupActions";
+import { useSettingsTransferActions } from "../features/settings/hooks/useSettingsTransferActions";
+import { useSettingsImageApiActions } from "../features/settings/hooks/useSettingsImageApiActions";
+import { useSettingsTextApiActions } from "../features/settings/hooks/useSettingsTextApiActions";
+import { useSettingsVoiceActions } from "../features/settings/hooks/useSettingsVoiceActions";
+import { useSettingsApiConnectionActions } from "../features/settings/hooks/useSettingsApiConnectionActions";
+import { useSettingsAssetActions } from "../features/settings/hooks/useSettingsAssetActions";
+import { useSettingsPresetActions } from "../features/settings/hooks/useSettingsPresetActions";
+import { useSettingsApplyPresetAction } from "../features/settings/hooks/useSettingsApplyPresetAction";
+import { useSettingsIdentityActions } from "../features/settings/hooks/useSettingsIdentityActions";
+import { useSettingsClearDataActions } from "../features/settings/hooks/useSettingsClearDataActions";
+import { useSettingsGlobalFontActions } from "../features/settings/hooks/useSettingsGlobalFontActions";
+import { useSettingsScopedSave } from "../features/settings/hooks/useSettingsScopedSave";
+import { useSettingsChatIconActions } from "../features/settings/hooks/useSettingsChatIconActions";
+import { useSettingsCssTemplateCopy } from "../features/settings/hooks/useSettingsCssTemplateCopy";
+import { getSettingsPreviewBubbleBackground, getSettingsPreviewBubbleStyle } from "../features/settings/settingsPreviewStyle";
 
 interface AppSettingsProps {
   settings: UserSettings;
   /** The style actually used by the last/current chat, including character overrides. */
   bubbleStylePreset?: "default" | "floating-cute" | "liquid-glass";
   presets: StylePreset[];
-  onSaveSettings: (update: UserSettingsUpdate) => void;
+  onSaveSettings: (update: UserSettingsUpdate) => boolean;
   onSavePreset: (preset: StylePreset) => void;
   onDeletePreset: (id: string) => void;
+  onSwitchIdentity?: (id: string) => void;
   onClose: () => void;
 }
 
@@ -103,11 +107,10 @@ const DEFAULT_PRESETS: StylePreset[] = [
 ];
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
-  { key: "image", label: "图片" }, { key: "voice", label: "语音" },
-  { key: "sticker", label: "表情" }, { key: "redPacket", label: "红包" },
-  { key: "transfer", label: "转账" }, { key: "file", label: "文件" },
-  { key: "location", label: "位置" }, { key: "call", label: "通话" },
-  { key: "plus", label: "加号" }, { key: "send", label: "发送" },
+  { key: "image", label: "图片" }, { key: "textImage", label: "文字图" }, { key: "voice", label: "语音" },
+  { key: "sticker", label: "表情" }, { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" },
+  { key: "location", label: "位置" }, { key: "call", label: "通话" }, { key: "plus", label: "加号" },
+  { key: "sendOnly", label: "发送1（仅发送）" }, { key: "sendReply", label: "发送2（发送并回复）" }, { key: "stop", label: "停止" },
 ];
 
 const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置页和其他应用不会应用本样式。 */
@@ -121,9 +124,24 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
   --chat-ai-text: var(--text-primary);
   --chat-bubble-border: var(--border);
   --chat-composer-bg: var(--surface);
+  --chat-composer-border: var(--border);
+  --chat-composer-border-width: 1px;
+  --chat-composer-radius: 0px;
+  --chat-composer-shadow: none;
   --chat-input-bg: var(--input-bg);
   --chat-send-bg: var(--button-primary-bg);
   --chat-send-text: var(--button-primary-text);
+  --chat-send-border: var(--button-primary-bg);
+  --chat-stop-bg: var(--button-primary-bg);
+  --chat-stop-text: var(--button-primary-text);
+  --chat-stop-border: var(--button-primary-bg);
+  --chat-stop-icon: none;
+  /* 底部展开功能栏的外框大小；只影响圆形/方形按钮框。 */
+  --chat-attachment-icon-size: 2.5rem;
+  /* 底部展开功能栏内部图片/默认图形大小；不改变按钮框。 */
+  --chat-attachment-glyph-size: 1rem;
+  --chat-attachment-panel-display: flex;
+  --chat-attachment-label-display: block;
 }
 
 .chat-page {
@@ -134,18 +152,33 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
 .cv-header { background: var(--chat-header-bg); }
 .cv-messages-list { background: var(--chat-message-list-bg); }
 .chat-bubble-self { background: var(--chat-user-bg); color: var(--chat-user-text); border: 1px solid var(--chat-bubble-border); border-radius: 14px; }
-.chat-bubble-self * { color: var(--chat-user-text); }
 .chat-bubble-other { background: var(--chat-ai-bg); color: var(--chat-ai-text); border: 1px solid var(--chat-bubble-border); border-radius: 14px; }
-.chat-bubble-other * { color: var(--chat-ai-text); }
+.chat-message--voice-wave,
+.chat-message--voice-duration,
+.chat-message--call-icon,
+.chat-message--call-duration { color: currentColor; }
 .chat-composer--default,
 .chat-composer--floating,
-.chat-composer--liquid { background: var(--chat-composer-bg); }
+.chat-composer--liquid {
+  background: var(--chat-composer-bg);
+  border: var(--chat-composer-border-width) solid var(--chat-composer-border);
+  border-radius: var(--chat-composer-radius);
+  box-shadow: var(--chat-composer-shadow);
+}
 .chat-input { background: var(--chat-input-bg); }
 .send-button { background: var(--chat-send-bg); color: var(--chat-send-text); }
+.chat-composer__stop-reply-button { background: var(--chat-stop-bg, var(--chat-send-bg)); color: var(--chat-stop-text, var(--chat-send-text)); border-color: var(--chat-stop-border, var(--chat-send-border)); }
+.chat-composer__stop-reply-button .cv-send-reply-icon svg { display: none; }
+.cv-stop-icon { background: var(--chat-stop-icon, none) center / contain no-repeat; }
+.chat-attachment-icon { width: var(--chat-attachment-icon-size, 2.5rem); height: var(--chat-attachment-icon-size, 2.5rem); }
+.chat-attachment-icon > svg,
+.chat-attachment-icon > img { width: var(--chat-attachment-glyph-size, 1rem); height: var(--chat-attachment-glyph-size, 1rem); }
+.chat-composer__attachment-panel { display: var(--chat-attachment-panel-display, flex); }
+.chat-attachment-label { display: var(--chat-attachment-label-display, block); }
 `;
 
 const BACKUP_KEYS = [
-  "phone_calendar_events",
+  "phone_schedule_v1",
   "phone_characters",
   "phone_characters_v3",
   "phone_homescreen_items",
@@ -163,6 +196,16 @@ const BACKUP_KEYS = [
   "phone_forum_actor_states",
   "phone_forum_activity_tasks",
   "phone_forum_profiles",
+  "phone_forum_community_npcs",
+  "phone_forum_translations",
+  "phone_forum_stories",
+  "phone_forum_story_characters",
+  "phone_forum_story_users",
+  "phone_forum_story_threads",
+  "phone_forum_story_replies",
+  "phone_forum_story_events",
+  "phone_forum_story_updates",
+  "phone_forum_story_execution_logs",
   "phone_forum_visit_history",
   "phone_forum_like_history",
   "phone_forum_notifications",
@@ -187,6 +230,15 @@ const BACKUP_KEYS = [
   "phone_identity_music_states",
   "phone_relationship_music_states",
   "phone_offline_stories",
+  "phone_reading_store_v1",
+  "phone_reading_co_reading_store_v1",
+  "phone_reading_analysis_store_v1",
+  "phone_reading_story_store_v1",
+  "phone_reading_co_story_store_v1",
+  "phone_cinema_store_v1",
+  "phone_relationship_network_maps_v1",
+  "phone_relationship_network_npcs_v1",
+  "phone_character_phones_v1",
   "phone_presets",
   "phone_settings",
   "phone_appearance_settings",
@@ -199,19 +251,21 @@ const BACKUP_KEYS = [
 ] as const;
 
 const BACKUP_KEY_SET = new Set<string>(BACKUP_KEYS);
-type BackupData = Partial<Record<(typeof BACKUP_KEYS)[number], string | null>>;
 
 const LIGHT_BACKUP_KEYS = [
   "phone_characters",
   "phone_characters_v3",
   "phone_messages",
   "phone_messages_v3",
+  "phone_moments_v3",
   "phone_conversation_summaries",
   "phone_worldbook_entries",
   "phone_memory_vault_items",
   "phone_memory_vault_settings",
   "phone_character_events",
   "phone_character_knowledge_claims",
+  "phone_behavior_corrections",
+  "phone_character_knowledge_migration_state",
   "phone_character_relationships",
   "phone_diary_entries",
   "phone_diary_shares",
@@ -222,189 +276,19 @@ const LIGHT_BACKUP_KEYS = [
   "phone_forum_replies",
   "phone_forum_shares",
   "phone_forum_profiles",
+  "phone_forum_community_npcs",
+  "phone_forum_translations",
   "phone_offline_stories",
+  "phone_reading_store_v1",
+  "phone_reading_co_reading_store_v1",
+  "phone_reading_analysis_store_v1",
+  "phone_reading_story_store_v1",
+  "phone_reading_co_story_store_v1",
+  "phone_cinema_store_v1",
+  "phone_relationship_network_maps_v1",
+  "phone_relationship_network_npcs_v1",
+  "phone_character_phones_v1",
 ] as const;
-
-async function downloadSystemBackup(keys: readonly (typeof BACKUP_KEYS)[number][]): Promise<void> {
-  const backupData: BackupData = {};
-  keys.forEach((key) => {
-    backupData[key] = sanitizeSystemBackupValue(key, localStorage.getItem(key));
-  });
-  if (keys.includes("phone_offline_stories")) {
-    try {
-      const localStories = JSON.parse(backupData.phone_offline_stories || "[]") as OfflineStory[];
-      const durableStories = await offlineStoryDb.loadAll();
-      backupData.phone_offline_stories = JSON.stringify(mergeOfflineStoryCollections(
-        Array.isArray(localStories) ? localStories : [],
-        durableStories,
-      ));
-    } catch (error) {
-      console.warn("Unable to include the durable offline-story copy in this backup.", error);
-    }
-  }
-  const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  link.href = url;
-  link.download = `xiaoshouji_backup_${dateStr}.json`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-export function sanitizeSystemBackupValue(
-  key: string,
-  value: string | null,
-  source?: Record<string, unknown>,
-): string | null {
-  if (!value) return value;
-  if (key === "phone_appearance_settings") {
-    try {
-      return JSON.stringify(sanitizeAppearanceSettings(JSON.parse(value)));
-    } catch {
-      return JSON.stringify({ themeMode: "light" });
-    }
-  }
-  if (key === "phone_homescreen_items") {
-    try {
-      const parsed = JSON.parse(value);
-      return JSON.stringify(normalizeHomeScreenLayout(
-        Array.isArray(parsed) ? parsed as HomeScreenItem[] : [],
-      ));
-    } catch {
-      return "[]";
-    }
-  }
-  if (["phone_diary_entries", "phone_diary_shares", "phone_diary_generation_tasks", "phone_diary_translations", "phone_diary_drafts"].includes(key)) {
-    try {
-      const parsed = JSON.parse(value);
-      if (!Array.isArray(parsed)) return "[]";
-      const relationshipRaw = source?.phone_character_relationships;
-      const relationships = typeof relationshipRaw === "string"
-        ? JSON.parse(relationshipRaw)
-        : JSON.parse(localStorage.getItem("phone_character_relationships") || "[]");
-      const relationMap = new Map(Array.isArray(relationships)
-        ? relationships.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && typeof (item as Record<string, unknown>).id === "string"))
-          .map((item) => [item.id as string, item])
-        : []);
-      const safe = parsed.filter((item) => {
-        if (!item || typeof item !== "object") return false;
-        const record = item as Record<string, unknown>;
-        if (typeof record.id !== "string" || typeof record.ownerIdentityId !== "string") return false;
-        if (key === "phone_diary_entries") {
-          if (record.authorType === "user") return typeof record.body === "string";
-          const relation = typeof record.relationId === "string" ? relationMap.get(record.relationId) : undefined;
-          return Boolean(relation && relation.userIdentityId === record.ownerIdentityId && relation.characterId === record.characterId && relation.conversationId === record.conversationId && typeof record.body === "string");
-        }
-        if (key === "phone_diary_shares") {
-          const relation = typeof record.targetRelationId === "string" ? relationMap.get(record.targetRelationId) : undefined;
-          return Boolean(relation && relation.userIdentityId === record.ownerIdentityId && relation.conversationId === record.conversationId && record.snapshot && typeof record.snapshot === "object");
-        }
-        if (key === "phone_diary_generation_tasks") {
-          const relation = typeof record.relationId === "string" ? relationMap.get(record.relationId) : undefined;
-          return Boolean(relation && relation.userIdentityId === record.ownerIdentityId);
-        }
-        if (key === "phone_diary_translations") {
-          return typeof record.diaryEntryId === "string" && typeof record.translatedBody === "string";
-        }
-        return typeof record.body === "string";
-      });
-      return JSON.stringify(safe);
-    } catch {
-      return "[]";
-    }
-  }
-  if (key === "phone_forum_threads") {
-    try {
-      const parsed = JSON.parse(value);
-      if (!Array.isArray(parsed)) return "[]";
-      return JSON.stringify(parsed.map((thread) => {
-        if (!thread || typeof thread !== "object") return thread;
-        const { privateAuthorRelationId: _relation, privateAuthorCharacterId: _character, ...publicThread } =
-          thread as Record<string, unknown>;
-        return publicThread;
-      }));
-    } catch {
-      return "[]";
-    }
-  }
-  if (key === "phone_forum_replies") {
-    try {
-      const parsed = JSON.parse(value);
-      if (!Array.isArray(parsed)) return "[]";
-      return JSON.stringify(parsed.map((reply) => {
-        if (!reply || typeof reply !== "object") return reply;
-        const { privateActor: _privateActor, ...publicReply } = reply as Record<string, unknown>;
-        return publicReply;
-      }));
-    } catch {
-      return "[]";
-    }
-  }
-  if (key === "phone_forum_generation_tasks") {
-    try {
-      const parsed = JSON.parse(value);
-      if (!Array.isArray(parsed)) return "[]";
-      const relationshipRaw = source?.phone_character_relationships;
-      const relationships = typeof relationshipRaw === "string"
-        ? JSON.parse(relationshipRaw)
-        : JSON.parse(localStorage.getItem("phone_character_relationships") || "[]");
-      const validRelationIds = new Set(
-        Array.isArray(relationships)
-          ? relationships.flatMap((item) =>
-              item && typeof item === "object" && typeof item.id === "string" ? [item.id] : [])
-          : [],
-      );
-      return JSON.stringify(parsed.filter((task) =>
-        task
-        && typeof task === "object"
-        && (typeof task.relationId !== "string" || validRelationIds.has(task.relationId))));
-    } catch {
-      return "[]";
-    }
-  }
-  if (["phone_forum_actor_states", "phone_forum_activity_tasks"].includes(key)) {
-    try {
-      const parsed = JSON.parse(value);
-      if (!Array.isArray(parsed)) return "[]";
-      // Scheduling state is optional after restore; omit private actor mappings and in-flight events.
-      return JSON.stringify(parsed.map((item) => {
-        if (!item || typeof item !== "object") return item;
-        const { actor: _actor, privateActor: _privateActor, pendingEvents: _events, ...safe } = item as Record<string, unknown>;
-        return safe;
-      }).filter((item) => item && typeof item === "object" && typeof (item as Record<string, unknown>).ownerIdentityId === "string"));
-    } catch { return "[]"; }
-  }
-  if (["phone_forum_profiles", "phone_forum_visit_history", "phone_forum_like_history", "phone_forum_notifications"].includes(key)) {
-    try {
-      const parsed = JSON.parse(value);
-      if (!Array.isArray(parsed)) return "[]";
-      // Resource blobs are local-only. Never export private actor/relation metadata.
-      return JSON.stringify(parsed.map((item) => {
-        if (!item || typeof item !== "object") return item;
-        const { avatarAssetId: _asset, privateActor: _actor, privateAuthorRelationId: _relation, privateAuthorCharacterId: _character, ...safe } = item as Record<string, unknown>;
-        return safe;
-      }));
-    } catch {
-      return "[]";
-    }
-  }
-  return value;
-}
-
-function snapshotLocalStorage(): Map<string, string> {
-  const snapshot = new Map<string, string>();
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index);
-    if (key !== null) {
-      const value = localStorage.getItem(key);
-      if (value !== null) snapshot.set(key, value);
-    }
-  }
-  return snapshot;
-}
 
 export default function AppSettings({
   settings,
@@ -413,692 +297,174 @@ export default function AppSettings({
   onSaveSettings,
   onSavePreset,
   onDeletePreset,
+  onSwitchIdentity,
   onClose,
 }: AppSettingsProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>(null);
+  const { activeTab, setActiveTab } = useSettingsNavigationState();
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
   const effectiveBubbleStylePreset = bubbleStylePreset || settings.globalChatStylePreset || "default";
 
-  // PWA states
-  const [isPwaInstallable, setIsPwaInstallable] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
-
-  useEffect(() => {
-    const checkStandalone = () => {
-      const isStandaloneMode = 
-        window.matchMedia('(display-mode: standalone)').matches || 
-        (window.navigator as any).standalone === true ||
-        document.referrer.includes('android-app://');
-      setIsStandalone(isStandaloneMode);
-    };
-
-    checkStandalone();
-
-    if ((window as any).deferredPrompt) {
-      setIsPwaInstallable(true);
-    }
-
-    const handlePromptAvailable = () => {
-      setIsPwaInstallable(true);
-    };
-
-    window.addEventListener("pwa-install-prompt-available", handlePromptAvailable);
-    return () => {
-      window.removeEventListener("pwa-install-prompt-available", handlePromptAvailable);
-    };
-  }, []);
-
-  const handlePwaInstall = async () => {
-    const promptEvent = (window as any).deferredPrompt;
-    if (!promptEvent) {
-      alert("抱歉，您的浏览器目前尚未触发 PWA 安装。通常这发生在您通过非安全连接访问、使用受限制的浏览器套壳，或者您的设备已经安装了该应用的情况下。\n\n请尝试在 Safari / Chrome / Edge 浏览器中直接打开本页面，或通过浏览器内置的“安装应用”/“添加到主屏幕”菜单选项进行手动安装！");
-      return;
-    }
-    try {
-      await promptEvent.prompt();
-      const { outcome } = await promptEvent.userChoice;
-      console.log(`[PWA] Install prompt outcome: ${outcome}`);
-      if (outcome === 'accepted') {
-        (window as any).deferredPrompt = null;
-        setIsPwaInstallable(false);
-      }
-    } catch (err: any) {
-      console.error("[PWA] Install prompt failed:", err);
-    }
-  };
+  const { isPwaInstallable, isStandalone, handlePwaInstall } = usePwaInstall();
 
   // Local Form state
-  const [name, setName] = useState(settings.name);
-  const [avatar, setAvatar] = useState(settings.avatar);
-  const [signature, setSignature] = useState(settings.signature);
-  const [bio, setBio] = useState(settings.bio);
-  const [wallpaper, setWallpaper] = useState(settings.wallpaper);
-  const [bubbleCss, setBubbleCss] = useState(settings.bubbleCss);
-  const [globalCss, setGlobalCss] = useState(settings.globalCss);
-  const [chatGlobalCSS, setChatGlobalCSS] = useState(settings.chatGlobalCSS || "");
-  const [globalChatCssTemplateCopied, setGlobalChatCssTemplateCopied] = useState(false);
-  const [chatIcons, setChatIcons] = useState<ChatIconOverrides>(() => sanitizeChatIcons(settings.chatIcons));
-  const [showHomeButton, setShowHomeButton] = useState(!!settings.showHomeButton);
-  const [hideStatusBar, setHideStatusBar] = useState(!!settings.hideStatusBar);
-  const [showBackupExportOptions, setShowBackupExportOptions] = useState(false);
-  const [isClearingApplicationData, setIsClearingApplicationData] = useState(false);
-  const [dockOpacity, setDockOpacity] = useState(settings.dockOpacity !== undefined ? settings.dockOpacity : 70);
-  const [widgetOpacity, setWidgetOpacity] = useState(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70);
-  const [iconBorderRadius, setIconBorderRadius] = useState(settings.iconBorderRadius !== undefined ? settings.iconBorderRadius : 35);
-  const [iconBgOpacity, setIconBgOpacity] = useState(settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100);
-  const [iconBorderWidth, setIconBorderWidth] = useState(settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1);
-  const [iconBorderOpacity, setIconBorderOpacity] = useState(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100);
-  const [hideAppNames, setHideAppNames] = useState(!!settings.hideAppNames);
-  const [desktopAppTextColor, setDesktopAppTextColor] = useState(settings.desktopAppTextColor || "#000000");
-  const [desktopIconMode, setDesktopIconMode] = useState<"light" | "dark">(settings.desktopIconMode || "dark");
-
-  // Beginner-friendly manual styling states
-  const [avatarBorderRadius, setAvatarBorderRadius] = useState(settings.avatarBorderRadius !== undefined ? settings.avatarBorderRadius : 12);
-  const [otherBubbleBg, setOtherBubbleBg] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-    : settings.otherBubbleBg || "#f4f4f5");
-  const [otherBubbleColor, setOtherBubbleColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-    : settings.otherBubbleColor || "#18181b");
-  const [otherBubbleRadius, setOtherBubbleRadius] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
-    : settings.otherBubbleRadius ?? 6);
-  const [otherBubbleOpacity, setOtherBubbleOpacity] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-    : settings.otherBubbleOpacity ?? 100);
-  const [selfBubbleBg, setSelfBubbleBg] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-    : settings.selfBubbleBg || "#18181b");
-  const [selfBubbleColor, setSelfBubbleColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-    : settings.selfBubbleColor || "#ffffff");
-  const [selfBubbleRadius, setSelfBubbleRadius] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassSelfBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
-    : settings.selfBubbleRadius ?? 6);
-  const [selfBubbleOpacity, setSelfBubbleOpacity] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-    : settings.selfBubbleOpacity ?? 100);
-  const [collapseConsecutiveAvatars, setCollapseConsecutiveAvatars] = useState(settings.collapseConsecutiveAvatars !== false);
-  const [hideNicknames, setHideNicknames] = useState(!!settings.hideNicknames);
-
-  // New beauty settings states
-  const [dockBorderRadius, setDockBorderRadius] = useState(settings.dockBorderRadius !== undefined ? settings.dockBorderRadius : 26);
-  const [widgetBorderRadius, setWidgetBorderRadius] = useState(settings.widgetBorderRadius !== undefined ? settings.widgetBorderRadius : 22);
-  const [iconBorderEnabled, setIconBorderEnabled] = useState(settings.iconBorderEnabled !== false);
-  const [bubbleTailEnabled, setBubbleTailEnabled] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassBubbleTailEnabled === true
-    : settings.bubbleTailEnabled === true);
-  const [bubbleTailVertical, setBubbleTailVertical] = useState<"top" | "center" | "bottom">(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassBubbleTailVertical || "top"
-    : settings.bubbleTailVertical || "top");
-  const [bubblePosition, setBubblePosition] = useState<"side" | "above">((effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassBubblePosition
-    : settings.bubblePosition) === "above" ? "above" : "side");
-  
-  // Bubble border states
-  const [bubbleBorderEnabled, setBubbleBorderEnabled] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassBubbleBorderEnabled === true
-    : !!settings.bubbleBorderEnabled);
-  const [bubbleBorderWidth, setBubbleBorderWidth] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassBubbleBorderWidth ?? 1
-    : settings.bubbleBorderWidth ?? 1);
-  const [otherBubbleBorderColor, setOtherBubbleBorderColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassOtherBubbleBorderColor || "#ffffff"
-    : settings.otherBubbleBorderColor || "#e4e4e7");
-  const [selfBubbleBorderColor, setSelfBubbleBorderColor] = useState(effectiveBubbleStylePreset === "liquid-glass"
-    ? settings.liquidGlassSelfBubbleBorderColor || "#ffffff"
-    : settings.selfBubbleBorderColor || "#27272a");
-
-  // Avatar border states
-  const [avatarBorderEnabled, setAvatarBorderEnabled] = useState(!!settings.avatarBorderEnabled);
-  const [avatarBorderWidth, setAvatarBorderWidth] = useState(settings.avatarBorderWidth !== undefined ? settings.avatarBorderWidth : 1);
-  const [avatarBorderColor, setAvatarBorderColor] = useState(settings.avatarBorderColor || "#e4e4e7");
-
-  const [beautySubTab, setBeautySubTab] = useState<"desktop" | "chat" | "preset">("chat");
-  const isLiquidGlassChatStyle = effectiveBubbleStylePreset === "liquid-glass";
-
-  useEffect(() => {
-    setOtherBubbleBg(isLiquidGlassChatStyle
-      ? settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-      : settings.otherBubbleBg || "#f4f4f5");
-    setOtherBubbleColor(isLiquidGlassChatStyle
-      ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-      : settings.otherBubbleColor || "#18181b");
-    setOtherBubbleOpacity(isLiquidGlassChatStyle
-      ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-      : settings.otherBubbleOpacity ?? 100);
-    setSelfBubbleBg(isLiquidGlassChatStyle
-      ? settings.liquidGlassSelfBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR
-      : settings.selfBubbleBg || "#18181b");
-    setSelfBubbleColor(isLiquidGlassChatStyle
-      ? settings.liquidGlassSelfBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR
-      : settings.selfBubbleColor || "#ffffff");
-    setSelfBubbleOpacity(isLiquidGlassChatStyle
-      ? settings.liquidGlassSelfBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY
-      : settings.selfBubbleOpacity ?? 100);
-    setOtherBubbleRadius(isLiquidGlassChatStyle
-      ? settings.liquidGlassOtherBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
-      : settings.otherBubbleRadius ?? 6);
-    setSelfBubbleRadius(isLiquidGlassChatStyle
-      ? settings.liquidGlassSelfBubbleRadius ?? LIQUID_GLASS_DEFAULT_BUBBLE_RADIUS
-      : settings.selfBubbleRadius ?? 6);
-    setBubbleTailEnabled(isLiquidGlassChatStyle
-      ? settings.liquidGlassBubbleTailEnabled === true
-      : settings.bubbleTailEnabled === true);
-    setBubbleTailVertical(isLiquidGlassChatStyle
-      ? settings.liquidGlassBubbleTailVertical || "top"
-      : settings.bubbleTailVertical || "top");
-    setBubblePosition(((isLiquidGlassChatStyle
-      ? settings.liquidGlassBubblePosition
-      : settings.bubblePosition) === "above") ? "above" : "side");
-    setBubbleBorderEnabled(isLiquidGlassChatStyle
-      ? settings.liquidGlassBubbleBorderEnabled === true
-      : settings.bubbleBorderEnabled === true);
-    setBubbleBorderWidth(isLiquidGlassChatStyle
-      ? settings.liquidGlassBubbleBorderWidth ?? 1
-      : settings.bubbleBorderWidth ?? 1);
-    setOtherBubbleBorderColor(isLiquidGlassChatStyle
-      ? settings.liquidGlassOtherBubbleBorderColor || "#ffffff"
-      : settings.otherBubbleBorderColor || "#e4e4e7");
-    setSelfBubbleBorderColor(isLiquidGlassChatStyle
-      ? settings.liquidGlassSelfBubbleBorderColor || "#ffffff"
-      : settings.selfBubbleBorderColor || "#27272a");
-  }, [
-    effectiveBubbleStylePreset,
-    isLiquidGlassChatStyle,
-    settings.liquidGlassOtherBubbleBg,
-    settings.liquidGlassOtherBubbleColor,
-    settings.liquidGlassOtherBubbleOpacity,
-    settings.liquidGlassOtherBubbleRadius,
-    settings.liquidGlassSelfBubbleBg,
-    settings.liquidGlassSelfBubbleColor,
-    settings.liquidGlassSelfBubbleOpacity,
-    settings.liquidGlassSelfBubbleRadius,
-    settings.liquidGlassBubbleTailEnabled,
-    settings.liquidGlassBubbleTailVertical,
-    settings.liquidGlassBubblePosition,
-    settings.liquidGlassBubbleBorderEnabled,
-    settings.liquidGlassBubbleBorderWidth,
-    settings.liquidGlassOtherBubbleBorderColor,
-    settings.liquidGlassSelfBubbleBorderColor,
-    settings.otherBubbleBg,
-    settings.otherBubbleColor,
-    settings.otherBubbleOpacity,
-    settings.otherBubbleRadius,
-    settings.selfBubbleBg,
-    settings.selfBubbleColor,
-    settings.selfBubbleOpacity,
-    settings.selfBubbleRadius,
-    settings.bubbleTailEnabled,
-    settings.bubbleTailVertical,
-    settings.bubblePosition,
-    settings.bubbleBorderEnabled,
-    settings.bubbleBorderWidth,
-    settings.otherBubbleBorderColor,
-    settings.selfBubbleBorderColor,
-  ]);
+  const { name, setName, avatar, setAvatar, signature, setSignature, bio, setBio } = useSettingsProfileDraftState(settings);
+  const apiPresetState = useSettingsApiPresetState(settings);
+  const voiceConfigState = useSettingsVoiceConfigState(settings);
+  const styleDraftState = useSettingsStyleDraftState(settings);
+  const {
+    wallpaper, setWallpaper, bubbleCss, setBubbleCss, globalCss, setGlobalCss,
+    chatGlobalCSS, setChatGlobalCSS, globalChatCssTemplateCopied, setGlobalChatCssTemplateCopied,
+    showHomeButton, setShowHomeButton, hideStatusBar, setHideStatusBar,
+    globalFontSize, setGlobalFontSize, globalFontUrlDraft, setGlobalFontUrlDraft,
+    fontOperationPending, setFontOperationPending, fontOperationMessage, setFontOperationMessage,
+  } = styleDraftState;
+  const { chatIcons, setChatIcons } = useSettingsChatIconState(settings);
+  const appearanceDraftState = useSettingsAppearanceDraftState(settings, effectiveBubbleStylePreset);
+  const {
+    showBackupExportOptions, setShowBackupExportOptions, lastBackupAt, setLastBackupAt,
+    isClearingApplicationData, setIsClearingApplicationData,
+  } = useSettingsBackupUiState();
+  const { handleExportFull, handleExportLight, handleSystemBackupImport, handleSystemBackupInspect } = useSystemBackupActions({
+    backupKeys: BACKUP_KEY_SET,
+    fullBackupKeys: BACKUP_KEYS,
+    lightBackupKeys: LIGHT_BACKUP_KEYS,
+    sanitizeValue: sanitizeSystemBackupValue,
+    onBackupCompleted: setLastBackupAt,
+  });
+  const {
+    storageDiagnostics,
+    storagePreflight,
+    isContentStorageMigrationRunning,
+    refreshStorageDiagnostics,
+    downloadStorageDiagnosticReport,
+    runStorageMigrationPreflight,
+    runContentStorageMigration,
+    requestStoragePersistence,
+  } = useStorageHealthActions({ downloadLightBackup: handleExportLight });
+  const { cleanOrphanedResources, cleanMigratedCopies } = useStorageCleanupActions({ refreshStorageDiagnostics });
+  const {
+    dockOpacity, setDockOpacity, widgetOpacity, setWidgetOpacity, iconBorderRadius, setIconBorderRadius,
+    iconBgOpacity, setIconBgOpacity, iconBorderWidth, setIconBorderWidth, iconBorderOpacity, setIconBorderOpacity,
+    hideAppNames, setHideAppNames, desktopAppTextColor, setDesktopAppTextColor, desktopIconMode, setDesktopIconMode,
+    avatarBorderRadius, setAvatarBorderRadius, otherBubbleBg, setOtherBubbleBg, otherBubbleColor, setOtherBubbleColor,
+    otherBubbleRadius, setOtherBubbleRadius, otherBubbleOpacity, setOtherBubbleOpacity, selfBubbleBg, setSelfBubbleBg,
+    selfBubbleColor, setSelfBubbleColor, selfBubbleRadius, setSelfBubbleRadius, selfBubbleOpacity, setSelfBubbleOpacity,
+    collapseConsecutiveAvatars, setCollapseConsecutiveAvatars, hideNicknames, setHideNicknames,
+    dockBorderRadius, setDockBorderRadius, widgetBorderRadius, setWidgetBorderRadius, iconBorderEnabled, setIconBorderEnabled,
+    bubbleTailEnabled, setBubbleTailEnabled, bubbleTailVertical, setBubbleTailVertical, bubblePosition, setBubblePosition,
+    bubbleSpacing, setBubbleSpacing,
+    bubbleBorderEnabled, setBubbleBorderEnabled, bubbleBorderWidth, setBubbleBorderWidth, otherBubbleBorderColor, setOtherBubbleBorderColor,
+    selfBubbleBorderColor, setSelfBubbleBorderColor, avatarBorderEnabled, setAvatarBorderEnabled, avatarBorderWidth, setAvatarBorderWidth,
+    avatarBorderColor, setAvatarBorderColor, beautySubTab, setBeautySubTab, isLiquidGlassChatStyle,
+  } = appearanceDraftState;
 
   const getPreviewBubbleVisualStyle = (sender: "self" | "other"): React.CSSProperties => {
     const isSelf = sender === "self";
-    const background = getBubbleBackgroundStyle(
+    const background = getSettingsPreviewBubbleBackground(
       isSelf ? selfBubbleBg : otherBubbleBg,
       isSelf ? selfBubbleOpacity : otherBubbleOpacity,
     );
-    const text = isSelf ? selfBubbleColor : otherBubbleColor;
-    const radius = isSelf ? selfBubbleRadius : otherBubbleRadius;
-    const borderColor = isSelf ? selfBubbleBorderColor : otherBubbleBorderColor;
-    return {
+    return getSettingsPreviewBubbleStyle({
       background,
-      color: text,
-      borderRadius: `${radius}px`,
-      border: bubbleBorderEnabled
-        ? `${bubbleBorderWidth}px solid ${borderColor}`
-        : isLiquidGlassChatStyle
-          ? "1.5px solid rgba(255, 255, 255, 0.55)"
-          : "none",
-      ...(isLiquidGlassChatStyle ? {
-        backdropFilter: "blur(20px) saturate(190%)",
-        WebkitBackdropFilter: "blur(20px) saturate(190%)",
-        boxShadow: "0 8px 32px rgba(0, 0, 0, 0.04)",
-      } : {}),
-    };
+      color: isSelf ? selfBubbleColor : otherBubbleColor,
+      radius: isSelf ? selfBubbleRadius : otherBubbleRadius,
+      borderEnabled: bubbleBorderEnabled,
+      borderWidth: bubbleBorderWidth,
+      borderColor: isSelf ? selfBubbleBorderColor : otherBubbleBorderColor,
+      liquidGlass: isLiquidGlassChatStyle,
+    });
   };
 
-  // Connection testing state
-  const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; msg: string } | null>(null);
+  const { isTesting, setIsTesting, testResult, setTestResult, newPresetName, setNewPresetName } = useSettingsTransientUiState();
 
-  // Preset Creator State
-  const [newPresetName, setNewPresetName] = useState("");
+  const {
+    apiPresets, activeApiPresetId, presetName, setPresetName,
+    apiEndpoint, setApiEndpoint, apiKey, setApiKey, selectedModel, setSelectedModel,
+    apiTemperature, setApiTemperature, streamCompatible, setStreamCompatible, showPassword, setShowPassword,
+    modelSuggestions, isFetchingModels,
+    enableImageGeneration, setEnableImageGeneration, imageApiPresets, setImageApiPresets,
+    activeImageApiPresetId, setActiveImageApiPresetId, imagePresetName, setImagePresetName,
+    imageApiEndpoint, setImageApiEndpoint, imageApiKey, setImageApiKey, imageSelectedModel, setImageSelectedModel, imageAspectRatio,
+    showImagePassword, setShowImagePassword, imageModelSuggestions, setImageModelSuggestions,
+    isFetchingImageModels, setIsFetchingImageModels, isTestingImageApi, setIsTestingImageApi,
+    imageTestResult, setImageTestResult,
+  } = apiPresetState;
 
-  // New API configuration presets states
-  const initialPresets: ApiPreset[] = settings.apiPresets || [
-    {
-      id: "preset-gemini",
-      name: "Default Gemini",
-      apiEndpoint: "",
-      apiKey: "",
-      selectedModel: "gemini-3.5-flash",
-      apiTemperature: 0.7,
-      streamCompatible: false
-    },
-    {
-      id: "preset-deepseek",
-      name: "DeepSeek Official",
-      apiEndpoint: "https://api.deepseek.com/v1",
-      apiKey: "",
-      selectedModel: "deepseek-v4-flash",
-      apiTemperature: 0.7,
-      streamCompatible: false
-    }
-  ];
-  const initialActiveId = settings.activeApiPresetId || "preset-gemini";
-  const initialPreset = initialPresets.find(p => p.id === initialActiveId) || initialPresets[0];
-
-  const [apiPresets, setApiPresets] = useState<ApiPreset[]>(initialPresets);
-  const [activeApiPresetId, setActiveApiPresetId] = useState(initialActiveId);
-  const [presetName, setPresetName] = useState(initialPreset?.name || "");
-  const [apiEndpoint, setApiEndpoint] = useState(initialPreset?.apiEndpoint || "");
-  const [apiKey, setApiKey] = useState(initialPreset?.apiKey || "");
-  const [selectedModel, setSelectedModel] = useState(initialPreset?.selectedModel || "");
-  const [apiTemperature, setApiTemperature] = useState(initialPreset?.apiTemperature !== undefined ? initialPreset.apiTemperature : 0.7);
-  const [streamCompatible, setStreamCompatible] = useState(initialPreset?.streamCompatible || false);
-
-  const [showPassword, setShowPassword] = useState(false);
-  const [modelSuggestions, setModelSuggestions] = useState<string[]>([]);
-  const [isFetchingModels, setIsFetchingModels] = useState(false);
-
-  const defaultImagePreset: ImageApiPreset = { id: "image-preset-default", name: "图片 API 配置", protocol: "openai-images", apiEndpoint: "", apiKey: "", selectedModel: "" };
-  const initialImagePresets = (settings.imageApiPresets?.length ? settings.imageApiPresets : [defaultImagePreset]).map((preset) => ({
-    ...preset,
-    // Keep a model stored by older image-setting versions instead of replacing it with an empty value.
-    selectedModel: preset.selectedModel || (preset as ImageApiPreset & { model?: string }).model || "",
-  }));
-  const [enableImageGeneration, setEnableImageGeneration] = useState(settings.enableImageGeneration === true);
-  const [imageApiPresets, setImageApiPresets] = useState<ImageApiPreset[]>(initialImagePresets);
-  const [activeImageApiPresetId, setActiveImageApiPresetId] = useState(settings.activeImageApiPresetId || initialImagePresets[0].id);
-  const initialImagePreset = initialImagePresets.find((preset) => preset.id === (settings.activeImageApiPresetId || initialImagePresets[0].id)) || initialImagePresets[0];
-  const [imagePresetName, setImagePresetName] = useState(initialImagePreset.name);
-  const [imageApiEndpoint, setImageApiEndpoint] = useState(initialImagePreset.apiEndpoint);
-  const [imageApiKey, setImageApiKey] = useState(initialImagePreset.apiKey);
-  const [imageSelectedModel, setImageSelectedModel] = useState(initialImagePreset.selectedModel);
-  const [showImagePassword, setShowImagePassword] = useState(false);
-  const [imageModelSuggestions, setImageModelSuggestions] = useState<string[]>([]);
-  const [isFetchingImageModels, setIsFetchingImageModels] = useState(false);
-  const [isTestingImageApi, setIsTestingImageApi] = useState(false);
-  const [imageTestResult, setImageTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const {
+    selectImagePreset, addImagePreset, deleteImagePreset, persistImagePresetDraft,
+    updateCurrentImageModel, fetchImageModels, testImageApi, updateImageGenerationEnabled, saveImageApiConfig, updateImageAspectRatio,
+  } = useSettingsImageApiActions({
+    settings,
+    onSaveSettings,
+    enableImageGeneration,
+    setEnableImageGeneration,
+    apiState: apiPresetState,
+  });
+  const {
+    handleSelectPreset, handleAddPreset, handleDeletePreset, handleFetchModels, handleSaveApiConfig,
+  } = useSettingsTextApiActions({ settings, onSaveSettings, apiState: apiPresetState, setTestResult });
+  const { handleTestConnection } = useSettingsApiConnectionActions({
+    settings, apiKey, apiEndpoint, selectedModel, setIsTesting, setTestResult,
+  });
 
   // Voice synthesis configuration. MiniMax fields remain intact for legacy users.
-  const [enableMiniMaxTts, setEnableMiniMaxTts] = useState(!!settings.enableMiniMaxTts);
-  const [ttsProvider, setTtsProvider] = useState<"minimax" | "mossland">(settings.ttsProvider === "mossland" ? "mossland" : "minimax");
-  const [minimaxApiKey, setMinimaxApiKey] = useState(settings.minimaxApiKey || "");
-  const [minimaxGroupId, setMinimaxGroupId] = useState(settings.minimaxGroupId || "");
-  const [minimaxModel, setMinimaxModel] = useState(settings.minimaxModel || "speech-2.8-hd");
-  const [minimaxSpeed, setMinimaxSpeed] = useState(settings.minimaxSpeed !== undefined ? settings.minimaxSpeed : 1.0);
-  const [minimaxPitch, setMinimaxPitch] = useState(settings.minimaxPitch !== undefined ? settings.minimaxPitch : 0);
-  const [minimaxVol, setMinimaxVol] = useState(settings.minimaxVol !== undefined ? settings.minimaxVol : 1.0);
-  const [minimaxProxyUrl] = useState(settings.minimaxProxyUrl || "");
-  const [mosslandApiEndpoint, setMosslandApiEndpoint] = useState(settings.mosslandApiEndpoint || "https://api.mosi.cn/v1/audio/speech");
-  const [mosslandApiKey, setMosslandApiKey] = useState(settings.mosslandApiKey || "");
-  const [mosslandModel, setMosslandModel] = useState(settings.mosslandModel || "moss-tts");
-  const [showMosslandPassword, setShowMosslandPassword] = useState(false);
+  const {
+    enableMiniMaxTts, setEnableMiniMaxTts, ttsProvider, setTtsProvider,
+    minimaxApiKey, setMinimaxApiKey, minimaxGroupId, setMinimaxGroupId, minimaxModel, setMinimaxModel,
+    minimaxSpeed, setMinimaxSpeed, minimaxPitch, setMinimaxPitch, minimaxVol, setMinimaxVol, minimaxProxyUrl,
+    mosslandApiEndpoint, setMosslandApiEndpoint, mosslandApiKey, setMosslandApiKey, mosslandModel, setMosslandModel,
+    showMosslandPassword, setShowMosslandPassword,
+  } = voiceConfigState;
+  const { handleSaveVoiceSettings } = useSettingsVoiceActions({
+    onSaveSettings,
+    voiceState: voiceConfigState,
+  });
 
-  const handleSaveVoiceSettings = () => {
-    onSaveSettings((previous) => ({
-      ...previous,
-      enableMiniMaxTts,
-      ttsProvider,
-      minimaxApiKey: minimaxApiKey.trim(),
-      minimaxGroupId: minimaxGroupId.trim(),
-      minimaxModel: minimaxModel.trim(),
-      minimaxSpeed: Number(minimaxSpeed),
-      minimaxPitch: Number(minimaxPitch),
-      minimaxVol: Number(minimaxVol),
-      minimaxProxyUrl: minimaxProxyUrl.trim(),
-      mosslandApiEndpoint: normalizeMosslandApiEndpoint(mosslandApiEndpoint),
-      mosslandApiKey: mosslandApiKey.trim(),
-      mosslandModel: mosslandModel.trim(),
-    }));
-    alert("语音设置保存成功！");
-  };
+  const { handleSave } = useSettingsScopedSave({ onSaveSettings });
 
-  const handleSelectPreset = (presetId: string, currentPresets: ApiPreset[] = apiPresets) => {
-    const preset = currentPresets.find(p => p.id === presetId);
-    if (preset) {
-      setActiveApiPresetId(presetId);
-      setPresetName(preset.name);
-      setApiEndpoint(preset.apiEndpoint);
-      setApiKey(preset.apiKey);
-      setSelectedModel(preset.selectedModel);
-      setApiTemperature(preset.apiTemperature);
-      setStreamCompatible(preset.streamCompatible);
-      setTestResult(null);
-    }
-  };
+  const {
+    handleExportChatTheme,
+    handleImportChatTheme,
+    downloadDesktopModuleBackup,
+    importDesktopModuleBackup,
+  } = useSettingsTransferActions({
+    settings,
+    chatGlobalCSS,
+    chatIcons,
+    setChatGlobalCSS,
+    setChatIcons,
+    handleSave,
+  });
 
-  const handleAddPreset = () => {
-    const newId = "preset-" + Date.now().toString();
-    const newPreset: ApiPreset = {
-      id: newId,
-      name: `新建配置 ${apiPresets.length + 1}`,
-      apiEndpoint: "",
-      apiKey: "",
-      selectedModel: "gemini-3.5-flash",
-      apiTemperature: 0.7,
-      streamCompatible: false
-    };
-    const updated = [...apiPresets, newPreset];
-    setApiPresets(updated);
-    handleSelectPreset(newId, updated);
-  };
+  const { handleGlobalFontFile, handleApplyGlobalFontUrl, handleResetGlobalFont } = useSettingsGlobalFontActions({
+    globalFontUrlDraft,
+    setGlobalFontUrlDraft,
+    setFontOperationPending,
+    setFontOperationMessage,
+    handleSave,
+  });
 
-  const handleDeletePreset = (idToDelete: string) => {
-    if (apiPresets.length <= 1) {
-      alert("最少需要保留一个 API 配置！");
-      return;
-    }
-    const updated = apiPresets.filter(p => p.id !== idToDelete);
-    setApiPresets(updated);
-    const fallbackId = updated[0].id;
-    handleSelectPreset(fallbackId, updated);
-  };
+  const { updateChatIcon } = useSettingsChatIconActions({ chatIcons, setChatIcons, handleSave });
 
-  const handleFetchModels = async () => {
-    setIsFetchingModels(true);
-    try {
-      const apiKeyValue = apiKey.trim() || settings.apiKey;
-      const endpointValue = apiEndpoint.trim();
+  const { copyGlobalChatCssTemplate } = useSettingsCssTemplateCopy({
+    template: GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE,
+    setCopied: setGlobalChatCssTemplateCopied,
+  });
 
-      const models = await apiFetchModels({
-        apiKey: apiKeyValue,
-        apiEndpoint: endpointValue
-      });
+  const { handleClearApplicationData } = useSettingsClearDataActions({
+    isClearingApplicationData,
+    setIsClearingApplicationData,
+  });
 
-      if (models && models.length > 0) {
-        setModelSuggestions(models);
-        if (!models.includes(selectedModel)) {
-          setSelectedModel(models[0]);
-        }
-      }
-    } catch (error) {
-      console.error("Fetch models error:", error);
-    } finally {
-      setIsFetchingModels(false);
-    }
-  };
-
-  const handleSaveApiConfig = () => {
-    const updatedPresets = apiPresets.map(p => {
-      if (p.id === activeApiPresetId) {
-        return {
-          id: p.id,
-          name: presetName.trim() || p.name,
-          apiEndpoint: apiEndpoint.trim(),
-          apiKey: apiKey.trim(),
-          selectedModel: selectedModel.trim(),
-          apiTemperature,
-          streamCompatible
-        };
-      }
-      return p;
-    });
-    
-    setApiPresets(updatedPresets);
-    
-    onSaveSettings((previous) => ({
-      ...previous,
-      apiPresets: updatedPresets,
-      activeApiPresetId,
-      apiKey: apiKey.trim(),
-      selectedModel: selectedModel.trim(),
-      apiEndpoint: apiEndpoint.trim(),
-      apiTemperature,
-      streamCompatible
-    }));
-    
-    alert("API 配置保存成功！");
-  };
-
-  const selectImagePreset = (id: string, presets = imageApiPresets) => {
-    const preset = presets.find((item) => item.id === id);
-    if (!preset) return;
-    setActiveImageApiPresetId(id); setImagePresetName(preset.name); setImageApiEndpoint(preset.apiEndpoint);
-    setImageApiKey(preset.apiKey); setImageSelectedModel(preset.selectedModel); setImageTestResult(null);
-  };
-  const addImagePreset = () => {
-    const preset: ImageApiPreset = { id: `image-preset-${Date.now()}`, name: `图片配置 ${imageApiPresets.length + 1}`, protocol: "openai-images", apiEndpoint: "", apiKey: "", selectedModel: "" };
-    const next = [...imageApiPresets, preset]; setImageApiPresets(next); selectImagePreset(preset.id, next);
-  };
-  const deleteImagePreset = () => {
-    if (imageApiPresets.length <= 1) return alert("至少保留一个图片 API 配置。");
-    const next = imageApiPresets.filter((item) => item.id !== activeImageApiPresetId); setImageApiPresets(next); selectImagePreset(next[0].id, next);
-  };
-  const persistImagePresetDraft = (changes: Partial<Pick<ImageApiPreset, "name" | "apiEndpoint" | "apiKey" | "selectedModel">>) => {
-    const name = changes.name ?? imagePresetName;
-    const apiEndpoint = changes.apiEndpoint ?? imageApiEndpoint;
-    const apiKey = changes.apiKey ?? imageApiKey;
-    const selectedModel = changes.selectedModel ?? imageSelectedModel;
-    const protocol = inferImageProtocol(selectedModel, apiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
-    const next = imageApiPresets.map((preset) => preset.id === activeImageApiPresetId ? {
-      ...preset,
-      name: name.trim() || preset.name,
-      apiEndpoint: apiEndpoint.trim(),
-      apiKey: apiKey.trim(),
-      selectedModel: selectedModel.trim(),
-      protocol,
-      geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(apiEndpoint) : undefined,
-      referenceImageSupported: supportsReferenceImageForModel(protocol, selectedModel),
-    } : preset);
-    setImageApiPresets(next);
-    onSaveSettings((previous) => ({ ...previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
-  };
-  const updateCurrentImageModel = (model: string) => {
-    setImageSelectedModel(model);
-    persistImagePresetDraft({ selectedModel: model });
-  };
-  const imageModelListMessage = (error: unknown) => {
-    const message = error instanceof Error ? error.message : "";
-    if (message) return message;
-    return "无法验证图片服务，请检查 API 地址、Key 和模型。";
-  };
-  const fetchImageModels = async () => {
-    setIsFetchingImageModels(true); setImageTestResult(null);
-    try {
-      const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
-      const models = await apiFetchImageModels({ apiKey: imageApiKey.trim(), apiEndpoint: imageApiEndpoint.trim(), protocol, geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(imageApiEndpoint) : undefined });
-      setImageModelSuggestions(models);
-      if (!models.includes(imageSelectedModel)) updateCurrentImageModel(models[0] || "");
-    } catch (error) { setImageTestResult({ success: false, message: imageModelListMessage(error) }); }
-    finally { setIsFetchingImageModels(false); }
-  };
-  const testImageApi = async () => {
-    if (!imageSelectedModel.trim()) {
-      setImageTestResult({ success: false, message: "请先选择或输入图片模型。" });
-      return;
-    }
-    setIsTestingImageApi(true);
-    try {
-      const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
-      const result = await apiTestImageConnection({ apiKey: imageApiKey.trim(), apiEndpoint: imageApiEndpoint.trim(), selectedModel: imageSelectedModel.trim(), protocol, geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(imageApiEndpoint) : undefined });
-      setImageTestResult(result);
-    }
-    finally { setIsTestingImageApi(false); }
-  };
-  const updateImageGenerationEnabled = (enabled: boolean) => {
-    setEnableImageGeneration(enabled);
-    onSaveSettings((previous) => ({ ...previous, enableImageGeneration: enabled }));
-  };
-  const saveImageApiConfig = () => {
-    if (!imageSelectedModel.trim()) {
-      setImageTestResult({ success: false, message: "请先选择或输入图片模型。" });
-      return;
-    }
-    const protocol = inferImageProtocol(imageSelectedModel, imageApiEndpoint, imageApiPresets.find((preset) => preset.id === activeImageApiPresetId)?.protocol);
-    const next = imageApiPresets.map((preset) => preset.id === activeImageApiPresetId ? {
-      ...preset, name: imagePresetName.trim() || preset.name, protocol,
-      apiEndpoint: imageApiEndpoint.trim(), apiKey: imageApiKey.trim(), selectedModel: imageSelectedModel.trim(),
-      geminiAuthMode: protocol === "gemini-native-image" ? inferGeminiImageAuthMode(imageApiEndpoint) : undefined,
-      referenceImageSupported: supportsReferenceImageForModel(protocol, imageSelectedModel),
-    } : preset);
-    setImageApiPresets(next);
-    onSaveSettings((previous) => ({ ...previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
-    alert("图片 API 设置已保存。");
-  };
-
-  const handleSave = (updatedFields: Partial<UserSettings>) => {
-    onSaveSettings((previous) => {
-      const updatedIdentities = (previous.identities || []).map(idty => {
-        if (idty.id === (previous.activeIdentityId || "identity-1")) {
-          return {
-            ...idty,
-            name: updatedFields.name !== undefined ? updatedFields.name : idty.name,
-            avatar: updatedFields.avatar !== undefined ? updatedFields.avatar : idty.avatar,
-            signature: updatedFields.signature !== undefined ? updatedFields.signature : idty.signature,
-            bio: updatedFields.bio !== undefined ? updatedFields.bio : idty.bio,
-          };
-        }
-        return idty;
-      });
-
-      return {
-        ...previous,
-        ...updatedFields,
-        identities: updatedIdentities
-      };
-    });
-  };
-
-  const updateChatIcon = (key: ChatIconKey, value: string) => {
-    const next = { ...chatIcons };
-    const url = value.trim();
-    if (url) next[key] = url;
-    else delete next[key];
-    setChatIcons(next);
-    handleSave({ chatIcons: next });
-  };
-
-  const handleExportChatTheme = () => {
-    const data = JSON.stringify({ version: 1, chatGlobalCSS, chatIcons }, null, 2);
-    const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "fanfanji-chat-theme.json";
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImportChatTheme = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const imported = JSON.parse(String(reader.result));
-        if (!imported || typeof imported !== "object") throw new Error("invalid theme");
-        const nextCss = typeof imported.chatGlobalCSS === "string" ? imported.chatGlobalCSS : "";
-        const nextIcons = sanitizeChatIcons(imported.chatIcons);
-        setChatGlobalCSS(nextCss);
-        setChatIcons(nextIcons);
-        handleSave({ chatGlobalCSS: nextCss, chatIcons: nextIcons });
-        alert("聊天美化主题已导入。");
-      } catch {
-        alert("无法导入该主题文件，请选择有效的聊天主题 JSON。");
-      } finally {
-        event.target.value = "";
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const downloadDesktopModuleBackup = () => {
-    try {
-      const backup = buildDesktopModuleBackup(settings, localStorage);
-      const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
-      const link = document.createElement("a");
-      const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      link.href = url;
-      link.download = `fanfanji-desktop-module_${date}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (error: any) {
-      alert("导出桌面模块失败：" + (error?.message || "未知错误"));
-    }
-  };
-
-  const importDesktopModuleBackup = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const backup = parseDesktopModuleBackup(JSON.parse(reader.result as string));
-        if (!confirm("导入桌面模块将覆盖当前壁纸、Dock、桌面布局、小组件与应用图标美化设置；聊天、角色、API 等数据不会受影响。是否继续？")) return;
-        applyDesktopModuleBackup(backup, localStorage);
-        alert("桌面模块已导入，应用将刷新以应用新外观。");
-        window.location.reload();
-      } catch (error: any) {
-        alert("导入桌面模块失败：" + (error?.message || "文件格式无效"));
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const copyGlobalChatCssTemplate = async () => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE;
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-      setGlobalChatCssTemplateCopied(true);
-      window.setTimeout(() => setGlobalChatCssTemplateCopied(false), 1500);
-    } catch {
-      alert("复制失败，请手动复制输入框中的模板。");
-    }
-  };
-
-  const handleClearApplicationData = async () => {
-    if (isClearingApplicationData) return;
-    if (!confirm("⚠️ 确定要清除所有缓存并恢复为默认设置吗？这会清空全部对话和角色数据且无法恢复！")) return;
-
-    setIsClearingApplicationData(true);
-    try {
-      await clearApplicationData();
-      // Reload immediately so mounted effects cannot restore the old in-memory state.
-      window.location.reload();
-    } catch (error) {
-      console.error("Failed to clear application data:", error);
-      setIsClearingApplicationData(false);
-      alert("清除失败，数据未被完整重置，请稍后重试。");
-    }
-  };
-
-  const handleSwitchIdentity = (id: string) => {
-    const idty = (settings.identities || []).find(i => i.id === id);
-    if (idty) {
-      setName(idty.name);
-      setAvatar(idty.avatar);
-      setSignature(idty.signature);
-      setBio(idty.bio);
-      
-      onSaveSettings((previous) => ({
-        ...previous,
-        activeIdentityId: id,
-        name: idty.name,
-        avatar: idty.avatar,
-        signature: idty.signature,
-        bio: idty.bio
-      }));
-    }
-  };
+  const { handleSwitchIdentity } = useSettingsIdentityActions({
+    settings,
+    onSwitchIdentity,
+    onSaveSettings,
+    setName,
+    setAvatar,
+    setSignature,
+    setBio,
+  });
 
   useEffect(() => {
     setName(settings.name);
@@ -1107,117 +473,26 @@ export default function AppSettings({
     setBio(settings.bio);
   }, [settings.activeIdentityId, settings.name, settings.avatar, settings.signature, settings.bio]);
 
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const compressed = await compressImage(file, 400, 400, 0.75);
-        setAvatar(compressed);
-        handleSave({ avatar: compressed });
-      } catch (err) {
-        console.error("Avatar compression failed:", err);
-      }
-    }
-  };
+  const { handleAvatarUpload, handleWallpaperUpload, handleIconUpload, handleRestoreAllIcons } = useSettingsAssetActions({
+    settings,
+    handleSave,
+    setAvatar,
+    setWallpaper,
+  });
 
-  const handleWallpaperUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const compressed = await compressImage(file, 1000, 1000, 0.7);
-        setWallpaper(compressed);
-        handleSave({ wallpaper: compressed, wallpaperSource: "user" });
-      } catch (err) {
-        console.error("Wallpaper compression failed:", err);
-      }
-    }
-  };
-
-  const handleIconUpload = async (appKey: string, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const compressed = await compressImagePreservingTransparency(file, 120, 120, 0.8);
-        const updatedIcons = { ...settings.customIcons, [appKey]: compressed };
-        handleSave({ customIcons: updatedIcons });
-      } catch (err) {
-        console.error("Icon compression failed:", err);
-      }
-    }
-  };
-
-  const handleRestoreAllIcons = () => {
-    handleSave({ customIcons: {} });
-  };
-
-  const handleTestConnection = async () => {
-    setIsTesting(true);
-    setTestResult(null);
-    try {
-      const apiKeyValue = apiKey.trim() || settings.apiKey;
-      const endpointValue = apiEndpoint.trim();
-
-      const result = await apiTestKey({
-        apiKey: apiKeyValue,
-        model: selectedModel,
-        apiEndpoint: endpointValue
-      });
-
-      setTestResult({
-        success: result.success,
-        msg: result.message
-      });
-    } catch (err: any) {
-      setTestResult({ success: false, msg: err.message || "连接失败" });
-    } finally {
-      setIsTesting(false);
-    }
-  };
-
-  const handleSaveCurrentAsPreset = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPresetName.trim()) return;
-
-    const newPreset: StylePreset = {
-      id: "preset-" + Date.now().toString(),
-      name: newPresetName.trim(),
-      bubbleCss,
-      globalCss,
-      wallpaper,
-      themeColor: "#3b82f6"
-    };
-
-    onSavePreset(newPreset);
-    setNewPresetName("");
-  };
-
-  const applyPreset = (preset: StylePreset) => {
-    const isClassicPreset = preset.id === CLASSIC_BUBBLE_PRESET_ID;
-    setWallpaper(preset.wallpaper);
-    setBubbleCss(isClassicPreset ? "" : preset.bubbleCss);
-    setGlobalCss(preset.globalCss);
-    if (isClassicPreset) {
-      setSelfBubbleBg(CLASSIC_BUBBLE_STRUCTURED_STYLE.selfBubbleBg);
-      setSelfBubbleColor(CLASSIC_BUBBLE_STRUCTURED_STYLE.selfBubbleColor);
-      setSelfBubbleRadius(CLASSIC_BUBBLE_STRUCTURED_STYLE.selfBubbleRadius);
-      setSelfBubbleOpacity(CLASSIC_BUBBLE_STRUCTURED_STYLE.selfBubbleOpacity);
-      setOtherBubbleBg(CLASSIC_BUBBLE_STRUCTURED_STYLE.otherBubbleBg);
-      setOtherBubbleColor(CLASSIC_BUBBLE_STRUCTURED_STYLE.otherBubbleColor);
-      setOtherBubbleRadius(CLASSIC_BUBBLE_STRUCTURED_STYLE.otherBubbleRadius);
-      setOtherBubbleOpacity(CLASSIC_BUBBLE_STRUCTURED_STYLE.otherBubbleOpacity);
-      setBubbleTailEnabled(false);
-    }
-    
-    onSaveSettings((previous) => ({
-      ...previous,
-      wallpaper: preset.wallpaper,
-      wallpaperSource: "preset",
-      bubbleCss: isClassicPreset ? "" : preset.bubbleCss,
-      globalCss: preset.globalCss,
-      activePreset: preset.name,
-      ...(isClassicPreset ? CLASSIC_BUBBLE_STRUCTURED_STYLE : {}),
-    }));
-  };
+  const { handleSaveCurrentAsPreset } = useSettingsPresetActions({
+    newPresetName,
+    setNewPresetName,
+    bubbleCss,
+    globalCss,
+    wallpaper,
+    onSavePreset,
+  });
+  const { applyPreset } = useSettingsApplyPresetAction({
+    onSaveSettings,
+    appearanceState: appearanceDraftState,
+    styleState: styleDraftState,
+  });
 
   const activePresetsList = [...DEFAULT_PRESETS, ...presets];
 
@@ -1228,12 +503,33 @@ export default function AppSettings({
     { key: "worldbook", label: "世界书" },
     { key: "music", label: "音乐" },
     { key: "schedule", label: "日程" },
+    { key: "reading", label: "阅读" },
+    { key: "cinema", label: "影视" },
+    { key: "relationship-network", label: "关系网" },
     { key: "forum", label: "论坛" },
     { key: "notes", label: "备忘录" },
     { key: "memory", label: "记忆书" },
     { key: "offline", label: "线下" },
     { key: "store", label: "应用商店" },
     { key: "settings", label: "设置" }
+  ];
+
+  const dockAppOptions = [
+    { key: "chat", label: "聊天" },
+    { key: "archives", label: "档案馆" },
+    { key: "worldbook", label: "世界书" },
+    { key: "music", label: "音乐" },
+    { key: "forum", label: "论坛" },
+    { key: "store", label: "应用商店" },
+    { key: "notes", label: "备忘录" },
+    { key: "diary", label: "日记" },
+    { key: "memory", label: "记忆书" },
+    { key: "offline", label: "线下" },
+    { key: "schedule", label: "日程" },
+    { key: "reading", label: "阅读" },
+    { key: "cinema", label: "影视" },
+    { key: "relationship-network", label: "关系网" },
+    { key: "settings", label: "设置" },
   ];
 
   const handleBack = () => {
@@ -1243,12 +539,12 @@ export default function AppSettings({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans" data-settings-shell>
+    <div className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans" data-settings-shell data-theme-page="settings">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
           onClick={handleBack}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           id="settings_back_btn"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -1439,7 +735,7 @@ export default function AppSettings({
               {/* Identity Switcher */}
               <div className="border-b border-slate-50 pb-4">
                 <div className="grid grid-cols-3 gap-2">
-                  {(settings.identities || []).map((idty, index) => {
+                  {(settings.identities || []).filter((idty) => idty.kind !== "alias").map((idty, index) => {
                     const isSelected = idty.id === (settings.activeIdentityId || "identity-1");
                     return (
                       <button
@@ -1632,6 +928,7 @@ export default function AppSettings({
                 <input value={imageApiEndpoint} onChange={(event) => { setImageApiEndpoint(event.target.value); persistImagePresetDraft({ apiEndpoint: event.target.value }); }} placeholder="由中转服务商提供的 API 地址" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono" />
                 <div className="relative"><input type={showImagePassword ? "text" : "password"} value={imageApiKey} onChange={(event) => { setImageApiKey(event.target.value); persistImagePresetDraft({ apiKey: event.target.value }); }} placeholder="API Key" className="w-full pl-3 pr-10 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono" /><button type="button" onClick={() => setShowImagePassword(!showImagePassword)} className="absolute right-3 top-2 text-slate-400">{showImagePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div>
                 <div><div className="mb-1 flex justify-between"><span className="text-[10px] font-bold text-slate-500">图片模型</span><button type="button" disabled={isFetchingImageModels} onClick={fetchImageModels} className="text-[10px] font-bold text-blue-600">{isFetchingImageModels ? "拉取中…" : "拉取模型列表"}</button></div>{imageModelSuggestions.length ? <select value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">{imageModelSuggestions.map((model) => <option key={model}>{model}</option>)}</select> : <input value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} placeholder="手动输入图片模型" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />}</div>
+                <div><label className="mb-1 block text-[10px] font-bold text-slate-500">生成比例</label><select value={imageAspectRatio} onChange={(event) => updateImageAspectRatio(event.target.value as typeof imageAspectRatio)} className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs"><option value="1:1">1:1 正方形</option><option value="3:4">3:4 竖图</option><option value="4:3">4:3 横图</option><option value="16:9">16:9 宽屏</option><option value="9:16">9:16 长屏</option></select></div>
                 <p className="text-[10px] leading-relaxed text-slate-400">测试连接只检查配置与模型列表，不会生成图片。</p>
                 {imageTestResult && <p className={`text-[10px] ${imageTestResult.success ? "text-emerald-600" : "text-rose-600"}`}>{imageTestResult.message}</p>}
                 <div className="settings-wide-action-group pt-1"><button type="button" onClick={testImageApi} disabled={isTestingImageApi} className="settings-wide-action settings-wide-action-primary disabled:opacity-60">{isTestingImageApi ? "测试中…" : "测试连接"}</button><button type="button" onClick={saveImageApiConfig} className="settings-wide-action settings-wide-action-secondary">保存配置</button></div>
@@ -1647,35 +944,35 @@ export default function AppSettings({
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("desktop")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
+                  className={`beauty-segment-control flex-1 font-bold rounded-[16px] transition-all ${
                     beautySubTab === "desktop"
                       ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
                       : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  桌面模块
+                  桌面布局
                 </button>
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("chat")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
+                  className={`beauty-segment-control flex-1 font-bold rounded-[16px] transition-all ${
                     beautySubTab === "chat"
                       ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
                       : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  聊天页面模块
+                  聊天页面
                 </button>
                 <button
                   type="button"
                   onClick={() => setBeautySubTab("preset")}
-                  className={`flex-1 py-2 text-xs font-bold rounded-[16px] transition-all ${
+                  className={`beauty-segment-control flex-1 font-bold rounded-[16px] transition-all ${
                     beautySubTab === "preset"
                       ? "bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-sm"
                       : "bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)]"
                   }`}
                 >
-                  主题预设模块
+                  主题预设
                 </button>
               </div>
 
@@ -2047,6 +1344,47 @@ export default function AppSettings({
                       })}
                     </div>
                   </div>
+
+                  {/* Dock 栏应用槽位 */}
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
+                    <div className="pb-1 border-b border-slate-50">
+                      <div>
+                        <span className="text-xs font-bold text-slate-700">Dock 栏应用</span>
+                        <p className="mt-1 text-[10px] leading-relaxed text-slate-400">四个常驻位置可以替换为任意应用，例如把音乐替换为线下；应用图标会自动跟随所选应用。</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {Array.from({ length: 4 }, (_, index) => {
+                        const dockApps = settings.dockApps?.length === 4
+                          ? settings.dockApps
+                          : ["chat", "music", "archives", "settings"];
+                        const selectedKey = dockApps[index] || "chat";
+                        return (
+                          <div
+                            key={index}
+                            className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/60 px-3 py-2.5"
+                          >
+                            <span className="w-12 shrink-0 text-[10px] font-bold text-slate-500">位置 {index + 1}</span>
+                            <select
+                              value={selectedKey}
+                              onChange={(event) => {
+                                const next = [...(settings.dockApps?.length === 4 ? settings.dockApps : ["chat", "music", "archives", "settings"] )];
+                                next[index] = event.target.value;
+                                handleSave({ dockApps: next });
+                              }}
+                              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:border-neutral-950"
+                              aria-label={`Dock 位置 ${index + 1}`}
+                            >
+                              {dockAppOptions.map((option) => (
+                                <option key={option.key} value={option.key}>{option.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -2063,10 +1401,13 @@ export default function AppSettings({
                     </div>
                     
                      <div
-                       className="bg-slate-50/60 p-4 rounded-[24px] border border-slate-100 space-y-4 relative overflow-hidden"
-                       style={isLiquidGlassChatStyle ? {
-                         background: "linear-gradient(135deg, #dbeafe 0%, #fdf2f8 48%, #ecfeff 100%)",
-                       } : undefined}
+                       className="bg-slate-50/60 p-4 rounded-[24px] border border-slate-100 flex flex-col relative overflow-hidden"
+                       style={{
+                         rowGap: `${Math.max(8, Math.min(56, bubbleSpacing))}px`,
+                         ...(isLiquidGlassChatStyle ? {
+                           background: "linear-gradient(135deg, #dbeafe 0%, #fdf2f8 48%, #ecfeff 100%)",
+                         } : {}),
+                       }}
                      >
                       {/* Message 1: Other Speaker (Always has avatar) */}
                       {bubblePosition === "above" ? (
@@ -2096,7 +1437,7 @@ export default function AppSettings({
                                 <div
                                   className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    backgroundColor: getSettingsPreviewBubbleBackground(otherBubbleBg, otherBubbleOpacity),
                                     borderRadius: "0 0 0 4px",
                                     transform: "rotate(45deg)",
                                     left: "-5px",
@@ -2131,7 +1472,7 @@ export default function AppSettings({
                                 <div
                                   className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    backgroundColor: getSettingsPreviewBubbleBackground(otherBubbleBg, otherBubbleOpacity),
                                     borderRadius: "0 0 0 4px",
                                     transform: "rotate(45deg)",
                                     left: "-5px",
@@ -2148,7 +1489,7 @@ export default function AppSettings({
                       {/* Message 2: Other Speaker (Consecutive message, avatar collapses based on state) */}
                       {bubblePosition === "above" ? (
                         /* Stacked layout for above */
-                        <div className="w-full flex flex-col items-start mt-1.5">
+                        <div className="w-full flex flex-col items-start">
                           {!collapseConsecutiveAvatars && (
                             <div className="flex items-center gap-2.5 mb-1 select-none flex-row">
                               <img
@@ -2175,7 +1516,7 @@ export default function AppSettings({
                                 <div
                                   className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    backgroundColor: getSettingsPreviewBubbleBackground(otherBubbleBg, otherBubbleOpacity),
                                     borderRadius: "0 0 0 4px",
                                     transform: "rotate(45deg)",
                                     left: "-5px",
@@ -2189,7 +1530,7 @@ export default function AppSettings({
                         </div>
                       ) : (
                         /* Side by side layout for side */
-                        <div className="w-full flex flex-row items-start gap-2.5 mt-1.5">
+                        <div className="w-full flex flex-row items-start gap-2.5">
                           {!collapseConsecutiveAvatars ? (
                             <img
                               src="https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg"
@@ -2217,7 +1558,7 @@ export default function AppSettings({
                                 <div
                                   className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    backgroundColor: getBubbleBackgroundStyle(otherBubbleBg, otherBubbleOpacity),
+                                    backgroundColor: getSettingsPreviewBubbleBackground(otherBubbleBg, otherBubbleOpacity),
                                     borderRadius: "0 0 0 4px",
                                     transform: "rotate(45deg)",
                                     left: "-5px",
@@ -2259,7 +1600,7 @@ export default function AppSettings({
                                 <div
                                   className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
+                                    backgroundColor: getSettingsPreviewBubbleBackground(selfBubbleBg, selfBubbleOpacity),
                                     borderRadius: "0 0 4px 0",
                                     transform: "rotate(45deg)",
                                     right: "-5px",
@@ -2294,7 +1635,7 @@ export default function AppSettings({
                                 <div
                                   className="absolute w-[13px] h-[13px] z-0"
                                   style={{
-                                    backgroundColor: getBubbleBackgroundStyle(selfBubbleBg, selfBubbleOpacity),
+                                    backgroundColor: getSettingsPreviewBubbleBackground(selfBubbleBg, selfBubbleOpacity),
                                     borderRadius: "0 0 4px 0",
                                     transform: "rotate(45deg)",
                                     right: "-5px",
@@ -2480,6 +1821,27 @@ export default function AppSettings({
                           className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                         />
                         <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{otherBubbleRadius}px</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 py-1">
+                      <span className="text-xs font-bold text-slate-700 shrink-0">气泡上下间距</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="8"
+                          max="56"
+                          step="1"
+                          value={bubbleSpacing}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            setBubbleSpacing(val);
+                            handleSave({ bubbleSpacing: val });
+                          }}
+                          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-neutral-950"
+                          aria-label="气泡上下间距"
+                        />
+                        <span className="text-[10px] text-slate-400 font-mono font-bold shrink-0 w-8 text-right">{bubbleSpacing}px</span>
                       </div>
                     </div>
 
@@ -2784,7 +2146,7 @@ export default function AppSettings({
                   </div>
 
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <div><span className="text-xs font-bold text-slate-700">聊天功能图标</span><p className="text-[10px] text-slate-400 leading-relaxed mt-1">填写图片 URL 后替换默认图标；角色覆盖优先于这里的全局配置。</p></div>
+                    <div><span className="text-xs font-bold text-slate-700">聊天功能图标</span><p className="text-[10px] text-slate-400 leading-relaxed mt-1">填写图片 URL 后替换默认图标；角色覆盖优先于这里的全局配置。底部工具栏可在 CSS 中分别调整外框大小（--chat-attachment-icon-size）和内部图片大小（--chat-attachment-glyph-size）。</p></div>
                     <div className="grid grid-cols-2 gap-2">
                       {CHAT_ICON_FIELDS.map(({ key, label }) => <label key={key} className="space-y-1"><span className="text-[10px] font-semibold text-slate-500">{label}图标</span><input value={chatIcons[key] || ""} onChange={(e) => updateChatIcon(key, e.target.value)} placeholder="图片 URL（留空用默认）" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" /></label>)}
                     </div>
@@ -2902,6 +2264,111 @@ export default function AppSettings({
           {activeTab === "system_config" && (
             <div className="space-y-4 text-left" data-system-settings>
               <div className="settings-section-header">系统偏好</div>
+              <div className="rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm space-y-5" data-global-typography-settings>
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-slate-100 text-slate-700">
+                    <TypeIcon className="h-4.5 w-4.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-bold tracking-wide text-slate-800">全局字体</h4>
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">上传字体文件或粘贴字体直链，保存后会立即应用到整个应用。</p>
+                    <p className="mt-1 truncate text-[10px] font-semibold text-slate-600">
+                      当前：{settings.globalFontSource === "upload" || settings.globalFontSource === "url"
+                        ? settings.globalFontName || "自定义字体"
+                        : "系统默认字体"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <label className={`flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[10px] font-bold text-slate-700 transition-colors hover:bg-slate-100 ${fontOperationPending ? "pointer-events-none opacity-50" : ""}`}>
+                    <Upload className="h-3.5 w-3.5" />
+                    上传字体文件
+                    <input
+                      type="file"
+                      accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2,application/font-woff,application/font-sfnt"
+                      className="hidden"
+                      disabled={fontOperationPending}
+                      onChange={handleGlobalFontFile}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={fontOperationPending || (!settings.globalFontAssetId && !settings.globalFontUrl)}
+                    onClick={() => void handleResetGlobalFont()}
+                    className="min-h-10 rounded-[14px] border border-slate-200 bg-white px-3 text-[10px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    恢复默认字体
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="relative min-w-0 flex-1">
+                      <Link className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="url"
+                        value={globalFontUrlDraft}
+                        onChange={(event) => setGlobalFontUrlDraft(event.target.value)}
+                        onKeyDown={(event) => { if (event.key === "Enter") void handleApplyGlobalFontUrl(); }}
+                        placeholder="粘贴 TTF / OTF / WOFF / WOFF2 字体直链"
+                        className="h-10 w-full rounded-[14px] border border-slate-200 bg-slate-50 pl-9 pr-3 text-[10px] text-slate-700 outline-none transition-colors focus:border-slate-400"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={fontOperationPending || !globalFontUrlDraft.trim()}
+                      onClick={() => void handleApplyGlobalFontUrl()}
+                      className="h-10 shrink-0 rounded-[14px] bg-neutral-950 px-4 text-[10px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      应用
+                    </button>
+                  </div>
+                  <p className="text-[9px] leading-relaxed text-slate-400">支持 TTF、OTF、WOFF、WOFF2，上传文件最大 25MB。网络字体服务器需要允许跨域访问。</p>
+                  {fontOperationMessage && <p className="rounded-[10px] bg-slate-50 px-3 py-2 text-[10px] leading-relaxed text-slate-600" role="status">{fontOperationMessage}</p>}
+                </div>
+
+                <div className="border-t border-slate-100 pt-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-bold tracking-wide text-slate-800">全局字体大小</h4>
+                      <p className="mt-1 text-[10px] text-slate-400">页面会按同一比例重新排版和适应。</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGlobalFontSize(DEFAULT_GLOBAL_FONT_SIZE);
+                        handleSave({ globalFontSize: DEFAULT_GLOBAL_FONT_SIZE });
+                      }}
+                      className="shrink-0 rounded-[10px] bg-slate-100 px-2.5 py-1.5 text-[10px] font-bold text-slate-600"
+                    >
+                      默认
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-bold text-slate-400">小</span>
+                    <input
+                      type="range"
+                      min={MIN_GLOBAL_FONT_SIZE}
+                      max={MAX_GLOBAL_FONT_SIZE}
+                      step={1}
+                      value={globalFontSize}
+                      aria-label="全局字体大小"
+                      onChange={(event) => {
+                        const next = sanitizeGlobalFontSize(event.target.value);
+                        setGlobalFontSize(next);
+                        handleSave({ globalFontSize: next });
+                      }}
+                      className="h-1 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-neutral-950"
+                    />
+                    <span className="text-[10px] font-bold text-slate-400">大</span>
+                    <span className="w-9 shrink-0 text-right font-mono text-[10px] font-bold text-slate-700">{globalFontSize}px</span>
+                  </div>
+                  <div className="rounded-[14px] border border-slate-100 bg-slate-50 px-4 py-3 text-center text-sm text-slate-700" style={{ fontFamily: "var(--app-font-family)" }}>
+                    米饭机 Aa 123 · 字体预览
+                  </div>
+                </div>
+              </div>
               {/* Floating Home Button Settings */}
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <div className="flex items-center justify-between">
@@ -2967,7 +2434,7 @@ export default function AppSettings({
                 </div>
 
                 <p className="text-[10px] text-slate-500 leading-relaxed">
-                  通过 PWA (Progressive Web App) 技术，您可以将<strong>饭饭机</strong>作为原生 App 安装到您的手机桌面。安装后点开可<strong>隐藏浏览器地址栏、实现沉浸式壁纸穿透状态栏、以及极其流畅的离线启动体验</strong>。
+                  通过 PWA (Progressive Web App) 技术，您可以将<strong>米饭机</strong>作为原生 App 安装到您的手机桌面。安装后点开可<strong>隐藏浏览器地址栏、实现沉浸式壁纸穿透状态栏、以及极其流畅的离线启动体验</strong>。
                 </p>
 
                 {isStandalone ? (
@@ -2987,7 +2454,7 @@ export default function AppSettings({
                         className="w-full py-3 bg-neutral-950 hover:bg-neutral-900 text-white font-extrabold rounded-[16px] text-xs transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
-                        <span>立即安装「饭饭机」到主屏幕</span>
+                        <span>立即安装「米饭机」到主屏幕</span>
                       </button>
                     ) : (
                       <div className="bg-slate-50 p-3 rounded-[16px] border border-slate-100/80 text-[10px] text-slate-600 space-y-1.5">
@@ -3021,158 +2488,46 @@ export default function AppSettings({
           {/* SYSTEM SETTINGS & BACKUP TAB */}
           {activeTab === "system" && (
             <div className="space-y-4 text-left">
-              <div className="settings-section-header">数据备份</div>
-              {showBackupExportOptions && (
-                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 p-4" role="dialog" aria-modal="true" aria-labelledby="backup-export-title">
-                  <div className="w-full max-w-sm rounded-[16px] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[0_8px_32px_rgba(0,0,0,0.16)]">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h3 id="backup-export-title" className="text-base font-semibold text-[var(--text-primary)]">选择导出方式</h3>
-                      <button type="button" onClick={() => setShowBackupExportOptions(false)} className="h-8 w-8 rounded-[12px] text-lg text-[var(--text-tertiary)]" aria-label="关闭">×</button>
-                    </div>
-                    <div className="space-y-2">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await downloadSystemBackup(BACKUP_KEYS);
-                            setShowBackupExportOptions(false);
-                          } catch (err: any) {
-                            alert("导出备份失败: " + err.message);
-                          }
-                        }}
-                        className="w-full rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] p-3 text-left transition-colors hover:bg-[var(--surface-raised)]"
-                      >
-                        <span className="block text-sm font-semibold text-[var(--text-primary)]">完整导出</span>
-                        <span className="mt-1 block text-xs text-[var(--text-tertiary)]">本机内的所有数据完整导出</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await downloadSystemBackup(LIGHT_BACKUP_KEYS);
-                            setShowBackupExportOptions(false);
-                          } catch (err: any) {
-                            alert("导出备份失败: " + err.message);
-                          }
-                        }}
-                        className="w-full rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] p-3 text-left transition-colors hover:bg-[var(--surface-raised)]"
-                      >
-                        <span className="block text-sm font-semibold text-[var(--text-primary)]">轻量导出</span>
-                        <span className="mt-1 block text-xs leading-5 text-[var(--text-tertiary)]">仅包含聊天、档案馆、世界书、记忆书、日记、线上线下</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {/* Data Backup and Restore */}
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">数据备份与还原</h3>
-                
-                <p className="text-[10px] text-slate-400 leading-relaxed">
-                  可以将本机内的配置打包导出备份，未来可在任何设备上导入此文件进行100%完美还原。音频和本地封面不会写入JSON，恢复后需重新导入本地文件。
-                </p>
+              <SystemBackupPanel
+                showExportOptions={showBackupExportOptions}
+                onOpenExportOptions={() => setShowBackupExportOptions(true)}
+                onCloseExportOptions={() => setShowBackupExportOptions(false)}
+                onExportFull={async () => {
+                  try {
+                    await handleExportFull();
+                    setShowBackupExportOptions(false);
+                  } catch (error: any) {
+                    alert("导出备份失败: " + error.message);
+                  }
+                }}
+                onExportLight={async () => {
+                  try {
+                    await handleExportLight();
+                    setShowBackupExportOptions(false);
+                  } catch (error: any) {
+                    alert("导出备份失败: " + error.message);
+                  }
+                }}
+                onImport={handleSystemBackupImport}
+                onInspect={handleSystemBackupInspect}
+              />
 
-                <div className="grid grid-cols-2 gap-3">
-                  {/* Export Button */}
-                  <button
-                    type="button"
-                    onClick={() => setShowBackupExportOptions(true)}
-                    className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group"
-                  >
-                    <Download className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-bold text-slate-700">导出数据备份</span>
-                    <span className="text-[8px] text-slate-400 mt-1">下载备份 JSON 文件</span>
-                  </button>
-
-                  {/* Import Button */}
-                  <label className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group cursor-pointer">
-                    <Upload className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-bold text-slate-700">导入备份还原</span>
-                    <span className="text-[8px] text-slate-400 mt-1">上传备份 JSON 文件</span>
-                    <input
-                      type="file"
-                      accept="application/json"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-
-                        const reader = new FileReader();
-                        reader.onload = async () => {
-                          try {
-                            const json: unknown = JSON.parse(reader.result as string);
-                            if (typeof json !== "object" || json === null || Array.isArray(json)) {
-                              throw new Error("无效的备份文件格式！");
-                            }
-
-                            const entries = Object.entries(json);
-                            if (entries.length === 0 || entries.some(([key, value]) => !BACKUP_KEY_SET.has(key) || (value !== null && typeof value !== "string"))) {
-                              throw new Error("非有效的小手机备份文件！");
-                            }
-
-                            if (confirm("确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置 and 世界书数据且不可撤销！")) {
-                              const snapshot = snapshotLocalStorage();
-                              const writtenKeys: string[] = [];
-
-                              try {
-                                for (const [key, value] of entries) {
-                                  if (typeof value === "string") {
-                                    writtenKeys.push(key);
-                                    localStorage.setItem(key, sanitizeSystemBackupValue(
-                                      key,
-                                      value,
-                                      json as Record<string, unknown>,
-                                    ) || value);
-                                  }
-                                }
-                                const restoredOfflineStories = entries.find(([key]) => key === "phone_offline_stories")?.[1];
-                                if (typeof restoredOfflineStories === "string") {
-                                  const parsedStories = JSON.parse(restoredOfflineStories) as unknown;
-                                  if (!Array.isArray(parsedStories)) throw new Error("线下故事备份格式无效");
-                                  await offlineStoryDb.replaceAll(parsedStories as OfflineStory[]);
-                                }
-                              } catch (writeError) {
-                                for (const key of writtenKeys) {
-                                  const previousValue = snapshot.get(key);
-                                  try {
-                                    if (previousValue === undefined) {
-                                      localStorage.removeItem(key);
-                                    } else {
-                                      localStorage.setItem(key, previousValue);
-                                    }
-                                  } catch (rollbackError) {
-                                    console.error("Backup restore rollback failed:", rollbackError);
-                                  }
-                                }
-                                throw writeError;
-                              }
-
-                              // Existing forum views receive the restored state immediately.
-                              if (entries.some(([key]) => key.startsWith("phone_forum_"))) {
-                                notifyForumStateChanged();
-                              }
-                              if (entries.some(([key]) => key === "phone_appearance_settings")) {
-                                notifyAppearanceSettingsChanged();
-                              }
-                              if (entries.length === 1 && entries[0][0] === "phone_appearance_settings") {
-                                alert("外观设置已恢复并立即应用。");
-                                return;
-                              }
-                              // JSON backups intentionally exclude media/sticker blobs. Offline stories
-                              // are restored to their durable store above before the app reloads.
-                              alert("导入成功！应用即将刷新加载新数据。");
-                              window.location.reload();
-                            }
-                          } catch (err: any) {
-                            alert("导入备份失败: " + err.message);
-                          }
-                        };
-                        reader.readAsText(file);
-                      }}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-              </div>
+              <StorageDiagnosticsCard
+                diagnostics={storageDiagnostics}
+                preflight={storagePreflight}
+                appVersion={APP_VERSION}
+                backupVersion={SYSTEM_BACKUP_VERSION}
+                lastBackupAt={lastBackupAt}
+                onRefresh={() => void refreshStorageDiagnostics()}
+                onRunPreflight={() => void runStorageMigrationPreflight()}
+                onRunContentMigration={() => void runContentStorageMigration()}
+                onResumeInterruptedMigration={() => void runContentStorageMigration(true)}
+                contentMigrationRunning={isContentStorageMigrationRunning}
+                onRequestPersistence={() => void requestStoragePersistence()}
+                onDownloadDiagnosticReport={downloadStorageDiagnosticReport}
+                onCleanOrphanedResources={cleanOrphanedResources}
+                onCleanMigratedCopies={cleanMigratedCopies}
+              />
 
               <div className="settings-section-header">桌面模块</div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
@@ -3480,6 +2835,17 @@ export default function AppSettings({
                       <button type="button" disabled={isFetchingImageModels} onClick={fetchImageModels} className="text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-60">{isFetchingImageModels ? "拉取中…" : "拉取模型列表"}</button>
                     </div>
                     {imageModelSuggestions.length ? <select value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm text-[var(--text-primary)]">{imageModelSuggestions.map((model) => <option key={model}>{model}</option>)}</select> : <input value={imageSelectedModel} onChange={(event) => updateCurrentImageModel(event.target.value)} placeholder="手动输入图片模型" className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm text-[var(--text-primary)]" />}
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-[var(--text-secondary)]">生成比例</label>
+                    <select value={imageAspectRatio} onChange={(event) => updateImageAspectRatio(event.target.value as typeof imageAspectRatio)} className="h-10 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-3 text-sm text-[var(--text-primary)]">
+                      <option value="1:1">1:1 正方形</option>
+                      <option value="3:4">3:4 竖图</option>
+                      <option value="4:3">4:3 横图</option>
+                      <option value="16:9">16:9 宽屏</option>
+                      <option value="9:16">9:16 长屏</option>
+                    </select>
+                    <p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">不同服务商支持的尺寸可能不同，OpenAI Images 会映射到对应的横向或纵向尺寸。</p>
                   </div>
                   <p className="text-xs leading-5 text-[var(--text-tertiary)]">测试连接只检查配置与模型列表，不会生成图片。</p>
                   {imageTestResult && <p className={`text-xs ${imageTestResult.success ? "text-emerald-600" : "text-rose-600"}`}>{imageTestResult.message}</p>}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
+import {
   ChevronLeft, 
   Search, 
   Plus, 
@@ -12,6 +12,8 @@ import {
   Save, 
   CheckSquare,
 } from "lucide-react";
+import { readString, remove as removeStoredValue, writeJson } from "../core/storage/storageAdapter";
+import { readArray } from "../core/storage/repositories/repositoryUtils";
 
 interface Note {
   id: string;
@@ -37,22 +39,16 @@ const SEED_TODOS: Todo[] = [];
 export default function AppNotes({ onClose }: AppNotesProps) {
   // Navigation: "notes" or "todo"
   const [activeTab, setActiveTab] = useState<"notes" | "todo">(() => {
-    const savedTab = localStorage.getItem("memo_active_tab");
-    localStorage.removeItem("memo_active_tab"); // consume once
+    const savedTab = readString("memo_active_tab").value;
+    removeStoredValue("memo_active_tab"); // consume once
     return (savedTab === "todo" ? "todo" : "notes");
   });
 
   // Notes state
-  const [notes, setNotes] = useState<Note[]>(() => {
-    const raw = localStorage.getItem("phone_memo_notes");
-    return raw ? JSON.parse(raw) : SEED_NOTES;
-  });
+  const [notes, setNotes] = useState<Note[]>(() => readArray<Note>("phone_memo_notes", SEED_NOTES).value);
 
   // Todos state (shared with TodoWidget!)
-  const [todos, setTodos] = useState<Todo[]>(() => {
-    const raw = localStorage.getItem("phone_memo_todos");
-    return raw ? JSON.parse(raw) : SEED_TODOS;
-  });
+  const [todos, setTodos] = useState<Todo[]>(() => readArray<Todo>("phone_memo_todos", SEED_TODOS).value);
 
   // UI state
   const [searchQuery, setSearchQuery] = useState("");
@@ -70,10 +66,10 @@ export default function AppNotes({ onClose }: AppNotesProps) {
 
   // Auto open todo creator if triggered from widget
   useEffect(() => {
-    const triggerEdit = localStorage.getItem("memo_open_todo_edit");
+    const triggerEdit = readString("memo_open_todo_edit").value;
     if (triggerEdit === "true" && activeTab === "todo") {
       setIsAddingTodo(true);
-      localStorage.removeItem("memo_open_todo_edit"); // consume
+      removeStoredValue("memo_open_todo_edit"); // consume
       setTimeout(() => {
         todoInputRef.current?.focus();
       }, 300);
@@ -82,12 +78,12 @@ export default function AppNotes({ onClose }: AppNotesProps) {
 
   // Persist notes
   useEffect(() => {
-    localStorage.setItem("phone_memo_notes", JSON.stringify(notes));
+    writeJson("phone_memo_notes", notes);
   }, [notes]);
 
   // Persist todos
   useEffect(() => {
-    localStorage.setItem("phone_memo_todos", JSON.stringify(todos));
+    writeJson("phone_memo_todos", todos);
   }, [todos]);
 
   // Handle Note Save (Create or Update)
@@ -186,7 +182,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
           onClick={isEditingNote ? () => setIsEditingNote(false) : onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           title="返回"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -200,17 +196,17 @@ export default function AppNotes({ onClose }: AppNotesProps) {
           {isEditingNote ? (
             <button 
               onClick={handleSaveNote}
-              className="w-8 h-8 rounded-full bg-neutral-950 hover:bg-neutral-900 text-white transition-all flex items-center justify-center shadow-sm"
+              className="app-nav-icon-button w-8 h-8 text-slate-800 transition-all flex items-center justify-center"
               title="保存"
             >
               <Save className="w-4 h-4" />
             </button>
           ) : (
-            activeTab === "notes" && (
+            (activeTab === "notes" || activeTab === "todo") && (
               <button 
-                onClick={handleOpenCreateNote}
-                className="w-8 h-8 bg-neutral-950 hover:bg-neutral-900 text-white rounded-full transition-colors flex items-center justify-center shadow-sm"
-                title="新建笔记"
+                onClick={activeTab === "notes" ? handleOpenCreateNote : () => setIsAddingTodo(true)}
+                className="app-nav-icon-button w-8 h-8 text-slate-800 transition-colors flex items-center justify-center"
+                title={activeTab === "notes" ? "新建笔记" : "新建待办"}
               >
                 <Plus className="w-4.5 h-4.5" />
               </button>
@@ -259,11 +255,11 @@ export default function AppNotes({ onClose }: AppNotesProps) {
                 margin: 0 !important;
               }
               .memo-editor-container input {
-                font-size: 16px !important;
+                font-size: calc(16px * var(--app-font-scale, 1)) !important;
                 font-weight: 800 !important;
               }
               .memo-editor-container textarea {
-                font-size: 14px !important;
+                font-size: calc(14px * var(--app-font-scale, 1)) !important;
               }
             `}</style>
             <input
@@ -342,7 +338,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
           /* TODOS TAB VIEW */
           <div className="p-4 space-y-4 max-w-md mx-auto">
             {/* Progress Card */}
-            <div className="bg-[var(--surface-raised)] border border-[var(--border)] rounded-2xl p-4 text-[var(--text-primary)] shadow-md relative overflow-hidden flex items-center justify-between">
+            <div className="bg-[var(--surface)] rounded-[10px] p-4 text-[var(--text-primary)] shadow-[0_1px_3px_rgba(0,0,0,0.06)] relative overflow-hidden flex items-center justify-between">
               <div className="space-y-1 z-10">
                 <span className="bg-[var(--badge-bg)] text-[var(--badge-text)] px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase">
                   自律待办管家
@@ -383,15 +379,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
             </div>
 
             {/* Actions Bar */}
-            <div className="flex gap-2 justify-between items-center">
-              <button
-                onClick={() => setIsAddingTodo(true)}
-                className="flex items-center gap-1 px-3 py-1.5 bg-neutral-950 hover:bg-neutral-900 text-white rounded-xl text-xs font-bold transition-all"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>新建待办</span>
-              </button>
-
+            <div className="flex items-center justify-end">
               {completedCount > 0 && (
                 <button
                   onClick={handleClearCompletedTodos}
@@ -404,7 +392,7 @@ export default function AppNotes({ onClose }: AppNotesProps) {
 
             {/* Todo Editor overlay/box */}
             {isAddingTodo && (
-              <form onSubmit={handleAddTodo} className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+              <form onSubmit={handleAddTodo} className="bg-[var(--surface)] p-2.5 rounded-[10px] shadow-[0_1px_3px_rgba(0,0,0,0.06)] space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                     新增待办内容
@@ -426,11 +414,11 @@ export default function AppNotes({ onClose }: AppNotesProps) {
                     placeholder="输入要准备的事务，如: 约陆沉砚去写生..."
                     value={newTodoText}
                     onChange={(e) => setNewTodoText(e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-base focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                    className="h-9 flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-neutral-950"
                   />
                   <button
                     type="submit"
-                    className="bg-neutral-950 text-white hover:bg-neutral-900 rounded-xl px-4 py-2 text-xs font-bold shadow-sm shrink-0"
+                    className="h-9 bg-neutral-950 text-white hover:bg-neutral-900 rounded-lg px-3 text-[11px] font-bold shadow-sm shrink-0"
                   >
                     添加
                   </button>
@@ -439,12 +427,12 @@ export default function AppNotes({ onClose }: AppNotesProps) {
             )}
 
             {/* Todo List */}
-            <div className="space-y-2 bg-[var(--surface-raised)] p-3 rounded-2xl border border-[var(--border)] shadow-sm">
+            <div className="space-y-2">
               {todos.map((todo) => (
                 <div
                   key={todo.id}
                   onClick={() => handleToggleTodo(todo.id)}
-                  className="flex items-center justify-between p-2.5 rounded-xl hover:bg-[var(--surface-muted)] transition-colors cursor-pointer group/todo"
+                  className="flex items-center justify-between rounded-[10px] bg-[var(--surface)] px-3 py-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:bg-[var(--surface-muted)] transition-colors cursor-pointer group/todo"
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     {todo.checked ? (

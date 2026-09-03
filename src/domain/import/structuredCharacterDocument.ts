@@ -17,6 +17,8 @@ export interface StructuredCharacterDocument {
   description: string;
   personality: string;
   worldBookEntries: CharacterDocumentWorldBookDraft[];
+  /** Normalized complete source. Importers may keep this verbatim instead of projecting only detected sections. */
+  fullText: string;
 }
 
 const PERSONA_MARKER = /(?:^|\n)\s*(?:↓\s*)?人设部分[。.]?\s*(?:\n|$)/i;
@@ -182,5 +184,6 @@ export function parseStructuredCharacterDocument(text: string, filename: string)
     description: persona.description,
     personality: persona.personality || personaSource,
     worldBookEntries: worldBookSource ? splitWorldBook(worldBookSource, name) : [],
+    fullText: normalized,
   };
 }

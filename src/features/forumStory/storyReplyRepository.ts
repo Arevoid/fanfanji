@@ -31,9 +31,6 @@ export type StoryForumReply = ForumReply & {
   storyCommentLabel: string;
 };
 
-/** Short domain alias used by story-level callers. */
-export type StoryReply = StoryForumReply;
-
 /** Input accepted by appendReply; floor values are assigned by the repository. */
 export type StoryForumReplyInput = Omit<StoryForumReply, "floor" | "floorNumber"> &
   Partial<Pick<StoryForumReply, "floor" | "floorNumber">>;
@@ -202,7 +199,3 @@ export const StoryForumReplyRepository = {
   updateReplyEngagement,
   tombstoneReply: tombstoneStoryReply,
 };
-
-export const StoryReplyRepository = StoryForumReplyRepository;
-
-export const storyForumReplyRepository = StoryForumReplyRepository;

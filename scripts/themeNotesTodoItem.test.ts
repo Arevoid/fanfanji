@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../src/components/AppNotes.tsx", import.meta.url), "utf8");
-assert.match(source, /bg-\[var\(--surface-raised\)\] p-3 rounded-2xl border border-\[var\(--border\)\]/);
+assert.match(source, /rounded-\[10px\] bg-\[var\(--surface\)\] px-3 py-2\.5/);
 assert.match(source, /text-\[var\(--text-primary\)\]/);
 assert.match(source, /text-\[var\(--text-secondary\)\] line-through/);
 assert.match(source, /border-2 border-\[var\(--border-strong\)\]/);

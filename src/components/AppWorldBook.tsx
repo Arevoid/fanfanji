@@ -5,6 +5,9 @@ import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldB
 import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
 import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
 import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
+import { readString, writeJson } from "../core/storage/storageAdapter";
+import { createId } from "../core/id/createId";
+import { getWorldBookCharacterIds, isWorldBookEntryForCharacter, isWorldBookEntryGlobal } from "../domain/worldbook/worldBookVisibility";
 
 export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBookEntry | null => {
   if (!e || typeof e !== "object") return null;
@@ -74,12 +77,13 @@ export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBo
   }
 
   return {
-    id: "wb-import-" + Date.now() + "-" + Math.floor(Math.random() * 100000),
+      id: createId("wb-import"),
     title,
     category: "常规",
     content,
     timestamp: Date.now(),
     characterId,
+    ...(Array.isArray(e.characterIds) ? { characterIds: e.characterIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0) } : {}),
     ...(e.scope && typeof e.scope === "object" ? { scope: e.scope } : {}),
     ...(e.visibility === "public" || e.visibility === "private" ? { visibility: e.visibility } : {}),
     ...(e.purpose === "world_canon" || e.purpose === "persona_rule" || e.purpose === "relationship_context" || e.purpose === "generation_rule" ? { purpose: e.purpose } : {}),
@@ -147,7 +151,7 @@ export default function AppWorldBook({
   const [selectedBinding, setSelectedBinding] = useState<string | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>(() => {
     try {
-      const stored = localStorage.getItem("worldbook_collapsed_categories");
+      const stored = readString("worldbook_collapsed_categories").value;
       return stored ? JSON.parse(stored) : {};
     } catch {
       return {};
@@ -156,7 +160,7 @@ export default function AppWorldBook({
 
   useEffect(() => {
     try {
-      localStorage.setItem("worldbook_collapsed_categories", JSON.stringify(collapsedCategories));
+      writeJson("worldbook_collapsed_categories", collapsedCategories);
     } catch (e) {
       console.error(e);
     }
@@ -283,7 +287,7 @@ export default function AppWorldBook({
   const [category, setCategory] = useState("常规");
   const [content, setContent] = useState("");
   const [bindingType, setBindingType] = useState<"global" | "character">("global");
-  const [boundCharacterId, setBoundCharacterId] = useState<string>("");
+  const [boundCharacterIds, setBoundCharacterIds] = useState<string[]>([]);
   const [triggerType, setTriggerType] = useState<"keys" | "constant" | "vector">("keys");
   const [keywords, setKeywords] = useState("");
   const [isActive, setIsActive] = useState(true);
@@ -297,7 +301,7 @@ export default function AppWorldBook({
     setContent("");
     setCategory("常规");
     setBindingType("global");
-    setBoundCharacterId(characters[0]?.id || "");
+    setBoundCharacterIds(characters[0]?.id ? [characters[0].id] : []);
     setTriggerType("keys");
     setKeywords("");
     setIsActive(true);
@@ -314,12 +318,13 @@ export default function AppWorldBook({
     setTitle(entry.title);
     setCategory(entry.category || "常规");
     setContent(entry.content);
-    if (entry.characterId && entry.characterId !== "global") {
+    const entryCharacterIds = getWorldBookCharacterIds(entry);
+    if (entryCharacterIds.length > 0) {
       setBindingType("character");
-      setBoundCharacterId(entry.characterId);
+      setBoundCharacterIds(entryCharacterIds);
     } else {
       setBindingType("global");
-      setBoundCharacterId("");
+      setBoundCharacterIds([]);
     }
     setTriggerType(entry.triggerType || "keys");
     setKeywords(entry.keywords || "");
@@ -345,13 +350,25 @@ export default function AppWorldBook({
       return;
     }
 
+    if (bindingType === "character" && boundCharacterIds.length === 0) {
+      setFormError("特定角色专属词条至少需要选择一位角色");
+      return;
+    }
+
+    const selectedCharacterIds: string[] = Array.from(new Set<string>(boundCharacterIds))
+      .filter((id) => characterOptions.some((option) => option.id === id));
+
     const newEntry: WorldBookEntry = {
       id: editingId || Date.now().toString(),
       title: title.trim(),
       category: category.trim() || "常规",
       content: content.trim(),
       timestamp: Date.now(),
-      characterId: bindingType === "global" ? "global" : boundCharacterId,
+      characterId: bindingType === "global" ? "global" : selectedCharacterIds[0],
+      characterIds: bindingType === "global" ? undefined : selectedCharacterIds,
+      scope: bindingType === "global"
+        ? { kind: "global" }
+        : { kind: "characters", characterIds: selectedCharacterIds },
       triggerType,
       keywords: triggerType === "keys" ? keywords.trim() : "",
       isActive,
@@ -476,9 +493,9 @@ export default function AppWorldBook({
     // Binding matches
     let matchesBinding = true;
     if (selectedBinding === "global") {
-      matchesBinding = !entry.characterId || entry.characterId === "global";
+      matchesBinding = isWorldBookEntryGlobal(entry);
     } else if (selectedBinding) {
-      matchesBinding = entry.characterId === selectedBinding;
+      matchesBinding = isWorldBookEntryForCharacter(entry, selectedBinding) && !isWorldBookEntryGlobal(entry);
     }
 
     return matchesSearch && matchesBinding;
@@ -490,7 +507,7 @@ export default function AppWorldBook({
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
           onClick={isEditing ? resetForm : onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           id="worldbook_back_btn"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -505,7 +522,7 @@ export default function AppWorldBook({
             <div className="relative">
               <button
                 onClick={() => setShowAddMenu(!showAddMenu)}
-                className="w-8 h-8 bg-neutral-950 hover:bg-neutral-900 text-white rounded-full transition-colors shadow flex items-center justify-center"
+                className="app-nav-icon-button w-8 h-8 text-slate-800 transition-colors flex items-center justify-center"
                 id="worldbook_add_btn"
               >
                 <Plus className="w-4.5 h-4.5" />
@@ -557,7 +574,7 @@ export default function AppWorldBook({
                     }
                   );
                 }}
-                className="w-8 h-8 rounded-full bg-rose-50 flex items-center justify-center hover:bg-rose-100 border border-rose-100 transition-colors"
+                className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors"
                 title="删除词条"
               >
                 <Trash2 className="w-4 h-4 text-rose-600" />
@@ -685,8 +702,8 @@ export default function AppWorldBook({
                       type="button"
                       onClick={() => {
                         setBindingType("character");
-                        if (!boundCharacterId && characters.length > 0) {
-                          setBoundCharacterId(characters[0].id);
+                        if (boundCharacterIds.length === 0 && characterOptions.length > 0) {
+                          setBoundCharacterIds([characterOptions[0].id]);
                         }
                       }}
                       className={`py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
@@ -702,22 +719,24 @@ export default function AppWorldBook({
                   {/* Target Character (conditional row) */}
                   {bindingType === "character" && characters.length > 0 && (
                     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-2.5 space-y-1 animate-fade-in">
-                      <label className="text-[10px] font-extrabold text-[var(--text-secondary)]">选择绑定的专属角色</label>
-                      <div className="relative">
-                        <select
-                          value={boundCharacterId}
-                          onChange={(e) => setBoundCharacterId(e.target.value)}
-                          className="w-full pl-3 pr-8 py-1.5 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] text-[var(--text-primary)] text-xs font-semibold appearance-none cursor-pointer"
-                        >
-                          {characterOptions.map(({ id, label }) => (
-                            <option key={id} value={id}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-[var(--text-secondary)]">
-                          <ChevronDown className="w-3.5 h-3.5" />
-                        </div>
+                      <label className="text-[10px] font-extrabold text-[var(--text-secondary)]">选择绑定的专属角色（可多选）</label>
+                      <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                        {characterOptions.map(({ id, label }) => {
+                          const checked = boundCharacterIds.includes(id);
+                          return (
+                            <label key={id} className={`flex items-center gap-2.5 rounded-[10px] border px-3 py-2 cursor-pointer transition-colors ${checked ? "border-[var(--accent)] bg-[var(--surface-raised)]" : "border-[var(--border)] bg-[var(--input-bg)]"}`}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => setBoundCharacterIds((current) => checked
+                                  ? current.filter((characterId) => characterId !== id)
+                                  : [...current, id])}
+                                className="h-4 w-4 accent-[var(--accent)]"
+                              />
+                              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[var(--text-primary)]">{label}</span>
+                            </label>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -1045,8 +1064,10 @@ export default function AppWorldBook({
                           <div className="space-y-2 animate-fade-in pl-0.5">
                             {groupEntries.map((entry) => {
                               // Find character bind info
-                              const isGlobal = !entry.characterId || entry.characterId === "global";
-                              const boundChar = !isGlobal ? characters.find((c) => c.id === entry.characterId) : null;
+                              const isGlobal = isWorldBookEntryGlobal(entry);
+                              const boundCharacters = getWorldBookCharacterIds(entry)
+                                .map((characterId) => characters.find((character) => character.id === characterId))
+                                .filter((character): character is Character => Boolean(character));
                               const isActive = entry.isActive !== false;
 
                               return (
@@ -1094,10 +1115,10 @@ export default function AppWorldBook({
                                   {/* Right: Actions and Link */}
                                   <div className="flex items-center gap-2.5 shrink-0">
                                     {/* 3. Link Icon (Hide if global, show link icon only if bound) */}
-                                    {!isGlobal && boundChar && (
+                                    {!isGlobal && boundCharacters.length > 0 && (
                                       <div
                                         className={`w-8 h-8 flex items-center justify-center shrink-0 ${isActive ? "text-[var(--text-secondary)]" : "text-[var(--text-disabled)]"}`}
-                                        title={`绑定专属角色: ${boundChar.name}`}
+                                        title={`绑定专属角色: ${boundCharacters.map((character) => character.name).join("、")}`}
                                       >
                                         <Link2 className="w-3.5 h-3.5 shrink-0" />
                                       </div>

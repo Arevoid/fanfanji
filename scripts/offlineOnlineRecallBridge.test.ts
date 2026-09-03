@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { acknowledgeOfflineHandoff, buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectPendingOfflineHandoffStory } from "../src/domain/memory/offlineMemorySync";
+import { acknowledgeOfflineHandoff, buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectInterveningOfflineHandoff, selectPendingOfflineHandoffStory } from "../src/domain/memory/offlineMemorySync";
 import type { MemoryItem, OfflineStory } from "../src/types";
 
 const handoff: MemoryItem = {
@@ -51,6 +51,21 @@ const story: OfflineStory = {
     { id: "offline-character", characterId: "character-a", relationId: "relation-a", conversationId: "conversation-a", sender: "character", content: "我来了", timestamp: 300, isOffline: true },
   ],
 };
+const intervening = selectInterveningOfflineHandoff({
+  stories: [story],
+  memories: [{ ...handoff, content: `【线下关键剧情归档】\n- 用户与角色确认恋爱关系。\n[offline-story:${story.id}:summary]` }],
+  relationId: "relation-a",
+  after: 100,
+  before: 450,
+});
+assert.equal(intervening?.story.id, story.id, "a synced offline event between two online sessions is selected without keyword overlap");
+assert.equal(selectInterveningOfflineHandoff({
+  stories: [story],
+  memories: [{ ...handoff, content: `【线下关键剧情归档】\n[offline-story:${story.id}:summary]` }],
+  relationId: "relation-b",
+  after: 100,
+  before: 450,
+}), undefined, "intervening timelines stay relationship-scoped");
 const timeline = buildOfflineHandoffTimelinePromptBlock({
   memory: { ...handoff, timestamp: 400 },
   story,
@@ -128,15 +143,24 @@ assert.equal(selectPendingOfflineHandoffStory({
 }), undefined, "a failed-summary raw transcript stops pretending to be an immediate return after the continuity window");
 
 const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
-const bridgeUses = chatSource.match(/selectFreshOfflineHandoffMemory\(\{/g) || [];
-assert.equal(bridgeUses.length, 3, "normal replies, regenerated replies and inner voice all receive the offline handoff");
-assert.doesNotMatch(chatSource, /!relevantMemories\.some\(\(memory\) => memory\.id === latestOfflineContinuationMemory\.id\)/, "structured memory selection cannot suppress the dedicated handoff block");
-assert.match(chatSource, /history\.push\(\{ role: "user", text: pendingOfflineHistoryAnchor \}\)/, "the offline segment is inserted next to the current online message as hidden history");
-assert.match(chatSource, /offlineContinuityContext[\s\S]*generateInnerVoice\(\{/, "inner voice receives the same offline continuity block as direct chat");
-assert.match(chatSource, /createdMessages\.length > 0[\s\S]*recordPendingOfflineHandoffDelivery/, "normal chat records delivery only after creating a reply");
-assert.match(chatSource, /recentUntrackedStory[\s\S]*createPendingOfflineHandoff/, "recent pre-schema stories can repair a missed first online handoff");
+const handoffRecoveryServiceSource = readFileSync(new URL("../src/features/chat/services/offlineHandoffRecoveryService.ts", import.meta.url), "utf8");
+const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
+const chatRuntimeSource = `${chatSource}\n${regenerationSource}`;
+const innerVoiceHookSource = readFileSync(new URL("../src/features/chat/hooks/useInnerVoice.ts", import.meta.url), "utf8");
+const bridgeUses = chatRuntimeSource.match(/selectFreshOfflineHandoffMemory\(\{/g) || [];
+assert.ok(bridgeUses.length >= 3, "normal replies and regenerated replies retain their offline handoff selection");
+assert.match(chatRuntimeSource, /getOfflineContinuityContext/);
+assert.match(innerVoiceHookSource, /getOfflineContinuityContext/);
+assert.doesNotMatch(chatRuntimeSource, /!relevantMemories\.some\(\(memory\) => memory\.id === latestOfflineContinuationMemory\.id\)/, "structured memory selection cannot suppress the dedicated handoff block");
+assert.match(chatRuntimeSource, /history\.push\(\{ role: "user", text: pendingOfflineHistoryAnchor \}\)/, "the offline segment is inserted next to the current online message as hidden history");
+assert.match(innerVoiceHookSource, /generateInnerVoice/, "opening a bubble can generate a missing inner voice on demand");
+assert.match(chatSource, /createInlineInnerVoiceRecord/, "the reply pipeline persists inline inner voice records");
+assert.match(chatRuntimeSource, /createdMessages\.length > 0[\s\S]*recordPendingOfflineHandoffDelivery/, "normal chat records delivery only after creating a reply");
+assert.match(handoffRecoveryServiceSource, /recentUntrackedStory[\s\S]*createPendingOfflineHandoff/, "recent pre-schema stories can repair a missed first online handoff");
+assert.match(chatSource, /chat-offline-timeline-event__label/, "the visible chat timeline marks a synced offline meeting between online messages");
 
 const offlineSource = readFileSync(new URL("../src/components/AppOffline.tsx", import.meta.url), "utf8");
-assert.match(offlineSource, /createPendingOfflineHandoff\(\{[\s\S]*story: completedStory/, "offline exit persists a handoff independently of extraction success");
+const offlineExitFinalization = readFileSync(new URL("../src/features/offline/hooks/useOfflineStoryExitFinalization.ts", import.meta.url), "utf8");
+assert.match(offlineExitFinalization, /createPendingOfflineHandoff\(\{[\s\S]*story: completedStory/, "offline exit persists a handoff independently of extraction success");
 
 console.log("PASS saved offline memory reaches the first online character reply without cross-relation leakage");

@@ -1,4 +1,4 @@
-import type { Message } from "../../../types";
+import type { Message, RedPacketPayload } from "../../../types";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 
 export type ChatMessageVisualType = "image" | "text-image" | "sticker" | "red-packet" | "transfer" | "call" | "voice" | "file" | "location" | "text";
@@ -21,10 +21,13 @@ export interface CharacterMessageInput {
   relationId?: string;
   conversationId?: string;
   content: string;
+  translation?: string;
   timestamp: number;
   senderId?: string;
   isOffline?: boolean;
   isNarration?: boolean;
+  redPacket?: RedPacketPayload;
+  redPacketAction?: Message["redPacketAction"];
 }
 
 export interface UserMessageInput {
@@ -37,4 +40,6 @@ export interface UserMessageInput {
   timestamp: number;
   isOffline?: boolean;
   isNarration?: boolean;
+  redPacket?: RedPacketPayload;
+  redPacketAction?: Message["redPacketAction"];
 }

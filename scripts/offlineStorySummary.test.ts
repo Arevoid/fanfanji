@@ -93,6 +93,8 @@ const tests: Array<[string, () => void | Promise<void>]> = [
       character,
       characterId: character.id,
       relationId: story.relationId,
+      userIdentityId: "identity-a",
+      conversationId: "direct:relation-a",
       recentMessages: story.messages,
       existingMemories: [],
       scenario: "offline",
@@ -102,7 +104,15 @@ const tests: Array<[string, () => void | Promise<void>]> = [
       createId: () => "ambiguous",
       currentTime: () => 4,
       formatContent: (items) => items.join("\n"),
-    }, async () => ({ items: ["我答应明天陪你。"] }));
+      offlineStoryPolicyInput: { story, userConfirmed: true, sourceMessages: story.messages },
+    }, async () => ({ candidates: [{
+      statement: "我答应明天陪你。",
+      kind: "plan",
+      subject: "relationship",
+      temporalStatus: "future",
+      sourceMessageIds: ["message-a"],
+      evidenceQuote: "明天一起通话。",
+    }] }));
     assert.equal(result.extractedMemories.length, 0);
   }],
   ["D confirmed third-person facts produce a canonical summary", async () => {
@@ -110,6 +120,8 @@ const tests: Array<[string, () => void | Promise<void>]> = [
       character,
       characterId: character.id,
       relationId: story.relationId,
+      userIdentityId: "identity-a",
+      conversationId: "direct:relation-a",
       recentMessages: story.messages,
       existingMemories: [],
       scenario: "offline",
@@ -119,7 +131,15 @@ const tests: Array<[string, () => void | Promise<void>]> = [
       createId: () => "summary",
       currentTime: () => 4,
       formatContent: (items) => `【线下剧情摘要】\n${items.map((item) => `- ${item}`).join("\n")}\n[${canonicalMarker}]`,
-    }, async () => ({ items: ["用户与角色A约定明天通话。"] }));
+      offlineStoryPolicyInput: { story, userConfirmed: true, sourceMessages: story.messages },
+    }, async () => ({ candidates: [{
+      statement: "用户与角色A约定明天通话。",
+      kind: "plan",
+      subject: "relationship",
+      temporalStatus: "future",
+      sourceMessageIds: ["message-a"],
+      evidenceQuote: "明天一起通话。",
+    }] }));
     assert.equal(result.extractedMemories.length, 1);
     assert.ok(result.extractedMemories[0]?.content.includes(canonicalMarker));
   }],

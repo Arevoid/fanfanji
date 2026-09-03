@@ -1,28 +1,39 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { apiChat, apiExtractMemories, apiTranslate } from "./utils/apiHelper";
+import { subscribeOfflineMemorySyncNotifications } from "./features/offline/services/offlineMemorySyncNotifications";
+import { createId } from "./core/id/createId";
+import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
-import { loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
-import { loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
-import { loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
+import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
+import { readArray } from "./core/storage/repositories/repositoryUtils";
+import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
+import { initializeMessages, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
+import { flushMoments, initializeMomentRepository, loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
 import { removeMemoriesForMoment } from "./features/moments/services/momentMemory";
 import { sanitizeMomentPublishText } from "./features/moments/services/momentContent";
+import { cleanAndExtractMoment } from "./features/moments/services/chatMomentUtils";
+import { generateRelationshipNetworkNpcMoment } from "./features/moments/services/relationshipNetworkNpcMomentService";
+import { upsertMomentPreservingOrder } from "./features/moments/services/momentState";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
-import { loadOfflineStories, mergeOfflineStoryCollections, saveOfflineStories } from "./core/storage/repositories/offlineRepository";
+import { loadOfflineStories, mergeOfflineStoryCollections } from "./core/storage/repositories/offlineRepository";
 import { offlineStoryDb } from "./core/storage/offlineStoryDb";
+import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./core/storage/contentStorageFlags";
+import { isContentStorageMigrationActive } from "./core/storage/contentStorageRuntimeLock";
 import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
-import { loadConversationSummaries, saveConversationSummaries, retractConversationSummariesBySourceMessageIds } from "./core/storage/repositories/conversationSummaryRepository";
-import { loadBehaviorCorrections, saveBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
-import { loadCharacterKnowledgeMigrationState, saveCharacterKnowledgeMigrationState } from "./core/storage/repositories/characterKnowledgeMigrationRepository";
+import { loadConversationSummaries, retractConversationSummariesBySourceMessageIds, conversationSummaryRepository } from "./core/storage/repositories/conversationSummaryRepository";
+import { loadBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
 import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
-import { loadCalendarEvents, saveCalendarEvents } from "./core/storage/repositories/calendarRepository";
+import { loadScheduleStore, saveScheduleStore, upsertAppointment } from "./core/storage/repositories/scheduleRepository";
+import { projectAppointmentsToScheduleEntries } from "./domain/schedule/scheduleProjection";
+import type { Appointment } from "./domain/schedule/scheduleTypes";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
+import { commitMemoryWriteBundle } from "./domain/memory/memoryWriteCoordinator";
 import { migrateLegacyCharacterIdentityData, resolveCanonicalCharacterId } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
@@ -32,6 +43,7 @@ import { loadDiaryEntries, loadDiaryGenerationTasks, loadDiaryShares, loadDiaryT
 import { removeForumGenerationTasksByRelations } from "./domain/forum/forumGenerationGuard";
 import { loadImageGenerationRecords, removeImageGenerationRecordsByCharacter, saveImageGenerationRecords } from "./core/storage/repositories/imageGenerationRepository";
 import { applyLiquidGlassTextDefaults } from "./features/chat/styles/liquidGlassDefaults";
+import { useRuntimeErrorMonitoring } from "./features/monitoring/hooks/useRuntimeErrorMonitoring";
 import {
   bindDualMusicWidget,
   loadDualMusicWidgetConfigs,
@@ -45,11 +57,28 @@ import {
   upsertIdentityMusicTrack,
 } from "./core/storage/repositories/musicWidgetRepository";
 import { imageAssetDb } from "./utils/imageAssetDb";
+import { createCharacterPhone, getCharacterPhone, saveCharacterPhone } from "./core/storage/repositories/characterPhoneRepository";
+import { normalizeCharacterPhoneProactiveMessages } from "./features/characterPhone/characterPhoneContent";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
-import { DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
+import { createRelationship, DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
+import { resolveRelationshipNetworkNpcActor } from "./domain/relationshipNetwork/relationshipNetworkNpcActor";
+import type { RelationshipNetworkNpc } from "./domain/relationshipNetwork/relationshipNetworkTypes";
+import { findRelationshipNetworkChatLink, loadRelationshipNetworkChatLinks } from "./core/storage/repositories/relationshipNetworkChatLinkRepository";
+import { findRelationshipNetworkNpcAutomationState, upsertRelationshipNetworkNpcAutomationState } from "./core/storage/repositories/relationshipNetworkNpcAutomationRepository";
+import { loadRelationshipNetworkNpcs } from "./core/storage/repositories/relationshipNetworkRepository";
+import {
+  appendRelationshipNetworkPendingMoment,
+  listRelationshipNetworkPendingMomentsForIdentity,
+  removeRelationshipNetworkPendingMoment,
+} from "./core/storage/repositories/relationshipNetworkPendingMomentRepository";
+import type { RelationshipNetworkPendingMoment } from "./domain/relationshipNetwork/relationshipNetworkTypes";
+import { selectRelationshipNetworkNpcMomentAutomationCandidate } from "./features/moments/services/relationshipNetworkNpcAutomationService";
+import type { RelationshipNetworkNpcMomentAutomationTrigger } from "./features/moments/services/relationshipNetworkNpcAutomationService";
+import { captureRelationshipCreatedEvent } from "./features/characterLife/services/characterEventCaptureService";
 import { messageMatchesMutationScope, type MessageMutationScope } from "./features/chat/context/directInteractionScope";
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, removePaymentStatusesForMessages, type RedPacketStatusMap } from "./features/chat/services/paymentScope";
-import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, CalendarEvent, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
+import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
+import type { CharacterPhoneImageSaveInput } from "./domain/characterPhone/types";
 import { 
   AlbumWidget, 
   CalendarAlbumWidget,
@@ -58,6 +87,8 @@ import {
   DualMusicWidget,
   AnniversaryWidget, 
   TodoWidget, 
+  ReadingWidget,
+  ChatStatsWidget,
   AddWidgetSheet 
 } from "./components/HomeScreenWidgets";
 import {
@@ -77,35 +108,43 @@ import {
   swapOneByOneItems,
 } from "./features/home/homeGrid";
 import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./features/music/services/dualMusicRecommendationService";
+import { isNeteaseMusicTrack, normalizeMusicTrack } from "./features/music/services/musicTrackModel";
+import { getNeteaseTrackStreamUrl } from "./features/music/services/neteaseMusicApi";
+import { loadMusicPlaybackHistory, recordMusicPlayback } from "./core/storage/repositories/musicPlaybackHistoryRepository";
+import type { MusicPlaybackHistoryItem } from "./types";
+import type { NeteaseMusicQuality } from "./features/music/neteaseTypes";
 import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./features/music/services/musicPlayback";
 import { resolveDesktopBackground } from "./features/theme/desktopBackground";
 import { useTheme } from "./features/theme/ThemeProvider";
+import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
-import { retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
+import { listByRelation as listCharacterEventsByRelation, retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
 import { removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
-import { removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
+import { loadMomentTopicRecords, removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
 import { removeProactiveTopicsForRelations, removeProactiveTopicsForCharacters } from "./core/storage/repositories/proactiveTopicRepository";
-import { migrateLegacyCharacterKnowledge } from "./features/characterKnowledge/services/legacyCharacterKnowledgeMigration";
+import { runLegacyCharacterKnowledgeMigration } from "./features/characterKnowledge/services/legacyCharacterKnowledgeMigrationRunner";
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
-import { CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION, CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "./domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
-import { migrateLegacyClassicBubblePreset } from "./features/chat/styles/classicBubblePreset";
+import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
+import { MOMENT_CHARACTER_EXPRESSION_PROMPT } from "./utils/livingPrompt";
+import {
+  migrateLegacyClassicBubblePreset,
+  migrateUnreadableClassicBubblePalette,
+} from "./features/chat/styles/classicBubblePreset";
 import StatusBar from "./components/StatusBar";
-import AppChat, { resolveActiveChatStylePreset } from "./components/AppChat";
-import AppArchives from "./components/AppArchives";
-import AppMusic from "./components/AppMusic";
-import AppStore from "./components/AppStore";
-import AppNotes from "./components/AppNotes";
-import AppDiary from "./components/AppDiary";
-import AppMemory from "./components/AppMemory";
+import { resolveActiveChatStylePreset } from "./features/chat/styles/chatStylePreset";
 import { useForumActivityEngine } from "./features/forum/hooks/useForumActivityEngine";
+import { shouldSeedScheduleForFreshInstall } from "./features/home/freshInstallPolicy";
 import {
   BookOpen,
+  BookOpenText,
   Bookmark,
   CalendarDays,
   Cloud,
   ContactRound,
+  Film,
+  Network,
   Images,
   Layers3,
   MessageCircle,
@@ -119,38 +158,154 @@ import {
   Settings as SettingsIcon,
   ShoppingBag,
   WalletCards,
+  Smartphone,
   X
 } from "lucide-react";
 
+const loadAppChat = () => import("./components/AppChat");
+const loadAppArchives = () => import("./components/AppArchives");
 const loadAppWorldBook = () => import("./components/AppWorldBook");
+const loadAppMusic = () => import("./components/AppMusic");
 const loadAppForum = () => import("./components/AppForum");
+const loadAppNotes = () => import("./components/AppNotes");
+const loadAppDiary = () => import("./components/AppDiary");
+const loadAppStore = () => import("./components/AppStore");
 const loadAppSettings = () => import("./components/AppSettings");
+const loadAppMemory = () => import("./components/AppMemory");
 const loadAppOffline = () => import("./components/AppOffline");
+const loadAppSchedule = () => import("./components/AppSchedule");
+const loadAppReading = () => import("./components/AppReading");
+const loadAppCinema = () => import("./components/AppCinema");
+const loadAppCharacterPhone = () => import("./components/AppCharacterPhone");
+const loadAppRelationshipNetwork = () => import("./components/AppRelationshipNetwork");
 
-const SECONDARY_APP_LOADERS: Record<string, () => Promise<unknown>> = {
-  worldbook: loadAppWorldBook,
-  forum: loadAppForum,
-  settings: loadAppSettings,
-  offline: loadAppOffline,
+// Vite can briefly return a failed module response while the dev server is
+// transforming the large chat module. Give the same navigation attempt one
+// bounded retry, and make preload failures non-fatal to the actual click.
+const withModuleRetry = <T,>(loader: () => Promise<T>) => async (): Promise<T> => {
+  try {
+    return await loader();
+  } catch (firstError) {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    try {
+      return await loader();
+    } catch {
+      throw firstError;
+    }
+  }
 };
 
-const preloadSecondaryApp = (appId: string) => {
-  const loader = SECONDARY_APP_LOADERS[appId];
-  if (loader) void loader();
+const APP_LOADERS: Record<string, () => Promise<unknown>> = {
+  chat: withModuleRetry(loadAppChat),
+  archives: withModuleRetry(loadAppArchives),
+  worldbook: withModuleRetry(loadAppWorldBook),
+  music: withModuleRetry(loadAppMusic),
+  forum: withModuleRetry(loadAppForum),
+  notes: withModuleRetry(loadAppNotes),
+  diary: withModuleRetry(loadAppDiary),
+  store: withModuleRetry(loadAppStore),
+  settings: withModuleRetry(loadAppSettings),
+  memory: withModuleRetry(loadAppMemory),
+  offline: withModuleRetry(loadAppOffline),
+  schedule: withModuleRetry(loadAppSchedule),
+  reading: withModuleRetry(loadAppReading),
+  cinema: withModuleRetry(loadAppCinema),
+  "character-phone": withModuleRetry(loadAppCharacterPhone),
+  "relationship-network": withModuleRetry(loadAppRelationshipNetwork),
 };
 
+const preloadApp = (appId: string) => {
+  const loader = APP_LOADERS[appId];
+  if (loader) void loader().catch((error) => {
+    console.warn(`预加载应用 ${appId} 失败，打开时将再次尝试。`, error);
+  });
+};
+
+const IDLE_PRELOAD_APP_IDS = [
+  "chat",
+  "archives",
+  "worldbook",
+  "music",
+  "forum",
+  "notes",
+  "diary",
+  "store",
+  "settings",
+  "memory",
+  "offline",
+  "schedule",
+  "reading",
+  "cinema",
+  "character-phone",
+  "relationship-network",
+] as const;
+
+const AppChat = React.lazy(loadAppChat);
+const AppArchives = React.lazy(loadAppArchives);
 const AppWorldBook = React.lazy(loadAppWorldBook);
+const AppMusic = React.lazy(loadAppMusic);
 const AppForum = React.lazy(loadAppForum);
+const AppNotes = React.lazy(loadAppNotes);
+const AppDiary = React.lazy(loadAppDiary);
+const AppStore = React.lazy(loadAppStore);
 const AppSettings = React.lazy(loadAppSettings);
+const AppMemory = React.lazy(loadAppMemory);
 const AppOffline = React.lazy(loadAppOffline);
+const AppSchedule = React.lazy(loadAppSchedule);
+const AppReading = React.lazy(loadAppReading);
+const AppCinema = React.lazy(loadAppCinema);
+const AppCharacterPhone = React.lazy(loadAppCharacterPhone);
+const AppRelationshipNetwork = React.lazy(loadAppRelationshipNetwork);
+class LazyAppErrorBoundary extends React.Component<
+  React.PropsWithChildren<{ visible?: boolean }>,
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
 
-function LazyAppBoundary({ children }: React.PropsWithChildren) {
+  constructor(props: React.PropsWithChildren<{ visible?: boolean }>) {
+    super(props);
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  render() {
+    const currentProps = (this as unknown as { props: React.PropsWithChildren<{ visible?: boolean }> }).props;
+    if (!this.state.error) return currentProps.children;
+    return (
+      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-[var(--app-bg)] px-6 text-center text-[var(--text-secondary)]" role="alert">
+        <span className="text-sm font-semibold text-[var(--text-primary)]">应用加载失败</span>
+        <span className="text-xs">请重试后继续。</span>
+        <button type="button" className="rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white" onClick={() => window.location.reload()}>重试</button>
+      </div>
+    );
+  }
+}
+
+function LazyAppBoundary({
+  children,
+  visible = true,
+}: React.PropsWithChildren<{ visible?: boolean }>) {
   return (
-    <React.Suspense
-      fallback={<div className="h-full bg-[var(--app-bg)]" aria-hidden="true" />}
+    <div
+      className="absolute inset-0 h-full w-full"
+      style={{ display: visible ? "block" : "none" }}
+      aria-hidden={!visible}
     >
-      {children}
-    </React.Suspense>
+      <LazyAppErrorBoundary visible={visible}>
+      <React.Suspense
+      fallback={(
+        <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-[var(--app-bg)] text-[var(--text-secondary)]" role="status" aria-live="polite">
+          <span className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" aria-hidden="true" />
+          <span className="text-xs font-semibold">正在打开…</span>
+        </div>
+      )}
+      >
+        {children}
+      </React.Suspense>
+      </LazyAppErrorBoundary>
+    </div>
   );
 }
 
@@ -167,6 +322,10 @@ const AppIcons = {
   settings: (className = "w-6 h-6") => <SettingsIcon className={className} strokeWidth={1.8} />,
   forum: (className = "w-6 h-6") => <Images className={className} strokeWidth={1.8} />,
   schedule: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
+  reading: (className = "w-6 h-6") => <BookOpenText className={className} strokeWidth={1.8} />,
+  cinema: (className = "w-6 h-6") => <Film className={className} strokeWidth={1.8} />,
+  "character-phone": (className = "w-6 h-6") => <Smartphone className={className} strokeWidth={1.8} />,
+  "relationship-network": (className = "w-6 h-6") => <Network className={className} strokeWidth={1.8} />,
   timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
   theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.8} />,
   activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.8} />,
@@ -213,12 +372,65 @@ const DEFAULT_HOME_SCREEN_ITEMS: HomeScreenItem[] = [
   { id: "store", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 0 } },
   { id: "settings", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 1 } },
   { id: "notes", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 0 } },
+  { id: "schedule", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 1 } },
 ];
 
 const DEFAULT_WORLDBOOK_ENTRIES: WorldBookEntry[] = [];
 
 // Default Seed Characters
 const DEFAULT_CHARACTERS: Character[] = [];
+
+function createChatCharacterFromRelationshipNetworkNpc(npc: RelationshipNetworkNpc, characterId: string, ownerIdentityId: string): Character {
+  return {
+    id: characterId,
+    name: npc.name,
+    avatar: npc.avatar || "👤",
+    personality: npc.personality || npc.summary || "一个从关系网档案创建的角色。",
+    backstory: [npc.summary, npc.motivation ? `当前动机：${npc.motivation}` : "", npc.tags?.length ? `标签：${npc.tags.join("、")}` : ""].filter(Boolean).join("\n\n"),
+    remark: npc.role || "来自关系网的 NPC",
+    ownerIdentityId,
+    relationshipNetworkNpcId: npc.id,
+  };
+}
+
+function hydrateRelationshipNetworkCharacters(baseCharacters: Character[]): Character[] {
+  const npcs = loadRelationshipNetworkNpcs().value;
+  const npcById = new Map(npcs.map((npc) => [npc.id, npc]));
+  const nextCharacters = [...baseCharacters];
+  loadRelationshipNetworkChatLinks().forEach((link) => {
+    const npc = npcById.get(link.npcId);
+    if (!npc || nextCharacters.some((character) => character.id === link.characterId)) return;
+    nextCharacters.push(createChatCharacterFromRelationshipNetworkNpc(npc, link.characterId, link.ownerIdentityId));
+  });
+  return nextCharacters;
+}
+
+function hydrateRelationshipNetworkRelationships(baseRelationships: CharacterRelationship[]): CharacterRelationship[] {
+  const nextRelationships = [...baseRelationships];
+  loadRelationshipNetworkChatLinks().forEach((link) => {
+    if (nextRelationships.some((relationship) => relationship.id === link.relationId)) return;
+    nextRelationships.push(createRelationship({
+      id: link.relationId,
+      characterId: link.characterId,
+      userIdentityId: link.ownerIdentityId,
+      now: link.createdAt,
+      relationship: "unknown",
+    }));
+  });
+  return nextRelationships;
+}
+
+const CHARACTER_PHONE_TEST_CHARACTER: Character = {
+  id: "character-phone-test",
+  name: "测试角色",
+  age: "",
+  avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
+  gender: "神秘",
+  mbti: "",
+  personality: "仅用于角色手机功能测试。",
+  backstory: "",
+  greeting: "今天也有好好吃饭吗？",
+};
 
 const DEFAULT_SETTINGS: UserSettings = {
   name: "饭饭",
@@ -229,6 +441,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   selectedModel: "gemini-3.5-flash",
   wallpaper: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
   customIcons: {},
+  dockApps: ["chat", "music", "archives", "settings"],
   globalChatStylePreset: "default",
   bubbleCss: "",
   globalCss: ``,
@@ -236,6 +449,11 @@ const DEFAULT_SETTINGS: UserSettings = {
   chatIcons: {},
   customFontName: "",
   customFontData: "",
+  globalFontSource: "default",
+  globalFontName: "",
+  globalFontUrl: "",
+  globalFontAssetId: "",
+  globalFontSize: 16,
   activePreset: "温和灰蓝 (Default)",
   momentsCover: "",
   apiEndpoint: "",
@@ -313,65 +531,115 @@ const DEFAULT_SETTINGS: UserSettings = {
 const DEFAULT_MESSAGES: Message[] = [];
 
 export default function App() {
+  useRuntimeErrorMonitoring();
   const { resolvedTheme } = useTheme();
   useVisualViewport();
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const preloadAll = () => Object.values(SECONDARY_APP_LOADERS).forEach((loader) => void loader());
+    const preloadIdleApps = () => IDLE_PRELOAD_APP_IDS.forEach((appId) => preloadApp(appId));
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
     };
     if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(preloadAll, { timeout: 1500 });
+      const handle = idleWindow.requestIdleCallback(preloadIdleApps, { timeout: 1500 });
       return () => idleWindow.cancelIdleCallback?.(handle);
     }
-    const handle = window.setTimeout(preloadAll, 600);
+    const handle = window.setTimeout(preloadIdleApps, 600);
     return () => window.clearTimeout(handle);
   }, []);
+  const seedScheduleForFreshInstall = useRef(
+    typeof window !== "undefined" && shouldSeedScheduleForFreshInstall(window.localStorage),
+  ).current;
+  const isCharacterPhoneTest = typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).get("characterPhoneTest") === "1";
 
   // Load initial states from LocalStorage or fallbacks
-  const [characters, setCharacters] = useState<Character[]>(() => loadCharacters(DEFAULT_CHARACTERS).value);
+  const [characters, setCharacters] = useState<Character[]>(() => {
+    const loaded = hydrateRelationshipNetworkCharacters(loadCharacters(DEFAULT_CHARACTERS).value);
+    return isCharacterPhoneTest && loaded.length === 0
+      ? [CHARACTER_PHONE_TEST_CHARACTER]
+      : loaded;
+  });
+  const charactersRef = useRef<Character[]>(characters);
+  charactersRef.current = characters;
+
+  useEffect(() => {
+    let active = true;
+    initializeCharacterRepository(DEFAULT_CHARACTERS).then((result) => {
+      if (active && result.valid) {
+        charactersRepositoryHydrated.current = true;
+        skipNextCharactersPersistenceRef.current = true;
+        const hydratedCharacters = hydrateRelationshipNetworkCharacters(result.value);
+        setCharacters(isCharacterPhoneTest && hydratedCharacters.length === 0
+          ? [CHARACTER_PHONE_TEST_CHARACTER]
+          : hydratedCharacters);
+      }
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    initializeMomentRepository([]).then((result) => {
+      if (active && result.valid) {
+        momentsPersistenceReady.current = true;
+        skipNextMomentsPersistenceRef.current = true;
+        setMoments(result.value);
+      }
+    });
+    return () => { active = false; };
+  }, []);
 
   const [settings, setSettingsState] = useState<UserSettings>(() => {
     const loadedSettings = loadSettings(DEFAULT_SETTINGS).value;
     const migration = migrateLegacyClassicBubblePreset(loadedSettings);
-    const migratedSettings = applyLiquidGlassTextDefaults(migration.settings);
-    if (migration.migrated || migratedSettings !== migration.settings) {
+    const classicPaletteMigration = migrateUnreadableClassicBubblePalette(migration.settings);
+    const migratedSettings = applyLiquidGlassTextDefaults(classicPaletteMigration.settings);
+    if (migration.migrated || classicPaletteMigration.settings !== migration.settings || migratedSettings !== classicPaletteMigration.settings) {
       const saved = saveSettings(migratedSettings);
       if (!saved.success) console.warn("[settings] Could not persist the legacy bubble preset migration.");
     }
     return migratedSettings;
   });
+  useGlobalTypography(settings);
   const settingsRef = useRef<UserSettings>(settings);
-  const settingsChangedByUser = useRef(false);
-  const setSettings = (update: UserSettingsUpdate): void => {
+  const setSettings = (update: UserSettingsUpdate): boolean => {
     const nextSettings = applyLiquidGlassTextDefaults(resolveSettingsUpdate(settingsRef.current, update));
-    settingsRef.current = nextSettings;
-    settingsChangedByUser.current = true;
-    setSettingsState(nextSettings);
-
     const result = saveSettings(nextSettings);
-    if (result.success) {
-      settingsChangedByUser.current = false;
-    } else {
+    if (!result.success) {
       console.error("Failed to save settings to localStorage:", result.error);
+      return false;
     }
+    settingsRef.current = nextSettings;
+    setSettingsState(nextSettings);
+    return true;
   };
 
-  const [messages, setMessages] = useState<Message[]>(() => loadMessages(DEFAULT_MESSAGES).value.filter((message) =>
-    !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)),
-  ));
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const initial = isMessageEntryStoreEnabled() && typeof indexedDB !== "undefined"
+      ? []
+      : loadMessages(DEFAULT_MESSAGES).value;
+    return normalizeCharacterPhoneProactiveMessages(initial.filter((message) => !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content))));
+  });
+
+  useEffect(() => {
+    let active = true;
+    void initializeMessages(DEFAULT_MESSAGES).then((result) => {
+      if (!active || !result.valid) return;
+      skipNextMessagesPersistenceRef.current = true;
+      setMessages(normalizeCharacterPhoneProactiveMessages(result.value.filter((message) =>
+        !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)),
+      )));
+    });
+    return () => { active = false; };
+  }, []);
 
   const [moments, setMoments] = useState<Moment[]>(() => loadMoments([]).value);
 
   const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets([]).value);
 
-  const [tracks, setTracks] = useState<MusicTrack[]>(() => {
-    const raw = localStorage.getItem("phone_music_tracks");
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [tracks, setTracks] = useState<MusicTrack[]>(() => readArray<MusicTrack>("phone_music_tracks", []).value.map(normalizeMusicTrack));
   const tracksRef = useRef<MusicTrack[]>(tracks);
   const [dualMusicConfigs, setDualMusicConfigs] = useState<DualMusicWidgetConfig[]>(() => loadDualMusicWidgetConfigs());
   const [identityMusicStates, setIdentityMusicStates] = useState<IdentityMusicState[]>(() => loadIdentityMusicStates());
@@ -389,42 +657,96 @@ export default function App() {
     });
   }, []);
 
-  const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => {
-    const raw = localStorage.getItem("phone_music_playlists");
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [playlists, setPlaylists] = useState<MusicPlaylist[]>(() => readArray<MusicPlaylist>("phone_music_playlists", []).value);
 
-  const [calendarEvents] = useState<CalendarEvent[]>(() => loadCalendarEvents([]).value);
+  const [scheduleStore, setScheduleStore] = useState(() => loadScheduleStore().value);
+  const scheduleStoreRef = useRef(scheduleStore);
+  scheduleStoreRef.current = scheduleStore;
+  const handleSaveAppointment = (appointment: Appointment): boolean => {
+    const result = upsertAppointment(scheduleStoreRef.current, appointment);
+    if (!result.success) return false;
+    const persisted = saveScheduleStore(result.store);
+    if (!persisted.success) return false;
+    scheduleStoreRef.current = result.store;
+    setScheduleStore(result.store);
+    return true;
+  };
+  const scheduleEntries = React.useMemo(
+    () => projectAppointmentsToScheduleEntries(scheduleStore.appointments),
+    [scheduleStore.appointments],
+  );
 
   const [worldBookEntries, setWorldBookEntries] = useState<WorldBookEntry[]>(() => loadWorldBookEntries(DEFAULT_WORLDBOOK_ENTRIES).value);
 
   // Navigation State
   const [activeApp, setActiveApp] = useState<string | null>(null);
+  const [memoryDiagnosticsRequestId, setMemoryDiagnosticsRequestId] = useState(0);
+  const [mountedAppIds, setMountedAppIds] = useState<Set<string>>(() => new Set());
+  const isAppMounted = (appId: string) => activeApp === appId || mountedAppIds.has(appId);
+  // Temporary test-only entry for the unfinished character phone experiment.
+  // It is intentionally query-gated and does not alter installed apps or the
+  // normal desktop/store surfaces.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("characterPhoneTest") === "1") {
+      setActiveApp("character-phone");
+    }
+  }, []);
+  useEffect(() => {
+    if (!activeApp) return;
+    setMountedAppIds((current) => current.has(activeApp)
+      ? current
+      : new Set([...current, activeApp]));
+  }, [activeApp]);
+  const handleChatNavigateToApp = (appId: string) => {
+    if (appId === "memory") setMemoryDiagnosticsRequestId((current) => current + 1);
+    setActiveApp(appId);
+  };
+  const [chatModuleActivated, setChatModuleActivated] = useState(false);
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
+  const [pendingOfflineStoryId, setPendingOfflineStoryId] = useState<string | null>(null);
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
-  const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => loadRelationships([]).value);
+  const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => hydrateRelationshipNetworkRelationships(loadRelationships([]).value));
+
+  // Do not download/mount the large chat application when another app is
+  // opened first. Once chat is active, keep it mounted while navigating to a
+  // related app (for example a shared forum post) so drafts and call state live.
+  useEffect(() => {
+    if (activeApp === "chat") setChatModuleActivated(true);
+    else if (activeApp === null) setChatModuleActivated(false);
+  }, [activeApp]);
 
   // Offline Stories State & Handlers
-  const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => loadOfflineStories([]).value);
+  const [offlineStories, setOfflineStories] = useState<OfflineStory[]>(() => (
+    isOfflineStoryEntryStoreEnabled() && typeof indexedDB !== "undefined"
+      ? []
+      : loadOfflineStories([]).value
+  ));
   const offlineStoriesRef = useRef(offlineStories);
   const offlineStoriesHydratedRef = useRef(false);
   const deletedOfflineStoryIdsRef = useRef(new Set<string>());
-  const charactersPersistenceReady = useRef(false);
+  const charactersRepositoryHydrated = useRef(false);
   const messagesPersistenceReady = useRef(false);
   const momentsPersistenceReady = useRef(false);
+  const skipNextCharactersPersistenceRef = useRef(false);
+  const skipNextMessagesPersistenceRef = useRef(false);
+  const skipNextMomentsPersistenceRef = useRef(false);
   const presetsPersistenceReady = useRef(false);
-  const calendarPersistenceReady = useRef(false);
   const worldBookPersistenceReady = useRef(false);
   const memoriesPersistenceReady = useRef(false);
   const skipNextMemoriesPersistenceRef = useRef(false);
   const characterIdentityMigrationLogRef = useRef(new Set<string>());
   const memorySettingsPersistenceReady = useRef(false);
   const relationshipsPersistenceReady = useRef(false);
+  const tracksPersistenceReady = useRef(false);
+  const playlistsPersistenceReady = useRef(false);
+  const dualMusicConfigsPersistenceReady = useRef(false);
+  const identityMusicStatesPersistenceReady = useRef(false);
+  const relationshipMusicStatesPersistenceReady = useRef(false);
 
   const persistOfflineStories = async (stories: OfflineStory[], changedStory?: OfflineStory): Promise<boolean> => {
-    const localResult = saveOfflineStories(stories);
     let durableSuccess = false;
     try {
       if (changedStory) await offlineStoryDb.save(changedStory);
@@ -433,8 +755,7 @@ export default function App() {
     } catch (error) {
       console.error("Failed to save offline stories to IndexedDB:", error);
     }
-    if (!localResult.success) console.error("Failed to save offline stories to localStorage:", localResult.error);
-    return localResult.success || durableSuccess;
+    return durableSuccess;
   };
 
   const replaceOfflineStories = (stories: readonly OfflineStory[]): void => {
@@ -445,8 +766,6 @@ export default function App() {
     });
     offlineStoriesRef.current = nextStories;
     setOfflineStories(nextStories);
-    const localResult = saveOfflineStories(nextStories);
-    if (!localResult.success) console.error("Failed to save offline stories to localStorage:", localResult.error);
     if (offlineStoriesHydratedRef.current) {
       void offlineStoryDb.replaceAll(nextStories).catch((error) => {
         console.error("Failed to replace offline stories in IndexedDB:", error);
@@ -475,11 +794,20 @@ export default function App() {
         durableStories.filter((story) => !deletedOfflineStoryIdsRef.current.has(story.id)),
       );
       offlineStoriesHydratedRef.current = true;
+      const durableInMergeOrder = [...durableStories].sort((left, right) => right.updatedAt - left.updatedAt);
+      const alreadySynchronized = JSON.stringify(durableInMergeOrder) === JSON.stringify(merged);
+      if (!alreadySynchronized) {
+        await offlineStoryDb.replaceAll(merged);
+      } else if (isContentStorageMigrationActive()) {
+        // A migration owns the storage boundary. Leave the fallback untouched
+        // until the migration either succeeds and reloads or fails safely.
+        return;
+      }
+      // Only remove the fallback after the durable write has succeeded. This
+      // protects LocalStorage when a migration or IndexedDB write fails.
+      removeStoredValue("phone_offline_stories");
       offlineStoriesRef.current = merged;
       setOfflineStories(merged);
-      const localResult = saveOfflineStories(merged);
-      if (!localResult.success) console.warn("Offline stories exceed localStorage capacity; IndexedDB remains authoritative.");
-      await offlineStoryDb.replaceAll(merged);
     }).catch((error) => {
       offlineStoriesHydratedRef.current = true;
       console.warn("Unable to hydrate the durable offline-story store; using localStorage only.", error);
@@ -505,14 +833,90 @@ export default function App() {
   // Global message notification banner state
   const [globalNotification, setGlobalNotification] = useState<{
     characterId: string;
+    relationId: string | null;
+    conversationId: string | null;
     avatar: string;
     name: string;
     content: string;
     timestamp: number;
   } | null>(null);
+  const [globalNotificationDragY, setGlobalNotificationDragY] = useState(0);
+  const [globalNotificationDismissing, setGlobalNotificationDismissing] = useState(false);
+  const globalNotificationGestureRef = useRef<{
+    pointerId: number;
+    startY: number;
+    lastY: number;
+    moved: boolean;
+  } | null>(null);
+  const globalNotificationDismissTimerRef = useRef<number | null>(null);
+
+  const dismissGlobalNotification = () => {
+    if (!globalNotification) return;
+    if (globalNotificationDismissTimerRef.current !== null) {
+      window.clearTimeout(globalNotificationDismissTimerRef.current);
+    }
+    setGlobalNotificationDismissing(true);
+    globalNotificationDismissTimerRef.current = window.setTimeout(() => {
+      setGlobalNotification(null);
+      setGlobalNotificationDragY(0);
+      setGlobalNotificationDismissing(false);
+      globalNotificationDismissTimerRef.current = null;
+    }, 180);
+  };
+
+  const handleGlobalNotificationPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    globalNotificationGestureRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      lastY: event.clientY,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleGlobalNotificationPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = globalNotificationGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const deltaY = event.clientY - gesture.startY;
+    gesture.lastY = event.clientY;
+    if (Math.abs(deltaY) > 10) gesture.moved = true;
+    setGlobalNotificationDragY(deltaY < 0 ? Math.max(-180, deltaY) : Math.min(20, deltaY * 0.2));
+  };
+
+  const handleGlobalNotificationPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = globalNotificationGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const deltaY = event.clientY - gesture.startY;
+    globalNotificationGestureRef.current = { ...gesture, lastY: event.clientY };
+    if (deltaY < -48) {
+      dismissGlobalNotification();
+    } else {
+      setGlobalNotificationDragY(0);
+    }
+    window.setTimeout(() => {
+      globalNotificationGestureRef.current = null;
+    }, 0);
+  };
+
+  useEffect(() => () => {
+    if (globalNotificationDismissTimerRef.current !== null) {
+      window.clearTimeout(globalNotificationDismissTimerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    setGlobalNotificationDragY(0);
+    setGlobalNotificationDismissing(false);
+    globalNotificationGestureRef.current = null;
+  }, [globalNotification?.timestamp]);
 
   // Global Toast warning/success state (P2: alert on save failures)
-  const [globalToast] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [globalToast, setGlobalToast] = useState<{ message: string; isError?: boolean } | null>(null);
+  useEffect(() => subscribeOfflineMemorySyncNotifications((notification) => {
+    setGlobalToast(notification);
+    window.setTimeout(() => setGlobalToast((current) => current?.message === notification.message ? null : current), 3200);
+  }), []);
 
   const [isStandaloneMode, setIsStandaloneMode] = useState(isStandalonePwa);
 
@@ -549,10 +953,10 @@ export default function App() {
   // Restore local track object URLs on mount from IndexedDB
   useEffect(() => {
     const restoreLocalTracks = async () => {
-      const raw = localStorage.getItem("phone_music_tracks");
+      const raw = readString("phone_music_tracks").value;
       if (!raw) return;
       try {
-        const parsedTracks = JSON.parse(raw) as MusicTrack[];
+        const parsedTracks = (JSON.parse(raw) as MusicTrack[]).map(normalizeMusicTrack);
         const localTracks = parsedTracks.filter((t) => t.isLocal);
         if (localTracks.length === 0) return;
 
@@ -620,12 +1024,22 @@ export default function App() {
         latestMsg.sender === "character" &&
         Date.now() - latestMsg.timestamp < 4000
       ) {
-        const isNotActiveChat = activeApp !== "chat" || activeChatCharId !== latestMsg.characterId;
+        const notificationScope = {
+          characterId: latestMsg.characterId,
+          relationId: latestMsg.relationId || null,
+          conversationId: latestMsg.conversationId || null,
+        };
+        const isNotActiveChat = activeApp !== "chat" || !isNotificationForActiveChat(notificationScope, {
+          characterId: activeChatCharId,
+          relationId: activeChatRelationId,
+        });
         if (isNotActiveChat) {
           const char = characters.find((c) => c.id === latestMsg.characterId);
           if (char) {
             setGlobalNotification({
               characterId: char.id,
+              relationId: notificationScope.relationId,
+              conversationId: notificationScope.conversationId,
               avatar: char.avatar,
               name: char.remark || char.name,
               content: latestMsg.content,
@@ -635,13 +1049,14 @@ export default function App() {
         }
       }
     }
-  }, [messages, activeApp, activeChatCharId, characters]);
+  }, [messages, activeApp, activeChatCharId, activeChatRelationId, characters]);
 
   const phoneScreenRef = useRef<HTMLDivElement>(null);
 
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
-    const raw = localStorage.getItem("phone_installed_apps");
+    const raw = readString("phone_installed_apps").value;
     let parsed: string[] = ["chat", "archives", "worldbook", "music", "notes", "offline", "store", "settings"];
+    if (!raw && seedScheduleForFreshInstall) parsed.push("schedule");
     if (raw) {
       try {
         const candidate = JSON.parse(raw);
@@ -652,7 +1067,7 @@ export default function App() {
         // Keep the safe defaults when a legacy value is malformed.
       }
     }
-    const filtered = parsed.filter(id => id !== "schedule");
+    const filtered = parsed;
     if (!filtered.includes("notes")) {
       filtered.push("notes");
     }
@@ -663,11 +1078,14 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem("phone_installed_apps", JSON.stringify(installedAppIds));
+    writeJson("phone_installed_apps", installedAppIds);
   }, [installedAppIds]);
 
   // Global Music Player State
   const [currentTrack, setCurrentTrack] = useState<MusicTrack | null>(null);
+  const [runtimeQueueTracks, setRuntimeQueueTracks] = useState<MusicTrack[]>([]);
+  const [neteaseQuality, setNeteaseQuality] = useState<NeteaseMusicQuality>("standard");
+  const [musicPlaybackHistory, setMusicPlaybackHistory] = useState<MusicPlaybackHistoryItem[]>(() => loadMusicPlaybackHistory(settings.activeIdentityId || DEFAULT_IDENTITY_ID));
   const [isPlaying, setIsPlaying] = useState(false);
   const [playMode, setPlayMode] = useState<"single" | "list" | "random">("list");
   const [volume, setVolume] = useState(0.8);
@@ -675,8 +1093,17 @@ export default function App() {
 
   const PRESEED_MUSIC_TRACKS: MusicTrack[] = [];
 
+  useEffect(() => {
+    setMusicPlaybackHistory(loadMusicPlaybackHistory(settings.activeIdentityId || DEFAULT_IDENTITY_ID));
+  }, [settings.activeIdentityId]);
+  const getMusicQueue = () => [
+    ...PRESEED_MUSIC_TRACKS,
+    ...tracks,
+    ...runtimeQueueTracks.filter((track) => !tracks.some((localTrack) => localTrack.id === track.id)),
+  ];
+
   const handleNextTrack = () => {
-    const allTracks = [...PRESEED_MUSIC_TRACKS, ...tracks];
+    const allTracks = getMusicQueue();
     if (allTracks.length === 0) return;
     
     if (playMode === "single") {
@@ -706,7 +1133,7 @@ export default function App() {
   };
 
   const handlePrevTrack = () => {
-    const allTracks = [...PRESEED_MUSIC_TRACKS, ...tracks];
+    const allTracks = getMusicQueue();
     if (allTracks.length === 0) return;
     const currentIndex = allTracks.findIndex((t) => t.id === currentTrack?.id);
     const prevIndex = (currentIndex - 1 + allTracks.length) % allTracks.length;
@@ -775,7 +1202,7 @@ export default function App() {
       setMusicPlaybackError("本地音频文件缺失，请重新导入这首歌。");
       return;
     }
-    if (!track.isLocal && !/^https?:\/\//i.test(track.url)) {
+    if (!track.isLocal && !/^https?:\/\//i.test(track.url) && !track.url.startsWith("/")) {
       setMusicPlaybackError("歌曲链接无效，请在音乐库中更新。");
       return;
     }
@@ -847,7 +1274,7 @@ export default function App() {
 
   // HomeScreen layout items (Apps + Widgets)
   const [homeScreenItems, setHomeScreenItems] = useState<HomeScreenItem[]>(() => {
-    const raw = localStorage.getItem("phone_homescreen_items");
+    const raw = readString("phone_homescreen_items").value;
     let items: HomeScreenItem[];
     if (raw !== null) {
       try {
@@ -857,19 +1284,21 @@ export default function App() {
         items = [];
       }
     } else {
-      items = DEFAULT_HOME_SCREEN_ITEMS.map((item) => ({
+      items = DEFAULT_HOME_SCREEN_ITEMS
+        .filter((item) => item.id !== "schedule" || seedScheduleForFreshInstall)
+        .map((item) => ({
         ...item,
         position: item.position ? { ...item.position } : undefined,
-      }));
+        }));
     }
 
     items = items
-      .filter((item) => item.id !== "schedule" && !(item.widgetType === "album" && item.size === "1x4"))
+      .filter((item) => !(item.widgetType === "album" && item.size === "1x4"))
       .map((item) => item.widgetType === "album" && item.size === "2x4"
         ? { ...item, widgetType: "calendar-album" }
         : item);
     const normalized = normalizeHomeScreenLayout(items);
-    localStorage.setItem("phone_homescreen_items", JSON.stringify(normalized));
+    writeJson("phone_homescreen_items", normalized);
     return normalized;
   });
 
@@ -880,7 +1309,7 @@ export default function App() {
   // default historical relationship. New direct data is always relation keyed.
   useEffect(() => {
     const rawFriendIds = (() => {
-      try { return JSON.parse(localStorage.getItem("phone_friend_ids") || "[]") as string[]; } catch { return []; }
+      try { return JSON.parse(readString("phone_friend_ids").value || "[]") as string[]; } catch { return []; }
     })();
     const result = migrateLegacyRelationshipData({
       characters,
@@ -901,12 +1330,12 @@ export default function App() {
     if (result.migratedMemoryCount || result.deduplicatedRelationshipCount) setMemories(result.memories);
     if (result.migratedStoryCount || result.deduplicatedRelationshipCount) replaceOfflineStories(result.offlineStories);
     Object.entries(result.relationIdRemaps).forEach(([fromRelationId, toRelationId]) => {
-      const sourceStoryId = localStorage.getItem(getOfflineStoryStorageKey(fromRelationId));
-      if (sourceStoryId && !localStorage.getItem(getOfflineStoryStorageKey(toRelationId))) {
-        localStorage.setItem(getOfflineStoryStorageKey(toRelationId), sourceStoryId);
+      const sourceStoryId = readString(getOfflineStoryStorageKey(fromRelationId)).value;
+      if (sourceStoryId && !readString(getOfflineStoryStorageKey(toRelationId)).value) {
+        writeString(getOfflineStoryStorageKey(toRelationId), sourceStoryId);
       }
-      localStorage.removeItem(getOfflineStoryStorageKey(fromRelationId));
-      localStorage.removeItem(getOfflineModeStorageKey(fromRelationId));
+      removeStoredValue(getOfflineStoryStorageKey(fromRelationId));
+      removeStoredValue(getOfflineModeStorageKey(fromRelationId));
     });
   }, [characters, relationships, messages, memories, offlineStories]);
 
@@ -949,45 +1378,22 @@ export default function App() {
 
   // Truth Layer migration is deliberately additive. Legacy Memory and
   // compressed-memory fields remain untouched for rollback and old-build
-  // readability; deterministic source IDs make this safe on every startup.
+  // readability. The runner snapshots all three target stores and the marker,
+  // so a later write or verification failure cannot leave a half-migrated
+  // Truth Layer behind.
   useEffect(() => {
     if (characters.length === 0 || relationships.length === 0) return;
-    const existingClaims = loadKnowledgeClaims().value;
-    const existingSummaries = loadConversationSummaries().value;
-    const existingCorrections = loadBehaviorCorrections().value;
-    const result = migrateLegacyCharacterKnowledge({
+    const result = runLegacyCharacterKnowledgeMigration({
       characters,
       relationships,
       memories,
       offlineStories,
-      existingClaims,
-      existingSummaries,
-      existingCorrections,
       now: Date.now(),
     });
-    if (result.claims.length > 0) {
-      const write = appendKnowledgeClaims(result.claims);
-      if (!write.success) console.error("Failed to persist migrated character knowledge claims:", write.error);
+    if (result.status === "failed") {
+      console.error("Failed to migrate legacy character knowledge:", result.error, result.rollbackErrors);
     }
-    if (result.summaries.length > 0) {
-      const write = saveConversationSummaries([...existingSummaries, ...result.summaries]);
-      if (!write.success) console.error("Failed to persist migrated conversation summaries:", write.error);
-    }
-    if (result.corrections.length > 0) {
-      const write = saveBehaviorCorrections([...existingCorrections, ...result.corrections]);
-      if (!write.success) console.error("Failed to persist migrated behavior corrections:", write.error);
-    }
-    const previous = loadCharacterKnowledgeMigrationState().value;
-    saveCharacterKnowledgeMigrationState({
-      schemaVersion: CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION,
-      migrationVersion: CHARACTER_KNOWLEDGE_MIGRATION_VERSION,
-      lastRunAt: Date.now(),
-      migratedMemoryIds: Array.from(new Set([...previous.migratedMemoryIds, ...result.migratedMemoryIds])),
-      migratedSummaryIds: Array.from(new Set([...previous.migratedSummaryIds, ...result.migratedSummaryIds])),
-      migratedCorrectionIds: Array.from(new Set([...previous.migratedCorrectionIds, ...result.migratedCorrectionIds])),
-      orphanRecordIds: Array.from(new Set([...previous.orphanRecordIds, ...result.orphanRecordIds])),
-    });
-    result.diagnostics.forEach((diagnostic) => {
+    result.migration.diagnostics.forEach((diagnostic) => {
       console.warn(`[character truth migration] ${diagnostic.recordId}: ${diagnostic.diagnostic}`);
     });
   }, [characters, relationships, memories, offlineStories]);
@@ -1014,7 +1420,7 @@ export default function App() {
   }).value);
 
   const [immediateSummaryTask, setImmediateSummaryTask] = useState<ImmediateSummaryTask>(() => {
-    const raw = localStorage.getItem("phone_immediate_summary_task");
+    const raw = readString("phone_immediate_summary_task").value;
     if (raw) {
       try {
         const parsed = JSON.parse(raw);
@@ -1033,7 +1439,7 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem("phone_immediate_summary_task", JSON.stringify(immediateSummaryTask));
+    writeJson("phone_immediate_summary_task", immediateSummaryTask);
   }, [immediateSummaryTask]);
 
   const handleStartImmediateSummary = async (characterId: string, rounds: number, relationId?: string, conversationId?: string) => {
@@ -1065,7 +1471,7 @@ export default function App() {
         return;
       }
 
-      const retrievalLimit = char.retrievalHistoryLimit || 100;
+      const retrievalLimit = char.historyMemoryLimit || 100;
       const relation = relationships.find((item) =>
         item.id === relationId
         && item.characterId === characterId
@@ -1099,12 +1505,12 @@ export default function App() {
         model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
         apiEndpoint: settings.apiEndpoint,
         templateType: char.archiveTemplateType,
-        createId: () => (Date.now() + Math.random()).toString(),
+        createId: () => createId("reading"),
         currentTime: () => Date.now(),
         formatContent: (items, formatOptions) => isDelicate
           ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
           : formatExtractedMemorySummary(headerLabel, items),
-      }, apiExtractMemories);
+      }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
       if (result.apiError) {
         setImmediateSummaryTask(prev => ({
           ...prev,
@@ -1115,10 +1521,6 @@ export default function App() {
       }
       const addedCount = result.extractedMemories.length;
       const processedCount = Math.max(addedCount, result.acceptedClaims.length);
-      if (result.acceptedClaims.length > 0 && !appendKnowledgeClaims(result.acceptedClaims).success) {
-        setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "长期认知写入失败，未更新兼容记忆" }));
-        return;
-      }
       const extractedSummary = createConversationSummaryRecord({
         scope: {
           relationId: relation.id,
@@ -1132,13 +1534,23 @@ export default function App() {
         rangeStartAt: msgsToSummarize[0]?.timestamp,
         rangeEndAt: msgsToSummarize[msgsToSummarize.length - 1]?.timestamp,
       });
-      if (extractedSummary) {
-        const summaryWrite = saveConversationSummaries([...loadConversationSummaries().value, extractedSummary]);
-        if (!summaryWrite.success) console.warn("Conversation summary cache could not be persisted:", summaryWrite.error);
+      const write = await commitMemoryWriteBundle({
+        claims: result.acceptedClaims,
+        summary: extractedSummary,
+        memories: addedCount > 0 ? MemoryService.mergeMemories(memories, result.extractedMemories) : undefined,
+        appendClaims: appendKnowledgeClaims,
+        appendSummaries: (summaries) => conversationSummaryRepository.appendMany(summaries),
+        saveMemories: (nextMemories) => {
+          setMemories([...nextMemories]);
+          return true;
+        },
+      });
+      if (!write.canonicalWritten || !write.memoriesWritten) {
+        console.error("Immediate summary memory bundle could not be persisted:", write.error || write.memoriesError);
+        setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "长期认知写入失败，未更新兼容记忆" }));
+        return;
       }
-      if (addedCount > 0) {
-        setMemories(prev => MemoryService.mergeMemories(prev, result.extractedMemories));
-      }
+      if (!write.summaryWritten) console.warn("Conversation summary cache could not be persisted:", write.summaryError);
 
       setImmediateSummaryTask({
         characterId,
@@ -1147,6 +1559,14 @@ export default function App() {
         status: "completed",
         rounds,
         extractedCount: processedCount,
+        archiveStats: {
+          sourceMessageCount: msgsToSummarize.length,
+          acceptedTruthCount: result.acceptedClaims.length,
+          summaryCount: write.summaryWritten ? 1 : 0,
+          ruleCount: 0,
+          compatibilityCount: addedCount,
+          rejectedCandidateCount: result.rejectedCandidateCount,
+        },
       });
 
       // Direct-chat summary markers belong to the relationship. Character keeps no
@@ -1228,7 +1648,7 @@ export default function App() {
   const visibleHomePageCount = getVisibleHomePageCount(homeScreenItems, isEditingHomeScreen);
 
   useEffect(() => {
-    localStorage.setItem("phone_homescreen_items", JSON.stringify(homeScreenItems));
+    writeJson("phone_homescreen_items", homeScreenItems);
   }, [homeScreenItems]);
 
   useEffect(() => {
@@ -1272,7 +1692,7 @@ export default function App() {
       if (current.some((item) => item.id === id)) {
         setInstalledAppIds((previous) => {
           const next = previous.includes(id) ? previous : [...previous, id];
-          localStorage.setItem("phone_installed_apps", JSON.stringify(next));
+          writeJson("phone_installed_apps", next);
           return next;
         });
         return current;
@@ -1284,12 +1704,12 @@ export default function App() {
       }
       setInstalledAppIds((previous) => {
         const next = previous.includes(id) ? previous : [...previous, id];
-        localStorage.setItem("phone_installed_apps", JSON.stringify(next));
+        writeJson("phone_installed_apps", next);
         return next;
       });
       setTimeout(() => setCurrentPage(position.page), 50);
       const next = [...current, { id, type: "app" as const, size: "1x1" as const, page: position.page, position }];
-      localStorage.setItem("phone_homescreen_items", JSON.stringify(next));
+      writeJson("phone_homescreen_items", next);
       return next;
     });
   };
@@ -1649,7 +2069,7 @@ export default function App() {
     }
   };
 
-  const handleAddWidget = (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "welcome") => {
+  const handleAddWidget = (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "reading" | "chat-stats" | "welcome") => {
     if (widgetType === "welcome") {
       setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: false }));
       setIsShowingAddWidget(false);
@@ -1672,6 +2092,12 @@ export default function App() {
       } else if (widgetType === "dual_music") {
         size = "2x3";
         actualWidgetType = "dual-music";
+      } else if (widgetType === "reading") {
+        size = "2x4";
+        actualWidgetType = "reading";
+      } else if (widgetType === "chat-stats") {
+        size = "2x2";
+        actualWidgetType = "chat-stats";
       } else {
         size = "2x2";
         actualWidgetType = widgetType as any;
@@ -1701,7 +2127,7 @@ export default function App() {
   const handleRemoveWidget = (id: string) => {
     setHomeScreenItems(current => current.filter(item => item.id !== id));
     setDualMusicConfigs((configs) => configs.filter((config) => config.widgetId !== id));
-    localStorage.removeItem(`time_widget_font_color_${id}`);
+    removeStoredValue(`time_widget_font_color_${id}`);
   };
 
   const getWidgetComponent = (type?: string) => {
@@ -1712,6 +2138,8 @@ export default function App() {
       case "music": return MusicWidget;
       case "dual-music": return DualMusicWidget;
       case "anniversary": return AnniversaryWidget;
+      case "reading": return ReadingWidget;
+      case "chat-stats": return ChatStatsWidget;
       case "todo": default: return TodoWidget;
     }
   };
@@ -1719,13 +2147,17 @@ export default function App() {
   const handleItemClick = (item: HomeScreenItem) => {
     if (isEditingHomeScreen || suppressNextItemClickRef.current) return;
     if (item.type === "app") {
-      preloadSecondaryApp(item.id);
+      preloadApp(item.id);
       setActiveApp(item.id);
     }
   };
   useEffect(() => {
-    if (!charactersPersistenceReady.current) {
-      charactersPersistenceReady.current = true;
+    // The first render may only contain a localStorage fallback while the
+    // durable character repository is still loading. Never persist that
+    // fallback, otherwise it can overwrite newer IndexedDB preferences.
+    if (!charactersRepositoryHydrated.current) return;
+    if (skipNextCharactersPersistenceRef.current) {
+      skipNextCharactersPersistenceRef.current = false;
       return;
     }
     const result = saveCharacters(characters);
@@ -1733,19 +2165,12 @@ export default function App() {
   }, [characters]);
 
   useEffect(() => {
-    if (!settingsChangedByUser.current) return;
-
-    const result = saveSettings(settingsRef.current);
-    if (result.success) {
-      settingsChangedByUser.current = false;
-    } else {
-      console.error("Failed to save settings to localStorage:", result.error);
-    }
-  }, [settings]);
-
-  useEffect(() => {
     if (!messagesPersistenceReady.current) {
       messagesPersistenceReady.current = true;
+      return;
+    }
+    if (skipNextMessagesPersistenceRef.current) {
+      skipNextMessagesPersistenceRef.current = false;
       return;
     }
     const result = saveMessages(messages);
@@ -1753,8 +2178,9 @@ export default function App() {
   }, [messages]);
 
   useEffect(() => {
-    if (!momentsPersistenceReady.current) {
-      momentsPersistenceReady.current = true;
+    if (!momentsPersistenceReady.current) return;
+    if (skipNextMomentsPersistenceRef.current) {
+      skipNextMomentsPersistenceRef.current = false;
       return;
     }
     const result = saveMoments(moments);
@@ -1771,34 +2197,51 @@ export default function App() {
   }, [presets]);
 
   useEffect(() => {
+    if (!tracksPersistenceReady.current) {
+      tracksPersistenceReady.current = true;
+      return;
+    }
     try {
-      localStorage.setItem("phone_music_tracks", JSON.stringify(tracks.map((track) =>
-        track.isLocal ? { ...track, url: "" } : track)));
+      writeJson("phone_music_tracks", tracks.map((track) =>
+        track.isLocal ? { ...track, url: "" } : track));
     } catch (e) {
       console.error("Failed to save tracks to localStorage:", e);
     }
   }, [tracks]);
 
-  useEffect(() => { saveDualMusicWidgetConfigs(dualMusicConfigs); }, [dualMusicConfigs]);
-  useEffect(() => { saveIdentityMusicStates(identityMusicStates); }, [identityMusicStates]);
-  useEffect(() => { saveRelationshipMusicStates(relationshipMusicStates); }, [relationshipMusicStates]);
+  useEffect(() => {
+    if (!dualMusicConfigsPersistenceReady.current) {
+      dualMusicConfigsPersistenceReady.current = true;
+      return;
+    }
+    saveDualMusicWidgetConfigs(dualMusicConfigs);
+  }, [dualMusicConfigs]);
+  useEffect(() => {
+    if (!identityMusicStatesPersistenceReady.current) {
+      identityMusicStatesPersistenceReady.current = true;
+      return;
+    }
+    saveIdentityMusicStates(identityMusicStates);
+  }, [identityMusicStates]);
+  useEffect(() => {
+    if (!relationshipMusicStatesPersistenceReady.current) {
+      relationshipMusicStatesPersistenceReady.current = true;
+      return;
+    }
+    saveRelationshipMusicStates(relationshipMusicStates);
+  }, [relationshipMusicStates]);
 
   useEffect(() => {
+    if (!playlistsPersistenceReady.current) {
+      playlistsPersistenceReady.current = true;
+      return;
+    }
     try {
-      localStorage.setItem("phone_music_playlists", JSON.stringify(playlists));
+      writeJson("phone_music_playlists", playlists);
     } catch (e) {
       console.error("Failed to save playlists to localStorage:", e);
     }
   }, [playlists]);
-
-  useEffect(() => {
-    if (!calendarPersistenceReady.current) {
-      calendarPersistenceReady.current = true;
-      return;
-    }
-    const result = saveCalendarEvents(calendarEvents);
-    if (!result.success) console.error("Failed to save calendar events to localStorage:", result.error);
-  }, [calendarEvents]);
 
   useEffect(() => {
     if (!worldBookPersistenceReady.current) {
@@ -1876,18 +2319,80 @@ export default function App() {
   }, []);
 
   // Handle character creation & updates
-  const handleSaveCharacter = (char: Character) => {
-    setCharacters((prev) => {
-      const exists = prev.some((c) => c.id === char.id);
-      if (exists) {
-        return prev.map((c) => (c.id === char.id ? char : c));
-      }
-      return [...prev, char];
-    });
+  const handleSaveCharacter = async (char: Character): Promise<boolean> => {
+    const currentCharacters = charactersRef.current;
+    const existingCharacter = currentCharacters.find((candidate) => candidate.id === char.id);
+    const savedCharacter = existingCharacter ? { ...existingCharacter, ...char } : char;
+    const nextCharacters = existingCharacter
+      ? currentCharacters.map((candidate) => candidate.id === char.id ? savedCharacter : candidate)
+      : [...currentCharacters, savedCharacter];
+    charactersRef.current = nextCharacters;
+    setCharacters(nextCharacters);
+    const queued = saveCharacters(nextCharacters);
+    if (!queued.success) return false;
+    const persisted = await flushCharacters();
+    return persisted.success;
   };
 
-  const handleDeleteCharacter = (id: string, skipConfirm = false) => {
+  const handleUpdateCharacter = async (
+    characterId: string,
+    patch: Partial<Character>,
+  ): Promise<boolean> => {
+    const currentCharacters = charactersRef.current;
+    if (!currentCharacters.some((candidate) => candidate.id === characterId)) return false;
+    const nextCharacters = currentCharacters.map((candidate) =>
+      candidate.id === characterId ? { ...candidate, ...patch } : candidate,
+    );
+    charactersRef.current = nextCharacters;
+    setCharacters(nextCharacters);
+    const queued = saveCharacters(nextCharacters);
+    if (!queued.success) return false;
+    const persisted = await flushCharacters();
+    return persisted.success;
+  };
+
+  const saveImageToCharacterPhone = async (input: CharacterPhoneImageSaveInput): Promise<void> => {
+    const canonicalCharacterId = resolveCanonicalCharacterId(input.characterId, charactersRef.current);
+    const character = charactersRef.current.find((candidate) => candidate.id === canonicalCharacterId);
+    if (!character || character.isGroupChat) return;
+
+    const ownerIdentityId = activeIdentityId;
+    const phone = getCharacterPhone(ownerIdentityId, canonicalCharacterId)
+      || createCharacterPhone(ownerIdentityId, character);
+    const safeSourceKey = input.sourceKey?.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const galleryItemId = safeSourceKey
+      ? `character-phone-gallery-${safeSourceKey}`
+      : createId("character-phone-gallery");
+    const existingItem = phone.galleryItems.find((item) => item.id === galleryItemId);
+    const imageAssetId = existingItem?.imageAssetId || `character-phone-gallery-asset-${galleryItemId}`;
+    await imageAssetDb.saveImage(imageAssetId, input.imageBlob);
+    const now = Date.now();
+    const galleryItem = {
+      ...existingItem,
+      id: galleryItemId,
+      title: input.title.trim() || "保存的照片",
+      caption: input.caption?.trim() || "",
+      timestamp: now,
+      source: input.source,
+      imageAssetId,
+      imageMimeType: input.imageMimeType || input.imageBlob.type || "image/png",
+      imageWidth: input.imageWidth,
+      imageHeight: input.imageHeight,
+      deletedAt: undefined,
+    };
+    saveCharacterPhone({
+      ...phone,
+      updatedAt: now,
+      galleryItems: [galleryItem, ...phone.galleryItems.filter((item) => item.id !== galleryItemId)],
+    });
+    window.dispatchEvent(new CustomEvent("character-phone-gallery-updated", {
+      detail: { ownerIdentityId, characterId: canonicalCharacterId },
+    }));
+  };
+
+  const handleDeleteCharacter = (id: string, skipConfirm = false, preserveGroupMemories = false) => {
     if (skipConfirm || confirm("确定要删除这名角色人设吗？删除后其相关聊天和动态也将被清空。")) {
+      const deletingGroup = characters.some((character) => character.id === id && character.isGroupChat);
       // A previous bad merge could leave a relationship pointing to a contact
       // copy. Delete that legacy reference together with its archive profile,
       // otherwise it remains visible in the address book after archive deletion.
@@ -1909,11 +2414,18 @@ export default function App() {
         id,
         deletedCharacterIds,
       );
+      // Group turns used to be written as per-member compatibility memories.
+      // They belong to the group lifecycle, not to the member relationships;
+      // remove them explicitly on either kind of group disband so “不保存记忆”
+      // cannot leave orphaned transcript records behind.
+      const cleanedMemories = deletingGroup && !preserveGroupMemories
+        ? cleaned.memories.filter((memory) => !memory.id.startsWith(`group-memory:${id}:`) && !memory.id.startsWith(`group-summary:${id}:`))
+        : cleaned.memories;
       try {
-        const parsed = JSON.parse(localStorage.getItem(RED_PACKET_STATUSES_KEY) || "{}") as RedPacketStatusMap;
+        const parsed = JSON.parse(readString(RED_PACKET_STATUSES_KEY).value || "{}") as RedPacketStatusMap;
         const removedMessages = messages.filter((message) => relationIds.includes(message.relationId || "") || characterIds.has(message.characterId));
         const withoutRelations = relationIds.reduce((statuses, relationId) => removePaymentStatusesByRelation(statuses, relationId), parsed);
-        localStorage.setItem(RED_PACKET_STATUSES_KEY, JSON.stringify(removePaymentStatusesForMessages(withoutRelations, removedMessages)));
+        writeJson(RED_PACKET_STATUSES_KEY, removePaymentStatusesForMessages(withoutRelations, removedMessages));
       } catch (error) {
         console.warn("Unable to clear payment state for deleted character:", error);
       }
@@ -1924,7 +2436,7 @@ export default function App() {
           : character));
       setRelationships(cleaned.relationships);
       setMessages(cleaned.messages);
-      setMemories(cleaned.memories);
+      setMemories(cleanedMemories);
       replaceOfflineStories(cleaned.offlineStories);
       const musicCleanup = removeMusicDataByRelations(dualMusicConfigs, relationshipMusicStates, relationIds);
       setDualMusicConfigs(musicCleanup.configs);
@@ -1966,24 +2478,27 @@ export default function App() {
       saveDiaryGenerationTasks(diaryCleanup.tasks);
       saveDiaryTranslations(diaryCleanup.translations);
       relationIds.forEach((relationId) => {
-        localStorage.removeItem(getOfflineModeStorageKey(relationId));
-        localStorage.removeItem(getOfflineStoryStorageKey(relationId));
+        removeStoredValue(getOfflineModeStorageKey(relationId));
+        removeStoredValue(getOfflineStoryStorageKey(relationId));
       });
       // Relation-aware UI state is intentionally stored as maps keyed by the
       // relation ID. Remove only the deleted character's relation entries.
       ["phone_initiated_chat_ids", "phone_last_read_timestamps"].forEach((key) => {
         try {
-          const raw = localStorage.getItem(key);
+          const raw = readString(key).value;
           if (!raw) return;
           const parsed = JSON.parse(raw);
           const next = Array.isArray(parsed)
             ? parsed.filter((value) => !relationIds.includes(value))
             : Object.fromEntries(Object.entries(parsed).filter(([relationId]) => !relationIds.includes(relationId)));
-          localStorage.setItem(key, JSON.stringify(next));
+          writeJson(key, next);
         } catch (error) {
           console.warn(`Unable to clear relationship state from ${key}:`, error);
         }
       });
+      moments
+        .filter((moment) => moment.imageAssetId && characterIds.has(moment.characterId))
+        .forEach((moment) => imageAssetDb.deleteImage(moment.imageAssetId!).catch((error) => console.warn("Failed to delete Moment image asset:", error)));
       setMoments((prev) => prev.filter((moment) => !characterIds.has(moment.characterId)));
       // Inner voices are private chat-experience records and must not survive
       // deletion of their canonical character.
@@ -2033,56 +2548,28 @@ export default function App() {
     if (!isGroupMessage) {
       const relationship = msg.relationId ? relationships.find((item) => item.id === msg.relationId) : undefined;
       if (!relationship
-        || relationship.characterId !== msg.characterId
+        || relationship.userIdentityId !== (settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID)
+        || resolveCanonicalCharacterId(relationship.characterId, characters) !== resolveCanonicalCharacterId(msg.characterId, characters)
         || (msg.conversationId && msg.conversationId !== (relationship.conversationId || getConversationId(relationship.id)))) {
         console.warn("Direct message write rejected because its relationship scope is missing or inconsistent.", msg.id);
         return;
       }
       messageToSave = { ...msg, conversationId: relationship.conversationId || getConversationId(relationship.id) };
     }
-    setMessages((prev) => [...prev, messageToSave]);
+    setMessages((prev) => {
+      if (prev.some((message) => message.id === messageToSave.id)) return prev;
+      return normalizeCharacterPhoneProactiveMessages([...prev, messageToSave]);
+    });
 
     // Update character's last active time on message exchange
       if (messageToSave.relationId) {
         setRelationships((previous) => previous.map((relation) => relation.id === messageToSave.relationId ? { ...relation, lastActiveTime: Date.now(), updatedAt: Date.now() } : relation));
       }
 
-    // Check if auto-translation is enabled and the message needs translation
-    const char = characters.find((c) => c.id === messageToSave.characterId);
-    if (
-      char &&
-      char.enableAutoTranslate &&
-      messageToSave.sender === "character" &&
-      !messageToSave.isNarration &&
-      !messageToSave.content.startsWith("data:image/") &&
-      !messageToSave.content.startsWith("[红包]")
-    ) {
-      // Check if text is non-Chinese
-      const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(messageToSave.content);
-      const hasKorean = /[\uac00-\ud7af]/.test(messageToSave.content);
-      const hasChinese = /[\u4e00-\u9fa5]/.test(messageToSave.content);
-      const hasEnglish = /[a-zA-Z]{3,}/.test(messageToSave.content);
-      const isNonChinese = hasJapanese || hasKorean || (!hasChinese && hasEnglish);
-
-      if (isNonChinese) {
-        apiTranslate({
-          text: messageToSave.content,
-          apiKey: settings.apiKey || "",
-          model: settings.selectedModel,
-          apiEndpoint: settings.apiEndpoint,
-        })
-          .then((res) => {
-            if (res && res.text && res.text !== messageToSave.content) {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === messageToSave.id && messageMatchesMutationScope(m, messageToSave) ? { ...m, translation: res.text } : m))
-              );
-            }
-          })
-          .catch((err) => {
-            console.error("Auto translation error:", err);
-          });
-      }
-    }
+    // New replies carry their translation in the same AI response envelope.
+    // Do not start a second request here; legacy messages can still be
+    // translated explicitly or by the one-time migration when auto-translate
+    // is enabled in chat settings.
   };
 
   const handleToggleBookmark = (id: string, scope?: MessageMutationScope) => {
@@ -2151,13 +2638,16 @@ export default function App() {
   const handleAddMoment = (newMo: Moment) => {
     const content = sanitizeMomentPublishText(newMo.content);
     if (!content && !newMo.image && !newMo.imageDescription) return;
-    setMoments((prev) => [{
+    const normalized = {
       ...newMo,
       content,
       comments: newMo.comments
         .map((comment) => ({ ...comment, content: sanitizeMomentPublishText(comment.content) }))
         .filter((comment) => Boolean(comment.content)),
-    }, ...prev]);
+    };
+    // Publishing is immediate; background photo understanding later upserts
+    // the same Moment with semantic/aspect metadata instead of duplicating it.
+    setMoments((prev) => upsertMomentPreservingOrder(prev, normalized));
   };
 
   const handleLikeMoment = (id: string, userName: string) => {
@@ -2181,6 +2671,7 @@ export default function App() {
       if (!recordDeletedCharacterMoment(deletedMoment)) {
         console.error("Failed to persist deleted character Moment generation task.");
       }
+      if (deletedMoment.imageAssetId) imageAssetDb.deleteImage(deletedMoment.imageAssetId).catch((error) => console.warn("Failed to delete Moment image asset:", error));
       setMemories((previous) => removeMemoriesForMoment(previous, deletedMoment));
     }
     removeMomentTopicsForMoments([momentId]);
@@ -2193,11 +2684,19 @@ export default function App() {
     const removedMoments = moments.filter((moment) => moment.relationId === relationId);
     const removedMomentIds = removedMoments.map((moment) => moment.id);
     removeMomentTopicsForMoments(removedMomentIds);
+    removedMoments
+      .filter((moment) => Boolean(moment.imageAssetId))
+      .forEach((moment) => imageAssetDb.deleteImage(moment.imageAssetId!).catch((error) => console.warn("Failed to delete Moment image asset:", error)));
     setMemories((previous) => removedMoments.reduce(
       (remaining, moment) => removeMemoriesForMoment(remaining, moment),
       previous,
     ));
-    setMoments((previous) => previous.filter((moment) => moment.relationId !== relationId));
+    setMoments((previous) => previous
+      .filter((moment) => moment.relationId !== relationId)
+      .map((moment) => ({
+        ...moment,
+        comments: moment.comments.filter((comment) => comment.relationId !== relationId),
+      })));
   };
 
   const handleAddCommentToMoment = (momentId: string, comment: MomentComment) => {
@@ -2262,13 +2761,9 @@ export default function App() {
     });
   };
 
-  // Calendar Schedule handlers
-
-
-
   // Music Handlers
   const handleAddMusicTrack = (track: MusicTrack) => {
-    setTracks((prev) => [...prev, track]);
+    setTracks((prev) => [...prev, normalizeMusicTrack(track)]);
   };
 
   const handleDeleteMusicTrack = (id: string) => {
@@ -2411,6 +2906,11 @@ export default function App() {
   // Desktop App Items rendering configuration
   const desktopApps = [
     {
+      id: "character-phone",
+      name: "手机",
+      icon: AppIcons["character-phone"](),
+    },
+    {
       id: "chat",
       name: "聊天",
       icon: AppIcons.chat(),
@@ -2461,6 +2961,26 @@ export default function App() {
       icon: AppIcons.offline(),
     },
     {
+      id: "schedule",
+      name: "日程",
+      icon: AppIcons.schedule(),
+    },
+    {
+      id: "reading",
+      name: "阅读",
+      icon: AppIcons.reading(),
+    },
+    {
+      id: "cinema",
+      name: "影视",
+      icon: AppIcons.cinema(),
+    },
+    {
+      id: "relationship-network",
+      name: "关系网",
+      icon: AppIcons["relationship-network"](),
+    },
+    {
       id: "settings",
       name: "设置",
       icon: AppIcons.settings(),
@@ -2473,6 +2993,288 @@ export default function App() {
     avatar: settings.avatar,
     signature: settings.signature,
     bio: settings.bio,
+  };
+  const relationshipNetworkNpcMomentInFlightRef = useRef<Set<string>>(new Set());
+  const [relationshipNetworkPendingMoments, setRelationshipNetworkPendingMoments] = useState<RelationshipNetworkPendingMoment[]>(() =>
+    listRelationshipNetworkPendingMomentsForIdentity(activeIdentityId));
+  useEffect(() => {
+    setRelationshipNetworkPendingMoments(listRelationshipNetworkPendingMomentsForIdentity(activeIdentityId));
+  }, [activeIdentityId]);
+  const handleSwitchIdentity = (identityId: string, openChat?: { relationId: string; characterId: string }) => {
+    const currentSettings = settingsRef.current;
+    const identity = currentSettings.identities?.find((item) => item.id === identityId);
+    if (!identity) return;
+    const targetRelation = openChat
+      ? relationships.find((relation) => relation.id === openChat.relationId
+        && relation.userIdentityId === identity.id
+        && resolveCanonicalCharacterId(relation.characterId, characters) === openChat.characterId)
+      : undefined;
+    if (targetRelation) {
+      setActiveChatRelationId(targetRelation.id);
+      setActiveChatCharId(resolveCanonicalCharacterId(targetRelation.characterId, characters));
+    } else {
+      setActiveChatCharId(null);
+      setActiveChatRelationId(null);
+    }
+    const saved = setSettings((previous) => ({
+      ...previous,
+      activeIdentityId: identity.id,
+      name: identity.name,
+      avatar: identity.avatar,
+      signature: identity.signature || "",
+      bio: identity.bio || "",
+    }));
+    if (!saved) {
+      alert("身份已切换，但当前浏览器存储空间不足，刷新页面后可能无法保留本次切换。请先清理存储空间。");
+    }
+  };
+
+  const linkRelationshipNetworkNpcToChat = async (npc: RelationshipNetworkNpc): Promise<{ characterId: string; relationId: string } | null> => {
+    const ownerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    const savedLink = findRelationshipNetworkChatLink(ownerIdentityId, npc.id);
+    const characterId = savedLink?.characterId || npc.linkedCharacterId || createId("char-network-npc");
+    const relationId = savedLink?.relationId || createId("relation-network-npc");
+    const existingCharacter = characters.find((character) =>
+      (character.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId
+      && ((character.id === characterId)
+        || character.relationshipNetworkNpcId === npc.id
+        || (character.name === npc.name && character.remark === (npc.role || "来自关系网的 NPC"))));
+    if (existingCharacter) {
+      const existingRelation = relationships.find((relation) => relation.userIdentityId === ownerIdentityId
+        && (relation.id === relationId || relation.characterId === existingCharacter.id));
+      if (existingRelation) return { characterId: existingCharacter.id, relationId: existingRelation.id };
+    }
+
+    const now = Date.now();
+    if (!existingCharacter) {
+      const character = createChatCharacterFromRelationshipNetworkNpc(npc, characterId, ownerIdentityId);
+      if (!(await handleSaveCharacter(character))) {
+        alert("聊天角色创建失败，请检查浏览器存储空间。关系网 NPC 未被修改。");
+        return null;
+      }
+    }
+
+    const existingRelation = relationships.find((relation) => relation.userIdentityId === ownerIdentityId
+      && (relation.id === relationId || relation.characterId === (existingCharacter?.id || characterId)));
+    if (existingRelation) {
+      setRelationships((current) => current.some((relation) => relation.id === existingRelation.id) ? current : [...current, existingRelation]);
+      return { characterId: existingCharacter?.id || characterId, relationId: existingRelation.id };
+    }
+    const relation = createRelationship({
+      id: relationId,
+      characterId: existingCharacter?.id || characterId,
+      userIdentityId: ownerIdentityId,
+      now,
+      relationship: "unknown",
+    });
+    const nextRelationships = [...relationships, relation];
+    const savedRelationships = saveRelationships(nextRelationships);
+    if (!savedRelationships.success) {
+      alert("聊天关系创建失败，请检查浏览器存储空间。完整角色档案已创建，可稍后在关系网中重试提升。");
+      return null;
+    }
+    setRelationships(nextRelationships);
+    captureRelationshipCreatedEvent(relation, now);
+    return { characterId, relationId: relation.id };
+  };
+
+  const generateRelationshipNetworkNpcMomentFromNetwork = async (
+    npc: RelationshipNetworkNpc,
+    options?: { automationTrigger?: RelationshipNetworkNpcMomentAutomationTrigger },
+  ): Promise<{ success: boolean; message: string }> => {
+    const ownerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    if (npc.ownerIdentityId !== ownerIdentityId) return { success: false, message: "这个 NPC 不属于当前身份，无法发布动态。" };
+    if (relationshipNetworkNpcMomentInFlightRef.current.has(npc.id)) return { success: false, message: "这个 NPC 正在生成动态，请稍候。" };
+
+    const chatLink = findRelationshipNetworkChatLink(ownerIdentityId, npc.id);
+    const actor = resolveRelationshipNetworkNpcActor({
+      npc,
+      ownerIdentityId,
+      characters,
+      relationships,
+      preferredCharacterId: chatLink?.characterId || npc.linkedCharacterId,
+      preferredRelationId: chatLink?.relationId,
+    });
+    const { character: sourceCharacter, relationship: sourceRelationship } = actor;
+
+    relationshipNetworkNpcMomentInFlightRef.current.add(npc.id);
+    try {
+      const generated = await generateRelationshipNetworkNpcMoment({
+        npc,
+        sourceCharacter,
+        relationship: sourceRelationship,
+        characters,
+        moments,
+        worldBookEntries,
+        knowledgeClaims: loadKnowledgeClaims().value,
+        memories,
+        events: listCharacterEventsByRelation(sourceRelationship.id),
+        topicHistory: loadMomentTopicRecords().value,
+        settings: settingsRef.current,
+        activeIdentityId: ownerIdentityId,
+        occurredAt: Date.now(),
+        requestAi: apiChat,
+        cleanAndExtractMoment,
+        characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
+        automationTrigger: options?.automationTrigger,
+      });
+      if (generated.blockedReason === "prohibited-content") {
+        return { success: false, message: `「${npc.name}」这次没有发布动态。` };
+      }
+      if (!generated.moment) return { success: false, message: `「${npc.name}」暂时没有适合公开的新动态。` };
+
+      if (npc.momentApprovalMode === "confirm") {
+        const pending: RelationshipNetworkPendingMoment = {
+          id: generated.moment.id,
+          ownerIdentityId,
+          npcId: npc.id,
+          sourceCharacterId: sourceCharacter.id,
+          sourceRelationId: sourceRelationship.id,
+          moment: generated.moment,
+          createdAt: Date.now(),
+        };
+        const pendingResult = appendRelationshipNetworkPendingMoment(pending);
+        if (!pendingResult.success) {
+          console.error("Failed to queue relationship-network NPC Moment:", pendingResult.error);
+          return { success: false, message: "动态已生成，但待确认列表保存失败，请稍后重试。" };
+        }
+        setRelationshipNetworkPendingMoments((current) => [
+          pending,
+          ...current.filter((item) => item.id !== pending.id),
+        ]);
+        return { success: true, message: `「${npc.name}」已生成动态，等待确认发布。` };
+      }
+
+      handleAddMoment(generated.moment);
+      return { success: true, message: `「${npc.name}」已发布一条朋友圈。` };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (/401|api[_ -]?key|authentication fails|invalid.*key/i.test(errorMessage)) {
+        return { success: false, message: "AI 服务鉴权失败，请检查 API Key。" };
+      }
+      console.error(`Failed to generate relationship-network NPC Moment for ${npc.name}:`, error);
+      return { success: false, message: `「${npc.name}」动态生成失败，请稍后重试。` };
+    } finally {
+      relationshipNetworkNpcMomentInFlightRef.current.delete(npc.id);
+    }
+  };
+
+  const checkRelationshipNetworkNpcAutomation = async (npc: RelationshipNetworkNpc): Promise<{ success: boolean; message: string }> => {
+    const ownerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    if (npc.ownerIdentityId !== ownerIdentityId) return { success: false, message: "这个 NPC 不属于当前身份。" };
+    const chatLink = findRelationshipNetworkChatLink(ownerIdentityId, npc.id);
+    const actor = resolveRelationshipNetworkNpcActor({
+      npc,
+      ownerIdentityId,
+      characters,
+      relationships,
+      preferredCharacterId: chatLink?.characterId || npc.linkedCharacterId,
+      preferredRelationId: chatLink?.relationId,
+    });
+    const { relationship: sourceRelationship } = actor;
+
+    const now = Date.now();
+    const state = findRelationshipNetworkNpcAutomationState(ownerIdentityId, npc.id);
+    const candidate = selectRelationshipNetworkNpcMomentAutomationCandidate({
+      npc,
+      relationship: sourceRelationship,
+      messages,
+      moments,
+      events: listCharacterEventsByRelation(sourceRelationship.id),
+      state,
+      now,
+    });
+    if (!candidate) return { success: false, message: `「${npc.name}」当前没有满足自动发动态条件的时间或事件。` };
+
+    const result = await generateRelationshipNetworkNpcMomentFromNetwork(npc, { automationTrigger: candidate.trigger });
+    // Record the trigger even when the model returns SKIP or a provider error;
+    // otherwise the 60-second scheduler could hammer the same event forever.
+    if (!result.message.includes("正在生成动态")) {
+      const stateResult = upsertRelationshipNetworkNpcAutomationState({
+        ...(state || { ownerIdentityId, npcId: npc.id }),
+        lastAttemptKey: candidate.key,
+        lastAttemptAt: now,
+        ...(result.success ? { lastPublishedAt: now } : {}),
+        updatedAt: now,
+      });
+      if (!stateResult.success) console.error("Failed to persist NPC automation state:", stateResult.error);
+    }
+    return result.success
+      ? { ...result, message: `${result.message}（${candidate.reason}）` }
+      : result;
+  };
+
+  const approveRelationshipNetworkNpcMoment = (pending: RelationshipNetworkPendingMoment) => {
+    if (pending.ownerIdentityId !== activeIdentityId) return;
+    handleAddMoment(pending.moment);
+    const nextMoments = [pending.moment, ...moments.filter((moment) => moment.id !== pending.moment.id)];
+    const persisted = saveMoments(nextMoments);
+    if (!persisted.success) {
+      console.error("Failed to persist published relationship-network NPC Moment:", persisted.error);
+      return;
+    }
+    void flushMoments().catch((error) => console.error("Failed to flush published relationship-network NPC Moment:", error));
+    const removed = removeRelationshipNetworkPendingMoment(activeIdentityId, pending.id);
+    if (!removed.success) {
+      console.error("Failed to remove published relationship-network NPC Moment:", removed.error);
+      return;
+    }
+    setRelationshipNetworkPendingMoments((current) => current.filter((item) => item.id !== pending.id));
+  };
+
+  const rejectRelationshipNetworkNpcMoment = (pending: RelationshipNetworkPendingMoment) => {
+    if (pending.ownerIdentityId !== activeIdentityId) return;
+    const removed = removeRelationshipNetworkPendingMoment(activeIdentityId, pending.id);
+    if (!removed.success) {
+      console.error("Failed to reject relationship-network NPC Moment:", removed.error);
+      return;
+    }
+    setRelationshipNetworkPendingMoments((current) => current.filter((item) => item.id !== pending.id));
+  };
+
+  // Every non-chat app can request a chat target. Resolve that target against
+  // the current identity before changing the chat route; a relation ID alone
+  // must never be enough to open another identity's conversation.
+  const openChatForCurrentIdentity = (characterId: string, relationId: string | null) => {
+    const ownerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    if (relationId) {
+      const relationship = relationships.find((candidate) => candidate.id === relationId
+        && candidate.userIdentityId === ownerIdentityId
+        && resolveCanonicalCharacterId(candidate.characterId, characters) === resolveCanonicalCharacterId(characterId, characters));
+      if (!relationship) return false;
+      setActiveChatCharId(resolveCanonicalCharacterId(relationship.characterId, characters));
+      setActiveChatRelationId(relationship.id);
+    } else {
+      const group = characters.find((candidate) => candidate.id === characterId
+        && candidate.isGroupChat
+        && (candidate.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId);
+      if (!group) return false;
+      setActiveChatCharId(group.id);
+      setActiveChatRelationId(null);
+    }
+    setActiveApp("chat");
+    return true;
+  };
+
+  const handlePlayMusicTrack = async (track: MusicTrack) => {
+    if (!isNeteaseMusicTrack(track)) {
+      toggleTrack(track.id, "music-library", true, track);
+      setMusicPlaybackHistory(recordMusicPlayback(track, settings.activeIdentityId || DEFAULT_IDENTITY_ID));
+      return;
+    }
+    if (!track.providerTrackId) {
+      setMusicPlaybackError("网易云歌曲缺少歌曲 ID，请重新打开歌单。");
+      return;
+    }
+    const playableTrack = {
+      ...track,
+      // Resolve the expiring NetEase URL on the same-origin server stream so
+      // playback can begin from this user gesture without a second client request.
+      url: getNeteaseTrackStreamUrl(track.providerTrackId, neteaseQuality),
+    };
+      setRuntimeQueueTracks((previous) => previous.some((item) => item.id === track.id) ? previous.map((item) => item.id === track.id ? playableTrack : item) : [...previous, playableTrack]);
+      toggleTrack(track.id, "music-library", true, playableTrack);
+      setMusicPlaybackHistory(recordMusicPlayback(playableTrack, settings.activeIdentityId || DEFAULT_IDENTITY_ID));
   };
   // Keep forum activity processing alive while the user navigates between apps.
   // The engine still respects document visibility and persists all pending work.
@@ -2568,7 +3370,12 @@ export default function App() {
           border-style: solid !important;
         }
         body, button, input, textarea, select, div, p, span, h1, h2, h3, h4, h5, h6 {
-          font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif !important;
+          font-family: var(--app-font-family, var(--app-default-font-family)) !important;
+        }
+        .phone-screen-container .character-phone-signature-font {
+          font-family: "Amerika Signature Demo", cursive !important;
+          font-style: normal !important;
+          font-weight: 400 !important;
         }
 
         /* FIGMA SPECIFICATION OVERRIDES FOR ALL PAGES & COMPONENTS */
@@ -2620,13 +3427,22 @@ export default function App() {
         .phone-screen-container button:not(.chat-header-control--plain),
         .phone-screen-container [class*="rounded-"]:not(img):not(.avatar-img):not(.avatar-icon):not(input):not(select):not(textarea):not(.chat-header-control--plain),
         .phone-screen-container .back-btn:not(.chat-header-control--plain),
-        .phone-screen-container #schedule_back_btn,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-other,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"],
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-slate-200"],
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-stone-100"] {
+        .phone-screen-container #schedule_back_btn {
           border-radius: 32px !important;
+        }
+
+        /* Reading covers and co-reading cards intentionally use tighter book-like corners. */
+        .phone-screen-container [data-reading-book-cover] {
+          border-radius: 8px !important;
+        }
+        .phone-screen-container [data-reading-book-card] {
+          border-radius: 12px !important;
+        }
+        .phone-screen-container [data-reading-delete] {
+          border-radius: 12px !important;
+        }
+        .phone-screen-container [data-reading-search] {
+          background-color: transparent !important;
         }
 
         /* 3. Strict 16px Padding & Gap of 12px */
@@ -2698,8 +3514,8 @@ export default function App() {
         }
         .phone-screen-container [data-settings-shell] .settings-section-header {
           color: var(--text-tertiary);
-          font-size: 14px;
-          line-height: 20px;
+          font-size: calc(14px * var(--app-font-scale, 1));
+          line-height: calc(20px * var(--app-font-scale, 1));
           padding-inline: 4px;
         }
         .phone-screen-container [data-settings-shell] [data-settings-beauty] [class~="rounded-[24px]"] {
@@ -2737,9 +3553,36 @@ export default function App() {
         /* Shared settings primitives for feature pages outside the main settings shell. */
         .phone-screen-container .settings-panel-card {
           background: var(--surface) !important;
+          border: 0 !important;
+          border-radius: 10px !important;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+        }
+
+        /* Unified content containers: match the compact grouped-card style
+           used by the reference mobile UI. Keep bubbles, avatars, toggles,
+           app icons and floating overlays on their own visual system. */
+        .phone-screen-container :is([data-theme-page], [data-settings-shell], [data-chat-shell]) :is(div, section, article)[class~="bg-white"][class*="rounded-"]:not([class*="rounded-full"]):not(.app-icon-surface):not(.message-bubble):not(.chat-bubble-other) {
+          border-radius: 10px !important;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+        }
+        .phone-screen-container .empty-state-action {
+          display: inline-flex !important;
+          min-height: 44px;
+          align-items: center;
+          justify-content: center;
+          padding: 0 16px;
           border: 1px solid var(--border) !important;
-          border-radius: 16px !important;
-          box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06) !important;
+          border-radius: 14px !important;
+          background: var(--surface) !important;
+          color: var(--text-primary) !important;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+          font-size: 12px;
+          font-weight: 600;
+          transition: background-color 160ms ease, box-shadow 160ms ease;
+        }
+        .phone-screen-container .empty-state-action:hover {
+          background: var(--surface-muted) !important;
+          box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08) !important;
         }
         .phone-screen-container .settings-wide-action-group {
           display: flex;
@@ -2755,9 +3598,9 @@ export default function App() {
           align-items: center;
           justify-content: center;
           padding: 0 16px;
-          font-size: 14px;
+          font-size: calc(14px * var(--app-font-scale, 1));
           font-weight: 600;
-          line-height: 20px;
+          line-height: calc(20px * var(--app-font-scale, 1));
           transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
         }
         .phone-screen-container .settings-wide-action-primary {
@@ -2818,10 +3661,18 @@ export default function App() {
         .phone-screen-container [class*="text-xs"][class*="font-extrabold"][class*="text-stone-"],
         .phone-screen-container [class*="text-xs"][class*="font-semibold"][class*="text-slate-"],
         .phone-screen-container [class*="text-xs"][class*="font-bold"][class*="text-stone-"] {
-          font-size: 11px !important;
+          font-size: calc(11px * var(--app-font-scale, 1)) !important;
           color: var(--text-secondary) !important;
           font-weight: 700 !important;
           letter-spacing: 0.02em !important;
+        }
+
+        /* Offline identity picker follows the compact story-list typography. */
+        .phone-screen-container .offline-identity-picker,
+        .phone-screen-container .offline-identity-picker__select {
+          font-size: calc(12px * var(--app-font-scale, 1)) !important;
+          font-weight: 400 !important;
+          letter-spacing: 0 !important;
         }
 
         /* Unified Helper Small Text: light grey #a1a1aa */
@@ -2839,7 +3690,7 @@ export default function App() {
         .phone-screen-container div[class*="text-stone-400"],
         .phone-screen-container div[class*="text-slate-400"] {
           color: var(--text-tertiary) !important;
-          font-size: 10px !important;
+          font-size: calc(10px * var(--app-font-scale, 1)) !important;
         }
 
         /* 7. Button Elements Global Harmonization */
@@ -2891,29 +3742,28 @@ export default function App() {
           padding: 0 !important;
         }
 
-        /* 8. Specific Chat Bubble Alignment */
-        /* Self bubble: Solid charcoal black, crisp white text, 32px round */
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"] {
-          background-color: var(--chat-user-bg) !important;
-          color: var(--chat-user-text) !important;
-          border-radius: 32px !important;
-          border: none !important;
+        /* Navigation icon actions use a flat hit area. Avatars, badges, toggles,
+           chips and send controls keep their own shapes. */
+        .phone-screen-container button.app-nav-icon-button,
+        .phone-screen-container label.app-nav-icon-button,
+        .phone-screen-container .app-nav-icon-button,
+        .phone-screen-container #schedule_back_btn,
+        .phone-screen-container .offline-icon-button {
+          border-radius: 0 !important;
+          background: transparent !important;
+          background-color: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
         }
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-self *,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-indigo-600"] * {
-          color: var(--chat-user-text) !important;
+        .phone-screen-container .app-nav-icon-button:hover,
+        .phone-screen-container #schedule_back_btn:hover,
+        .phone-screen-container .offline-icon-button:hover {
+          background: transparent !important;
+          opacity: .72 !important;
         }
 
-        /* Other bubble: Soft light gray, charcoal text, 32px round */
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) .chat-bubble-other,
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-slate-200"],
-        .phone-screen-container #conv-screen:not(.style-liquid-glass) div[class*="bg-stone-100"] {
-          background-color: var(--chat-ai-bg) !important;
-          color: var(--chat-ai-text) !important;
-          border-radius: 32px !important;
-          border: 1px solid var(--border) !important;
-        }
+        /* 8. Chat bubbles own their palette, radius and border inside AppChat.
+           Phone-wide !important rules here used to block the classic controls. */
 
         /* Double segment buttons (such as stays/experiences, notes/todo tabs) */
         .phone-screen-container .flex-1.py-2.rounded-xl {
@@ -3035,7 +3885,9 @@ export default function App() {
           // The configured wallpaper is never overwritten just because its resource is unavailable.
           backgroundColor: "var(--desktop-default-bg)",
           position: "relative",
-          height: (typeof window !== "undefined" && window.innerWidth < 768) ? "100%" : undefined,
+          height: typeof window !== "undefined"
+            ? window.innerWidth < 768 ? "100%" : "min(812px, 100dvh)"
+            : undefined,
           transition: "background 0.3s ease, width 0.3s ease",
         }}
       >
@@ -3044,13 +3896,37 @@ export default function App() {
         {/* Global New Message Notification Banner */}
         {globalNotification && (
           <div
+            onPointerDown={handleGlobalNotificationPointerDown}
+            onPointerMove={handleGlobalNotificationPointerMove}
+            onPointerUp={handleGlobalNotificationPointerEnd}
+            onPointerCancel={handleGlobalNotificationPointerEnd}
             onClick={(e) => {
-              setActiveApp("chat");
-              setActiveChatCharId(globalNotification.characterId);
+              if (globalNotificationGestureRef.current?.moved) return;
+              const target = getNotificationChatTarget(globalNotification);
+              const targetRelation = target.relationId
+                ? relationships.find((relation) => relation.id === target.relationId)
+                : undefined;
+              if (targetRelation && targetRelation.userIdentityId !== activeIdentityId) {
+                handleSwitchIdentity(targetRelation.userIdentityId, {
+                  relationId: targetRelation.id,
+                  characterId: resolveCanonicalCharacterId(targetRelation.characterId, characters),
+                });
+              } else if (!openChatForCurrentIdentity(target.characterId, target.relationId)) {
+                setGlobalNotification(null);
+                return;
+              }
               setGlobalNotification(null);
             }}
-            className="absolute left-3.5 right-3.5 z-50 animate-slide-down bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-100 p-3 flex items-center gap-3 cursor-pointer select-none animate-fade-in"
-             style={{ top: settings.hideStatusBar ? "8px" : "calc(env(safe-area-inset-top, 0px) + 48px)" }}
+            className="absolute left-3.5 right-3.5 z-50 flex cursor-grab select-none items-center gap-3 rounded-2xl border border-slate-100 bg-white/95 p-3 shadow-xl backdrop-blur-md transition-transform active:cursor-grabbing"
+            style={{
+              top: settings.hideStatusBar ? "8px" : "calc(env(safe-area-inset-top, 0px) + 48px)",
+              transform: "translateY(" + (globalNotificationDismissing ? -180 : globalNotificationDragY) + "px)",
+              opacity: globalNotificationDismissing ? 0 : 1,
+              transition: globalNotificationDragY === 0 || globalNotificationDismissing
+                ? "transform 180ms ease-out, opacity 180ms ease-out"
+                : "none",
+              touchAction: "none",
+            }}
           >
             {/* Avatar */}
             <img
@@ -3068,17 +3944,6 @@ export default function App() {
                 {globalNotification.content}
               </p>
             </div>
-            {/* Close Button */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation(); // Prevent jumping to chat
-                setGlobalNotification(null);
-              }}
-              className="absolute top-2.5 right-2.5 p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
-              title="关闭"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
           </div>
         )}
 
@@ -3164,17 +4029,17 @@ export default function App() {
                                     }}
                                   >
                                     <img
-                                      src={settings.avatar}
-                                      alt={settings.name}
+                                      src={activeIdentity.avatar}
+                                      alt={activeIdentity.name}
                                       className="w-12 h-12 rounded-full object-cover border border-slate-200/20 shadow-sm shrink-0"
                                       referrerPolicy="no-referrer"
                                     />
                                     <div className="min-w-0 flex-1">
                                       <h2 className="text-sm font-extrabold text-neutral-900 tracking-tight leading-tight">
-                                        {settings.name}
+                                        {activeIdentity.name}
                                       </h2>
                                       <p className="text-[11px] text-neutral-500 mt-1 line-clamp-1 leading-relaxed">
-                                        {settings.signature}
+                                        {activeIdentity.signature}
                                       </p>
                                     </div>
                                   </div>
@@ -3366,6 +4231,8 @@ export default function App() {
                                             onNext={handleNextTrack}
                                             currentTrack={currentTrack || null}
                                             characters={characters}
+                                            messages={messages}
+                                            relationships={relationships}
                                             onOpenApp={setActiveApp}
                                             installedAppIds={installedAppIds}
                                             widgetOpacity={settings.widgetOpacity}
@@ -3384,6 +4251,10 @@ export default function App() {
                                             onRefreshRelationshipMusic={(relationId: string) => { void refreshRelationshipMusic(relationId); }}
                                             musicRecommendationLoading={musicRecommendationRelationId === dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === activeIdentityId)?.relationId}
                                             musicError={musicRecommendationError || musicPlaybackError}
+                                            onOpenReading={(bookId, paragraphAnchorId) => {
+                                              setActiveApp("reading");
+                                              window.setTimeout(() => window.dispatchEvent(new CustomEvent("open-reading-book", { detail: { bookId, paragraphAnchorId } })), 0);
+                                            }}
                                           />
                                         </div>
                                       </div>
@@ -3424,8 +4295,9 @@ export default function App() {
                 const iconSizeStyle = isHiddenNames 
                   ? { width: "60px", height: "60px" } 
                   : { width: "52px", height: "52px" };
-                const isTransparentDockIcon = (appId: string) =>
-                  isTransparencyPreservedImage(settings.customIcons[appId]);
+                const dockAppIds = (settings.dockApps?.length === 4
+                  ? settings.dockApps
+                  : ["chat", "music", "archives", "settings"]);
 
                 return (
                   <div 
@@ -3439,98 +4311,33 @@ export default function App() {
                       borderRadius: settings.dockBorderRadius !== undefined ? `${settings.dockBorderRadius}px` : "26px"
                     }}
                   >
-                    <div className="flex items-center justify-center w-full h-full">
-                      {installedAppIds.includes("chat") ? (
-                        <button
-                          onClick={() => setActiveApp("chat")}
-                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                            isTransparentDockIcon("chat")
-                              ? "transparent-custom-icon"
-                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                          }`}
-                          style={{ borderRadius: isTransparentDockIcon("chat") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                        >
-                          {settings.customIcons["chat"] ? (
-                            <img src={settings.customIcons["chat"]} alt="" className={`w-full h-full ${isTransparentDockIcon("chat") ? "object-contain" : "object-cover"}`} />
-                          ) : (
-                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                              {AppIcons.chat()}
-                            </div>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="shrink-0" style={iconSizeStyle} />
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-center w-full h-full">
-                      {installedAppIds.includes("music") ? (
-                        <button
-                          onClick={() => setActiveApp("music")}
-                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                            isTransparentDockIcon("music")
-                              ? "transparent-custom-icon"
-                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                          }`}
-                          style={{ borderRadius: isTransparentDockIcon("music") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                        >
-                          {settings.customIcons["music"] ? (
-                            <img src={settings.customIcons["music"]} alt="" className={`w-full h-full ${isTransparentDockIcon("music") ? "object-contain" : "object-cover"}`} />
-                          ) : (
-                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                              {AppIcons.music()}
-                            </div>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="shrink-0" style={iconSizeStyle} />
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-center w-full h-full">
-                      {installedAppIds.includes("archives") ? (
-                        <button
-                          onClick={() => setActiveApp("archives")}
-                          className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                            isTransparentDockIcon("archives")
-                              ? "transparent-custom-icon"
-                              : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                          }`}
-                          style={{ borderRadius: isTransparentDockIcon("archives") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                        >
-                          {settings.customIcons["archives"] ? (
-                            <img src={settings.customIcons["archives"]} alt="" className={`w-full h-full ${isTransparentDockIcon("archives") ? "object-contain" : "object-cover"}`} />
-                          ) : (
-                            <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                              {AppIcons.archives()}
-                            </div>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="shrink-0" style={iconSizeStyle} />
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-center w-full h-full">
-                      <button
-                        onPointerDown={() => preloadSecondaryApp("settings")}
-                        onClick={() => setActiveApp("settings")}
-                        className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
-                          isTransparentDockIcon("settings")
-                            ? "transparent-custom-icon"
-                            : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
-                        }`}
-                        style={{ borderRadius: isTransparentDockIcon("settings") ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
-                      >
-                        {settings.customIcons["settings"] ? (
-                          <img src={settings.customIcons["settings"]} alt="" className={`w-full h-full ${isTransparentDockIcon("settings") ? "object-contain" : "object-cover"}`} />
-                        ) : (
-                          <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                            {AppIcons.settings()}
-                          </div>
-                        )}
-                      </button>
-                    </div>
+                    {dockAppIds.map((appId) => {
+                      const appIcon = AppIcons[appId as keyof typeof AppIcons];
+                      const customIcon = settings.customIcons[appId];
+                      const isTransparentIcon = isTransparencyPreservedImage(customIcon);
+                      return (
+                        <div key={appId} className="flex items-center justify-center w-full h-full">
+                          <button
+                            onPointerDown={() => preloadApp(appId)}
+                            onClick={() => setActiveApp(appId)}
+                            className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
+                              isTransparentIcon
+                                ? "transparent-custom-icon"
+                                : "bg-white border border-[#f0f0f3] shadow-[0_3px_8px_rgba(0,0,0,0.05)] hover:bg-stone-50"
+                            }`}
+                            style={{ borderRadius: isTransparentIcon ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
+                          >
+                            {customIcon ? (
+                              <img src={customIcon} alt="" className={`w-full h-full ${isTransparentIcon ? "object-contain" : "object-cover"}`} />
+                            ) : (
+                              <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
+                                {appIcon ? appIcon() : AppIcons.chat()}
+                              </div>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })()}
@@ -3568,22 +4375,27 @@ export default function App() {
           ) : (
             // Full screen app view ports with transitions
             <div 
-              className="absolute inset-0 z-30 bg-slate-50/92 backdrop-blur-md flex flex-col h-full"
+              className={`absolute inset-0 z-30 ${activeApp === "character-phone" ? "bg-transparent" : "bg-slate-50/92 backdrop-blur-md"} flex flex-col h-full`}
               style={{
                  paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)",
                 paddingBottom: "env(safe-area-inset-bottom, 0px)"
               }}
             >
               <div className="w-full flex-1 min-h-0 relative">
-                <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
-                  <AppChat
+                {(activeApp === "chat" || chatModuleActivated) && (
+                  <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
+                  <LazyAppBoundary>
+                      <AppChat
+                    key={`chat-${activeIdentityId}`}
                     characters={characters}
                     relationships={relationships}
                     settings={settings}
                     messages={messages}
                     moments={moments}
                     onSendMessage={handleSendMessage}
+                    onSaveImageToCharacterPhone={saveImageToCharacterPhone}
                     onSaveCharacter={handleSaveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
                     onAddMoment={handleAddMoment}
                     onAddCommentToMoment={handleAddCommentToMoment}
                     onDeleteCommentFromMoment={handleDeleteCommentFromMoment}
@@ -3595,7 +4407,8 @@ export default function App() {
                     onUpdateMessage={handleUpdateMessage}
                     onClose={() => setActiveApp(null)}
                     onSaveSettings={setSettings}
-                    onNavigateToApp={setActiveApp}
+                    onSwitchIdentity={handleSwitchIdentity}
+                    onNavigateToApp={handleChatNavigateToApp}
                     worldBookEntries={worldBookEntries}
                     onClearMessages={handleClearMessages}
                     memories={memories}
@@ -3606,8 +4419,14 @@ export default function App() {
                     activeChatRelationId={activeChatRelationId}
                     setActiveChatRelationId={setActiveChatRelationId}
                     onSaveRelationships={setRelationships}
+                    appointments={scheduleStore.appointments}
+                    onSaveAppointment={handleSaveAppointment}
                     offlineStories={offlineStories}
                     onSaveOfflineStory={handleSaveOfflineStory}
+                    onOpenOfflineStory={(storyId) => {
+                      setPendingOfflineStoryId(storyId);
+                      setActiveApp("offline");
+                    }}
                     onDeleteOfflineStory={handleDeleteOfflineStory}
                     onDeleteCharacter={handleDeleteCharacter}
                     onDeleteRelationshipMusic={handleDeleteRelationshipMusic}
@@ -3616,26 +4435,39 @@ export default function App() {
                     relationshipMusicStates={relationshipMusicStates}
                     pendingDiaryShareMessageId={pendingDiaryShareMessageId}
                     onDiaryShareHandled={() => setPendingDiaryShareMessageId(null)}
+                    pendingRelationshipNetworkMoments={relationshipNetworkPendingMoments}
+                    onApproveRelationshipNetworkNpcMoment={approveRelationshipNetworkNpcMoment}
+                    onRejectRelationshipNetworkNpcMoment={rejectRelationshipNetworkNpcMoment}
+                    onCheckRelationshipNetworkNpcAutomation={checkRelationshipNetworkNpcAutomation}
                     onOpenForumShare={(shareId) => {
                       setOpenForumShareId(shareId);
                       setActiveApp("forum");
                     }}
-                  />
-                </div>
-
-                {activeApp === "archives" && (
-                  <AppArchives
-                    characters={characters}
-                    worldBookEntries={worldBookEntries}
-                    onSaveCharacter={handleSaveCharacter}
-                    onDeleteCharacter={handleDeleteCharacter}
-                    onClose={() => setActiveApp(null)}
-                    onSaveWorldBookEntries={handleSaveWorldBookEntries}
-                  />
+                      />
+                    </LazyAppBoundary>
+                  </div>
                 )}
 
-                {activeApp === "worldbook" && (
-                  <LazyAppBoundary>
+                {isAppMounted("archives") && (
+                  <LazyAppBoundary visible={activeApp === "archives"}>
+                    <AppArchives
+                      characters={characters}
+                      worldBookEntries={worldBookEntries}
+                      onSaveCharacter={handleSaveCharacter}
+                      onDeleteCharacter={handleDeleteCharacter}
+                      onClose={() => setActiveApp(null)}
+                      onOpenCharacterPhone={
+                        typeof window !== "undefined" && new URLSearchParams(window.location.search).get("characterPhoneTest") === "1"
+                          ? () => setActiveApp("character-phone")
+                          : undefined
+                      }
+                      onSaveWorldBookEntries={handleSaveWorldBookEntries}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("worldbook") && (
+                  <LazyAppBoundary visible={activeApp === "worldbook"}>
                     <AppWorldBook
                       entries={worldBookEntries}
                       characters={characters}
@@ -3647,8 +4479,9 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "music" && (
-                  <AppMusic
+                {isAppMounted("music") && (
+                  <LazyAppBoundary visible={activeApp === "music"}>
+                    <AppMusic
                     tracks={tracks}
                     playlists={playlists}
                     onAddTrack={handleAddMusicTrack}
@@ -3657,6 +4490,11 @@ export default function App() {
                     onDeletePlaylist={handleDeleteMusicPlaylist}
                     onClose={() => setActiveApp(null)}
                     currentTrack={currentTrack}
+                    queueTracks={runtimeQueueTracks}
+                    playbackHistory={musicPlaybackHistory}
+                    activeIdentityId={activeIdentityId}
+                    neteaseQuality={neteaseQuality}
+                    setNeteaseQuality={setNeteaseQuality}
                     setCurrentTrack={setCurrentTrack}
                     isPlaying={isPlaying}
                     setIsPlaying={setIsPlaying}
@@ -3665,12 +4503,13 @@ export default function App() {
                     setPlayMode={setPlayMode}
                     volume={volume}
                     setVolume={setVolume}
-                    onPlayTrack={(track) => toggleTrack(track.id, "music-library", true, track)}
-                  />
+                    onPlayTrack={handlePlayMusicTrack}
+                    />
+                  </LazyAppBoundary>
                 )}
 
-                {activeApp === "forum" && (
-                  <LazyAppBoundary>
+                {isAppMounted("forum") && (
+                  <LazyAppBoundary visible={activeApp === "forum"}>
                     <AppForum
                       activeIdentity={activeIdentity}
                       characters={characters}
@@ -3683,23 +4522,106 @@ export default function App() {
                       onOpenForumShareHandled={() => setOpenForumShareId(null)}
                       onSendMessage={handleSendMessage}
                       onOpenChat={(characterId, relationId) => {
-                        setActiveChatCharId(characterId);
-                        setActiveChatRelationId(relationId);
-                        setActiveApp("chat");
+                        openChatForCurrentIdentity(characterId, relationId);
                       }}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "notes" && (
-                  <AppNotes
-                    onClose={() => setActiveApp(null)}
-                  />
+                {isAppMounted("notes") && (
+                  <LazyAppBoundary visible={activeApp === "notes"}>
+                    <AppNotes
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
                 )}
 
-                {activeApp === "diary" && (
-                  <AppDiary
+                {isAppMounted("schedule") && (
+                  <LazyAppBoundary visible={activeApp === "schedule"}>
+                    <AppSchedule
+                      entries={scheduleEntries}
+                      appointments={scheduleStore.appointments}
+                      characters={characters}
+                      onOpenChat={(characterId, relationId) => {
+                        openChatForCurrentIdentity(characterId, relationId);
+                      }}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("reading") && (
+                  <LazyAppBoundary visible={activeApp === "reading"}>
+                    <AppReading
+                      userIdentityId={activeIdentityId}
+                      settings={settings}
+                      characters={characters}
+                      relationships={relationships}
+                      worldBookEntries={worldBookEntries}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("cinema") && (
+                  <LazyAppBoundary visible={activeApp === "cinema"}>
+                    <AppCinema
+                      userIdentityId={activeIdentityId}
+                      settings={settings}
+                      characters={characters}
+                      relationships={relationships}
+                      memories={memories}
+                      onSaveMemories={setMemories}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("relationship-network") && (
+                  <LazyAppBoundary visible={activeApp === "relationship-network"}>
+                    <AppRelationshipNetwork
+                      key={`relationship-network-${activeIdentityId}`}
+                      activeIdentity={activeIdentity}
+                      characters={characters}
+                      relationships={relationships}
+                      onOpenChat={(characterId, relationId) => {
+                        openChatForCurrentIdentity(characterId, relationId);
+                      }}
+                      onLinkNpcToChat={linkRelationshipNetworkNpcToChat}
+                      onGenerateNpcMoment={generateRelationshipNetworkNpcMomentFromNetwork}
+                      onCheckNpcAutomation={checkRelationshipNetworkNpcAutomation}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("character-phone") && (
+                  <LazyAppBoundary visible={activeApp === "character-phone"}>
+                    <AppCharacterPhone
+                      userIdentityId={activeIdentityId}
+                      activeIdentity={activeIdentity}
+                      characters={characters}
+                      relationships={relationships}
+                      messages={messages}
+                      moments={moments}
+                      worldBookEntries={worldBookEntries}
+                      musicTracks={tracks}
+                      settings={settings}
+                      resolvedTheme={resolvedTheme}
+                      onSendMessage={handleSendMessage}
+                      onSaveImageToCharacterPhone={saveImageToCharacterPhone}
+                      onOpenChat={(characterId, relationId) => {
+                        openChatForCurrentIdentity(characterId, relationId);
+                      }}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("diary") && (
+                  <LazyAppBoundary visible={activeApp === "diary"}>
+                    <AppDiary
                     activeIdentity={activeIdentity}
                     characters={characters}
                     relationships={relationships}
@@ -3708,17 +4630,17 @@ export default function App() {
                     settings={settings}
                     onSendMessage={handleSendMessage}
                     onOpenChat={(characterId, relationId, sourceMessageId) => {
-                      setActiveChatCharId(characterId);
-                      setActiveChatRelationId(relationId);
+                      if (!openChatForCurrentIdentity(characterId, relationId)) return;
                       setPendingDiaryShareMessageId(sourceMessageId || null);
-                      setActiveApp("chat");
                     }}
                     onClose={() => setActiveApp(null)}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
-                {activeApp === "store" && (
-                  <AppStore
+                {isAppMounted("store") && (
+                  <LazyAppBoundary visible={activeApp === "store"}>
+                    <AppStore
                     installedAppIds={installedAppIds}
                     onInstallApp={handleInstallApp}
                     onUninstallApp={handleUninstallApp}
@@ -3731,17 +4653,19 @@ export default function App() {
                       const iconFn = AppIcons[id as keyof typeof AppIcons];
                       return iconFn ? iconFn(className) : null;
                     }}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
-                {activeApp === "settings" && (
-                  <LazyAppBoundary>
+                {isAppMounted("settings") && (
+                  <LazyAppBoundary visible={activeApp === "settings"}>
                     <AppSettings
                       settings={settings}
                       bubbleStylePreset={resolveActiveChatStylePreset(
                         characters.find((character) => character.id === activeChatCharId)?.chatStylePreset,
                         settings.globalChatStylePreset,
                       )}
+                      onSwitchIdentity={handleSwitchIdentity}
                       presets={presets}
                       onSaveSettings={setSettings}
                       onSavePreset={handleSavePreset}
@@ -3751,34 +4675,42 @@ export default function App() {
                   </LazyAppBoundary>
                 )}
 
-                {activeApp === "memory" && (
-                  <AppMemory
+                {isAppMounted("memory") && (
+                  <LazyAppBoundary visible={activeApp === "memory"}>
+                    <AppMemory
                     characters={characters}
                     relationships={relationships}
                     memories={memories}
                     onSaveMemories={setMemories}
                     recallSettings={recallSettings}
                     onSaveRecallSettings={setRecallSettings}
-                    onUpdateCharacter={handleSaveCharacter}
                     immediateSummaryTask={immediateSummaryTask}
                     onStartImmediateSummary={handleStartImmediateSummary}
                     onResetImmediateSummary={handleResetImmediateSummary}
                     onClose={() => setActiveApp(null)}
+                    openDiagnosticsRequestId={memoryDiagnosticsRequestId}
                     selectedModel={settings.selectedModel}
                     apiEndpoint={settings.apiEndpoint}
-                  />
+                    />
+                  </LazyAppBoundary>
                 )}
 
-                {activeApp === "offline" && (
-                  <LazyAppBoundary>
+                {isAppMounted("offline") && (
+                  <LazyAppBoundary visible={activeApp === "offline"}>
                     <AppOffline
                       characters={characters}
                       relationships={relationships}
                       settings={settings}
                       offlineStories={offlineStories}
+                      openStoryId={pendingOfflineStoryId}
+                      onOpenOfflineStoryHandled={(storyId) => {
+                        setPendingOfflineStoryId((current) => current === storyId ? null : current);
+                      }}
                       messages={messages}
                       activeChatCharId={activeChatCharId}
                       worldBookEntries={worldBookEntries}
+                      appointments={scheduleStore.appointments}
+                      onSaveAppointment={handleSaveAppointment}
                       onSaveOfflineStory={handleSaveOfflineStory}
                       onSaveRelationships={setRelationships}
                       onDeleteOfflineStory={handleDeleteOfflineStory}
@@ -3899,6 +4831,8 @@ export default function App() {
                   isPlaying,
                   currentTrack: currentTrack || null,
                   characters,
+                  messages,
+                  relationships,
                   installedAppIds,
                   widgetOpacity: settings.widgetOpacity,
                   widgetBorderRadius: settings.widgetBorderRadius,

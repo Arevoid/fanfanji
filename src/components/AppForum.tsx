@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createId as createApplicationId } from "../core/id/createId";
 import {
   ChevronLeft,
   LoaderCircle,
@@ -89,12 +90,9 @@ import {
 } from "../domain/forum/forumContentSafety";
 import { appendForumNotification, createForumNotification, createForumProfile, recordForumVisit, resolveForumPublicAuthor, updateForumLikeHistory } from "../domain/forum/forumProfileData";
 import { imageAssetDb } from "../utils/imageAssetDb";
-import { compressImage } from "../utils/stickerDb";
-import { createForumCommunityNpc } from "../features/forum/forumCommunityNpcData";
 import {
   listForumCommunityNpcsForIdentity,
   removeForumCommunityNpc,
-  upsertForumCommunityNpc,
 } from "../core/storage/repositories/forumCommunityNpcRepository";
 import { listForumStoryUiItems } from "../features/forumStory/forumStoryUiData";
 import { ForumStoryList } from "../features/forumStory/components/ForumStoryList";
@@ -104,14 +102,15 @@ import {
   generateForumStoryOnManualRefresh,
 } from "../features/forumStory/services/forumStoryRefreshService";
 import { ForumStoryEngagementService } from "../features/forumStory/services/forumStoryEngagementService";
-import { ForumStoryUpdateService } from "../features/forumStory/services/forumStoryUpdateService";
-import { ForumStoryCommentService } from "../features/forumStory/services/forumStoryCommentService";
 import { getForumStoryUiThread } from "../features/forumStory/forumStoryUiData";
 import type { ForumStoryUiReply } from "../features/forumStory/forumStoryUiData";
-import { StoryForumReplyRepository } from "../features/forumStory/storyReplyRepository";
-import { StoryEventRepository } from "../features/forumStory/storyEventRepository";
-import { ForumStoryRepository } from "../features/forumStory/forumStoryRepository";
+import { useForumStoryReaderActions } from "../features/forumStory/hooks/useForumStoryReaderActions";
 import { FORUM_HOME_PAGE_SIZE, FORUM_REPLY_PAGE_SIZE } from "../domain/forum/forumCapacity";
+import { useForumActivityEngine } from "../features/forum/hooks/useForumActivityEngine";
+import { useForumCommunityNpcActions } from "../features/forum/hooks/useForumCommunityNpcActions";
+import { useForumProfileActions } from "../features/forum/hooks/useForumProfileActions";
+import { useForumStoryScheduler } from "../features/forumStory/hooks/useForumStoryScheduler";
+import { useForumStoryUpdateAction } from "../features/forumStory/hooks/useForumStoryUpdateAction";
 
 interface AppForumProps {
   activeIdentity: UserIdentity;
@@ -134,10 +133,7 @@ type DeleteTarget =
   | null;
 
 const createId = (prefix: string): string => {
-  const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return `${prefix}-${suffix}`;
+  return createApplicationId(prefix);
 };
 
 const formatForumTime = (timestamp: number): string => {
@@ -279,6 +275,20 @@ export default function AppForum({
     [activeIdentity.id, communityNpcRevision],
   );
 
+  useForumActivityEngine({
+    ownerIdentityId: activeIdentity.id,
+    relationships,
+    characters,
+    messages,
+    memories,
+    worldBookEntries,
+    settings,
+  });
+  useForumStoryScheduler({
+    settings,
+    onChanged: () => setForumStoryRevision((revision) => revision + 1),
+  });
+
   useEffect(() => {
     loadForumDataSafely({
       validRelationIds: new Set(relationships.map((relationship) => relationship.id)),
@@ -361,6 +371,17 @@ export default function AppForum({
   }, [openForumShareId, activeIdentity.id, identityThreads, onOpenForumShareHandled, shares]);
 
   const reportStorageError = () => setError("保存失败，请检查浏览器存储空间后重试。");
+
+  const { saveProfile, uploadProfileAvatar } = useForumProfileActions({
+    activeIdentityId: activeIdentity.id,
+    activeProfile,
+    profiles,
+    profileName,
+    profileBio,
+    onProfileSaved: () => { setSecondaryPage(null); setNotice("资料已保存"); },
+    onStorageError: reportStorageError,
+    setError,
+  });
 
   const persistTasks = (nextTasks: ForumGenerationTask[]) => {
     if (!commitForumMutation({ generationTasks: nextTasks }).success) {
@@ -508,93 +529,24 @@ export default function AppForum({
     }
   };
 
-  const requestForumStoryUpdate = async (storyId: string) => {
-    if (isStoryUpdating) return;
-    const view = getForumStoryUiThread(storyId);
-    if (!view || view.story.status === "completed") return;
-    setIsStoryUpdating(true);
-    setError("");
-    try {
-      const updateResult = await ForumStoryUpdateService.generateStoryUpdate({
-        story: view.story,
-        thread: view.thread,
-        settings,
-        triggerReason: "manual",
-        // A liked story is promised a conclusion once it has received enough
-        // development; otherwise this remains a normal serial update.
-        conclude: view.thread.readerInterest === true && view.story.currentEpisode >= 3,
-      });
-      // Every update immediately receives a bounded, real forum discussion;
-      // the comment service persists only story-scoped identities and floors.
-      if (updateResult.story.status !== "completed") {
-        await ForumStoryCommentService.generateStoryComments({
-          story: updateResult.story,
-          thread: updateResult.thread,
-          settings,
-          count: 5 + Math.floor(Math.random() * 6),
-        });
-      }
-      setForumStoryRevision((revision) => revision + 1);
-      setNotice(updateResult.story.status === "completed" ? "楼主已发布最终结局。" : "楼主已更新，新的讨论已补进楼层。");
-    } catch (storyError) {
-      setError(storyError instanceof Error ? storyError.message : "故事更新失败，请稍后重试。");
-    } finally {
-      setIsStoryUpdating(false);
-    }
-  };
+  const { requestForumStoryUpdate } = useForumStoryUpdateAction({
+    isStoryUpdating,
+    settings,
+    setIsStoryUpdating,
+    setError,
+    setNotice,
+    setForumStoryRevision,
+  });
 
-  // Reader comments stay strictly inside the ForumStory repositories. They
-  // intentionally use a story-local reader identity rather than a real forum
-  // profile, Character, relationship or memory record.
-  const submitForumStoryComment = async (storyId: string, body: string, replyTo?: ForumStoryUiReply) => {
-    const view = getForumStoryUiThread(storyId);
-    if (!view) return;
-    const now = Date.now();
-    const readerId = `${storyId}:reader`;
-    const parent = replyTo ? StoryForumReplyRepository.listReplies(storyId, view.thread.id).find((reply) => reply.id === replyTo.id) : undefined;
-    const write = StoryForumReplyRepository.appendReply({
-      id: createId("forum-story-reader-reply"),
-      storyId,
-      threadId: view.thread.id,
-      ownerIdentityId: `story-scope:${storyId}`,
-      publicAuthor: { displayName: "我", kind: "virtual", isAnonymous: false },
-      body,
-      source: "ai-virtual",
-      occurredAt: now,
-      baseLikeCount: 0,
-      likedByIdentityIds: [],
-      createdAt: now,
-      updatedAt: now,
-      storyAuthorType: "forum_user",
-      storyAuthorId: readerId,
-      ...(parent ? { parentReplyId: parent.id, replyToUserId: parent.storyAuthorId, quoteContent: parent.body.slice(0, 180) } : {}),
-      storyCommentStyle: "ordinary",
-      storyCommentLabel: "论坛读者",
-    });
-    if (!write.success || !write.reply) throw new Error("故事评论保存失败");
-    const eventWrite = StoryEventRepository.appendEvent({
-      id: createId("forum-story-reader-event"),
-      storyId,
-      type: "comment_added",
-      source: "user",
-      status: "confirmed",
-      summary: `论坛读者: ${body.slice(0, 200)}`,
-      storyVersion: view.story.version,
-      occurredAt: now,
-      createdAt: now,
-      forumThreadId: view.thread.id,
-      forumReplyId: write.reply.id,
-      floorNumber: write.reply.floorNumber ?? write.reply.floor,
-      idempotencyKey: `${storyId}:reader:${write.reply.id}`,
-    });
-    if (!eventWrite.success) throw new Error("故事评论事件保存失败");
-    setForumStoryRevision((revision) => revision + 1);
-    // User participation gets a compact follow-up discussion, without putting
-    // any user identity or private data into the story prompt.
-    void ForumStoryCommentService.generateStoryComments({ story: view.story, thread: view.thread, settings, count: 3 }).then(() => {
-      setForumStoryRevision((revision) => revision + 1);
-    }).catch(() => undefined);
-  };
+  const { submitForumStoryComment, handleForumStoryUtility } = useForumStoryReaderActions({
+    settings,
+    replyingTo,
+    setActiveStoryId,
+    setReplyingTo,
+    setError,
+    setNotice,
+    setForumStoryRevision,
+  });
 
   const likeForumStoryReply = (storyId: string, replyId: string) => {
     const view = getForumStoryUiThread(storyId);
@@ -610,39 +562,6 @@ export default function AppForum({
     }
   };
 
-  const handleForumStoryUtility = async (
-    action: "share" | "delete" | "translate",
-    storyId: string,
-    reply?: ForumStoryUiReply,
-  ) => {
-    const view = getForumStoryUiThread(storyId);
-    if (!view) return;
-    if (action === "share") {
-      const text = `${view.thread.title}\n${view.thread.initialContent}`;
-      try { await navigator.clipboard?.writeText(text); setNotice("帖子内容已复制，可转发给朋友。"); }
-      catch { setNotice("当前浏览器不支持复制，请手动选择帖子内容。") }
-      return;
-    }
-    if (action === "delete" && !reply) {
-      if (!window.confirm("删除这条故事帖子？已生成的故事记录不会进入普通论坛。")) return;
-      if (!ForumStoryRepository.deleteStory(storyId).success) { setError("故事帖子删除失败"); return; }
-      setActiveStoryId(null);
-      setForumStoryRevision((revision) => revision + 1);
-      return;
-    }
-    if (action === "delete" && reply) {
-      if (!window.confirm("删除这条评论？楼层会保留，内容将显示为“该回复已删除”。")) return;
-      if (!StoryForumReplyRepository.tombstoneReply(storyId, view.thread.id, reply.id).success) {
-        setError("故事评论删除失败，请重试");
-        return;
-      }
-      setForumStoryRevision((revision) => revision + 1);
-      if (replyingTo?.id === reply.id) setReplyingTo(undefined);
-      return;
-    }
-    if (action === "delete") return;
-    setNotice("故事帖子使用原文展示，暂不需要翻译。");
-  };
 
   const generateInitialReplies = async (thread: ForumThread) => {
     setWaitingReplyThreadIds((ids) => [...new Set([...ids, thread.id])]);
@@ -875,25 +794,6 @@ export default function AppForum({
     setVisibleReplyCount(FORUM_REPLY_PAGE_SIZE); requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 }));
   };
 
-  const saveProfile = () => {
-    const displayName = profileName.trim();
-    if (!displayName) { setError("昵称不能为空"); return; }
-    const nextProfile = { ...activeProfile, displayName: displayName.slice(0, 32), bio: profileBio.trim().slice(0, 160), updatedAt: Date.now() };
-    if (commitForumMutation({ profiles: [...profiles.filter((item) => item.ownerIdentityId !== activeIdentity.id), nextProfile] })) { setSecondaryPage(null); setNotice("资料已保存"); }
-    else reportStorageError();
-  };
-
-  const uploadProfileAvatar = async (file: File | undefined) => {
-    if (!file || !file.type.startsWith("image/")) { setError("请选择图片文件"); return; }
-    try {
-      const blob = await compressImage(file);
-      const assetId = `forum-profile-avatar-${activeIdentity.id}`;
-      await imageAssetDb.saveImage(assetId, blob);
-      const next = { ...activeProfile, avatarAssetId: assetId, updatedAt: Date.now() };
-      if (!commitForumMutation({ profiles: [...profiles.filter((item) => item.ownerIdentityId !== activeIdentity.id), next] })) reportStorageError();
-    } catch { setError("头像保存失败，请重试"); }
-  };
-
   const resetShareSheet = () => {
     setShowShareSheet(false);
     setSelectedShareRelationId(null);
@@ -941,112 +841,30 @@ export default function AppForum({
     setShowComposer(false);
   };
 
-  const resetCommunityNpcComposer = () => {
-    setCommunityNpcName("");
-    setCommunityNpcAvatar("");
-    setCommunityNpcPersona("");
-    setShowCommunityNpcComposer(false);
-  };
-
-  const saveCommunityNpc = () => {
-    const displayName = communityNpcName.trim();
-    const personaSummary = communityNpcPersona.trim();
-    if (!displayName || !personaSummary) {
-      setError("请填写论坛 NPC 的名字和人设");
-      return;
-    }
-    const npc = createForumCommunityNpc({
-      id: createId("forum-community-npc"),
-      ownerIdentityId: activeIdentity.id,
-      displayName,
-      avatar: communityNpcAvatar.trim() || undefined,
-      personaSummary,
-      now: Date.now(),
-    });
-    upsertForumCommunityNpc(npc);
-    setCommunityNpcRevision((value) => value + 1);
-    resetCommunityNpcComposer();
-  };
-
-  const updateCommunityNpc = (npc: ForumCommunityNpc, patch: Partial<ForumCommunityNpc>) => {
-    upsertForumCommunityNpc({ ...npc, ...patch, updatedAt: Date.now() });
-    setCommunityNpcRevision((value) => value + 1);
-  };
-
-  const toggleCommunityNpcExport = (npcId: string) => {
-    setSelectedCommunityNpcIds((current) => current.includes(npcId)
-      ? current.filter((id) => id !== npcId)
-      : [...current, npcId]);
-  };
-
-  const exportCommunityNpcs = () => {
-    const cards = communityNpcs
-      .filter((npc) => selectedCommunityNpcIds.includes(npc.id))
-      .map(({ displayName, avatar, personaSummary, publicStyle, enabled }) => ({
-        displayName,
-        ...(avatar ? { avatar } : {}),
-        personaSummary,
-        publicStyle,
-        enabled,
-      }));
-    if (cards.length === 0) {
-      setError("请至少选择一个论坛 NPC 角色卡。");
-      return;
-    }
-    const blob = new Blob([JSON.stringify({ format: "forum-community-npc/v1", cards }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `论坛NPC角色卡-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    setShowCommunityNpcExport(false);
-    setNotice(`已导出 ${cards.length} 个论坛 NPC 角色卡。`);
-  };
-
-  const importCommunityNpcs = async (files: FileList | null) => {
-    if (!files?.length) return;
-    setError("");
-    let imported = 0;
-    try {
-      for (const file of Array.from(files)) {
-        const raw = JSON.parse(await file.text()) as unknown;
-        const candidates = Array.isArray(raw)
-          ? raw
-          : raw && typeof raw === "object" && Array.isArray((raw as { cards?: unknown }).cards)
-            ? (raw as { cards: unknown[] }).cards
-            : [raw];
-        for (const candidate of candidates) {
-          if (!candidate || typeof candidate !== "object") continue;
-          const card = candidate as Record<string, unknown>;
-          const displayName = typeof card.displayName === "string" ? card.displayName.trim().slice(0, 40) : "";
-          const personaSummary = typeof card.personaSummary === "string" ? card.personaSummary.trim().slice(0, 300) : "";
-          if (!displayName || !personaSummary) continue;
-          const npc = createForumCommunityNpc({
-            id: createId("forum-community-npc"),
-            ownerIdentityId: activeIdentity.id,
-            displayName,
-            ...(typeof card.avatar === "string" && card.avatar.trim() ? { avatar: card.avatar.trim() } : {}),
-            personaSummary,
-            publicStyle: typeof card.publicStyle === "string" ? card.publicStyle.trim().slice(0, 300) : personaSummary,
-            now: Date.now(),
-          });
-          const saved = upsertForumCommunityNpc({
-            ...npc,
-            enabled: typeof card.enabled === "boolean" ? card.enabled : true,
-          });
-          if (saved.success) imported += 1;
-        }
-      }
-      if (!imported) throw new Error("未找到可导入的论坛 NPC 角色卡。");
-      setCommunityNpcRevision((value) => value + 1);
-      setNotice(`已导入 ${imported} 个论坛 NPC 角色卡。`);
-    } catch (importError) {
-      setError(importError instanceof Error ? importError.message : "论坛 NPC 导入失败。");
-    }
-  };
+  const {
+    resetCommunityNpcComposer,
+    saveCommunityNpc,
+    updateCommunityNpc,
+    toggleCommunityNpcExport,
+    exportCommunityNpcs,
+    importCommunityNpcs,
+  } = useForumCommunityNpcActions({
+    activeIdentityId: activeIdentity.id,
+    communityNpcs,
+    selectedCommunityNpcIds,
+    communityNpcName,
+    communityNpcAvatar,
+    communityNpcPersona,
+    setCommunityNpcName,
+    setCommunityNpcAvatar,
+    setCommunityNpcPersona,
+    setShowCommunityNpcComposer,
+    setSelectedCommunityNpcIds,
+    setCommunityNpcRevision,
+    setShowCommunityNpcExport,
+    setError,
+    setNotice,
+  });
 
   const handleCreateThread = () => {
     const title = postTitle.trim();
@@ -1241,7 +1059,7 @@ export default function AppForum({
         <button
           type="button"
           onClick={handleBack}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-700 active:bg-slate-100"
+          className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-700"
           aria-label="返回"
         >
           <ChevronLeft className="h-5 w-5" />
@@ -1255,7 +1073,7 @@ export default function AppForum({
             type="button"
             onClick={() => setShowHomeActions(true)}
             disabled={isRefreshing}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-950 text-white active:scale-95"
+            className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-800 active:scale-95"
             aria-label="论坛操作"
           >
             {isRefreshing
@@ -1267,7 +1085,7 @@ export default function AppForum({
             ref={communityNpcMenuAnchorRef}
             type="button"
             onClick={() => setShowCommunityNpcMenu(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-950 text-white active:scale-95"
+            className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-800 active:scale-95"
             aria-label="NPC角色操作"
           >
             <Plus className="h-4 w-4" />
@@ -1277,7 +1095,7 @@ export default function AppForum({
             type="button"
             onClick={() => void runThreadActivity("manual-thread-refresh", activeThread)}
             disabled={isThreadRefreshing}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-600 active:bg-slate-100 disabled:text-slate-300"
+            className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-600 disabled:text-slate-300"
             aria-label="刷新帖子动态"
           >
             <RefreshCw className={`h-4 w-4 ${isThreadRefreshing ? "animate-spin" : ""}`} />
@@ -1287,7 +1105,7 @@ export default function AppForum({
             type="button"
             onClick={() => void requestForumStoryUpdate(activeStoryId)}
             disabled={isStoryUpdating}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-600 active:bg-slate-100 disabled:text-slate-300"
+            className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-600 disabled:text-slate-300"
             aria-label="刷新帖子动态"
           >
             <RefreshCw className={`h-4 w-4 ${isStoryUpdating ? "animate-spin" : ""}`} />
@@ -1721,7 +1539,7 @@ export default function AppForum({
                 rows={1}
                 maxLength={2000}
                 placeholder={replyingTo ? `回复 ${replyingTo.floor} 楼…` : "写下你的回复…"}
-                className="max-h-24 min-h-10 flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] leading-5 outline-none focus:border-slate-400"
+                className="forum-composer-input max-h-24 min-h-10 flex-1 resize-none rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] leading-5 outline-none focus:border-slate-400"
               />
               <button
                 type="button"
@@ -1771,7 +1589,7 @@ export default function AppForum({
               onChange={(event) => setPostTitle(event.target.value)}
               maxLength={80}
               placeholder="输入帖子标题"
-              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-slate-400"
+              className="forum-composer-input h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-slate-400"
             />
             <span className="mt-1 block text-right text-[10px] text-slate-300">{postTitle.length}/80</span>
           </label>
@@ -1783,7 +1601,7 @@ export default function AppForum({
               maxLength={5000}
               rows={7}
               placeholder="分享你想讨论的内容"
-              className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-6 outline-none focus:border-slate-400"
+              className="forum-composer-input w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-6 outline-none focus:border-slate-400"
             />
             <span className="mt-1 block text-right text-[10px] text-slate-300">{postBody.length}/5000</span>
           </label>

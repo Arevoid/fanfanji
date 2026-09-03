@@ -13,8 +13,8 @@ for (const source of [modal, sheet]) {
   assert.match(source, /env\(safe-area-inset-bottom\)/);
 }
 assert.match(forum, /data-keyboard-safe-composer/);
-assert.match(offline, /offline-page w-full h-full min-h-0 flex flex-col/);
-assert.match(offline, /app-viewport-overlay fixed inset-x-0 top-0 z-50/);
+assert.match(offline, /offline-page[\s\S]*w-full h-full min-h-0 flex flex-col/);
+assert.match(offline, /app-viewport-overlay[\s\S]*fixed inset-x-0 top-0 z-50/);
 assert.match(index, /\.phone-screen-container \.fixed\.inset-0/);
 
 console.log("PASS modal, bottom sheet, forum, and offline input surfaces share the keyboard-safe viewport contract");

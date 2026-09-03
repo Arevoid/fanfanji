@@ -1,4 +1,5 @@
 import type { DiaryEntry } from "../../types";
+import { createId } from "../../core/id/createId";
 
 export const DIARY_MAX_BODY_LENGTH = 4000;
 
@@ -17,6 +18,4 @@ export const getDiaryDayKey = (timestamp: number): string => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
 
-export const createDiaryId = (prefix = "diary"): string => `${prefix}-${typeof crypto !== "undefined" && "randomUUID" in crypto
-  ? crypto.randomUUID()
-  : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+export const createDiaryId = (prefix = "diary"): string => createId(prefix);

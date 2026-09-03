@@ -52,6 +52,19 @@ const sleepingPrompt = sleepingContext ? formatProactivePromptContext(buildProac
 assert.match(sleepingPrompt, /Current routine state: sleeping/);
 assert.match(sleepingPrompt, /behavior reference only/);
 
+const disabledContext = buildProactiveCognitiveContext({
+  character,
+  relationship,
+  memories: [],
+  events: [],
+  occurredAt: Date.UTC(2026, 0, 5, 23, 30),
+  routine: sleepingRoutine,
+  timeAwareness: false,
+});
+assert.equal(disabledContext?.routineContext, undefined, "disabled time awareness must not project routine state");
+const disabledPrompt = disabledContext ? formatProactivePromptContext(buildProactivePromptContext(disabledContext)) : "";
+assert.doesNotMatch(disabledPrompt, /Time context:|Current routine state:|sleeping/);
+
 const crossMidnightRoutine = buildCharacterRoutine({
   activeHours: [{ start: "20:00", end: "02:00" }],
   sleepHours: [{ start: "02:00", end: "08:00" }],

@@ -115,4 +115,20 @@ assert.deepEqual(legacyPrompt.publicCommentHistory, [], "missing public context 
 assert.deepEqual(legacyPrompt.behaviorConstraints, [], "missing public context keeps constraints empty");
 assert.equal(formatMomentPromptContext(undefined), "", "missing adapter context remains compatible");
 
+const previousEvening = new Date(2026, 7, 14, 22, 35).getTime();
+const datedFormatted = formatMomentPromptContext({
+  ...publicPrompt,
+  time: { date: "2026-08-15", time: "11:26" },
+  relationFacts: [{ content: "用户发送红包 52.1 元。", timestamp: previousEvening }],
+  relationEvents: [{
+    kind: "red_packet_received",
+    summary: "收到用户发送的红包 52.1 元。",
+    occurredAt: previousEvening,
+    confidence: 1,
+  }],
+});
+assert.match(datedFormatted, /相对本条朋友圈为“昨天”/);
+assert.match(datedFormatted, /用户发送红包 52\.1 元/);
+assert.match(datedFormatted, /Never rewrite a yesterday\/earlier event as happening today/);
+
 console.log("PASS Moment Prompt Adapter uses MomentPublicCognitiveContext with public isolation, bounded history, and legacy fallback");

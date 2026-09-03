@@ -1,10 +1,13 @@
 import type { Character, InnerVoiceRecord, Message, UserSettings, WorldBookEntry } from "../../../types";
+import { createId } from "../../../core/id/createId";
 import { apiChat } from "../../../utils/apiHelper";
 import { buildInnerVoicePrompt } from "../../../domain/prompt/innerVoicePrompt";
 import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
+import { serializeMessageContentForPrompt } from "../prompts/messagePromptSerializer";
+import type { InlineInnerVoicePayload } from "./chatTurnResponseProtocol";
 
 export interface GenerateInnerVoiceInput {
   character: Character;
@@ -18,6 +21,35 @@ export interface GenerateInnerVoiceInput {
   settings: UserSettings;
   offlineContinuityContext?: string;
   worldBookEntries?: readonly WorldBookEntry[];
+}
+
+export function createInlineInnerVoiceRecord(input: {
+  character: Character;
+  triggerMessage: Message;
+  relationId?: string;
+  groupId?: string;
+  conversationId: string;
+  payload: InlineInnerVoicePayload;
+  settings: UserSettings;
+}): InnerVoiceRecord {
+  const summary = serializeMessageContentForPrompt(input.triggerMessage, {
+    mode: "history",
+    userName: input.settings.name,
+    characterName: input.character.name,
+  });
+  return {
+    id: createId("inner-voice"),
+    characterId: input.character.id,
+    relationId: input.relationId,
+    groupId: input.groupId,
+    messageId: input.triggerMessage.id,
+    conversationId: input.conversationId,
+    triggerMessageSummary: summary.slice(0, 120),
+    emotionalState: input.payload.emotionalState,
+    state: input.payload.emotionalState,
+    content: input.payload.content,
+    createdAt: Date.now(),
+  };
 }
 
 function parseInnerVoice(text: string): { content: string; emotionalState: string } | null {
@@ -46,7 +78,7 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
 
   const worldBook = input.relationship ? buildWorldBookSystemBlocks(
     [...(input.worldBookEntries || [])], input.character.id,
-    input.recentMessages.slice(-10).map((message) => message.content).join("\n"),
+    input.recentMessages.slice(-10).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: input.settings.name, characterName: input.character.name })).join("\n"),
     { scenario: "chat", characterId: input.relationship.characterId, userIdentityId: input.relationship.userIdentityId, relationId: input.relationship.id },
   ) : undefined;
   const composedPrompt = PromptComposer.compose({
@@ -75,13 +107,13 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
   const parsed = parseInnerVoice(response.text);
   if (!parsed) return null;
   return {
-    id: `inner-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: createId("inner-voice"),
     characterId: input.character.id,
     relationId,
     groupId,
     messageId: input.triggerMessage.id,
     conversationId,
-    triggerMessageSummary: input.triggerMessage.content.slice(0, 120),
+    triggerMessageSummary: serializeMessageContentForPrompt(input.triggerMessage, { mode: "history", userName: input.settings.name, characterName: input.character.name }).slice(0, 120),
     emotionalState: parsed.emotionalState,
     state: parsed.emotionalState,
     content: parsed.content,

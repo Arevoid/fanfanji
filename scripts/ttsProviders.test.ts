@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { buildCharacterTtsOptions, getTtsProvider, normalizeMosslandApiEndpoint, resolveTtsCharacter } from "../src/features/voice/ttsConfig";
+import { readFileSync } from "node:fs";
+import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, normalizeMosslandApiEndpoint, resolveTtsCharacter, shouldQueueCallSpeech } from "../src/features/voice/ttsConfig";
 import { fetchSingleTtsSegment } from "../src/utils/minimaxTts";
 
 const mosslandSettings: any = {
@@ -12,6 +13,34 @@ assert.equal(getTtsProvider({}), "minimax", "legacy settings must remain on Mini
 assert.equal(normalizeMosslandApiEndpoint("https://mossland.mosi.cn"), "https://api.mosi.cn/v1/audio/speech");
 assert.equal(normalizeMosslandApiEndpoint("https://mossland.studio/"), "https://api.mosi.cn/v1/audio/speech");
 assert.equal(normalizeMosslandApiEndpoint("https://proxy.example/custom/speech"), "https://proxy.example/custom/speech");
+assert.equal(canPlayTtsMessage({ isOfflineModeActive: false, isVoiceMessage: false, isQueuedCallSpeech: true }), true, "plain call subtitles must reach TTS");
+assert.equal(canPlayTtsMessage({ isOfflineModeActive: false, isVoiceMessage: false, isQueuedCallSpeech: false }), false, "plain online text stays blocked");
+assert.equal(shouldQueueCallSpeech("character", "电话里的回复"), true, "character call subtitles are eligible for TTS when the global switch is on");
+assert.equal(shouldQueueCallSpeech("user", "用户说话"), false, "user call subtitles are never synthesized as character speech");
+assert.equal(shouldQueueCallSpeech("character", "   "), false, "empty call subtitles are ignored");
+const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const directReplyDeliverySource = readFileSync(new URL("../src/features/chat/services/directReplyDeliveryService.ts", import.meta.url), "utf8");
+const voiceBubbleEligibilitySource = readFileSync(new URL("../src/features/chat/services/voiceBubbleEligibility.ts", import.meta.url), "utf8");
+const chatDeliverySource = readFileSync(new URL("../src/features/chat/services/chatMessageDelivery.ts", import.meta.url), "utf8");
+const callPlaybackSource = readFileSync(new URL("../src/features/chat/hooks/useChatCallSpeechPlayback.ts", import.meta.url), "utf8");
+assert.match(callPlaybackSource, /callTtsAudioRef\.current \|\| new Audio\(\)/, "call playback must reuse the gesture-unlocked audio element");
+assert.match(appChatSource, /if \(!incoming\) unlockCallTtsPlayback\(\)/, "outgoing call taps must unlock mobile audio");
+assert.match(chatDeliverySource, /options\.settings\.enableMiniMaxTts && shouldQueueCallSpeech/, "the global TTS switch must govern call synthesis");
+assert.match(voiceBubbleEligibilitySource, /if \(!enabled\) return false/, "the global TTS switch must disable automatic normal-chat voice conversion");
+assert.match(directReplyDeliverySource, /if \(callSpeechCompletion\) await callSpeechCompletion/, "the next call bubble must wait until the current speech finishes");
+assert.match(
+  callPlaybackSource,
+  /const playback = audio\.play\(\);[\s\S]*revealCallSubtitleOnce\(\);[\s\S]*await playback/,
+  "a character call subtitle must be revealed in the same turn that starts audio playback",
+);
+assert.match(callPlaybackSource, /callSpeechGenerationRef\.current \+= 1/, "clearing a call must invalidate in-flight speech synthesis");
+assert.match(callPlaybackSource, /const blob = await getSpeechForText[\s\S]*if \(isCancelledCallSpeech\(\)\) return/, "late TTS results must be discarded after hang-up");
+assert.match(callPlaybackSource, /if \(callTtsObjectUrlRef\.current\)[\s\S]*URL\.revokeObjectURL/, "hang-up must revoke the active call audio URL");
+assert.match(
+  directReplyDeliverySource,
+  /if \(input\.shouldCancel\(\) \|\| input\.signal\?\.aborted\) break/,
+  "hang-up must stop unsent bubbles from the cancelled call turn",
+);
 const canonicalCharacter: any = { id: "profile", name: "角色", mosslandVoiceId: "canonical-voice" };
 const contactCharacter: any = { id: "contact", name: "联系人", isContactInstance: true, profileSourceId: "profile" };
 assert.equal(
@@ -65,6 +94,20 @@ try {
     voiceId: "moss-voice",
   });
   assert.equal(blob.type, "audio/mpeg");
+
+  const minimaxBlob = await fetchSingleTtsSegment("你好", minimaxOptions);
+  assert.equal(capturedUrl, "/api/minimax-tts", "MiniMax must use the app proxy by default");
+  assert.deepEqual(JSON.parse(String(capturedInit?.body)), {
+    text: "你好",
+    apiKey: "mini-key",
+    groupId: "group",
+    model: "speech-2.8-hd",
+    voiceId: "mini-voice",
+    speed: 1.3,
+    pitch: 2,
+    vol: 0.9,
+  });
+  assert.equal(minimaxBlob.type, "audio/mpeg");
 
   await assert.rejects(
     () => fetchSingleTtsSegment("你好", buildCharacterTtsOptions(mosslandSettings)),

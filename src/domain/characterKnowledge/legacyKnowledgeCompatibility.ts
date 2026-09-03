@@ -41,7 +41,11 @@ export function projectLegacyMemoryToKnowledgeClaim(
   return {
     migrated: true,
     claim: {
-      id: `legacy-memory:${memory.id}`,
+      // Legacy ids were global, while Truth Layer records are relation-scoped.
+      // Keep the original id in sourceRecordId, but include the relation in
+      // the new claim id/evidence key so two old records with the same id can
+      // never collapse across identities.
+      id: `legacy-memory:${memory.id}:${relation.id}`,
       relationId: relation.id,
       characterId: relation.characterId,
       userIdentityId: relation.userIdentityId,
@@ -56,7 +60,7 @@ export function projectLegacyMemoryToKnowledgeClaim(
         authorship: "unknown",
         sourceRecordId: memory.id,
         producer: "legacy-memory-compat.v1",
-        evidenceKey: `legacy-memory:${memory.id}`,
+        evidenceKey: `legacy-memory:${memory.id}:${relation.id}`,
       },
       confidence: 0.25,
       userConfirmed: false,

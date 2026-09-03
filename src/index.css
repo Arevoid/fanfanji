@@ -11,6 +11,30 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @font-face {
+  font-family: "RedPacketPayFont";
+  src: url("./assets/fonts/Aidian-SignatureTi-Marker-pen-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Aidian SignatureTi Marker pen -Medium";
+  src: url("./assets/fonts/Aidian-SignatureTi-Marker-pen-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Amerika Signature Demo";
+  src: url("./assets/fonts/AmerikaSignatureDemo-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
   font-family: "Athena Unicode";
   src: url("./assets/fonts/new-athena-unicode.woff") format("woff");
   font-style: normal;
@@ -42,6 +66,27 @@
   --app-viewport-height: 100dvh;
   --app-viewport-offset-top: 0px;
   --keyboard-inset: 0px;
+  --app-root-font-size: 16px;
+  --app-font-scale: 1;
+  --app-default-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+  --app-font-family: var(--app-default-font-family);
+}
+
+/* Older iOS Safari versions do not understand dynamic viewport units. Keep
+   the standalone launch surface full-height there as well; newer browsers
+   continue to use the visual-viewport value written by the controller. */
+@supports not (height: 100dvh) {
+  :root {
+    --app-viewport-height: -webkit-fill-available;
+  }
+
+  html, body, #root {
+    min-height: -webkit-fill-available;
+  }
+}
+
+html {
+  font-size: var(--app-root-font-size);
 }
 
 html, body, #root {
@@ -53,6 +98,110 @@ html, body, #root {
   overflow: hidden;
   background-color: var(--app-bg);
   color: var(--text-primary);
+  font-family: var(--app-font-family);
+}
+
+button, input, textarea, select {
+  font: inherit;
+}
+
+/* Keep custom long-press menus from being replaced by the browser callout. */
+.chat-long-press-target {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+/* Built-in bubble tails. These are intentionally part of the app chrome so
+   enabling “气泡尖角” works even when the user has not supplied custom CSS. */
+.cv-bubble-tip-portal-layer,
+.cv-bubble-tip-portal {
+  pointer-events: none;
+  overflow: visible;
+}
+
+.cv-bubble-tip-portal-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+}
+
+.cv-bubble-tip-portal {
+  position: absolute;
+}
+
+.bubble-tip {
+  position: absolute;
+  top: 14px;
+  width: 0;
+  height: 0;
+  z-index: 10;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+}
+
+.bubble-tip.other-tip {
+  left: -7px;
+  border-right: 8px solid var(--bubble-tip-bg, #ffffff);
+}
+
+.bubble-tip.self-tip {
+  left: 0;
+  border-left: 8px solid var(--bubble-tip-bg, #95ec69);
+}
+
+/* iOS Safari zooms focused text controls whose computed font-size is below
+   16px. Keep every text-entry control at the platform's no-zoom minimum on
+   small screens. Non-text controls keep their compact geometry. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
+/* Tailwind arbitrary pixel sizes are fixed values by default. Scale the set
+   used by the app so they participate in the same global typography reflow. */
+[class~="text-[7.5px]"] { font-size: calc(7.5px * var(--app-font-scale)); }
+[class~="text-[8px]"] { font-size: calc(8px * var(--app-font-scale)); }
+[class~="text-[9px]"] { font-size: calc(9px * var(--app-font-scale)); }
+[class~="text-[10px]"] { font-size: calc(10px * var(--app-font-scale)); }
+[class~="text-[10.5px]"] { font-size: calc(10.5px * var(--app-font-scale)); }
+[class~="text-[11px]"] { font-size: calc(11px * var(--app-font-scale)); }
+[class~="text-[11.5px]"] { font-size: calc(11.5px * var(--app-font-scale)); }
+[class~="text-[12px]"] { font-size: calc(12px * var(--app-font-scale)); }
+[class~="text-[13px]"] { font-size: calc(13px * var(--app-font-scale)); }
+[class~="text-[13.5px]"] { font-size: calc(13.5px * var(--app-font-scale)); }
+[class~="text-[14px]"] { font-size: calc(14px * var(--app-font-scale)); }
+[class~="text-[15px]"] { font-size: calc(15px * var(--app-font-scale)); }
+[class~="text-[16px]"] { font-size: calc(16px * var(--app-font-scale)); }
+[class~="text-[17px]"] { font-size: calc(17px * var(--app-font-scale)); }
+[class~="text-[18px]"] { font-size: calc(18px * var(--app-font-scale)); }
+[class~="text-[24px]"] { font-size: calc(24px * var(--app-font-scale)); }
+[class~="text-[25px]"] { font-size: calc(25px * var(--app-font-scale)); }
+[class~="text-[80px]"] { font-size: calc(80px * var(--app-font-scale)); }
+
+/* Compact segmented controls keep their original control geometry when the
+   user enlarges reading text globally. The selected font family still applies. */
+.schedule-filter-control {
+  box-sizing: border-box;
+  height: 36px;
+  padding: 0 14px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.beauty-segment-control {
+  box-sizing: border-box;
+  min-width: 0;
+  height: 38px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 1.15;
+  white-space: nowrap;
 }
 
 .app-viewport-root {
@@ -62,10 +211,20 @@ html, body, #root {
 }
 
 .app-viewport-overlay {
+  /* Portalled dialogs sit outside the app root. Follow the visual viewport
+     when the mobile browser shifts it to keep an input focused above the IME. */
+  top: var(--app-viewport-offset-top, 0px);
   bottom: auto;
   height: var(--app-viewport-height, 100dvh);
   max-height: var(--app-viewport-height, 100dvh);
   min-height: 0;
+}
+
+/* Some mobile browsers keep fixed app shells at their layout-viewport height
+   while the IME occupies the visual viewport. Lift the chat composer only by
+   the measured overlap; when the shell resizes normally this remains zero. */
+#conv-screen .chat-input-area {
+  transform: translateY(calc(-1 * var(--chat-keyboard-lift, 0px)));
 }
 
 /* Legacy feature dialogs still use Tailwind's `fixed inset-0` shell. Keep the

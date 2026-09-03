@@ -65,6 +65,12 @@ export const cleanAndExtractMoment = (content: string) => {
 
 export const renderMomentContent = (content: string) => cleanAndExtractMoment(content).content;
 
+/** Keeps short text-image descriptions visually balanced inside the card. */
+export const isShortMomentImageDescription = (description: string) => description.trim().length <= 24;
+
+/** A public interaction can intentionally end without producing a comment. */
+export const isMomentSkipResponse = (content: string) => /^(?:\[\s*skip\s*\]|skip|跳过|不回复|不评论|无需回复|无需评论|不需要回复|不需要评论)[\s。.!！…]*$/iu.test(content.trim());
+
 export const getMomentComments = (moment: Moment) => {
   const parsed = cleanAndExtractMoment(moment.content);
   const dynamicComments: typeof moment.comments = [];

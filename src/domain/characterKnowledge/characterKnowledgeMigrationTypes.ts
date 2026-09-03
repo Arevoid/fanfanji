@@ -1,6 +1,8 @@
 export const CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION = 1;
 export const CHARACTER_KNOWLEDGE_MIGRATION_VERSION = 1;
 
+export type CharacterKnowledgeMigrationStatus = "idle" | "completed" | "failed";
+
 /**
  * Startup bookkeeping is diagnostic only. Legacy stores remain the source of
  * truth for rollback, while deterministic IDs make a repeated run harmless.
@@ -8,7 +10,9 @@ export const CHARACTER_KNOWLEDGE_MIGRATION_VERSION = 1;
 export interface CharacterKnowledgeMigrationState {
   schemaVersion: number;
   migrationVersion: number;
+  status: CharacterKnowledgeMigrationStatus;
   lastRunAt: number;
+  lastError?: string;
   migratedMemoryIds: string[];
   migratedSummaryIds: string[];
   migratedCorrectionIds: string[];

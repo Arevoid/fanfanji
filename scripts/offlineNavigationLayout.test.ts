@@ -105,17 +105,19 @@ assert.deepEqual(resolveOfflineChatNavigationTarget({
 });
 
 const componentSource = readFileSync(new URL("../src/components/AppOffline.tsx", import.meta.url), "utf8");
+const workspaceExitSource = readFileSync(new URL("../src/features/offline/hooks/useOfflineWorkspaceExitActions.ts", import.meta.url), "utf8");
+const workspaceHeaderSource = readFileSync(new URL("../src/features/offline/components/OfflineWorkspaceHeader.tsx", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("../src/components/offline/offlineStory.css", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-const workspaceHeaderStart = componentSource.indexOf('<header className="offline-workspace-header">');
-const workspaceHeaderEnd = componentSource.indexOf("</header>", workspaceHeaderStart);
+const workspaceHeaderStart = workspaceHeaderSource.indexOf('<header className={`offline-workspace-header');
+const workspaceHeaderEnd = workspaceHeaderSource.indexOf("</header>", workspaceHeaderStart);
 const linkedStatusStart = componentSource.indexOf('className="offline-chat-link-card"', workspaceHeaderStart);
 
 assert.ok(workspaceHeaderStart >= 0 && workspaceHeaderEnd > workspaceHeaderStart);
 assert.ok(linkedStatusStart > workspaceHeaderEnd, "linked status must render outside the navigation header");
-assert.match(componentSource.slice(workspaceHeaderStart, workspaceHeaderEnd), /aria-label="返回线下故事列表"/);
-assert.match(componentSource.slice(workspaceHeaderStart, workspaceHeaderEnd), /offline-workspace-menu-anchor/);
-assert.match(componentSource, /onNavigateToChat\(target\.characterId, target\.relationId, target\.conversationId\)/);
+assert.match(workspaceHeaderSource.slice(workspaceHeaderStart, workspaceHeaderEnd), /aria-label="返回线下故事列表"/);
+assert.match(workspaceHeaderSource.slice(workspaceHeaderStart, workspaceHeaderEnd), /offline-workspace-menu-anchor/);
+assert.match(workspaceExitSource, /onNavigateToChat\(target\.characterId, target\.relationId, target\.conversationId\)/);
 assert.match(cssSource, /\.offline-workspace-nav\s*\{[\s\S]*grid-template-columns:\s*40px minmax\(0, 1fr\) 40px/);
 assert.match(cssSource, /\.offline-chat-link-copy\s*\{[\s\S]*min-width:\s*0/);
 assert.match(cssSource, /\.offline-chat-link-action\s*\{[\s\S]*flex:\s*0 0 auto/);

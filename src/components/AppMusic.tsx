@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { MusicTrack, MusicPlaylist } from "../types";
+import { MusicTrack, MusicPlaylist, MusicPlaybackHistoryItem } from "../types";
 import { audioDb } from "../utils/audioDb";
+import MusicLibraryPanel from "./music/MusicLibraryPanel";
 import {
   Play,
   Pause,
@@ -9,6 +10,7 @@ import {
   Plus,
   Trash2,
   ChevronLeft,
+  Disc3,
   Music,
   ListMusic,
   FileAudio,
@@ -18,8 +20,14 @@ import {
   Repeat,
   Repeat1,
   Shuffle,
-  Sparkles
+  Sparkles,
+  FileText,
+  Loader2,
 } from "lucide-react";
+import { getNeteaseLyrics } from "../features/music/services/neteaseMusicApi";
+import { isNeteaseMusicTrack } from "../features/music/services/musicTrackModel";
+import type { NeteaseLyrics } from "../features/music/neteaseTypes";
+import type { NeteaseMusicQuality } from "../features/music/neteaseTypes";
 
 interface AppMusicProps {
   tracks: MusicTrack[];
@@ -30,6 +38,11 @@ interface AppMusicProps {
   onDeletePlaylist: (id: string) => void;
   onClose: () => void;
   currentTrack: MusicTrack | null;
+  queueTracks?: MusicTrack[];
+  playbackHistory?: MusicPlaybackHistoryItem[];
+  activeIdentityId: string;
+  neteaseQuality: NeteaseMusicQuality;
+  setNeteaseQuality: (quality: NeteaseMusicQuality) => void;
   setCurrentTrack: (track: MusicTrack | null) => void;
   isPlaying: boolean;
   setIsPlaying: (playing: boolean) => void;
@@ -49,12 +62,36 @@ const WAVE_BARS = [
   14, 12, 10, 14, 18, 24, 22, 16, 12, 10, 8, 8, 6, 6, 4, 4, 4, 4, 4, 4, 4, 4
 ];
 
+interface LyricLine {
+  time: number;
+  text: string;
+}
+
+const parseLyrics = (value: string): LyricLine[] => {
+  const lines: LyricLine[] = [];
+  value.split(/\r?\n/).forEach((line) => {
+    const matches = [...line.matchAll(/\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g)];
+    const text = line.replace(/\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g, "").trim();
+    if (!text) return;
+    matches.forEach((match) => {
+      const fraction = match[3] ? Number("0." + match[3]) : 0;
+      lines.push({ time: Number(match[1]) * 60 + Number(match[2]) + fraction, text });
+    });
+  });
+  return lines.sort((a, b) => a.time - b.time);
+};
+
 export default function AppMusic({
   tracks,
   onAddTrack,
   onDeleteTrack,
   onClose,
   currentTrack,
+  queueTracks = [],
+  playbackHistory = [],
+  activeIdentityId,
+  neteaseQuality,
+  setNeteaseQuality,
   setCurrentTrack,
   isPlaying,
   audioRef,
@@ -76,8 +113,13 @@ export default function AppMusic({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [showPlaylist, setShowPlaylist] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(true);
+  const [lyrics, setLyrics] = useState<NeteaseLyrics | null>(null);
+  const [lyricsLoading, setLyricsLoading] = useState(false);
+  const [lyricsError, setLyricsError] = useState<string | null>(null);
+  const lyricLineRefs = React.useRef<Array<HTMLParagraphElement | null>>([]);
 
-  const allTracks = [...PRESEED_TRACKS, ...tracks];
+  const allTracks = [...PRESEED_TRACKS, ...tracks, ...queueTracks.filter((track) => !tracks.some((item) => item.id === track.id))];
 
   useEffect(() => {
     if (allTracks.length > 0 && !currentTrack) {
@@ -120,6 +162,51 @@ export default function AppMusic({
       audioRef.current.volume = volume;
     }
   }, [volume]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLyrics(null);
+    setLyricsError(null);
+    lyricLineRefs.current = [];
+    if (!currentTrack || !isNeteaseMusicTrack(currentTrack) || !currentTrack.providerTrackId) return;
+
+    setLyricsLoading(true);
+    void getNeteaseLyrics(currentTrack.providerTrackId)
+      .then((result) => {
+        if (!cancelled) setLyrics(result);
+      })
+      .catch((error) => {
+        if (!cancelled) setLyricsError(error instanceof Error ? error.message : "歌词读取失败");
+      })
+      .finally(() => {
+        if (!cancelled) setLyricsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [currentTrack?.id, currentTrack?.providerTrackId]);
+
+  const handleLoadLyrics = async () => {
+    if (!currentTrack || !isNeteaseMusicTrack(currentTrack) || !currentTrack.providerTrackId) return;
+    setLyricsLoading(true);
+    setLyricsError(null);
+    try {
+      setLyrics(await getNeteaseLyrics(currentTrack.providerTrackId));
+    } catch (error) {
+      setLyricsError(error instanceof Error ? error.message : "歌词读取失败。");
+    } finally {
+      setLyricsLoading(false);
+    }
+  };
+
+  const lyricText = lyrics?.lyric || lyrics?.translatedLyric || "";
+  const lyricLines = parseLyrics(lyricText);
+  const activeLyricIndex = lyricLines.reduce((activeIndex, line, index) => (
+    line.time <= currentTime ? index : activeIndex
+  ), -1);
+
+  useEffect(() => {
+    if (activeLyricIndex < 0) return;
+    lyricLineRefs.current[activeLyricIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeLyricIndex, currentTrack?.id]);
 
   const handlePlayPause = () => {
     if (currentTrack) onPlayTrack(currentTrack);
@@ -179,6 +266,7 @@ export default function AppMusic({
           artist: "本地上传",
           url: fileUrl,
           isLocal: true,
+          source: "local",
           audioAssetId: trackId,
           audioMimeType: file.type || undefined,
           coverAssetId,
@@ -205,6 +293,7 @@ export default function AppMusic({
       artist: newArtist.trim() || "网络直链",
       url: newUrl.trim(),
       isLocal: false,
+      source: "network-link",
       coverUrl: newCoverUrl.trim() || undefined,
     };
     onAddTrack(newTrack);
@@ -219,15 +308,16 @@ export default function AppMusic({
 
 
   const progressPercent = duration > 0 ? currentTime / duration : 0;
+  const useReferencePlayerLayout = true;
 
   return (
     <div data-theme-page="music" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans overflow-hidden relative">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
+      <div className={`flex items-center justify-between px-4 py-1.5 z-10 shrink-0 relative ${showLibrary ? "bg-transparent" : "bg-sky-50/70"}`}>
         <button
-          onClick={onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
-          title="返回"
+          onClick={() => showLibrary ? onClose() : setShowLibrary(true)}
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
+          title={showLibrary ? "返回桌面" : "返回音乐首页"}
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
         </button>
@@ -237,18 +327,55 @@ export default function AppMusic({
         </h1>
 
         <div className="w-8 h-8 flex items-center justify-end z-10">
-          <button
+          {!showLibrary && <button
             onClick={() => setIsShowingImportModal(true)}
-            className="w-8 h-8 rounded-full bg-neutral-950 hover:bg-neutral-900 text-white transition-all flex items-center justify-center shadow-sm"
+            className="app-nav-icon-button w-8 h-8 text-slate-800 transition-all flex items-center justify-center"
             title="导入音乐"
           >
             <Plus className="w-4.5 h-4.5" />
-          </button>
+          </button>}
         </div>
       </div>
 
-      {/* Central Content Area (Visualizer + Metadata + Scrubbing) */}
-      <div className="flex-1 flex flex-col items-center justify-center px-5 py-6 overflow-y-auto pb-10 relative bg-gradient-to-b from-stone-100/50 to-transparent">
+      {showLibrary && (
+        <div className="absolute inset-0 z-40 bg-[var(--app-bg)]">
+          <MusicLibraryPanel
+            tracks={allTracks}
+            currentTrack={currentTrack}
+            isPlaying={isPlaying}
+            onPlayTrack={onPlayTrack}
+            onOpenPlayer={() => setShowLibrary(false)}
+            onOpenImport={() => setIsShowingImportModal(true)}
+            onClose={onClose}
+            playbackHistory={playbackHistory}
+            activeIdentityId={activeIdentityId}
+          />
+        </div>
+      )}
+
+      {useReferencePlayerLayout && <main className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-sky-50/70 px-7 pb-5 pt-4">
+        {currentTrack ? <>
+          <div className="mx-auto aspect-square w-full max-w-[304px] overflow-hidden rounded-[24px] bg-[var(--surface-muted)] shadow-sm">
+            {currentTrack.coverUrl ? <img src={currentTrack.coverUrl} alt={`${currentTrack.title} 专辑封面`} className="h-full w-full object-cover" /> : <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--text-secondary)]"><Disc3 className="h-20 w-20" /><span className="text-xs">暂无专辑封面</span></div>}
+          </div>
+          <div className="mt-5 text-center"><h2 className="truncate text-xl font-extrabold text-slate-800">{currentTrack.title}</h2><p className="mt-1 truncate text-sm text-slate-600">{currentTrack.artist || "未知艺术家"}</p></div>
+          <div className="mt-14 flex min-h-[76px] flex-1 items-center justify-center text-center">
+            {lyricText ? <div className="max-h-28 w-full overflow-y-auto px-2 text-center text-[12px] leading-7 text-slate-600">{lyricLines.length > 0 ? lyricLines.map((line, index) => <p key={line.time + "-" + index} ref={(node) => { lyricLineRefs.current[index] = node; }} className={index === activeLyricIndex ? "scale-105 font-bold text-sky-800 transition-all duration-300" : "opacity-60 transition-all duration-300"}>{line.text}</p>) : <p className="whitespace-pre-wrap">{lyricText}</p>}</div> : <div><p className="text-xs text-slate-500">{lyricsLoading ? "正在加载歌词…" : "找不到歌词"}</p>{isNeteaseMusicTrack(currentTrack) && <button type="button" onClick={() => void handleLoadLyrics()} className="mt-3 inline-flex items-center gap-1 rounded-full bg-white/80 px-3 py-1.5 text-[10px] font-bold text-slate-600 shadow-sm">{lyricsLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />} 重新加载歌词</button>}</div>}
+          </div>
+          {lyricsError && <p className="mt-2 text-center text-[10px] text-red-500">{lyricsError}</p>}
+          <div className="mt-5"><input type="range" min="0" max={duration || 100} value={currentTime} onChange={handleSeek} className="h-1.5 w-full cursor-pointer accent-sky-700" /><div className="mt-2 flex justify-between text-[10px] font-medium text-slate-500"><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div></div>
+          <div className="mt-5 flex items-center justify-between px-1 pb-1 text-slate-600">
+            <button type="button" onClick={() => setPlayMode((prev) => prev === "list" ? "single" : prev === "single" ? "random" : "list")} className="p-2" title="播放模式">{playMode === "single" ? <Repeat1 className="h-5 w-5" /> : playMode === "random" ? <Shuffle className="h-5 w-5" /> : <Repeat className="h-5 w-5" />}</button>
+            <button type="button" onClick={handlePrev} className="p-2" title="上一首"><SkipBack className="h-5 w-5 fill-current" /></button>
+            <button type="button" onClick={handlePlayPause} className="flex h-14 w-14 items-center justify-center rounded-full bg-black text-white shadow-md" title={isPlaying ? "暂停" : "播放"}>{isPlaying ? <Pause className="h-6 w-6 fill-current" /> : <Play className="ml-0.5 h-6 w-6 fill-current" />}</button>
+            <button type="button" onClick={handleNext} className="p-2" title="下一首"><SkipForward className="h-5 w-5 fill-current" /></button>
+            <button type="button" onClick={() => setShowPlaylist(!showPlaylist)} className={`p-2 ${showPlaylist ? "text-slate-900" : ""}`} title="播放列表"><ListMusic className="h-5 w-5" /></button>
+          </div>
+        </> : <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-slate-500"><Music className="h-10 w-10" /><span className="text-xs">当前播放队列为空，请导入音乐</span></div>}
+      </main>}
+
+      {/* Legacy visualizer kept as a fallback for older layouts. */}
+      {!useReferencePlayerLayout && <div className="flex-1 flex flex-col items-center justify-center px-5 py-6 overflow-y-auto pb-10 relative bg-gradient-to-b from-stone-100/50 to-transparent">
         {currentTrack ? (
           <>
             {/* Wave Equalizer Animation (Absolute top and responsive) */}
@@ -312,7 +439,20 @@ export default function AppMusic({
                 <Sparkles className="w-3 h-3 text-neutral-950" />
                 <span>{currentTrack.artist}</span>
               </p>
+              {isNeteaseMusicTrack(currentTrack) && (
+                <div className="mt-3 flex items-center justify-center gap-2"><button type="button" onClick={() => void handleLoadLyrics()} className="flex items-center gap-1 rounded-full bg-stone-200 px-3 py-1.5 text-[10px] font-bold text-stone-700 hover:bg-stone-300">
+                  {lyricsLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />} {lyrics ? "刷新歌词" : "查看歌词"}
+                </button><select value={neteaseQuality} onChange={(event) => setNeteaseQuality(event.target.value as NeteaseMusicQuality)} className="rounded-full bg-stone-200 px-2 py-1.5 text-[10px] font-bold text-stone-700 outline-none"><option value="standard">标准</option><option value="higher">较高</option><option value="exhigh">极高</option></select></div>
+              )}
+              {lyricsError && <p className="mt-2 text-[10px] text-red-500">{lyricsError}</p>}
             </div>
+
+            {lyrics && (
+              <div className="mt-4 max-h-32 w-full max-w-xs overflow-y-auto rounded-2xl border border-stone-200 bg-white/70 px-4 py-3 text-center text-[11px] leading-6 text-stone-600">
+                <p className="whitespace-pre-wrap">{lyrics.lyric || lyrics.translatedLyric}</p>
+                {lyrics.lyric && lyrics.translatedLyric && <p className="mt-3 border-t border-stone-200 pt-3 whitespace-pre-wrap text-stone-400">{lyrics.translatedLyric}</p>}
+              </div>
+            )}
 
             {/* Waveform-based Scrubbing Slider */}
             <div className="w-full max-w-xs mt-8 relative select-none">
@@ -358,7 +498,7 @@ export default function AppMusic({
             <span>当前播放队列为空，请导入音乐</span>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* 置顶悬浮播放列表面板 */}
       {/* 宽度：页面宽度左右保留约 16px 边距 (left-4 right-4)，高度：约为屏幕高度的 35%–45% (h-[40vh]) */}
@@ -453,8 +593,8 @@ export default function AppMusic({
         </div>
       </div>
 
-      {/* 底部一排播放控制按钮固定常驻页面最下方 */}
-      <div className="shrink-0 h-20 bg-white border-t border-stone-200 flex items-center justify-center px-6 z-30 shadow-[0_-4px_12px_rgba(0,0,0,0.03)]">
+      {/* Legacy fixed controls are only used by the fallback player layout. */}
+      {!useReferencePlayerLayout && <div className="shrink-0 h-20 bg-white border-t border-stone-200 flex items-center justify-center px-6 z-30 shadow-[0_-4px_12px_rgba(0,0,0,0.03)]">
         <div className="flex items-center justify-between w-full max-w-xs">
           {/* Play Mode Button */}
           <button
@@ -508,7 +648,7 @@ export default function AppMusic({
             <ListMusic className="w-5 h-5" />
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* Import / Add Music Overlay Modal */}
       {isShowingImportModal && (

@@ -15,9 +15,13 @@ import { inspectKnowledgeLanguageCues, normalizeKnowledgeTemporalSemantics } fro
 
 const KNOWLEDGE_KINDS = new Set<KnowledgeKind>(["fact", "preference", "plan", "belief", "hypothesis"]);
 const KNOWLEDGE_SUBJECTS = new Set<KnowledgeSubject>(["user", "character", "relationship", "other"]);
+const KNOWLEDGE_SOURCE_APPS = new Set([
+  "chat", "offline", "memory", "moments", "notes", "diary", "cinema", "schedule", "forum",
+  "relationship-network", "music", "reading", "worldbook", "archives", "system", "legacy",
+]);
 const TRUTH_STATUSES = new Set<TruthStatus>(["asserted", "confirmed", "inferred", "disputed", "retracted", "legacy_unverified"]);
 const TEMPORAL_STATUSES = new Set<TemporalStatus>(["past", "present", "future", "timeless", "unknown"]);
-const SOURCE_KINDS = new Set(["user_message", "deterministic_action", "manual", "ooc_correction", "offline_story", "import", "legacy_memory"]);
+const SOURCE_KINDS = new Set(["user_message", "automatic_summary", "deterministic_action", "manual", "ooc_correction", "offline_story", "import", "legacy_memory"]);
 const SOURCE_AUTHORSHIP = new Set(["user", "character", "system", "unknown"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -40,6 +44,7 @@ function normalizeSource(value: unknown): KnowledgeSourceRef | undefined {
   if (!isRecord(value)
     || !SOURCE_KINDS.has(value.kind as string)
     || !SOURCE_AUTHORSHIP.has(value.authorship as string)
+    || (value.app !== undefined && (!isNonEmpty(value.app) || !KNOWLEDGE_SOURCE_APPS.has(value.app.trim())))
     || !isNonEmpty(value.producer)
     || !isNonEmpty(value.evidenceKey)) return undefined;
   const messageIds = cleanStringArray(value.messageIds);
@@ -47,6 +52,7 @@ function normalizeSource(value: unknown): KnowledgeSourceRef | undefined {
   return {
     kind: value.kind as KnowledgeSourceRef["kind"],
     authorship: value.authorship as KnowledgeSourceRef["authorship"],
+    ...(typeof value.app === "string" ? { app: value.app as KnowledgeSourceRef["app"] } : {}),
     ...(messageIds ? { messageIds } : {}),
     ...(isNonEmpty(value.eventId) ? { eventId: value.eventId.trim() } : {}),
     ...(isNonEmpty(value.storyId) ? { storyId: value.storyId.trim() } : {}),
@@ -66,6 +72,9 @@ function hasTraceableEvidence(source: KnowledgeSourceRef): boolean {
 
 const clampConfidence = (value: number | undefined, maximum: number): number =>
   Math.min(maximum, Math.max(0, isFiniteNumber(value) ? value : maximum));
+
+const normalizeImportance = (value: number | undefined): number | undefined =>
+  value === undefined ? undefined : Math.min(10, Math.max(1, Math.round(value)));
 
 function resolveTruth(candidate: KnowledgeWriteCandidate): { truthStatus: TruthStatus; userConfirmed: boolean; confidence: number } {
   const { source } = candidate;
@@ -130,6 +139,7 @@ export function evaluateKnowledgeWrite(candidate: KnowledgeWriteCandidate): Know
       temporalStatus: temporal.temporalStatus,
       source,
       confidence: truth.confidence,
+      ...(normalizeImportance(candidate.importance) !== undefined ? { importance: normalizeImportance(candidate.importance) } : {}),
       userConfirmed: truth.userConfirmed,
       ...(candidate.occurredAt !== undefined ? { occurredAt: candidate.occurredAt } : {}),
       recordedAt: candidate.recordedAt,
@@ -160,6 +170,7 @@ export function normalizeKnowledgeClaim(value: unknown): KnowledgeClaim | undefi
     || value.confidence < 0
     || value.confidence > 1
     || typeof value.userConfirmed !== "boolean"
+    || (value.recallDisabled !== undefined && typeof value.recallDisabled !== "boolean")
     || !isFiniteNumber(value.recordedAt)
     || (value.status !== "active" && value.status !== "retracted")
     || value.visibility !== "relation_private"
@@ -169,6 +180,7 @@ export function normalizeKnowledgeClaim(value: unknown): KnowledgeClaim | undefi
     || (value.status === "retracted") !== (value.truthStatus === "retracted")) return undefined;
   const optionalNumbers = [value.occurredAt, value.validFrom, value.validTo];
   if (optionalNumbers.some((item) => item !== undefined && !isFiniteNumber(item))) return undefined;
+  if (value.importance !== undefined && (!isFiniteNumber(value.importance) || value.importance < 1 || value.importance > 10)) return undefined;
   return {
     id: value.id.trim(),
     relationId: scope.relationId.trim(),
@@ -182,7 +194,9 @@ export function normalizeKnowledgeClaim(value: unknown): KnowledgeClaim | undefi
     temporalStatus: value.temporalStatus as TemporalStatus,
     source,
     confidence: value.confidence,
+    ...(isFiniteNumber(value.importance) ? { importance: Math.round(value.importance) } : {}),
     userConfirmed: value.userConfirmed,
+    ...(value.recallDisabled === true ? { recallDisabled: true } : {}),
     ...(isFiniteNumber(value.occurredAt) ? { occurredAt: value.occurredAt } : {}),
     recordedAt: value.recordedAt,
     ...(isFiniteNumber(value.validFrom) ? { validFrom: value.validFrom } : {}),

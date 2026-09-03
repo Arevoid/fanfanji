@@ -3,6 +3,7 @@ import { MemoryService } from "../src/domain/memory/MemoryService";
 import {
   buildKnowledgeExtractionPrompt,
   parseKnowledgeExtractionOutput,
+  parseOrRepairKnowledgeExtractionOutput,
 } from "../src/features/characterKnowledge/services/knowledgeExtractionProtocol";
 import type { Character, Message } from "../src/types";
 
@@ -78,6 +79,47 @@ const parsed = parseKnowledgeExtractionOutput([
 ].join("\n"), new Set([userMessage.id, characterMessage.id]));
 assert.equal(parsed.length, 1);
 assert.deepEqual(parsed[0]?.sourceMessageIds, [userMessage.id]);
+
+let repairCalls = 0;
+const repairedOrdinaryText = await parseOrRepairKnowledgeExtractionOutput({
+  rawText: "用户说以后想和角色一起去日本。",
+  allowedMessageIds: new Set([userMessage.id, characterMessage.id]),
+  originalPrompt: prompt,
+  repair: async (repairPrompt) => {
+    repairCalls += 1;
+    assert.match(repairPrompt, /普通输出仅用于理解上一次尝试，不能作为事实来源/);
+    assert.match(repairPrompt, /用户说以后想和角色一起去日本/);
+    return JSON.stringify(payload());
+  },
+});
+assert.equal(repairCalls, 1);
+assert.equal(repairedOrdinaryText.repaired, true);
+assert.equal(repairedOrdinaryText.candidates[0]?.statement, "用户计划和角色一起去日本。");
+
+let validRepairCalls = 0;
+const alreadyStructured = await parseOrRepairKnowledgeExtractionOutput({
+  rawText: JSON.stringify(payload()),
+  allowedMessageIds: new Set([userMessage.id]),
+  originalPrompt: prompt,
+  repair: async () => {
+    validRepairCalls += 1;
+    return "";
+  },
+});
+assert.equal(validRepairCalls, 0, "valid JSONL must not spend a second API request");
+assert.equal(alreadyStructured.repaired, false);
+
+let emptyRepairCalls = 0;
+await parseOrRepairKnowledgeExtractionOutput({
+  rawText: "",
+  allowedMessageIds: new Set([userMessage.id]),
+  originalPrompt: prompt,
+  repair: async () => {
+    emptyRepairCalls += 1;
+    return "";
+  },
+});
+assert.equal(emptyRepairCalls, 0, "an honestly empty extraction must remain empty");
 
 const baseContext = {
   character,

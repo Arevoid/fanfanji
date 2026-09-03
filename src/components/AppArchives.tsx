@@ -4,15 +4,16 @@ import { apiSummarizePersonality } from "../utils/apiHelper";
 import { Plus, Trash2, User, ChevronLeft, AlertCircle, X, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2, Download } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
 import { getSpeechForText } from "../utils/minimaxTts";
-import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile } from "../features/archives/characterExport";
-import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
+import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile, createCharacterFromRawDocument } from "../features/archives/characterExport";
 import { buildCharacterTtsOptions, type TtsProvider } from "../features/voice/ttsConfig";
+import { readString } from "../core/storage/storageAdapter";
 
 interface AppArchivesProps {
   characters: Character[];
-  onSaveCharacter: (character: Character) => void;
+  onSaveCharacter: (character: Character) => void | boolean | Promise<boolean>;
   onDeleteCharacter: (id: string, skipConfirm?: boolean) => void;
   onClose: () => void;
+  onOpenCharacterPhone?: (characterId: string) => void;
   worldBookEntries?: WorldBookEntry[];
   onSaveWorldBookEntries?: (entries: WorldBookEntry[]) => void;
 }
@@ -30,6 +31,7 @@ export default function AppArchives({
   onSaveCharacter,
   onDeleteCharacter,
   onClose,
+  onOpenCharacterPhone,
   worldBookEntries = [],
   onSaveWorldBookEntries,
 }: AppArchivesProps) {
@@ -105,11 +107,12 @@ export default function AppArchives({
 
   // Form State
   const [name, setName] = useState("");
-  const [age, setAge] = useState<number | "">("");
+  const [age, setAge] = useState<number | "" | "∞">("");
   const [gender, setGender] = useState("");
   const [mbti, setMbti] = useState("");
   const [avatar, setAvatar] = useState("");
   const [personality, setPersonality] = useState("");
+  const [replyLanguage, setReplyLanguage] = useState("");
   const [, setBackstory] = useState("");
   const [greeting, setGreeting] = useState("");
   const [initialChatMode, setInitialChatMode] = useState<"greeting" | "context">("greeting");
@@ -140,7 +143,7 @@ export default function AppArchives({
 
       let settings: any = {};
       try {
-        const saved = localStorage.getItem("phone_settings");
+        const saved = readString("phone_settings").value;
         if (saved) settings = JSON.parse(saved);
       } catch (e) {
         console.error(e);
@@ -184,6 +187,7 @@ export default function AppArchives({
     setMbti("");
     setAvatar("");
     setPersonality("");
+    setReplyLanguage("");
     setBackstory("");
     setGreeting("");
     setAlbum([]);
@@ -216,6 +220,7 @@ export default function AppArchives({
       combined += "\n\n【背景故事】\n" + char.backstory;
     }
     setPersonality(combined);
+    setReplyLanguage(char.replyLanguage || "");
     setBackstory("");
     setGreeting(char.initialChatContext || char.greeting || "");
     setInitialChatMode(char.initialChatMode || (char.initialChatContext ? "context" : "greeting"));
@@ -251,27 +256,6 @@ export default function AppArchives({
       let importedChar: Character;
       let characterBook: any = null;
 
-      const importStructuredTextCharacter = (text: string): Character => {
-        const parsed = parseStructuredCharacterDocument(text, file.name);
-        const id = "char-import-" + Date.now();
-        if (parsed.worldBookEntries.length > 0) {
-          characterBook = { entries: parsed.worldBookEntries };
-        }
-        return {
-          id,
-          name: parsed.name,
-          age: parsed.age,
-          gender: parsed.gender,
-          mbti: parsed.mbti,
-          avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
-          personality: parsed.personality,
-          backstory: parsed.description,
-          greeting: "",
-          album: [],
-          references: [],
-        };
-      };
-
       if (isPng) {
         const charaStr = await parsePngChunks(file);
         if (!charaStr) {
@@ -291,13 +275,6 @@ export default function AppArchives({
           });
         }
         importedChar = mapSillyTavernToCharacter(parsedJson, imgDataUrl);
-        const innerData = parsedJson.data || parsedJson;
-        const mwb = innerData.mountedWorldbooks || innerData.mounted_worldbooks || innerData.mounted_world_books || parsedJson.mountedWorldbooks || parsedJson.mounted_worldbooks || parsedJson.mounted_world_books;
-        if (mwb && Array.isArray(mwb)) {
-          characterBook = { entries: mwb };
-        } else {
-          characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
-        }
       } else if (isJson) {
         const text = await new Promise<string>((resolve, reject) => {
           const r = new FileReader();
@@ -324,7 +301,7 @@ export default function AppArchives({
           r.onerror = () => reject(new Error("读取 TXT 配置文件失败"));
           r.readAsText(file);
         });
-        importedChar = importStructuredTextCharacter(text);
+        importedChar = createCharacterFromRawDocument(text, file.name, "char-import-" + Date.now());
       } else if (isDocx) {
         const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
           const r = new FileReader();
@@ -333,7 +310,7 @@ export default function AppArchives({
           r.readAsArrayBuffer(file);
         });
         const text = await safeParseDocx(arrayBuffer);
-        importedChar = importStructuredTextCharacter(text);
+        importedChar = createCharacterFromRawDocument(text, file.name, "char-import-" + Date.now());
       } else {
         throw new Error("请上传 .png 角色卡、.json 配置文件、.txt 或 .docx 文档文件！");
       }
@@ -343,7 +320,7 @@ export default function AppArchives({
       // the entire Character object, including chat and relationship settings.
       importedChar = createCharacterFromImportedProfile(importedChar, importedChar.id);
 
-      const finishImport = (importEntries: boolean) => {
+      const finishImport = async (importEntries: boolean) => {
         try {
           let importedEntriesCount = 0;
           const rawEntries = Array.isArray(characterBook?.entries)
@@ -373,7 +350,8 @@ export default function AppArchives({
             }
           }
 
-          onSaveCharacter(importedChar);
+          const saved = await onSaveCharacter(importedChar);
+          if (saved === false) throw new Error("角色档案保存失败，请检查浏览器存储权限或剩余空间");
 
           let successMsg = `成功导入角色「${importedChar.name}」！`;
           if (importedEntriesCount > 0) {
@@ -417,7 +395,7 @@ export default function AppArchives({
       setErrorMsg("请输入姓名！");
       return;
     }
-    if (age !== "" && isNaN(Number(age))) {
+    if (age !== "" && age !== "∞" && (!Number.isInteger(age) || age < 0)) {
       setErrorMsg("请输入正确的年龄！");
       return;
     }
@@ -427,14 +405,19 @@ export default function AppArchives({
     const finalPersonality = personality.trim();
 
     const savedChar: Character = {
+      // Archive editing changes the profile form only. Keep chat/runtime
+      // preferences and future character fields intact instead of replacing
+      // the record with a partial profile object.
+      ...(originalChar || {}),
       id: editingId || Date.now().toString(),
       name: name.trim(),
-      age: age === "" ? "" : Number(age),
+      age,
       gender,
       mbti,
       avatar: finalAvatar,
       personality: finalPersonality,
       backstory: "",
+      replyLanguage: replyLanguage.trim() || undefined,
       greeting: initialChatMode === "greeting" ? greeting.trim() : undefined,
       initialChatContext: initialChatMode === "context" ? greeting.trim() : undefined,
       initialChatMode,
@@ -496,7 +479,7 @@ export default function AppArchives({
     
     setIsSummarizing(true);
     try {
-      const rawSettings = localStorage.getItem("phone_settings");
+    const rawSettings = readString("phone_settings").value;
       let apiKey = "";
       let model = "";
       let apiEndpoint = "";
@@ -552,7 +535,7 @@ export default function AppArchives({
         <button
           type="button"
           onClick={isCreating ? resetForm : onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           id="archives_back_btn"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -578,7 +561,7 @@ export default function AppArchives({
                     }
                   );
                 }}
-                className="w-8 h-8 rounded-xl bg-rose-50 flex items-center justify-center hover:bg-rose-100 border border-rose-100 transition-colors"
+                className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors"
                 title="删除角色"
               >
                 <Trash2 className="w-4 h-4 text-rose-600" />
@@ -589,7 +572,7 @@ export default function AppArchives({
               <button
                 type="button"
                 onClick={() => setShowAddMenu(!showAddMenu)}
-                className="w-8 h-8 bg-neutral-950 hover:bg-neutral-900 text-white rounded-full transition-colors shadow flex items-center justify-center"
+                className="app-nav-icon-button w-8 h-8 text-slate-800 transition-colors flex items-center justify-center"
                 id="archives_add_btn"
               >
                 <Plus className="w-4.5 h-4.5" />
@@ -646,7 +629,7 @@ export default function AppArchives({
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 pb-20">
+      <div className="flex-1 overflow-y-auto p-4 pb-6">
         {isCreating ? (
           <form onSubmit={handleSubmit} className="settings-panel-card space-y-4 max-w-md mx-auto p-5 animate-slide-up">
             
@@ -706,13 +689,21 @@ export default function AppArchives({
                 <label className="block text-xs font-semibold text-slate-500 mb-1">
                   年龄
                 </label>
+                <div className="flex gap-2">
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   value={age}
-                  onChange={(e) => setAge(e.target.value === "" ? "" : parseInt(e.target.value))}
+                  onChange={(e) => {
+                    const value = e.target.value.trim();
+                    if (value === "" || value === "∞") setAge(value as "" | "∞");
+                    else if (/^\d{1,3}$/.test(value)) setAge(Number(value));
+                  }}
                   placeholder="请输入年龄"
-                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
+                  className="min-w-0 flex-1 px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
                 />
+                <button type="button" onClick={() => setAge(age === "∞" ? "" : "∞")} className={`w-11 rounded-[8px] border text-lg font-semibold ${age === "∞" ? "border-neutral-950 bg-neutral-950 text-white" : "border-slate-200 bg-slate-50 text-slate-600"}`} aria-label="设置年龄为无限">∞</button>
+                </div>
               </div>
             </div>
 
@@ -753,6 +744,17 @@ export default function AppArchives({
             </div>
 
             {/* Detailed Personality and Backstory */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">角色回复语言（选填）</label>
+              <input
+                type="text"
+                value={replyLanguage}
+                onChange={(e) => setReplyLanguage(e.target.value)}
+                placeholder="例如：日语、English；留空则从人设/国籍自动识别"
+                className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
+              />
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1">
                 详细人设与背景 (选填)
@@ -865,7 +867,7 @@ export default function AppArchives({
               return null;
             }
             return (
-              <div className="space-y-4 max-w-md mx-auto animate-slide-up pb-10">
+              <div className="space-y-4 max-w-md mx-auto animate-slide-up pb-4">
                 {/* Profile Header Card */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center text-center relative overflow-hidden">
                   <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-r from-neutral-800 to-neutral-950 opacity-10" />
@@ -887,7 +889,7 @@ export default function AppArchives({
                     <span className="w-1 h-1 rounded-full bg-slate-300" />
                     <span>{char.gender}</span>
                     <span className="w-1 h-1 rounded-full bg-slate-300" />
-                    <span>{char.age}岁</span>
+                    <span>{char.age === "∞" ? "∞" : char.age ? `${char.age}岁` : "年龄未设置"}</span>
                   </p>
                 </div>
 
@@ -1131,7 +1133,7 @@ export default function AppArchives({
                 <button
                   type="button"
                   onClick={() => setIsCreating(true)}
-                  className="mt-4 px-4 py-2 bg-neutral-950 hover:bg-neutral-900 text-white rounded-xl text-xs font-semibold transition-all shadow-sm"
+                  className="empty-state-action mt-4"
                 >
                   现在去创建
                 </button>
@@ -1150,7 +1152,7 @@ export default function AppArchives({
                         {char.mbti}
                       </span>
                       <span className="px-1.5 py-0.5 bg-[var(--badge-muted-bg)] text-[var(--badge-muted-text)] text-[10px] font-bold rounded-md">
-                        {char.age}岁
+                        {char.age === "∞" ? "∞" : char.age ? `${char.age}岁` : "年龄未设置"}
                       </span>
                     </div>
 
@@ -1174,6 +1176,18 @@ export default function AppArchives({
                         {char.personality}
                       </p>
                     </div>
+                    {onOpenCharacterPhone && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenCharacterPhone(char.id);
+                        }}
+                        className="absolute bottom-3 right-3 rounded-full bg-neutral-900 px-2.5 py-1 text-[10px] font-bold text-white"
+                      >
+                        角色手机测试
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

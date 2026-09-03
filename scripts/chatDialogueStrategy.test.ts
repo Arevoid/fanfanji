@@ -36,8 +36,10 @@ assert.equal(decide([message("u1", "user", "你今天还顺利吗？", 1)]).stra
 assert.equal(decide([message("u1", "user", "我在整理房间", 1)]).strategy, "continue");
 
 const guidance = formatChatDialogueStrategyGuidance({ strategy: "transition" });
-assert.match(guidance, /Selected strategy: transition/);
-assert.match(guidance, /Preserve the existing character persona/);
+assert.match(guidance, /Detected interaction signal: possible-repetition-or-completion/);
+assert.match(guidance, /soft interaction analysis only/);
+assert.doesNotMatch(formatChatDialogueStrategyGuidance({ strategy: "comfort" }), /Prioritize.*support|before anything else/);
+assert.match(formatChatDialogueStrategyGuidance({ strategy: "comfort" }), /not an order to comfort/);
 assert.equal(guidance.includes("relationId"), false);
 assert.equal(guidance.includes("Memory"), false);
 

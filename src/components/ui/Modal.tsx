@@ -14,6 +14,7 @@ export interface ModalProps {
   children: ReactNode;
   onClose: () => void;
   footer?: ReactNode;
+  headerActions?: ReactNode;
   size?: ModalSize;
   closeOnOverlayClick?: boolean;
   showCloseButton?: boolean;
@@ -35,6 +36,7 @@ export function Modal({
   children,
   onClose,
   footer,
+  headerActions,
   size = "md",
   closeOnOverlayClick = true,
   showCloseButton = true,
@@ -76,12 +78,15 @@ export function Modal({
             onMouseDown={(event) => event.stopPropagation()}
           >
             {(title || description || showCloseButton) && (
-              <header className="flex shrink-0 items-start gap-[var(--space-3)] px-[var(--space-5)] pt-[var(--space-5)]">
+              <header className="flex shrink-0 items-center gap-[var(--space-3)] px-[var(--space-5)] pt-[var(--space-5)]">
                 <div className="min-w-0 flex-1">
                   {title && <h2 id={titleId} className="text-[17px] font-semibold leading-6">{title}</h2>}
                   {description && <p id={descriptionId} className="mt-1 text-[13px] leading-[18px] text-[var(--color-text-secondary)]">{description}</p>}
                 </div>
-                {showCloseButton && <IconButton aria-label="关闭" icon={<X size={20} />} onClick={onClose} variant="ghost" />}
+                <div className="flex shrink-0 items-center gap-1">
+                  {headerActions}
+                  {showCloseButton && <IconButton aria-label="关闭" icon={<X size={20} />} onClick={onClose} variant="ghost" />}
+                </div>
               </header>
             )}
             <div className={`min-h-0 flex-1 overflow-y-auto px-[var(--space-5)] py-[var(--space-4)] ${contentClassName}`}>{children}</div>

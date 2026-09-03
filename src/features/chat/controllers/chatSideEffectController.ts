@@ -10,7 +10,6 @@ export interface ChatReplySideEffectInput {
   relationships: CharacterRelationship[];
   isOffline: boolean;
   activeOfflineStoryId?: string | null;
-  extractInterval?: number;
 }
 
 export interface ChatSideEffectControllerDependencies {
@@ -18,12 +17,19 @@ export interface ChatSideEffectControllerDependencies {
   onSaveOfflineStory?: (story: OfflineStory) => void;
   extractMemories: (messages: Message[]) => Promise<number>;
   onSaveRelationships: (relationships: CharacterRelationship[]) => void;
+  updateRelationships?: (update: (previous: CharacterRelationship[]) => CharacterRelationship[]) => void;
   onSaveCharacter: (character: Character) => void;
+  /** Prefer a field patch for delayed side effects so stale full snapshots cannot overwrite settings. */
+  updateCharacter?: (characterId: string, patch: Partial<Character>) => void | Promise<boolean>;
   schedule?: (task: () => void | Promise<void>, delayMs: number) => void;
   now?: () => number;
 }
 
 export type LastReadTimestamps = Record<string, number>;
+
+const AUTO_SUMMARY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+const autoSummaryInFlight = new Set<string>();
+const autoSummaryCooldownUntil = new Map<string, number>();
 
 /**
  * Reply-completion side effects. The controller deliberately receives the
@@ -37,6 +43,16 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
     }, delayMs);
   });
   const now = dependencies.now || (() => Date.now());
+  const saveRelationships = (
+    base: CharacterRelationship[],
+    update: (previous: CharacterRelationship[]) => CharacterRelationship[],
+  ) => {
+    if (dependencies.updateRelationships) {
+      dependencies.updateRelationships(update);
+      return;
+    }
+    dependencies.onSaveRelationships(update(base));
+  };
 
   return {
     afterReplySuccess(input: ChatReplySideEffectInput): void {
@@ -54,10 +70,10 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
         return;
       }
 
-      if (input.activeCharacter.enableAutoSummary === true) {
-        const extractIntervalRounds = input.activeCharacter.summaryTriggerRound !== undefined
-          ? input.activeCharacter.summaryTriggerRound
-          : (input.extractInterval || 10);
+        const configuredRounds = input.activeCharacter.summaryTriggerRound;
+        const extractIntervalRounds = Number.isFinite(configuredRounds)
+          ? Math.min(100, Math.max(10, Math.round(configuredRounds as number)))
+          : 50;
         const triggerCount = extractIntervalRounds * 2;
         const currentMessages = input.userMsg
           ? [...input.currentChatMessages, input.userMsg, ...input.createdMessages]
@@ -74,23 +90,42 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
         }
 
         if (eligibleMessages.length >= triggerCount) {
-          schedule(async () => {
-            const count = await dependencies.extractMemories(eligibleMessages);
-            // A successful extraction with no durable facts is still a
-            // completed archive pass. Advance the marker so the same range is
-            // not sent to the model again after every subsequent reply.
-            if (count >= 0) {
-              const lastMessage = eligibleMessages[eligibleMessages.length - 1];
-              if (lastMessage && input.activeRelationship) {
-                dependencies.onSaveRelationships(input.relationships.map((relation) => relation.id === input.activeRelationship?.id
-                  ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: now() }
-                  : relation));
+          const summaryScopeKey = input.activeRelationship?.id || input.activeCharacter.id;
+          const currentTime = now();
+          const cooldownUntil = autoSummaryCooldownUntil.get(summaryScopeKey) || 0;
+          if (!autoSummaryInFlight.has(summaryScopeKey) && currentTime >= cooldownUntil) {
+            // Mark this scope before scheduling. The controller can be
+            // recreated by React between replies, so this guard intentionally
+            // lives at module scope and prevents duplicate hidden requests.
+            autoSummaryInFlight.add(summaryScopeKey);
+            schedule(async () => {
+              try {
+                const count = await dependencies.extractMemories(eligibleMessages);
+                // A successful extraction with no durable facts is still a
+                // completed archive pass. Advance the marker so the same
+                // range is not sent to the model again after every reply.
+                if (count >= 0) {
+                  autoSummaryCooldownUntil.delete(summaryScopeKey);
+                  const lastMessage = eligibleMessages[eligibleMessages.length - 1];
+                  if (lastMessage && input.activeRelationship) {
+                    saveRelationships(input.relationships, (previous) => previous.map((relation) => relation.id === input.activeRelationship?.id
+                      ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: now() }
+                      : relation));
+                  }
+                } else {
+                  // A failed background request must not be replayed on every
+                  // following chat turn. Manual extraction is unaffected.
+                  autoSummaryCooldownUntil.set(summaryScopeKey, now() + AUTO_SUMMARY_FAILURE_COOLDOWN_MS);
+                }
+              } catch (error) {
+                autoSummaryCooldownUntil.set(summaryScopeKey, now() + AUTO_SUMMARY_FAILURE_COOLDOWN_MS);
+                console.warn("Automatic memory extraction skipped after an API failure:", error instanceof Error ? error.message : error);
+              } finally {
+                autoSummaryInFlight.delete(summaryScopeKey);
               }
-            }
-          }, 200);
+            }, 200);
+          }
         }
-      }
-
       if (input.activeCharacter.album && input.activeCharacter.album.length > 0) {
         const needsCover = !input.activeCharacter.momentsCover;
         const shouldChangeCover = needsCover || Math.random() < 0.35;
@@ -98,10 +133,14 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
           const albumList = input.activeCharacter.album;
           const selectedCover = albumList[Math.floor(Math.random() * albumList.length)];
           if (selectedCover !== input.activeCharacter.momentsCover) {
-            dependencies.onSaveCharacter({
-              ...input.activeCharacter,
-              momentsCover: selectedCover,
-            });
+            if (dependencies.updateCharacter) {
+              void dependencies.updateCharacter(input.activeCharacter.id, { momentsCover: selectedCover });
+            } else {
+              dependencies.onSaveCharacter({
+                ...input.activeCharacter,
+                momentsCover: selectedCover,
+              });
+            }
           }
         }
       }

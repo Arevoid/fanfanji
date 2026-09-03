@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
   MusicTrack,
@@ -12,6 +12,13 @@ import {
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { formatTimeWidgetDate } from "../features/home/timeWidgetDate";
 import { audioDb } from "../utils/audioDb";
+import { readString, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
+import { readArray } from "../core/storage/repositories/repositoryUtils";
+import { initializeReadingStore, loadReadingStore } from "../core/storage/repositories/readingRepository";
+import { initializeCoReadingStore, listReadingComments, listReadingRooms } from "../core/storage/repositories/readingCoReadingRepository";
+import type { ReadingBook } from "../domain/reading/types";
+import type { ReadingComment } from "../domain/reading/coReadingTypes";
+import ReadingBookCover from "./reading/ReadingBookCover";
 import {
   compressImagePreservingTransparency,
   isTransparencyPreservedImage,
@@ -30,6 +37,8 @@ import {
   Volume2,
   User,
   Clock,
+  BookOpenText,
+  MessageCircle,
 } from "lucide-react";
 
 // Pre-seeded high-quality images for the Album Widget to look gorgeous
@@ -82,6 +91,7 @@ interface WidgetProps {
   id: string;
   isEditing?: boolean;
   onRemove?: () => void;
+  compact?: boolean;
   // Music states for MusicWidget
   isPlaying?: boolean;
   onTogglePlay?: () => void;
@@ -106,13 +116,13 @@ interface WidgetProps {
   onRefreshRelationshipMusic?: (relationId: string) => void;
   musicRecommendationLoading?: boolean;
   musicError?: string | null;
+  onOpenReading?: (bookId: string, paragraphAnchorId?: string) => void;
+  messages?: Array<import("../types").Message>;
+  relationships?: CharacterRelationship[];
 }
 
 export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBorderRadius }: WidgetProps) {
-  const [customPhotos, setCustomPhotos] = useState<string[]>(() => {
-    const raw = localStorage.getItem(`album_widget_photos_${id}`);
-    return raw ? JSON.parse(raw) : [];
-  });
+  const [customPhotos, setCustomPhotos] = useState<string[]>(() => readArray<string>(`album_widget_photos_${id}`, []).value);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -120,7 +130,7 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
       const compressed = await compressImagePreservingTransparency(file, 800, 800, 0.75);
       const updated = [compressed];
       setCustomPhotos(updated);
-      localStorage.setItem(`album_widget_photos_${id}`, JSON.stringify(updated));
+      writeJson(`album_widget_photos_${id}`, updated);
     }
   };
 
@@ -191,8 +201,8 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
 /** A wide, date-led photo widget. Its image is intentionally unmasked so the
  * user controls contrast solely with the single date-text colour setting. */
 export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadius }: WidgetProps) {
-  const [backgroundImage, setBackgroundImage] = useState(() => localStorage.getItem(`calendar_album_image_${id}`) || ALBUM_IMAGES[2]);
-  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(localStorage.getItem(`calendar_album_font_color_${id}`)));
+  const [backgroundImage, setBackgroundImage] = useState(() => readString(`calendar_album_image_${id}`).value || ALBUM_IMAGES[2]);
+  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(readString(`calendar_album_font_color_${id}`).value));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [draftBackgroundImage, setDraftBackgroundImage] = useState(backgroundImage);
   const [draftFontColor, setDraftFontColor] = useState(fontColor);
@@ -225,8 +235,8 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
     const nextColor = normalizeWidgetTextColor(draftFontColor, fontColor);
     setBackgroundImage(draftBackgroundImage);
     setFontColor(nextColor);
-    localStorage.setItem(`calendar_album_image_${id}`, draftBackgroundImage);
-    localStorage.setItem(`calendar_album_font_color_${id}`, nextColor);
+    writeString(`calendar_album_image_${id}`, draftBackgroundImage);
+    writeString(`calendar_album_font_color_${id}`, nextColor);
     setIsSettingsOpen(false);
   };
 
@@ -321,9 +331,9 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
 }
 
 /** Frameless 2×4 clock matching the compact date-over-time reference layout. */
-export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
+export function TimeWidget({ id, isEditing, onRemove, compact = false }: WidgetProps) {
   const [now, setNow] = useState(() => new Date());
-  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(localStorage.getItem(`time_widget_font_color_${id}`), "#1c1917"));
+  const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(readString(`time_widget_font_color_${id}`).value, "#1c1917"));
   const [draftFontColor, setDraftFontColor] = useState(fontColor);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const textRefs = useRef<Array<HTMLSpanElement | null>>([]);
@@ -368,7 +378,7 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
     const nextColor = normalizeWidgetTextColor(draftFontColor, fontColor);
     setFontColor(nextColor);
     setDraftFontColor(nextColor);
-    localStorage.setItem(`time_widget_font_color_${id}`, nextColor);
+    writeString(`time_widget_font_color_${id}`, nextColor);
     setIsSettingsOpen(false);
   };
 
@@ -388,13 +398,13 @@ export function TimeWidget({ id, isEditing, onRemove }: WidgetProps) {
       >
         <span
           ref={(element) => { textRefs.current[0] = element; }}
-          className="w-full whitespace-nowrap text-center text-[17px] font-bold leading-none tracking-[-0.02em]"
+          className={`w-full whitespace-nowrap text-center font-bold leading-none tracking-[-0.02em] ${compact ? "text-[11px]" : "text-[17px]"}`}
         >
           {display.heading}
         </span>
         <span
           ref={(element) => { textRefs.current[1] = element; }}
-          className="mt-4 whitespace-nowrap text-[clamp(92px,28vw,118px)] font-normal leading-[0.74] tracking-[-0.045em]"
+          className={`whitespace-nowrap font-normal leading-[0.74] tracking-[-0.045em] ${compact ? "mt-1 text-[54px]" : "mt-4 text-[clamp(92px,28vw,118px)]"}`}
         >
           {display.time}
         </span>
@@ -557,13 +567,13 @@ export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, 
 
 
 export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widgetBorderRadius }: WidgetProps) {
-  const [targetDate, setTargetDate] = useState(() => localStorage.getItem(`anniversary_date_${id}`) || "2026-03-02");
-  const [title, setTitle] = useState(() => localStorage.getItem(`anniversary_title_${id}`) || "纪念日");
-  const [widgetType, setWidgetType] = useState<"anniversary" | "countdown">(() => (localStorage.getItem(`anniversary_type_${id}`) as "anniversary" | "countdown") || "anniversary");
-  const [backgroundImage, setBackgroundImage] = useState(() => localStorage.getItem(`anniversary_bg_${id}`) || "");
+  const [targetDate, setTargetDate] = useState(() => readString(`anniversary_date_${id}`).value || "2026-03-02");
+  const [title, setTitle] = useState(() => readString(`anniversary_title_${id}`).value || "纪念日");
+  const [widgetType, setWidgetType] = useState<"anniversary" | "countdown">(() => (readString(`anniversary_type_${id}`).value as "anniversary" | "countdown") || "anniversary");
+  const [backgroundImage, setBackgroundImage] = useState(() => readString(`anniversary_bg_${id}`).value || "");
   const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(
-    localStorage.getItem(`anniversary_color_${id}`),
-    localStorage.getItem(`anniversary_bg_${id}`) ? "#ffffff" : "#1c1917",
+    readString(`anniversary_color_${id}`).value,
+    readString(`anniversary_bg_${id}`).value ? "#ffffff" : "#1c1917",
   ));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [draftTargetDate, setDraftTargetDate] = useState(targetDate);
@@ -598,12 +608,12 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
     setWidgetType(draftWidgetType);
     setBackgroundImage(draftBackgroundImage);
     setFontColor(nextColor);
-    localStorage.setItem(`anniversary_date_${id}`, draftTargetDate);
-    localStorage.setItem(`anniversary_title_${id}`, draftTitle);
-    localStorage.setItem(`anniversary_type_${id}`, draftWidgetType);
-    localStorage.setItem(`anniversary_color_${id}`, nextColor);
-    if (draftBackgroundImage) localStorage.setItem(`anniversary_bg_${id}`, draftBackgroundImage);
-    else localStorage.removeItem(`anniversary_bg_${id}`);
+    writeString(`anniversary_date_${id}`, draftTargetDate);
+    writeString(`anniversary_title_${id}`, draftTitle);
+    writeString(`anniversary_type_${id}`, draftWidgetType);
+    writeString(`anniversary_color_${id}`, nextColor);
+    if (draftBackgroundImage) writeString(`anniversary_bg_${id}`, draftBackgroundImage);
+    else removeStoredValue(`anniversary_bg_${id}`);
     setIsSettingsOpen(false);
   };
 
@@ -852,14 +862,16 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
 
   useEffect(() => {
     const loadTodos = () => {
-      const raw = localStorage.getItem("phone_memo_todos");
-      if (raw) {
-        setTodos(JSON.parse(raw));
-      } else {
+      const result = readArray<{ id: string; text: string; checked: boolean }>("phone_memo_todos", []);
+      if (result.found && result.valid) {
+        setTodos(result.value);
+      } else if (!result.found) {
         // Fallback default todos
         const defaultTodos: { id: string; text: string; checked: boolean }[] = [];
         setTodos(defaultTodos);
-        localStorage.setItem("phone_memo_todos", JSON.stringify(defaultTodos));
+        writeJson("phone_memo_todos", defaultTodos);
+      } else {
+        setTodos([]);
       }
     };
     loadTodos();
@@ -873,7 +885,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
     e.stopPropagation();
     const updated = todos.map(t => t.id === todoId ? { ...t, checked: !t.checked } : t);
     setTodos(updated);
-    localStorage.setItem("phone_memo_todos", JSON.stringify(updated));
+    writeJson("phone_memo_todos", updated);
   };
 
   const completedCount = todos.filter(t => t.checked).length;
@@ -888,7 +900,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
             const isInstalled = installedAppIds 
               ? installedAppIds.includes("notes") 
               : (() => {
-                  const raw = localStorage.getItem("phone_installed_apps");
+                  const raw = readString("phone_installed_apps").value;
                   if (raw) {
                     try {
                       const parsed = JSON.parse(raw);
@@ -903,8 +915,8 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
               return;
             }
 
-            localStorage.setItem("memo_active_tab", "todo");
-            localStorage.setItem("memo_open_todo_edit", "true");
+            writeString("memo_active_tab", "todo");
+            writeString("memo_open_todo_edit", "true");
             onOpenApp("notes");
           }
         }}
@@ -981,9 +993,213 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
   );
 }
 
+interface ReadingWidgetEntry {
+  book: ReadingBook;
+  comment: ReadingComment;
+  chapterTitle: string;
+}
+
+const readingWidgetDayKey = (): string => new Date().toISOString().slice(0, 10);
+
+const readingWidgetHash = (value: string): number => Array.from(value).reduce((hash, character) => ((hash * 31) + (character.codePointAt(0) || 0)) >>> 0, 7);
+
+function getReadingWidgetEntry(ownerIdentityId?: string): ReadingWidgetEntry | null {
+  if (!ownerIdentityId) return null;
+  const store = loadReadingStore().value;
+  const books = store.books.filter((book) => book.userIdentityId === ownerIdentityId && book.status === "ready");
+  const bookById = new Map(books.map((book) => [book.id, book]));
+  const chapterById = new Map(store.chapters.filter((chapter) => chapter.userIdentityId === ownerIdentityId).map((chapter) => [chapter.id, chapter]));
+  const entries = listReadingRooms(ownerIdentityId).flatMap((room) => listReadingComments(room)
+    .filter((comment) => comment.kind === "paragraph" && !comment.parentCommentId && comment.body.trim())
+    .map((comment) => {
+      const book = bookById.get(comment.bookId);
+      if (!book) return null;
+      return { book, comment, chapterTitle: chapterById.get(comment.targetChapterId || "")?.title || "未命名章节" };
+    })
+    .filter((entry): entry is ReadingWidgetEntry => Boolean(entry)));
+  if (!entries.length) return books[0] ? { book: books[0], comment: null as unknown as ReadingComment, chapterTitle: "暂无段评" } : null;
+  const sorted = entries.sort((left, right) => left.comment.createdAt - right.comment.createdAt);
+  return sorted[readingWidgetHash(`${ownerIdentityId}:${readingWidgetDayKey()}`) % sorted.length];
+}
+
+export function ReadingWidget({ isEditing, onRemove, activeIdentity, widgetBorderRadius, onOpenReading }: WidgetProps) {
+  const [entry, setEntry] = useState<ReadingWidgetEntry | null>(() => getReadingWidgetEntry(activeIdentity?.id));
+  const refresh = () => setEntry(getReadingWidgetEntry(activeIdentity?.id));
+  useEffect(() => {
+    let active = true;
+    refresh();
+    Promise.all([initializeReadingStore(), initializeCoReadingStore()]).then(() => {
+      if (active) refresh();
+    }).catch(() => {
+      if (active) refresh();
+    });
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const retryTimer = window.setTimeout(refresh, 1200);
+    return () => {
+      active = false;
+      window.clearTimeout(retryTimer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [activeIdentity?.id]);
+
+  return (
+    <div
+      className="relative flex h-full w-full overflow-visible border border-stone-200/60 bg-white/90 p-3 text-left shadow-sm backdrop-blur-sm"
+      style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}
+      onClick={() => entry && onOpenReading?.(entry.book.id, entry.comment?.targetParagraphAnchorId)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && entry) onOpenReading?.(entry.book.id, entry.comment?.targetParagraphAnchorId); }}
+      aria-label={entry ? `打开《${entry.book.title}》阅读原文` : "阅读小组件"}
+    >
+      {entry ? (
+        <>
+          <ReadingBookCover book={entry.book} className="h-full w-[28%] shrink-0 rounded-sm" />
+          <div className="flex min-w-0 flex-1 flex-col pl-3">
+            <h3 className="truncate text-sm font-black text-stone-900">{entry.book.title}</h3>
+            <p className="mt-1 truncate text-[10px] font-semibold text-stone-700">{entry.comment?.authorName || "阅读"}</p>
+            <p className="mt-1 line-clamp-4 min-h-0 flex-1 whitespace-pre-wrap text-[10px] leading-[1.55] text-stone-400">{entry.comment?.body || "这本书还没有段评，点击开始阅读。"}</p>
+            <div className="mt-1 flex items-center justify-between gap-2 border-t border-stone-300/70 pt-1 text-[9px] text-stone-700">
+              <span className="min-w-0 truncate">{entry.chapterTitle}</span>
+              <span className="shrink-0 font-semibold">查看原文 →</span>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-center text-xs font-semibold text-stone-400">添加书籍并写下第一条段评后，这里会显示每日阅读摘评</div>
+      )}
+      {isEditing && onRemove && <button type="button" data-home-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>}
+    </div>
+  );
+}
+
+const chatStatsDayKey = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+};
+
+const chatStatsDateFromKey = (key: string): Date => {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month - 1, day);
+};
+
+/** Widget timestamps are intentionally fixed to local 24-hour HH:mm output. */
+const chatStatsFormatTime = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
+};
+
+function countChatStreak(days: Set<string>, today: Date): number {
+  const cursor = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (!days.has(chatStatsDayKey(cursor.getTime()))) cursor.setDate(cursor.getDate() - 1);
+  let streak = 0;
+  while (days.has(chatStatsDayKey(cursor.getTime()))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function countLongestChatStreak(days: Set<string>): number {
+  const sorted = Array.from(days).sort();
+  let longest = 0;
+  let current = 0;
+  let previous: Date | null = null;
+  sorted.forEach((key) => {
+    const date = chatStatsDateFromKey(key);
+    if (previous && date.getTime() - previous.getTime() === 86_400_000) current += 1;
+    else current = 1;
+    longest = Math.max(longest, current);
+    previous = date;
+  });
+  return longest;
+}
+
+interface ChatStatsData {
+  currentStreak: number;
+  longestStreak: number;
+  counts: Map<string, number>;
+  latest: import("../types").Message | null;
+}
+
+function getChatStatsData(
+  messages: Array<import("../types").Message>,
+  relationships: CharacterRelationship[],
+  characters: Character[],
+  activeIdentity?: UserIdentity,
+): ChatStatsData {
+  const identityId = activeIdentity?.id;
+  const relationIds = new Set(relationships.filter((relation) => relation.userIdentityId === identityId).map((relation) => relation.id));
+  const characterIds = new Set(relationships.filter((relation) => relation.userIdentityId === identityId).map((relation) => relation.characterId));
+  characters.filter((character) => character.ownerIdentityId === identityId && character.isGroupChat).forEach((character) => characterIds.add(character.id));
+  const scoped = messages.filter((message) => {
+    if (message.isImportedContext || !message.timestamp || !Number.isFinite(message.timestamp)) return false;
+    if (message.relationId) return relationIds.has(message.relationId);
+    return characterIds.has(message.characterId);
+  });
+  const counts = new Map<string, number>();
+  scoped.forEach((message) => {
+    const key = chatStatsDayKey(message.timestamp);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  const days = new Set(counts.keys());
+  return {
+    currentStreak: countChatStreak(days, new Date()),
+    longestStreak: countLongestChatStreak(days),
+    counts,
+    latest: scoped.reduce<import("../types").Message | null>((latest, message) => !latest || message.timestamp > latest.timestamp ? message : latest, null),
+  };
+}
+
+export function ChatStatsWidget({ isEditing, onRemove, activeIdentity, characters = [], relationships = [], messages = [], widgetBorderRadius }: WidgetProps) {
+  const data = useMemo(() => getChatStatsData(messages, relationships, characters, activeIdentity), [messages, relationships, characters, activeIdentity]);
+  const today = new Date();
+  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const start = new Date(end);
+  start.setDate(start.getDate() - 83);
+  const days = Array.from({ length: 84 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    return date;
+  });
+  const weeks = Array.from({ length: 12 }, (_, weekIndex) => days.slice(weekIndex * 7, weekIndex * 7 + 7));
+  const latestCharacter = data.latest ? characters.find((character) => character.id === data.latest?.characterId) : undefined;
+  const latestName = latestCharacter?.name || "对方";
+  const latestText = data.latest ? `最晚${chatStatsFormatTime(data.latest.timestamp)}分，您还在与${latestName}畅聊` : "还没有聊天记录";
+
+  return (
+    <div className="relative flex h-full w-full flex-col overflow-visible border border-stone-200/70 bg-white/90 px-3 py-2.5 text-stone-900 shadow-sm backdrop-blur-sm" style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}>
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="text-[12px] font-black leading-tight">连续聊天</h3>
+          <p className="mt-0.5 text-[8px] font-medium text-stone-400">最长连续{data.longestStreak}天</p>
+        </div>
+        <div className="flex items-baseline gap-0.5 leading-none"><span className="text-[31px] font-black tracking-tight">{data.currentStreak}</span><span className="text-[12px] font-bold">天</span></div>
+      </div>
+      <div className="mt-2 flex min-h-0 flex-1 justify-between gap-[3px] px-0.5" aria-label="近十二周聊天活跃度">
+        {weeks.map((week, weekIndex) => <div key={weekIndex} className="grid min-w-0 flex-1 grid-rows-7 gap-x-[2px] gap-y-[3px]">
+          {week.map((date) => {
+            const count = data.counts.get(chatStatsDayKey(date.getTime())) || 0;
+            const tone = count === 0 ? "bg-stone-100" : count <= 3 ? "bg-sky-200" : count <= 10 ? "bg-sky-300" : count <= 25 ? "bg-sky-400" : "bg-sky-500";
+            return <span key={date.getTime()} title={`${chatStatsDayKey(date.getTime())}：${count}条消息`} className={`block aspect-square w-full rounded-[2px] ${tone}`} />;
+          })}
+        </div>)}
+      </div>
+      <p className="mt-2 line-clamp-2 min-h-[22px] text-center text-[9px] font-medium leading-[1.25] text-stone-400">{data.latest ? <><span className="block">最晚{chatStatsFormatTime(data.latest.timestamp)}分</span><span className="block">您还在与{latestName}畅聊</span></> : latestText}</p>
+      {isEditing && onRemove && <button type="button" data-home-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(); }} className="absolute -right-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-xs font-black text-white shadow-md">×</button>}
+    </div>
+  );
+}
+
 // Bottom sheet selector for preset widgets
 interface AddWidgetSheetProps {
-  onAdd: (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "welcome") => void;
+  onAdd: (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "reading" | "chat-stats" | "welcome") => void;
   onClose: () => void;
   settings?: UserSettings;
 }
@@ -1005,6 +1221,15 @@ export function AddWidgetSheet({ onAdd, onClose, settings }: AddWidgetSheetProps
       </div>
 
       <div className="grid grid-cols-2 gap-4">
+        <button onClick={() => onAdd("chat-stats")} className="flex items-center gap-3 rounded-2xl border border-stone-200/60 bg-stone-50 p-3 text-left transition-all hover:scale-[1.02] hover:bg-stone-100 active:scale-95">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-700"><MessageCircle className="h-5 w-5" /></div>
+          <div><h4 className="text-xs font-black text-stone-800">聊天统计 (2×2)</h4><p className="mt-0.5 text-[10px] font-medium text-stone-400">连续聊天与活跃热力图</p></div>
+        </button>
+        <button onClick={() => onAdd("reading")} className="flex items-center gap-3 rounded-2xl border border-stone-200/60 bg-stone-50 p-3 text-left transition-all hover:scale-[1.02] hover:bg-stone-100 active:scale-95">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700"><BookOpenText className="h-5 w-5" /></div>
+          <div><h4 className="text-xs font-black text-stone-800">阅读摘评 (2×4)</h4><p className="mt-0.5 text-[10px] font-medium text-stone-400">每日随机显示共读段评</p></div>
+        </button>
+
         {/* Option 1: Album 2x2 */}
         <button
           onClick={() => onAdd("album")}

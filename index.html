@@ -2,55 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content, maximum-scale=1, user-scalable=no" />
-    <title>饭饭机</title>
+    <!-- Keep the viewport contract conservative for iOS Safari.  The visual
+         viewport controller handles keyboard resizing; the non-standard
+         interactive-widget/max-scale flags can make Safari open a pushed PWA
+         in a non-standalone, letterboxed layout. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>米饭机</title>
     
     <!-- PWA primary settings -->
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="icon" type="image/png" href="/icon-192.png" />
+    <!-- Version the manifest/icon URLs so Chrome, Android launchers and iOS
+         Safari do not keep the previous app shell/icon after a deployment. -->
+    <link rel="manifest" href="/manifest.json?v=20260818" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=20260818" />
     <meta id="app-theme-color" name="theme-color" content="#f7f7f5" />
-    <script>
-      // Keep the first paint aligned with the persisted appearance preference.
-      // The React ThemeProvider remains the runtime source of truth.
-      (function () {
-        var light = "#f7f7f5";
-        var dark = "#171719";
-        var theme = "light";
-        try {
-          var raw = localStorage.getItem("phone_appearance_settings");
-          var mode = raw ? JSON.parse(raw).themeMode : "light";
-          if (mode === "dark") theme = "dark";
-          else if (mode === "system" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) theme = "dark";
-        } catch (_) {}
-        var color = theme === "dark" ? dark : light;
-        function applyFirstPaintTheme() {
-          document.documentElement.dataset.theme = theme;
-          document.documentElement.style.colorScheme = theme;
-          document.documentElement.style.backgroundColor = color;
-          if (document.body) {
-            document.body.style.colorScheme = theme;
-            document.body.style.backgroundColor = color;
-          }
-          var root = document.getElementById("root");
-          if (root) {
-            root.style.colorScheme = theme;
-            root.style.backgroundColor = color;
-          }
-          var meta = document.getElementById("app-theme-color");
-          if (meta) meta.content = color;
-          var appleStatusBar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
-          if (appleStatusBar) appleStatusBar.content = theme === "dark" ? "black-translucent" : "default";
-        }
-        applyFirstPaintTheme();
-        document.addEventListener("DOMContentLoaded", applyFirstPaintTheme, { once: true });
-      })();
-    </script>
+    <!-- Enforced policy: custom API hosts remain allowed through connect-src https:. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: blob: https:; connect-src 'self' https:; media-src 'self' data: blob: https:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'none';">
+    <script src="/firstPaintTheme.js"></script>
     
     <!-- iOS / Apple Standalone App Support -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-touch-fullscreen" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="饭饭机" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png" />
+    <meta name="apple-mobile-web-app-title" content="米饭机" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png?v=20260818" />
     
     <!-- Android / Chrome Web App Support -->
     <meta name="mobile-web-app-capable" content="yes" />

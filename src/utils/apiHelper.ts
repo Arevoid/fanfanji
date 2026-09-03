@@ -2,11 +2,53 @@
 
 import {
   buildKnowledgeExtractionPrompt,
-  parseKnowledgeExtractionOutput,
+  parseOrRepairKnowledgeExtractionOutput,
   type ExtractedKnowledgeCandidatePayload,
   type KnowledgeExtractionHistoryItem,
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
-import { prepareGeminiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
+import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
+import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError } from "./fetchWithTimeout";
+import { recordApiUsage, type ApiUsageOperation } from "../core/monitoring/apiUsageMetrics";
+import { emptyTextApiErrorDetails, parseTextApiErrorPayload, type TextApiErrorCode } from "./textApiError";
+
+async function trackApiUsage<T>(operation: ApiUsageOperation, inputCharacters: number, request: () => Promise<T>): Promise<T> {
+  try {
+    const result = await request();
+    const output = typeof result === "object" && result !== null && "text" in result
+      ? String((result as { text?: unknown }).text || "").length
+      : 0;
+    recordApiUsage({ operation, succeeded: true, inputCharacters, outputCharacters: output });
+    return result;
+  } catch (error) {
+    recordApiUsage({ operation, succeeded: false, inputCharacters });
+    throw error;
+  }
+}
+
+export class ApiChatError extends Error {
+  readonly status?: number;
+  readonly code: TextApiErrorCode;
+  readonly reason?: string;
+
+  constructor(message: string, options: { status?: number; code?: TextApiErrorCode; reason?: string; cause?: unknown } = {}) {
+    super(message, options.cause !== undefined ? { cause: options.cause } : undefined);
+    this.name = "ApiChatError";
+    this.status = options.status;
+    this.code = options.code || "unknown";
+    this.reason = options.reason;
+  }
+}
+
+const apiRequestError = (error: unknown, label: string): ApiChatError => {
+  if (isApiRequestError(error, "timeout")) return new ApiChatError(describeApiRequestError(error, label), { code: "timeout", status: 504, cause: error });
+  if (isApiRequestError(error, "aborted")) return new ApiChatError(describeApiRequestError(error, label), { code: "aborted", status: 499, cause: error });
+  if (isApiRequestError(error, "network")) return new ApiChatError(describeApiRequestError(error, label), { code: "network", status: 503, cause: error });
+  return new ApiChatError(error instanceof Error ? error.message : String(error || `${label}请求失败。`), { cause: error });
+};
+
+export const isProhibitedContentError = (error: unknown): boolean =>
+  (error instanceof ApiChatError && error.code === "provider_safety")
+  || /PROHIBITED_CONTENT|request blocked by Gemini API|content[_ -]?safety|content[_ -]?filter/i.test(error instanceof Error ? error.message : String(error));
 
 // Helper to parse different models response formats
 export const parseModels = (data: any): string[] | null => {
@@ -45,8 +87,10 @@ async function directClientChat(params: {
   apiEndpoint?: string;
   apiTemperature?: number;
   streamCompatible?: boolean;
+  imageDataUrl?: string;
+  signal?: AbortSignal;
 }): Promise<{ text: string }> {
-  const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible } = params;
+  const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible, imageDataUrl, signal } = params;
 
   if (apiEndpoint && apiEndpoint.trim()) {
     // Custom OpenAI compatible API
@@ -56,17 +100,23 @@ async function directClientChat(params: {
     }
 
     const messagesPayload: any[] = [];
-    if (systemInstruction) {
-      messagesPayload.push({ role: "system", content: systemInstruction });
+    const openAiPrompt = prepareOpenAiPromptTransport(history, systemInstruction);
+    if (openAiPrompt.systemInstruction) {
+      messagesPayload.push({ role: "system", content: openAiPrompt.systemInstruction });
     }
-    if (history && Array.isArray(history)) {
-      for (const h of history) {
+    if (openAiPrompt.history.length > 0) {
+      for (const h of openAiPrompt.history) {
         messagesPayload.push(toOpenAiHistoryEntry(h));
       }
     }
-    messagesPayload.push({ role: "user", content: message });
+    if (openAiPrompt.finalSystemInstruction) {
+      messagesPayload.push({ role: "system", content: openAiPrompt.finalSystemInstruction });
+    }
+    messagesPayload.push({ role: "user", content: imageDataUrl
+      ? [{ type: "text", text: message }, { type: "image_url", image_url: { url: imageDataUrl } }]
+      : message });
 
-    const responseFetch = await fetch(endpointUrl, {
+    const responseFetch = await fetchWithTimeout(endpointUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -77,12 +127,13 @@ async function directClientChat(params: {
         messages: messagesPayload,
         temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
         stream: streamCompatible || false
-      })
-    });
+      }),
+      signal,
+    }, API_REQUEST_TIMEOUTS.textGeneration);
 
     if (!responseFetch.ok) {
-      const errorText = await responseFetch.text();
-      throw new Error(`自定义 API 接口请求失败 (${responseFetch.status}): ${errorText || "无响应"}`);
+      const details = parseTextApiErrorPayload(await responseFetch.text(), responseFetch.status);
+      throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason });
     }
 
     const responseText = await responseFetch.text();
@@ -112,17 +163,20 @@ async function directClientChat(params: {
     } else {
       try {
         const dataFetch = JSON.parse(trimmedText);
-        aiText = dataFetch.choices?.[0]?.message?.content || 
-                 dataFetch.choices?.[0]?.text || "";
+            const content = dataFetch.choices?.[0]?.message?.content ?? dataFetch.choices?.[0]?.text;
+            aiText = Array.isArray(content)
+              ? content.map((part: any) => typeof part === "string" ? part : part?.text || "").join("")
+              : typeof content === "string" ? content : "";
       } catch (jsonErr) {
         aiText = trimmedText;
       }
     }
 
-    if (aiText !== undefined) {
+    if (aiText.trim()) {
       return { text: aiText };
     }
-    throw new Error(`自定义 API 接口无有效响应内容: ${responseText}`);
+    const details = emptyTextApiErrorDetails();
+    throw new ApiChatError(details.message, { status: 502, code: details.code, reason: details.reason });
   } else {
     // Gemini Direct client-side fetch
     const cleanModel = model || "gemini-1.5-flash";
@@ -150,13 +204,20 @@ async function directClientChat(params: {
 
     // Add current user message
     const cleanMsg = (message || "").trim();
-    if (cleanMsg) {
+    if (cleanMsg || imageDataUrl) {
+      const currentParts: any[] = [];
+      if (cleanMsg) currentParts.push({ text: cleanMsg });
+      if (imageDataUrl) {
+        const match = imageDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) currentParts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+      }
       if (contents.length > 0 && contents[contents.length - 1].role === "user") {
-        contents[contents.length - 1].parts[0].text += "\n" + cleanMsg;
+        if (cleanMsg) contents[contents.length - 1].parts.push({ text: cleanMsg });
+        if (currentParts.some((part) => part.inlineData)) contents[contents.length - 1].parts.push(...currentParts.filter((part) => part.inlineData));
       } else {
         contents.push({
           role: "user",
-          parts: [{ text: cleanMsg }]
+          parts: currentParts.length ? currentParts : [{ text: " " }]
         });
       }
     }
@@ -168,7 +229,7 @@ async function directClientChat(params: {
       });
     }
 
-    const responseFetch = await fetch(modelsUrl, {
+    const responseFetch = await fetchWithTimeout(modelsUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -183,20 +244,27 @@ async function directClientChat(params: {
             parts: [{ text: geminiPrompt.systemInstruction }]
           }
         } : {})
-      })
-    });
+      }),
+      signal,
+    }, API_REQUEST_TIMEOUTS.textGeneration);
 
+    const responseText = await responseFetch.text();
     if (!responseFetch.ok) {
-      const errorText = await responseFetch.text();
-      throw new Error(`Gemini API 接口请求失败 (${responseFetch.status}): ${errorText || "无响应"}`);
+      const details = parseTextApiErrorPayload(responseText, responseFetch.status);
+      throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason });
     }
 
-    const dataFetch = await responseFetch.json();
-    const aiText = dataFetch.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (aiText !== undefined) {
+    let dataFetch: any;
+    try { dataFetch = JSON.parse(responseText); } catch {
+      throw new ApiChatError("Gemini 返回了无法解析的响应。", { status: 502, code: "provider_invalid_response" });
+    }
+    const aiText = dataFetch.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || "").join("") || "";
+    if (aiText.trim()) {
       return { text: aiText };
     }
-    throw new Error(`Gemini API 返回不符合预期: ${JSON.stringify(dataFetch)}`);
+    const reason = dataFetch.candidates?.[0]?.finishReason || dataFetch.promptFeedback?.blockReason || "";
+    const details = emptyTextApiErrorDetails(502, reason);
+    throw new ApiChatError(details.message, { status: 502, code: details.code, reason: details.reason });
   }
 }
 
@@ -207,12 +275,12 @@ async function directClientFetchModels(apiKey: string, apiEndpoint?: string): Pr
     baseUrl = baseUrl.replace(/\/chat\/completions$/, "");
     const modelsUrl = baseUrl.endsWith("/models") ? baseUrl : (baseUrl + "/models");
 
-    const responseFetch = await fetch(modelsUrl, {
+    const responseFetch = await fetchWithTimeout(modelsUrl, {
       method: "GET",
       headers: {
         "Authorization": `Bearer ${apiKey}`
       }
-    });
+    }, API_REQUEST_TIMEOUTS.modelList);
     if (responseFetch.ok) {
       const data = await responseFetch.json();
       const parsed = parseModels(data);
@@ -221,7 +289,7 @@ async function directClientFetchModels(apiKey: string, apiEndpoint?: string): Pr
     throw new Error("无法从自定义端点解析出模型列表");
   } else {
     const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-    const responseFetch = await fetch(modelsUrl);
+    const responseFetch = await fetchWithTimeout(modelsUrl, {}, API_REQUEST_TIMEOUTS.modelList);
     if (responseFetch.ok) {
       const data = await responseFetch.json();
       const parsed = parseModels(data);
@@ -234,7 +302,7 @@ async function directClientFetchModels(apiKey: string, apiEndpoint?: string): Pr
 // 2. Exported Wrapper Functions that try Backend first, then Fallback
 
 // chat wrapper
-export async function apiChat(params: {
+async function apiChatImpl(params: {
   message: string;
   history: any[];
   systemInstruction?: string;
@@ -243,24 +311,70 @@ export async function apiChat(params: {
   apiEndpoint?: string;
   apiTemperature?: number;
   streamCompatible?: boolean;
+  imageDataUrl?: string;
+  signal?: AbortSignal;
 }): Promise<{ text: string }> {
+  const { signal, ...requestBody } = params;
+  let res: Response | null = null;
   try {
-    const res = await fetch("/api/chat", {
+    res = await fetchWithTimeout("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && typeof data.text === "string") {
-        return { text: data.text };
-      }
-    }
-    throw new Error("后端服务不可用，尝试直连");
+      body: JSON.stringify(requestBody),
+      signal,
+    }, API_REQUEST_TIMEOUTS.textGeneration);
   } catch (err) {
-    console.warn("apiChat backend failed, trying client direct fallback:", err);
-    return directClientChat(params);
+    // A network failure means the optional app backend is genuinely absent.
+    // Provider HTTP errors must not be retried through the browser because that
+    // sends the same rejected prompt twice and hides the original status/body.
+    if (!isApiRequestError(err, "network")) throw apiRequestError(err, "聊天 API");
+    console.warn("apiChat backend network request failed, trying client direct fallback:", err);
+    try {
+      return await directClientChat(params);
+    } catch (fallbackError) {
+      if (fallbackError instanceof ApiChatError) throw fallbackError;
+      if (isApiRequestError(fallbackError)) throw apiRequestError(fallbackError, "聊天 API");
+      throw fallbackError;
+    }
   }
+
+  const responseText = await res.text();
+  const contentType = res.headers.get("content-type") || "";
+  const routeMissingStatus = res.status === 404 || res.status === 405;
+  const looksLikeStaticHostFallback = (/text\/html/i.test(contentType) && (routeMissingStatus || res.ok))
+    || (routeMissingStatus && !responseText.trim());
+  if (looksLikeStaticHostFallback) {
+    console.warn("apiChat backend route is unavailable on this host, trying client direct fallback");
+    try {
+      return await directClientChat(params);
+    } catch (fallbackError) {
+      if (fallbackError instanceof ApiChatError) throw fallbackError;
+      if (isApiRequestError(fallbackError)) throw apiRequestError(fallbackError, "聊天 API");
+      throw fallbackError;
+    }
+  }
+  if (!res.ok) {
+    const details = parseTextApiErrorPayload(responseText, res.status);
+    throw new ApiChatError(details.message, { status: res.status, code: details.code, reason: details.reason });
+  }
+
+  let data: any;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    // A successful non-JSON response is not a valid chat backend response.
+    throw new ApiChatError("聊天 API 返回成功状态，但没有有效的文本响应。", { status: 502, code: "provider_invalid_response" });
+  }
+  if (data && typeof data.text === "string" && data.text.trim()) return { text: data.text };
+  if (data?.error) {
+    const details = parseTextApiErrorPayload(responseText, res.status || 502);
+    throw new ApiChatError(details.message, { status: res.status || 502, code: details.code, reason: details.reason });
+  }
+  throw new ApiChatError("聊天 API 返回成功状态，但没有有效的文本响应。", { status: 502, code: "provider_empty" });
+}
+
+export async function apiChat(params: Parameters<typeof apiChatImpl>[0]): Promise<{ text: string }> {
+  return trackApiUsage("chat", params.message.length + params.history.reduce((total, entry) => total + String(entry?.text || entry?.content || "").length, 0), () => apiChatImpl(params));
 }
 
 // test key wrapper
@@ -270,11 +384,11 @@ export async function apiTestKey(params: {
   apiEndpoint?: string;
 }): Promise<{ success: boolean; message: string }> {
   try {
-    const res = await fetch("/api/test-key", {
+    const res = await fetchWithTimeout("/api/test-key", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
+    }, API_REQUEST_TIMEOUTS.connectionTest);
     if (res.ok) {
       const data = await res.json();
       if (data.success) {
@@ -285,6 +399,9 @@ export async function apiTestKey(params: {
     }
     throw new Error("后端服务不可用，尝试直连");
   } catch (err) {
+    if (isApiRequestError(err) && !isApiRequestError(err, "network")) {
+      return { success: false, message: describeApiRequestError(err, "连接测试") };
+    }
     console.warn("apiTestKey backend failed, trying client direct fallback:", err);
     try {
       if (params.apiEndpoint && params.apiEndpoint.trim()) {
@@ -313,7 +430,9 @@ export async function apiTestKey(params: {
       }
       return { success: false, message: "连接失败，请确认 API Key 是否正确，或网络是否可以访问。" };
     } catch (fallbackErr: any) {
-      return { success: false, message: fallbackErr.message || "直连也失败，请检查网络和 API 配置。" };
+      return { success: false, message: isApiRequestError(fallbackErr)
+        ? describeApiRequestError(fallbackErr, "连接测试")
+        : fallbackErr.message || "直连也失败，请检查网络和 API 配置。" };
     }
   }
 }
@@ -324,11 +443,11 @@ export async function apiFetchModels(params: {
   apiEndpoint?: string;
 }): Promise<string[]> {
   try {
-    const res = await fetch("/api/models", {
+    const res = await fetchWithTimeout("/api/models", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
+    }, API_REQUEST_TIMEOUTS.modelList);
     if (res.ok) {
       const data = await res.json();
       if (data.success && Array.isArray(data.models) && data.models.length > 0) {
@@ -337,23 +456,15 @@ export async function apiFetchModels(params: {
     }
     throw new Error("后端服务不可用，尝试直连");
   } catch (err) {
+    if (isApiRequestError(err) && !isApiRequestError(err, "network")) {
+      throw new Error(describeApiRequestError(err, "模型列表 API"));
+    }
     console.warn("apiFetchModels backend failed, trying client direct fallback:", err);
     try {
       return await directClientFetchModels(params.apiKey, params.apiEndpoint);
     } catch (fallbackErr) {
-      // Return hardcoded elegant defaults so it never fails completely
-      return [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "deepseek-chat",
-        "deepseek-reasoner",
-        "deepseek-v3",
-        "gpt-4o",
-        "gpt-4o-mini",
-        "claude-3-5-sonnet"
-      ];
+      if (isApiRequestError(fallbackErr)) throw new Error(describeApiRequestError(fallbackErr, "模型列表 API"));
+      throw fallbackErr;
     }
   }
 }
@@ -388,12 +499,15 @@ export async function apiFetchImageModels(params: {
 }): Promise<string[]> {
   let response: Response;
   try {
-    response = await fetch("/api/image/models", {
+    response = await fetchWithTimeout("/api/image/models", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
-  } catch {
+    }, API_REQUEST_TIMEOUTS.modelList);
+  } catch (error) {
+    if (isApiRequestError(error) && !isApiRequestError(error, "network")) {
+      throw new Error(describeApiRequestError(error, "图片模型 API"));
+    }
     throw new Error(imageProxyUnavailableMessage());
   }
   const data = await readImageProxyPayload(response);
@@ -413,12 +527,15 @@ export async function apiTestImageConnection(params: {
 }): Promise<{ success: boolean; message: string }> {
   let response: Response;
   try {
-    response = await fetch("/api/image/test", {
+    response = await fetchWithTimeout("/api/image/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
-  } catch {
+    }, API_REQUEST_TIMEOUTS.connectionTest);
+  } catch (error) {
+    if (isApiRequestError(error) && !isApiRequestError(error, "network")) {
+      return { success: false, message: describeApiRequestError(error, "图片 API 连接测试") };
+    }
     return { success: false, message: imageProxyUnavailableMessage() };
   }
   const data = await readImageProxyPayload(response);
@@ -427,7 +544,7 @@ export async function apiTestImageConnection(params: {
 }
 
 // extract memories wrapper
-export async function apiExtractMemories(params: {
+async function apiExtractMemoriesImpl(params: {
   history: KnowledgeExtractionHistoryItem[];
   characterName: string;
   characterProfile?: string;
@@ -439,11 +556,11 @@ export async function apiExtractMemories(params: {
   scenario?: "offline";
 }): Promise<{ text: string; items: ExtractedKnowledgeCandidatePayload[]; candidates?: ExtractedKnowledgeCandidatePayload[]; error?: string }> {
   try {
-    const res = await fetch("/api/extract-memories", {
+    const res = await fetchWithTimeout("/api/extract-memories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
+    }, API_REQUEST_TIMEOUTS.memoryTask);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.candidates)) {
@@ -452,6 +569,9 @@ export async function apiExtractMemories(params: {
     }
     throw new Error("后端服务不可用，尝试直连");
   } catch (err) {
+    if (isApiRequestError(err) && err.kind !== "network") {
+      return { text: "", items: [], error: describeApiRequestError(err, "记忆提取") };
+    }
     console.warn("apiExtractMemories backend failed, trying client direct fallback:", err);
     try {
       const prompt = buildKnowledgeExtractionPrompt({
@@ -462,18 +582,11 @@ export async function apiExtractMemories(params: {
         scenario: params.scenario,
       });
 
-      let targetModel = params.model;
-      if (params.apiEndpoint && params.apiEndpoint.trim()) {
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-chat";
-        }
-      }
-
       const result = await directClientChat({
         message: prompt,
         history: [],
         apiKey: params.apiKey,
-        model: targetModel,
+        model: params.model,
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.5,
         systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
@@ -482,32 +595,53 @@ export async function apiExtractMemories(params: {
       });
 
       const aiText = result.text || "";
-      const candidates = parseKnowledgeExtractionOutput(aiText, new Set(params.history.map((item) => item.id)));
-      return { text: aiText, items: candidates, candidates };
+      const repaired = await parseOrRepairKnowledgeExtractionOutput({
+        rawText: aiText,
+        allowedMessageIds: new Set(params.history.map((item) => item.id)),
+        originalPrompt: prompt,
+        repair: async (repairPrompt) => (await directClientChat({
+          message: repairPrompt,
+          history: [],
+          apiKey: params.apiKey,
+          model: params.model,
+          apiEndpoint: params.apiEndpoint,
+          apiTemperature: 0.2,
+          systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
+            ? "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。"
+            : undefined,
+        })).text || "",
+      });
+      return { text: repaired.text, items: repaired.candidates, candidates: repaired.candidates };
     } catch (fallbackErr) {
       console.error("Direct extract memories fallback failed:", fallbackErr);
       return {
         text: "",
         items: [],
-        error: fallbackErr instanceof Error ? fallbackErr.message : "记忆提取服务不可用",
+        error: isApiRequestError(fallbackErr)
+          ? describeApiRequestError(fallbackErr, "记忆提取")
+          : fallbackErr instanceof Error ? fallbackErr.message : "记忆提取服务不可用",
       };
     }
   }
 }
 
+export async function apiExtractMemories(params: Parameters<typeof apiExtractMemoriesImpl>[0]): Promise<Awaited<ReturnType<typeof apiExtractMemoriesImpl>>> {
+  return trackApiUsage("memory-extraction", params.history.reduce((total, entry) => total + String(entry.text || "").length, 0), () => apiExtractMemoriesImpl(params));
+}
+
 // summarize personality wrapper
-export async function apiSummarizePersonality(params: {
+async function apiSummarizePersonalityImpl(params: {
   references: any[];
   apiKey: string;
   model: string;
   apiEndpoint?: string;
 }): Promise<{ text: string }> {
   try {
-    const res = await fetch("/api/summarize-personality", {
+    const res = await fetchWithTimeout("/api/summarize-personality", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
+    }, API_REQUEST_TIMEOUTS.memoryTask);
     if (res.ok) {
       const data = await res.json();
       if (data && typeof data.text === "string") {
@@ -516,6 +650,9 @@ export async function apiSummarizePersonality(params: {
     }
     throw new Error("后端服务不可用，尝试直连");
   } catch (err) {
+    if (isApiRequestError(err) && err.kind !== "network") {
+      throw new Error(describeApiRequestError(err, "人设总结"));
+    }
     console.warn("apiSummarizePersonality backend failed, trying client direct fallback:", err);
     try {
       const referencesText = params.references
@@ -533,18 +670,11 @@ ${referencesText}
 3. 语言要极具表现力，可以直接用于大语言模型的系统提示词，使扮演效果极其传神逼真。
 4. 排除一切寒暄、解释或 markdown 包裹废话，直接给出提炼后的设定正文内容。`;
 
-      let targetModel = params.model;
-      if (params.apiEndpoint && params.apiEndpoint.trim()) {
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-chat";
-        }
-      }
-
       const result = await directClientChat({
         message: prompt,
         history: [],
         apiKey: params.apiKey,
-        model: targetModel,
+        model: params.model,
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.5,
         systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
@@ -555,13 +685,20 @@ ${referencesText}
       return { text: result.text };
     } catch (fallbackErr: any) {
       console.error("Direct summarize personality fallback failed:", fallbackErr);
-      throw new Error(fallbackErr.message || "直连总结失败");
+      throw new Error(isApiRequestError(fallbackErr)
+        ? describeApiRequestError(fallbackErr, "人设总结")
+        : fallbackErr.message || "直连总结失败");
     }
   }
 }
 
+export async function apiSummarizePersonality(params: Parameters<typeof apiSummarizePersonalityImpl>[0]): Promise<{ text: string }> {
+  const inputCharacters = params.references.reduce((total, reference) => total + String(reference?.title || "").length + String(reference?.content || "").length, 0);
+  return trackApiUsage("personality", inputCharacters, () => apiSummarizePersonalityImpl(params));
+}
+
 // translate wrapper
-export async function apiTranslate(params: {
+async function apiTranslateImpl(params: {
   text: string;
   apiKey: string;
   model: string;
@@ -571,23 +708,45 @@ export async function apiTranslate(params: {
   /** Forum translations must never fall back to a browser-to-provider request. */
   proxyOnly?: boolean;
 }): Promise<{ text: string }> {
+  let res: Response;
   try {
-    const res = await fetch("/api/translate", {
+    res = await fetchWithTimeout("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && typeof data.text === "string") {
-        return { text: data.text };
-      }
-    }
-    throw new Error("翻译代理服务不可用");
+    }, API_REQUEST_TIMEOUTS.textGeneration);
   } catch (err) {
-    if (params.proxyOnly) throw err;
+    if (params.proxyOnly) {
+      throw new Error(isApiRequestError(err) ? describeApiRequestError(err, "翻译") : String(err));
+    }
+    if (isApiRequestError(err) && err.kind !== "network") {
+      throw new Error(describeApiRequestError(err, "翻译"));
+    }
     console.warn("apiTranslate backend failed, trying client direct fallback:", err);
-    try {
+  }
+
+  if (res) {
+    const raw = await res.text();
+    const contentType = res.headers.get("content-type") || "";
+    const routeMissing = res.status === 404 || res.status === 405;
+    const staticFallback = (/text\/html/i.test(contentType) && (routeMissing || res.ok)) || (routeMissing && !raw.trim());
+    if (res.ok && !staticFallback) {
+      try {
+        const data = JSON.parse(raw);
+        if (data && typeof data.text === "string" && data.text.trim()) return { text: data.text };
+      } catch {
+        throw new Error("翻译服务返回了无法解析的响应。");
+      }
+      throw new Error("翻译服务没有返回有效文本。");
+    }
+    if (!staticFallback) {
+      throw new Error(`翻译 API 请求失败 (${res.status}): ${parseTextApiErrorPayload(raw, res.status).message}`);
+    }
+    if (params.proxyOnly) throw new Error("当前部署没有提供翻译代理路由。");
+    console.warn("apiTranslate backend route is unavailable, trying client direct fallback");
+  }
+
+  try {
       const targetLanguage = params.targetLanguage || "zh-CN";
       const prompt = `你是一个专业的翻译官。请将下面这段文本忠实翻译成${targetLanguage}。
       
@@ -600,38 +759,56 @@ ${params.text}
 3. 如果输入包含 [FORUM_TITLE] 或 [FORUM_BODY] 标记，必须原样保留标记，仅翻译标记后的公开文本。
 4. 请直接输出翻译结果，不要包含任何多余的说明、解释或 markdown 格式包装。`;
 
-      let targetModel = params.model;
-      if (params.apiEndpoint && params.apiEndpoint.trim()) {
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-chat";
-        }
-      }
-
       const result = await directClientChat({
         message: prompt,
         history: [],
         apiKey: params.apiKey,
-        model: targetModel,
+        model: params.model,
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.3,
-        systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
-          ? "你是一个翻译助手，直接输出目标简体中文，不要带任何废话和解释。"
+        systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
+          ? `你是翻译助手，直接输出目标语言 ${targetLanguage}，不要带任何解释。`
           : undefined
       });
 
       return { text: result.text };
     } catch (fallbackErr: any) {
       console.error("Direct translate fallback failed:", fallbackErr);
-      throw new Error(fallbackErr.message || "直连翻译失败");
-    }
+      throw new Error(isApiRequestError(fallbackErr)
+        ? describeApiRequestError(fallbackErr, "翻译")
+        : fallbackErr.message || "直连翻译失败");
   }
 }
 
-// Estimates the prompt token size in client-side real-time preview
-export function estimateTokenCount(text: string): number {
-  if (!text) return 0;
-  // Estimate: Chinese character is ~1.5 to 2 tokens. English word is ~1.3 tokens.
-  const chineseChars = text.match(/[\u4e00-\u9fa5]/g)?.length || 0;
-  const remaining = text.length - chineseChars;
-  return Math.round(chineseChars * 1.5 + remaining * 0.4);
+export async function apiTranslate(params: Parameters<typeof apiTranslateImpl>[0]): Promise<{ text: string }> {
+  return trackApiUsage("translation", params.text.length, () => apiTranslateImpl(params));
+}
+
+type MemoryExtractionParams = Parameters<typeof apiExtractMemories>[0];
+type MemoryExtractionResponse = Awaited<ReturnType<typeof apiExtractMemories>>;
+
+function normalizeMemoryExtractionResponse(response: MemoryExtractionResponse): MemoryExtractionResponse {
+  const hasStructuredItems = (response.items?.length || 0) > 0 || (response.candidates?.length || 0) > 0;
+  if (response.error || hasStructuredItems || !response.text?.trim()) return response;
+  return {
+    ...response,
+    error: "记忆提取模型返回了无法识别的结构化结果",
+  };
+}
+
+/**
+ * A dedicated extraction model may not exist on the user's custom endpoint
+ * even though ordinary chat works. Retry only transport/model failures with
+ * the already verified chat model; an honestly empty extraction is preserved.
+ */
+export async function apiExtractMemoriesWithModelFallback(
+  params: MemoryExtractionParams,
+  fallbackModel?: string,
+  request: (nextParams: MemoryExtractionParams) => Promise<MemoryExtractionResponse> = apiExtractMemories,
+): Promise<MemoryExtractionResponse> {
+  const primary = normalizeMemoryExtractionResponse(await request(params));
+  const normalizedFallback = fallbackModel?.trim();
+  if (!primary.error || !normalizedFallback || normalizedFallback === params.model.trim()) return primary;
+  console.warn(`Memory extraction model '${params.model}' failed; retrying with the active chat model '${normalizedFallback}'.`);
+  return normalizeMemoryExtractionResponse(await request({ ...params, model: normalizedFallback }));
 }

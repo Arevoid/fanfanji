@@ -1,3 +1,5 @@
+import { attachIndexedDbLifecycle } from "../core/storage/idbLifecycle";
+
 class AudioDB {
   private dbName = "MusicAppDB";
   private storeName = "localTracks";
@@ -19,6 +21,7 @@ class AudioDB {
       };
       request.onsuccess = () => {
         this.db = request.result;
+        attachIndexedDbLifecycle(request.result, () => { this.db = null; });
         resolve(request.result);
       };
       request.onerror = () => reject(request.error);

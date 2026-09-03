@@ -1,6 +1,7 @@
 import {
   CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION,
   CHARACTER_KNOWLEDGE_MIGRATION_VERSION,
+  type CharacterKnowledgeMigrationStatus,
   type CharacterKnowledgeMigrationState,
 } from "../../../domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import { storageKeys } from "../storageKeys";
@@ -14,6 +15,7 @@ const cleanIds = (value: unknown): string[] => Array.isArray(value)
 const fallbackState = (): CharacterKnowledgeMigrationState => ({
   schemaVersion: CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION,
   migrationVersion: CHARACTER_KNOWLEDGE_MIGRATION_VERSION,
+  status: "idle",
   lastRunAt: 0,
   migratedMemoryIds: [],
   migratedSummaryIds: [],
@@ -28,10 +30,22 @@ export function normalizeCharacterKnowledgeMigrationState(value: unknown): Chara
   const migrationVersion = typeof record.migrationVersion === "number" && Number.isInteger(record.migrationVersion)
     ? record.migrationVersion
     : CHARACTER_KNOWLEDGE_MIGRATION_VERSION;
+  const status: CharacterKnowledgeMigrationStatus = record.status === "failed"
+    ? "failed"
+    : record.status === "completed"
+      ? "completed"
+      : lastRunAt > 0
+        ? "completed"
+        : "idle";
+  const lastError = typeof record.lastError === "string" && record.lastError.trim()
+    ? record.lastError.trim()
+    : undefined;
   return {
     schemaVersion: CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION,
     migrationVersion,
+    status,
     lastRunAt,
+    ...(lastError ? { lastError } : {}),
     migratedMemoryIds: cleanIds(record.migratedMemoryIds),
     migratedSummaryIds: cleanIds(record.migratedSummaryIds),
     migratedCorrectionIds: cleanIds(record.migratedCorrectionIds),

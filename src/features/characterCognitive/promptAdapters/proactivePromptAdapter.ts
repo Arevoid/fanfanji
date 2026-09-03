@@ -20,11 +20,13 @@ interface ProactivePromptRoutineContext {
 type ProactiveContextWithRoutine = CharacterCognitiveContext & {
   routineContext?: ProactivePromptRoutineContext;
   topicContext?: ProactiveTopicContext;
+  timeAwareness?: boolean;
 };
 
 type ProactivePromptContextWithRoutine = ProactivePromptContext & {
   routineContext?: ProactivePromptRoutineContext;
   topicContext?: ProactiveTopicContext;
+  timeAwareness?: boolean;
 };
 
 function projectProactiveRoutineContext(context: CharacterCognitiveContext): Pick<
@@ -109,6 +111,9 @@ export const buildProactivePromptContext = (
   ...projectProactiveRelationshipContext(context),
   ...projectProactiveRoutineContext(context),
   ...projectProactiveTopicContext(context),
+  ...((context as ProactiveContextWithRoutine).timeAwareness === undefined
+    ? {}
+    : { timeAwareness: (context as ProactiveContextWithRoutine).timeAwareness }),
   recentMeaningfulEvents: selectSafePromptEvents(context, options),
   openContext: [],
   boundaries: projectPromptBoundary(context),
@@ -141,6 +146,7 @@ export function formatProactivePromptContext(context: ProactivePromptContextWith
     : [];
   const lastMeaningfulEvent = context.relationshipTimeline?.lastMeaningfulEventAt;
   const routine = context.routineContext;
+  const timeAwareness = context.timeAwareness !== false;
 
   return [
     "[RELATION-SAFE PROACTIVE COGNITIVE CONTEXT]",
@@ -155,8 +161,8 @@ export function formatProactivePromptContext(context: ProactivePromptContextWith
     ...(relationshipBoundaries.length > 0 ? ["Relationship boundaries:", ...relationshipBoundaries] : []),
     ...topicGuidance,
     ...(lastMeaningfulEvent === undefined ? [] : [`- Last meaningful relationship event at: ${lastMeaningfulEvent}`]),
-    `Time context: ${context.time.date} ${context.time.time}${context.time.period ? ` (${context.time.period})` : ""}`,
-    ...(routine ? [
+    ...(timeAwareness ? [`Time context: ${context.time.date} ${context.time.time}${context.time.period ? ` (${context.time.period})` : ""}`] : []),
+    ...(timeAwareness && routine ? [
       "Routine context (behavior reference only):",
       `- Current time period: ${routine.period}`,
       `- Current routine state: ${routine.state}`,

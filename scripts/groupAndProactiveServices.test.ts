@@ -1,13 +1,25 @@
 import { strict as assert } from "node:assert";
-import { generateGroupReplyCandidates } from "../src/features/chat/services/groupChatService";
+import { buildGroupChatHistoryContext, generateGroupReplyCandidates } from "../src/features/chat/services/groupChatService";
 import { generateProactiveReplyCandidates } from "../src/features/chat/services/proactiveMessageService";
 import { matchGroupReplyMembers, parseGroupReplies } from "../src/features/chat/services/groupReplyParser";
-import type { Character } from "../src/types";
+import type { Character, Message } from "../src/types";
 import type { AiChatRequest } from "../src/features/chat/services/chatServiceTypes";
 
 const memberA: Character = { id: "a", name: "A", avatar: "", personality: "", backstory: "" };
 const memberB: Character = { id: "b", name: "B", avatar: "", personality: "", backstory: "" };
 const outsider: Character = { id: "x", name: "X", avatar: "", personality: "", backstory: "" };
+const historyMessage = (id: string, timestamp: number, sender: "user" | "character", content: string, senderId?: string): Message => ({ id, timestamp, sender, content, characterId: "group", senderId });
+const historyContext = buildGroupChatHistoryContext({
+  sourceMessages: [historyMessage("late", 3, "character", "后到", "a"), historyMessage("early", 1, "user", "先到"), historyMessage("early", 2, "user", "重复 ID")],
+  groupMembers: [memberA],
+  userName: "机主",
+  contextMemoryLimit: 2,
+  scanMessage: historyMessage("scan", 4, "user", "扫描文本"),
+});
+assert.deepEqual(historyContext.messages.map((message) => message.id), ["early", "late"]);
+assert.match(historyContext.historyText, /机主 \(机主\): 重复 ID/);
+assert.match(historyContext.historyText, /A: 后到/);
+assert.match(historyContext.scanText, /扫描文本/);
 const request: AiChatRequest = { message: "group", history: [], systemInstruction: "time boundary memories", apiKey: "test", model: "test" };
 let groupRequests = 0;
 const group = await generateGroupReplyCandidates({
@@ -52,7 +64,7 @@ const proactive = await generateProactiveReplyCandidates({
 
 // I-T: both proactive paths share parsing/candidates and carry caller-prepared context without extra requests.
 assert.equal(proactiveRequests, 1);
-assert.deepEqual(proactive.messages.map((message) => message.content), ["接着刚才的话", "[红包]|1|hi"]);
+assert.deepEqual(proactive.messages.map((message) => message.content), ["接着刚才的话", "[红包]|1.00|hi"]);
 assert.deepEqual(proactive.messages.map((message) => message.timestamp), [20, 21]);
 assert.deepEqual(proactive.messages.map((message) => message.characterId), ["a", "a"]);
 assert.equal(proactive.data.text?.includes("接着"), true);

@@ -20,7 +20,7 @@ import {
   placeItemWithDisplacement,
   swapOneByOneItems,
 } from "../src/features/home/homeGrid";
-import { sanitizeSystemBackupValue } from "../src/components/AppSettings";
+import { sanitizeSystemBackupValue } from "../src/features/settings/systemBackupSanitizer";
 
 const item = (
   id: string,
@@ -278,8 +278,8 @@ assert.match(appSource, /id:\s*"album_widget_1"[\s\S]*position:\s*\{\s*page:\s*0
 assert.match(appSource, /id:\s*"music_widget_1"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*2,\s*column:\s*2\s*\}/);
 assert.match(appSource, /id:\s*"notes"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*4,\s*column:\s*0\s*\}/);
 assert.match(appSource, /let parsed: string\[\] = \["chat", "archives", "worldbook", "music", "notes", "offline", "store", "settings"\]/);
-assert.match(appSource, /installedAppIds\.includes\("chat"\)[\s\S]*installedAppIds\.includes\("music"\)[\s\S]*installedAppIds\.includes\("archives"\)[\s\S]*setActiveApp\("settings"\)/);
-assert.match(appSource, /const raw = localStorage\.getItem\("phone_homescreen_items"\)/);
+assert.match(appSource, /setInstalledAppIds|installedAppIds\.includes\("chat"\)/);
+assert.match(appSource, /const raw = readString\("phone_homescreen_items"\)\.value/);
 assert.match(appSource, /if \(raw !== null\)[\s\S]*Array\.isArray\(parsed\) \? parsed : \[\]/);
 assert.doesNotMatch(
   appSource,

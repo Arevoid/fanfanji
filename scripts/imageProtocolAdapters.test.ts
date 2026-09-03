@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { ImageApiError, baseFor, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "../src/server/imageProtocolAdapters";
+import { ImageApiError, baseFor, fetchImageModels, generateImageWithProtocol, normalizeImageAspectRatio, openAiImageSizeForAspectRatio, testImageConnectionWithProtocol } from "../src/server/imageProtocolAdapters";
 
 const originalFetch = globalThis.fetch;
 const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -30,6 +30,10 @@ try {
   assert.equal(baseFor("https://host/v1/", "gemini-native-image"), "https://host/v1");
   assert.equal(baseFor("https://host", "gemini-native-image"), "https://host");
   assert.equal(baseFor("https://host/v1/models", "gemini-native-image"), "https://host/v1");
+  assert.equal(normalizeImageAspectRatio("16:9"), "16:9");
+  assert.equal(normalizeImageAspectRatio("unsupported"), "1:1");
+  assert.equal(openAiImageSizeForAspectRatio("9:16"), "1024x1536");
+  assert.equal(openAiImageSizeForAspectRatio("4:3"), "1536x1024");
 
   const models = await fetchImageModels({ protocol: "openai-images", apiEndpoint: "https://models.example/v1", apiKey: key });
   assert.deepEqual(models, ["gpt-image-test"]);
@@ -55,6 +59,10 @@ try {
   assert.equal(calls[4].url, "https://gemini.example/v1/models/gemini-2.5-flash-image:generateContent");
   assert.equal(new Headers(calls[4].init?.headers).get("authorization"), `Bearer ${key}`);
   assert.deepEqual(JSON.parse(String(calls[4].init?.body)).contents[0].parts[1], { inlineData: { mimeType: "image/jpeg", data: "UkVG" } });
+  assert.equal(JSON.parse(String(calls[4].init?.body)).generationConfig.imageConfig.aspectRatio, "1:1");
+
+  await generateImageWithProtocol({ protocol: "gemini-native-image", geminiAuthMode: "bearer", apiEndpoint: "https://gemini.example/v1", apiKey: key, model: "gemini-2.5-flash-image", prompt: "landscape", aspectRatio: "16:9" });
+  assert.equal(JSON.parse(String(calls[5].init?.body)).generationConfig.imageConfig.aspectRatio, "16:9");
 
   const snakeCaseGemini = await generateImageWithProtocol({ protocol: "gemini-native-image", geminiAuthMode: "bearer", apiEndpoint: "https://snake.example/v1", apiKey: key, model: "gemini-2.5-flash-image", prompt: "portrait" });
   assert.equal(snakeCaseGemini, "data:image/webp;base64,U05BS0U=");

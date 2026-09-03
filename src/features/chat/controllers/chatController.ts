@@ -1,4 +1,5 @@
 import type { Character, Message, OfflineStory } from "../../../types";
+import { createId } from "../../../core/id/createId";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 import { createUserTextMessage } from "../services/messageFactory";
 
@@ -6,10 +7,11 @@ export function formatQuotedChatInput(
   inputText: string,
   quotedMessage: Message,
   activeCharacter: Character,
+  quotedSenderName?: string,
 ): string {
   const senderName = quotedMessage.sender === "user"
     ? "我"
-    : (activeCharacter.remark || activeCharacter.name);
+    : (quotedSenderName || (activeCharacter.isGroupChat ? activeCharacter.name : (activeCharacter.remark || activeCharacter.name)));
   let shortContent = quotedMessage.content;
   if (shortContent.startsWith("[文件]")) {
     const parts = shortContent.split("|");
@@ -32,7 +34,7 @@ export function createChatUserMessage(input: {
   isInputNarration: boolean;
 }): Message {
   return createUserTextMessage({
-    id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    id: createId("user"),
     characterId: input.characterId,
     context: input.context,
     content: input.content,

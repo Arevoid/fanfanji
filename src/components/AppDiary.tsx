@@ -6,6 +6,7 @@ import {
   MessageCircle,
   Plus,
   Search,
+  Share2,
   Trash2,
 } from "lucide-react";
 import type {
@@ -25,16 +26,19 @@ import {
   loadDiaryDrafts,
   loadDiaryEntries,
   loadDiaryGenerationTasks,
+  loadDiaryShares,
   removeDiaryEntryArtifacts,
   saveDiaryDrafts,
   saveDiaryEntries,
   saveDiaryGenerationTasks,
+  saveDiaryShares,
   subscribeDiaryState,
 } from "../core/storage/repositories/diaryRepository";
 import {
   generateDiaryEntry,
   canGenerateDiary,
 } from "../features/diary/services/diaryGenerationService";
+import { createDiaryShareMessage } from "../features/diary/services/diaryShareService";
 
 interface AppDiaryProps {
   activeIdentity: UserIdentity;
@@ -88,6 +92,7 @@ export default function AppDiary({
     tags: "",
   });
   const [busyRelationId, setBusyRelationId] = useState<string | null>(null);
+  const [sharingRelationId, setSharingRelationId] = useState<string | null>(null);
   const [relationFilterId, setRelationFilterId] = useState<string | null>(null);
 
   useEffect(
@@ -150,6 +155,9 @@ export default function AppDiary({
     [relationships, activeIdentity.id, characters],
   );
   const selected = ownEntries.find((entry) => entry.id === selectedId) || null;
+  const shareTargets = selected
+    ? directRelations.filter(({ relation }) => selected.authorType === "user" || selected.relationId === relation.id)
+    : [];
   const filtered = ownEntries.filter(
     (entry) =>
       !query ||
@@ -224,10 +232,31 @@ export default function AppDiary({
     setSelectedId(entry.id);
   };
   const removeEntry = (entry: DiaryEntry) => {
-    if (!window.confirm("删除这篇日记？关联的翻译和分享快照也会删除。")) return;
+    if (!window.confirm("删除这篇日记？关联翻译会删除；已经发送到聊天中的冻结分享仍会保留。")) return;
     removeDiaryEntryArtifacts(entry.id);
     persist(entries.filter((item) => item.id !== entry.id));
     setSelectedId(null);
+  };
+  const shareEntry = (entry: DiaryEntry, target: (typeof directRelations)[number]) => {
+    if (sharingRelationId) return;
+    const displayName = target.character.remark || target.character.name;
+    if (!window.confirm(`将当前日记的冻结副本明确分享给 ${displayName}？`)) return;
+
+    setSharingRelationId(target.relation.id);
+    try {
+      const { share, message } = createDiaryShareMessage({ entry, relation: target.relation });
+      const writeResult = saveDiaryShares([
+        share,
+        ...loadDiaryShares().value.filter((item) => item.id !== share.id),
+      ]);
+      if (!writeResult.success) throw new Error("分享快照保存失败，请检查本地存储空间");
+      onSendMessage(message);
+      onOpenChat(target.relation.characterId, target.relation.id, message.id);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "日记分享失败，请稍后重试");
+    } finally {
+      setSharingRelationId(null);
+    }
   };
   const generate = async (
     relation: CharacterRelationship,
@@ -298,14 +327,14 @@ export default function AppDiary({
         <header className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center px-3 py-2">
           <button
             onClick={() => setEditing(null)}
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center"
           >
             <ChevronLeft size={19} />
           </button>
           <h1 className="truncate text-center text-base font-bold">写日记</h1>
           <button
             onClick={saveEntry}
-            className="h-9 rounded-full bg-[var(--segmented-active-bg)] text-xs font-bold text-[var(--segmented-active-text)]"
+            className="app-nav-icon-button h-9 px-2 text-xs font-bold text-[var(--segmented-active-text)]"
           >
             保存
           </button>
@@ -360,14 +389,14 @@ export default function AppDiary({
         <header className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center px-3 py-2">
           <button
             onClick={() => setSelectedId(null)}
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center"
           >
             <ChevronLeft size={19} />
           </button>
           <h1 className="truncate text-center text-sm font-bold">日记详情</h1>
           <button
             onClick={() => removeEntry(selected)}
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)] text-rose-500"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center text-rose-500"
             title="删除日记"
           >
             <Trash2 size={16} />
@@ -421,6 +450,35 @@ export default function AppDiary({
               </div>
             )}
           </div>
+          {shareTargets.length > 0 && (
+            <section className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="flex items-center gap-2 text-sm font-bold">
+                <Share2 size={16} />
+                明确分享给好友
+              </div>
+              <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                只会发送当前内容的冻结副本，对方无法读取你的其他日记。
+              </p>
+              <div className="mt-3 grid gap-2">
+                {shareTargets.map((target) => {
+                  const displayName = target.character.remark || target.character.name;
+                  const isSharing = sharingRelationId === target.relation.id;
+                  return (
+                    <button
+                      key={target.relation.id}
+                      type="button"
+                      disabled={Boolean(sharingRelationId)}
+                      onClick={() => shareEntry(selected, target)}
+                      className="flex items-center justify-between rounded-xl bg-[var(--surface-muted)] px-3 py-2 text-left text-sm disabled:opacity-50"
+                    >
+                      <span className="truncate">分享给 {displayName}</span>
+                      <span className="text-xs text-[var(--text-secondary)]">{isSharing ? "分享中…" : "发送"}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
           {selected.authorType === "character" && selected.relationId && (
             <button
               onClick={() => {
@@ -448,7 +506,7 @@ export default function AppDiary({
       <header className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center px-3 py-2">
         <button
           onClick={onClose}
-          className="grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-muted)]"
+          className="app-nav-icon-button grid h-9 w-9 place-items-center"
         >
           <ChevronLeft size={19} />
         </button>
@@ -457,7 +515,7 @@ export default function AppDiary({
           <button
             onClick={generateFromHeader}
             title="让 TA 写一篇日记"
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center text-[var(--text-primary)]"
           >
             <BookHeart size={18} />
           </button>
@@ -465,7 +523,7 @@ export default function AppDiary({
           <button
             onClick={() => beginEdit()}
             title="新建日记"
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center text-[var(--text-primary)]"
           >
             <Plus size={19} />
           </button>
@@ -508,8 +566,7 @@ export default function AppDiary({
             </div>
             {tab === "counterpart" && (
               <section className="mt-4">
-                <h2 className="text-sm font-bold">当前关系</h2>
-                <div className="mt-2 flex gap-2 overflow-x-auto pb-2">
+                <div className="flex items-start justify-start gap-3 overflow-x-auto pb-2 no-scrollbar">
                   {directRelations.map(({ relation, character }) => (
                     <button
                       key={relation.id}
@@ -519,14 +576,13 @@ export default function AppDiary({
                         )
                       }
                       disabled={busyRelationId === relation.id}
-                      className={`shrink-0 rounded-2xl border px-3 py-2 text-left text-xs ${relation.id === relationFilterId ? "border-[var(--text-primary)] bg-[var(--surface-muted)]" : "border-[var(--border)] bg-[var(--surface)]"}`}
+                      className={`group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 text-center transition-all ${relation.id === relationFilterId ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)]"}`}
                     >
-                      <span className="font-bold">
-                        {character.remark || character.name}
+                      <span className={`relative rounded-full p-0.5 transition-all ${relation.id === relationFilterId ? "bg-rose-300" : "bg-transparent"}`}>
+                        <img src={character.avatar} alt="" className="h-8 w-8 rounded-full border border-slate-200 object-cover" />
+                        {relation.id === relationFilterId && <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-rose-400 text-[7px] font-bold text-white">✓</span>}
                       </span>
-                      <span className="diary-filter-hint ml-1 text-[var(--text-secondary)]">
-                        {busyRelationId === relation.id ? "生成中…" : "筛选"}
-                      </span>
+                      <span className="max-w-full truncate text-[9px] font-bold leading-3">{character.remark || character.name}</span>
                     </button>
                   ))}{" "}
                 </div>
@@ -568,7 +624,7 @@ export default function AppDiary({
           </>
         )}
       </main>
-      <style>{`.diary-editor-field{border-radius:16px !important}.diary-action{display:flex;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:8px 4px;font-size:13px;line-height:1.2}.diary-action svg{flex-shrink:0}.diary-action:disabled{opacity:.42}.diary-filter-hint{display:none}`}</style>
+      <style>{`.diary-editor-field{border-radius:16px !important}.diary-action{display:flex;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:8px 4px;font-size: calc(13px * var(--app-font-scale, 1));line-height:1.2}.diary-action svg{flex-shrink:0}.diary-action:disabled{opacity:.42}.diary-filter-hint{display:none}`}</style>
     </div>
   );
 }

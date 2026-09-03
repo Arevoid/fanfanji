@@ -10,6 +10,20 @@ export function isSameTruthScope(left: CharacterTruthScope, right: CharacterTrut
     && (!left.conversationId || !right.conversationId || left.conversationId === right.conversationId);
 }
 
+/**
+ * Strict scope equality for persisted truth and derived caches.
+ *
+ * `isSameTruthScope` remains available for legacy readers that need to compare
+ * records before a conversation id was introduced. New writes, summaries and
+ * prompt projections must never treat a missing conversation id as a wildcard.
+ */
+export function isExactTruthScope(left: CharacterTruthScope, right: CharacterTruthScope): boolean {
+  return left.relationId === right.relationId
+    && left.characterId === right.characterId
+    && left.userIdentityId === right.userIdentityId
+    && left.conversationId === right.conversationId;
+}
+
 export function getKnowledgeClaimIdempotencyKey(claim: KnowledgeClaim): string {
   return [
     claim.relationId,
@@ -44,7 +58,7 @@ export function retractKnowledgeClaim(
   reason: string,
 ): KnowledgeClaim[] {
   if (!isCompleteTruthScope(scope) || !reason.trim()) return [...claims];
-  return claims.map((claim) => claim.id === claimId && isSameTruthScope(claim, scope)
+  return claims.map((claim) => claim.id === claimId && isExactTruthScope(claim, scope)
     ? { ...claim, truthStatus: "retracted", status: "retracted", retractionReason: reason.trim() }
     : claim);
 }
@@ -55,12 +69,12 @@ export function supersedeKnowledgeClaim(
   previousClaimId: string,
   replacement: KnowledgeClaim,
 ): KnowledgeClaim[] {
-  const previous = claims.find((claim) => claim.id === previousClaimId && isSameTruthScope(claim, scope));
+  const previous = claims.find((claim) => claim.id === previousClaimId && isExactTruthScope(claim, scope));
   const normalizedReplacement = normalizeKnowledgeClaim(replacement);
   if (!previous
     || previous.status !== "active"
     || !normalizedReplacement
-    || !isSameTruthScope(previous, normalizedReplacement)
+    || !isExactTruthScope(previous, normalizedReplacement)
     || normalizedReplacement.id === previous.id
     || claims.some((claim) => claim.id === normalizedReplacement.id)) return [...claims];
   const retired = claims.map((claim) => claim.id === previous.id
@@ -93,7 +107,7 @@ export const retractKnowledgeClaimsBySourceMessageIds = (
   const removed = new Set(messageIds.filter(Boolean));
   if (removed.size === 0) return [...claims];
   return claims.map((claim) => claim.source.messageIds?.some((messageId) => removed.has(messageId))
-    && (!scope || isSameTruthScope(claim, scope))
+    && (!scope || isExactTruthScope(claim, scope))
     ? {
       ...claim,
       truthStatus: "retracted" as const,

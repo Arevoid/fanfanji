@@ -35,7 +35,7 @@ import {
   loadForumThreads,
   saveForumGenerationTasks,
 } from "../src/core/storage/repositories/forumRepository";
-import { sanitizeSystemBackupValue } from "../src/components/AppSettings";
+import { sanitizeSystemBackupValue } from "../src/features/settings/systemBackupSanitizer";
 
 const now = 10_000_000;
 const settings = {

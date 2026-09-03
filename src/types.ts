@@ -6,7 +6,7 @@ export interface CharacterReference {
   content: string;
 }
 
-export const CHAT_ICON_KEYS = ["image", "voice", "sticker", "redPacket", "transfer", "file", "location", "call", "plus", "send"] as const;
+export const CHAT_ICON_KEYS = ["image", "textImage", "voice", "sticker", "redPacket", "transfer", "location", "call", "plus", "send", "sendOnly", "sendReply", "stop"] as const;
 export type ChatIconKey = typeof CHAT_ICON_KEYS[number];
 export type ChatIconOverrides = Partial<Record<ChatIconKey, string>>;
 
@@ -24,21 +24,24 @@ export function sanitizeChatIcons(value: unknown): ChatIconOverrides {
 export interface Character {
   id: string;
   name: string;
-  age?: number | "";
+  age?: number | "" | "∞";
   avatar: string; // URL, emoji, or base64
   gender?: string;
   mbti?: string;
   personality: string;
   backstory: string;
+  /** Explicit visible reply language. When absent, it is inferred from the complete persona, nationality, and visible World Book metadata. */
+  replyLanguage?: string;
   remark?: string; // Edit remark in chat menu
   isPinned?: boolean; // Pin chat to top
   chatBg?: string; // Custom chat background image
   momentsCover?: string; // Personal moments background cover
   album?: string[]; // Personal photo gallery / album
   references?: CharacterReference[];
+  /** Legacy persisted field; automatic summary is now always enabled. */
   enableAutoSummary?: boolean;
   enableAutoTranslate?: boolean;
-  summaryTriggerRound?: number;
+  summaryTriggerRound?: number; // 10~100, default 50 rounds
   compressedMemory?: string;
   /** Optional character-level routine configuration; it is a prompt hint only. */
   routine?: CharacterRoutine;
@@ -63,12 +66,12 @@ export interface Character {
   initialChatMode?: "greeting" | "context";
   lastImmediateSummaryMsgId?: string;
   disableBracketActions?: boolean;
+  /** Number of chat messages processed per automatic/manual archive batch. */
   historyMemoryLimit?: number;
-  contextMemoryLimit?: number; // 10~50, default 20
-  retrievalHistoryLimit?: number; // 10~200, default 100
+  contextMemoryLimit?: number; // 10~300 messages, default 150
+  /** Long-term memory items retrieved and injected per chat turn. */
+  retrievalHistoryLimit?: number; // 10~100, default 50
   archiveTemplateType?: "refined" | "delicate"; // "refined" (event log) | "delicate" (first person diary)
-  autoArchiveInterval?: number; // 10~100, default 50 rounds
-  enableAutoArchive?: boolean;
   enableTimeAwareness?: boolean;
   isGroupChat?: boolean;
   memberIds?: string[];
@@ -77,6 +80,8 @@ export interface Character {
   /** Contact copies are hidden from the archive and keep a link to their source profile. */
   isContactInstance?: boolean;
   profileSourceId?: string;
+  /** Identifies a chat profile created from a Relationship Network NPC. */
+  relationshipNetworkNpcId?: string;
   minimaxVoiceId?: string;
   mosslandVoiceId?: string;
   minimaxSpeed?: number;
@@ -102,6 +107,10 @@ export interface Message {
   senderId?: string;
   content: string;
   timestamp: number;
+  /** Optional structured metadata for red packets; legacy markup remains supported. */
+  redPacket?: RedPacketPayload;
+  /** Group-turn decision, persisted only as harmless metadata on generated replies. */
+  redPacketAction?: "claim_and_reply" | "claim_silent" | "decline_and_reply" | "silent";
   isBookmarked?: boolean;
   isOffline?: boolean;
   /** Snapshot-only online context. It informs a story but is never rendered as story text. */
@@ -208,6 +217,7 @@ export interface DiaryDraft {
 
 export type ImageApiProtocol = "openai-images" | "gemini-native-image" | "imagen-text";
 export type GeminiImageAuthMode = "x-goog-api-key" | "bearer";
+export type ImageAspectRatio = "1:1" | "3:4" | "4:3" | "16:9" | "9:16";
 
 export interface ImageApiPreset {
   id: string;
@@ -217,6 +227,8 @@ export interface ImageApiPreset {
   apiEndpoint: string;
   apiKey: string;
   selectedModel: string;
+  /** Preferred output ratio. Legacy presets default to 1:1 at request time. */
+  aspectRatio?: ImageAspectRatio;
   /** Gemini middleboxes differ; user selects the authentication header they support. */
   geminiAuthMode?: GeminiImageAuthMode;
   /** Must be enabled only when the selected Gemini middlebox/model explicitly accepts image input. */
@@ -263,10 +275,15 @@ export interface InnerVoiceRecord {
 
 export interface MomentComment {
   id: string;
+  /** Stable actor identity prevents comments from different relationships being mixed by display name. */
+  characterId?: string;
+  relationId?: string;
   authorName: string;
   authorAvatar: string;
   content: string;
   timestamp: number;
+  /** Stable parent comment id for public reply threads. */
+  replyToCommentId?: string;
 }
 
 export interface Moment {
@@ -274,6 +291,8 @@ export interface Moment {
   characterId?: string; // If posted by a character, otherwise user
   /** Direct-chat relationship that owns an automatically generated character Moment. */
   relationId?: string;
+  /** Optional stable source when a relationship-network NPC publishes the post. */
+  relationshipNetworkNpcId?: string;
   authorName: string;
   authorAvatar: string;
   content: string;
@@ -283,6 +302,11 @@ export interface Moment {
   /** Legacy comments parsed from older post content that the user has removed. */
   deletedCommentIds?: string[];
   image?: string; // base64 or URL
+  /** Generated/uploaded image blobs can live in IndexedDB instead of metadata. */
+  imageAssetId?: string;
+  /** Original aspect metadata retained so uploaded photos are never forced into a square tile. */
+  imageWidth?: number;
+  imageHeight?: number;
   /** A placeholder image rendered from text until image generation is available. */
   imageType?: "photo" | "text";
   imageDescription?: string;
@@ -440,8 +464,6 @@ export interface ForumMutationEvent {
   occurredAt: number;
 }
 
-export type ForumRootTab = "home" | "mine";
-
 export interface ForumUserProfile {
   ownerIdentityId: string;
   displayName: string;
@@ -569,6 +591,8 @@ export interface ForumTranslation {
   lastAccessedAt: number;
 }
 
+export type MusicTrackSource = "local" | "network-link" | "netease";
+
 export interface MusicTrack {
   id: string;
   title: string;
@@ -576,6 +600,14 @@ export interface MusicTrack {
   /** Runtime ObjectURL for a local file, or the persisted URL for a network track. */
   url: string;
   isLocal: boolean;
+  /** Explicit provider identity; missing values are inferred for legacy tracks. */
+  source?: MusicTrackSource;
+  /** Provider-native ID for remote tracks; never used as a local IndexedDB key. */
+  providerTrackId?: string;
+  /** Account scope for remote provider records, when a provider account is involved. */
+  providerAccountId?: string;
+  /** Runtime-only expiry hint for a provider playback URL. */
+  remoteUrlExpiresAt?: number;
   duration?: string;
   /** Local audio blobs live in MusicAppDB. Old tracks use id as the asset key. */
   audioAssetId?: string;
@@ -592,17 +624,10 @@ export interface MusicPlaylist {
   tracks: string[]; // Track IDs
 }
 
-export interface CalendarEvent {
-  id: string;
-  date: string; // YYYY-MM-DD
-  title: string;
-  description?: string;
-  isDone: boolean;
-}
-
 export type WorldBookScope =
   | { kind: "global" }
   | { kind: "character"; characterId: string }
+  | { kind: "characters"; characterIds: string[] }
   | { kind: "identity"; userIdentityId: string }
   | { kind: "relationship"; relationId: string; characterId: string; userIdentityId: string };
 
@@ -617,6 +642,8 @@ export interface WorldBookEntry {
   content: string;
   timestamp: number;
   characterId?: string; // "global" or a specific character's ID
+  /** Multiple canonical characters that may use this entry. */
+  characterIds?: string[];
   /** New explicit scope; missing scope keeps legacy character/global reads compatible. */
   scope?: WorldBookScope;
   /** Public entries must opt in explicitly; missing visibility is legacy/private. */
@@ -635,6 +662,8 @@ export interface UserIdentity {
   avatar: string;
   signature: string;
   bio: string;
+  /** Alias identities belong to the contacts identity switcher, not the main profile/settings surfaces. */
+  kind?: "primary" | "alias";
 }
 
 export interface UserSettings {
@@ -648,6 +677,8 @@ export interface UserSettings {
   /** Distinguishes an explicit user/preset wallpaper from legacy placeholder defaults. */
   wallpaperSource?: "user" | "preset" | "legacy-default";
   customIcons: Record<string, string>; // appKey -> image base64/URL or empty
+  /** Four applications that remain pinned in the bottom Dock. */
+  dockApps?: string[];
   bubbleCss: string; // Custom bubble CSS
   globalCss: string; // Custom global CSS
   /** CSS scoped to active chat conversation screens only. */
@@ -691,6 +722,12 @@ export interface UserSettings {
   widgetOpacity?: number;
   customFontName?: string;
   customFontData?: string;
+  /** Global application typography. Uploaded font binaries live in IndexedDB. */
+  globalFontSource?: "default" | "upload" | "url";
+  globalFontName?: string;
+  globalFontUrl?: string;
+  globalFontAssetId?: string;
+  globalFontSize?: number;
   iconBorderRadius?: number;
   iconBgOpacity?: number;
   iconBorderWidth?: number;
@@ -707,6 +744,8 @@ export interface UserSettings {
   avatarBorderRadius?: number;
   otherBubbleBg?: string;
   otherBubbleColor?: string;
+  /** One-time repair version for unreadable legacy classic bubble palettes. */
+  classicBubblePaletteMigrationVersion?: number;
   otherBubbleRadius?: number;
   otherBubbleOpacity?: number;
   selfBubbleBg?: string;
@@ -721,6 +760,8 @@ export interface UserSettings {
   bubbleTailEnabled?: boolean;
   bubbleTailVertical?: "top" | "center" | "bottom";
   bubblePosition?: "side" | "above" | "below";
+  /** Base vertical gap between rendered chat message rows, in pixels. */
+  bubbleSpacing?: number;
   hideNicknames?: boolean;
   bubbleBorderEnabled?: boolean;
   bubbleBorderWidth?: number;
@@ -775,7 +816,7 @@ export interface StylePreset {
 export interface HomeScreenItem {
   id: string;
   type: "app" | "widget";
-  widgetType?: "album" | "calendar-album" | "time" | "music" | "dual-music" | "anniversary" | "todo";
+  widgetType?: "album" | "calendar-album" | "time" | "music" | "dual-music" | "anniversary" | "todo" | "reading" | "chat-stats";
   size: "1x1" | "2x2" | "1x4" | "2x3" | "2x4";
   /** Legacy mirror kept during migration. position.page is authoritative. */
   page: number;
@@ -824,14 +865,64 @@ export interface MemoryItem {
   characterId: string;
   /** The direct relationship that owns this remembered interaction. */
   relationId?: string;
+  /** Optional scope metadata for records created by newer memory writers. */
+  userIdentityId?: string;
+  conversationId?: string;
   /** The Moment that created this automatic memory, when applicable. */
   sourceMomentId?: string;
+  /** The cinema media that created this compatibility memory, when applicable. */
+  sourceCinemaId?: string;
   /** Authoritative Truth Layer records represented by this compatibility view. */
   sourceKnowledgeClaimIds?: string[];
+  /** Temporarily excludes this record from recall without deleting its content. */
+  recallDisabled?: boolean;
   content: string;
   timestamp: number;
   importance?: number; // 1-10, default 5
   isManual?: boolean;
+  /** A confirmed reading interaction may mirror into this exact relationship only. */
+  sourceReadingRoomId?: string;
+  sourceReadingCommentId?: string;
+  sourceReadingEvidence?: {
+    bookId: string;
+    chapterId?: string;
+    paragraphAnchorId?: string;
+  };
+}
+
+export interface MusicPlaybackHistoryItem {
+  id: string;
+  ownerIdentityId: string;
+  trackId: string;
+  title: string;
+  artist: string;
+  source?: MusicTrackSource;
+  providerTrackId?: string;
+  providerAccountId?: string;
+  playedAt: number;
+}
+
+export interface MusicRemoteLibraryItem {
+  id: string;
+  ownerIdentityId: string;
+  provider: "netease";
+  providerAccountId: string;
+  providerTrackId: string;
+  title: string;
+  artist: string;
+  coverUrl?: string;
+  savedAt: number;
+}
+
+export type RedPacketMode = "lucky" | "exclusive";
+
+export interface RedPacketPayload {
+  mode: RedPacketMode;
+  totalAmount: number;
+  count: number;
+  greeting: string;
+  recipientId?: string;
+  recipientName?: string;
 }
 
 export interface MemoryVaultSettings {
@@ -841,6 +932,15 @@ export interface MemoryVaultSettings {
   extractInterval: number;
 }
 
+export interface MemoryArchiveStats {
+  sourceMessageCount: number;
+  acceptedTruthCount: number;
+  summaryCount: number;
+  ruleCount: number;
+  compatibilityCount: number;
+  rejectedCandidateCount: number;
+}
+
 export interface ImmediateSummaryTask {
   characterId: string;
   relationId?: string;
@@ -848,6 +948,7 @@ export interface ImmediateSummaryTask {
   status: "idle" | "summarizing" | "completed" | "error";
   rounds: number;
   extractedCount: number;
+  archiveStats?: MemoryArchiveStats;
   error?: string;
 }
 
@@ -858,13 +959,27 @@ export interface OfflineStory {
   relationId?: string;
   conversationId?: string;
   characterIds?: string[];
+  /** Frozen display data for multiplayer story cards; live characters remain authoritative for prompts. */
+  participantSnapshots?: Array<{
+    id: string;
+    name: string;
+    avatar?: string;
+  }>;
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** One-time director guidance, consumed after the next successful generation. */
+  oneTimeGuidance?: string;
+  /** Ongoing director guidance, applied to every future generation. */
+  ongoingGuidance?: string;
   mode: "director" | "continue" | "if";
   ifPrompt?: string;
   sourceChatId?: string; // Optional reference source
   sourceChatMsgCount?: number;
+  /** Confirmed appointment that explicitly opened this continuation. */
+  sourceAppointmentId?: string;
+  /** One-shot request for the inviting character to open the first scene. */
+  autoStartFirstAct?: boolean;
   messages: Message[];
   wordLimit?: number;
   partnerPerspective?: string;
@@ -882,10 +997,14 @@ export interface OfflineStory {
   worldBookSnapshot?: WorldBookEntry[];
   /** Confirmed Truth/manual-memory snapshot captured for this isolated story. */
   knowledgeSnapshot?: string[];
+  /** Per-participant memory snapshot for multi-character stories. */
+  memberKnowledgeSnapshots?: Record<string, string[]>;
   /** Frozen at the moment an online chat is explicitly imported into this story. */
   importedContext?: {
     messages: Message[];
     memories: string[];
+    /** Deterministic facts extracted at the online → offline handoff. */
+    handoffFacts?: OfflineHandoffFact[];
     /** Group imports keep each member's relationship-private memory separate. */
     memberMemories?: Record<string, string[]>;
     worldBook: string[];
@@ -915,6 +1034,19 @@ export interface Sticker {
   id: string;
   name: string;
   url: string; // Dynamic ObjectURL or base64/url
+  /** Cached multimodal understanding. Chat prompts use this instead of an inaccessible blob/url. */
+  semanticDescription?: string;
+}
+
+export interface OfflineHandoffFact {
+  id: string;
+  sourceMessageIds: string[];
+  speaker: "user" | "character";
+  kind: "schedule" | "plan" | "preference" | "context";
+  content: string;
+  /** Human-readable absolute local time resolved from relative words such as 明天/明晚. */
+  normalizedTime?: string;
+  sourceTimestamp: number;
 }
 
 export interface StickerGroup {

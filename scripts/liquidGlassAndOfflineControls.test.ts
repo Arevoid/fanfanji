@@ -105,11 +105,13 @@ assert.match(chat, /#conv-screen\.style-liquid-glass \.cv-header \.menu-btn[\s\S
 assert.match(chat, /mx-3\.5 mb-3\.5 mt-1 overflow-visible shrink-0 flex flex-col cv-footer chat-input-area chat-composer--liquid/);
 assert.match(chat, /#conv-screen\.style-liquid-glass \.chat-composer__input[\s\S]*border-radius: 999px/);
 assert.match(chat, /#conv-screen\.style-liquid-glass \.chat-composer__attachment-panel/);
-assert.match(app, /#conv-screen:not\(\.style-liquid-glass\) \.chat-bubble-self/);
-assert.match(app, /#conv-screen:not\(\.style-liquid-glass\) \.chat-bubble-other/);
+assert.doesNotMatch(app, /#conv-screen:not\(\.style-liquid-glass\) \.chat-bubble-self/);
+assert.doesNotMatch(app, /#conv-screen:not\(\.style-liquid-glass\) \.chat-bubble-other/);
+assert.match(chat, /settings\.otherBubbleBg[\s\S]*getBubbleBackgroundStyle\(settings\.otherBubbleBg/);
+assert.match(chat, /color: \$\{settings\.otherBubbleColor\} !important/);
 assert.match(app, /bubbleStylePreset=\{resolveActiveChatStylePreset/);
 assert.match(settings, /effectiveBubbleStylePreset/);
-assert.match(serviceWorker, /fanfan-phone-v5/);
+assert.match(serviceWorker, /const CACHE_NAME\s*=\s*["']fanfan-phone-[^"']+["']/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("self"\)/);
 assert.match(settings, /getPreviewBubbleVisualStyle\("other"\)/);
 assert.match(settings, /液态玻璃气泡设置/);

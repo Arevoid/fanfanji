@@ -19,6 +19,10 @@ export interface MemoryRetrievalContext {
   queryText: string;
   existingMemories: readonly MemoryItem[];
   limit?: number;
+  /** Soft prompt budget for compatibility-memory recall, measured in characters. */
+  maxCharacters?: number;
+  /** Truth Layer is the prompt authority; skip compatibility mirrors when it is loaded. */
+  excludeCanonicalMirrors?: boolean;
   scenario: MemoryScenario;
 }
 

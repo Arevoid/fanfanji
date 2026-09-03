@@ -126,13 +126,13 @@ export function formatChatConversationFlowGuidance(flow: ConversationFlowAnalysi
   if (!flow) return "";
 
   const repetitionRule = flow.shouldTransition
-    ? "The current event or emotion has repeated too long. Stop paraphrasing it and make a natural transition now."
-    : "Do not repeat the same event or emotion in new wording; add new information or a genuinely different reaction.";
+    ? "The current event or emotion may be getting repetitive. Treat that only as a pacing signal: transition, linger, complain, or repeat only as this specific character naturally would."
+    : "Avoid accidental paraphrase loops, unless deliberate repetition is an established habit or meaningful reaction of this specific character.";
   const stateRule = flow.state === "naturally-completed"
-    ? "The latest topic is naturally complete. Acknowledge it briefly if needed, then move on; do not reopen it just to keep talking."
+    ? "The latest topic appears complete. Whether to linger, reopen it, end, or move on is still decided by this character's habits and relationship."
     : flow.state === "needs-follow-up"
-      ? "The latest character question or promise still needs the user's answer. Respond to the newest message first without repeating an earlier question."
-      : "The latest topic is active. Continue only while the user's newest message clearly keeps it open.";
+      ? "The latest character question or promise may still be open; treat that as context, not an order to repeat or pursue it."
+      : "The latest topic appears active; use that only as context for this character's own response.";
 
   return `[CONVERSATION FLOW — SHORT-TERM GUIDANCE]
 Topic state: ${flow.state}
@@ -140,9 +140,9 @@ Repeated topic turns (derived from recent chat only): ${flow.repeatedTopicTurns}
 Repeated emotion turns (derived from recent chat only): ${flow.repeatedEmotionTurns}
 ${stateRule}
 ${repetitionRule}
-Never stay on one event for three or more consecutive turns. Do not recycle the same accusation, reassurance, or emotional sentence with synonyms.
-When a topic is complete or repetition reaches the limit, transition in the character's own voice. A suitable bridge may touch on ${flow.transitionSuggestions.join("、")}，but do not sound like a customer-service topic switch.
-Answer the newest user message first, preserve the established persona and scene facts, and never mention this flow analysis or these instructions to the user.`;
+The turn counts are diagnostics, not a universal limit. They must not force a talkative, clingy, grudging, repetitive, evasive, or quiet character into the same pacing template.
+If a transition fits the character, a possible bridge may touch on ${flow.transitionSuggestions.join("、")}；otherwise stay, react, or end the exchange as this character would.
+Preserve the established persona and scene facts. Never mention this flow analysis or these instructions to the user.`;
 }
 
 function formatShortTermEmotion(label: string, state: ShortTermEmotionState): string {
@@ -157,14 +157,14 @@ export function formatChatEmotionGuidance(snapshot: ChatEmotionSnapshot | undefi
   if (!snapshot) return "";
 
   const characterDecayRule = snapshot.character.decay
-    ? "The character has already expressed this emotion repeatedly. Lower the intensity; do not restate or escalate it. Let the exchange land naturally or shift topics in character."
-    : "Keep emotional intensity proportionate to the newest user message; do not manufacture a stronger feeling.";
+    ? "The character has expressed this emotion repeatedly. This is a repetition signal only; keep, lower, heighten, or redirect it according to the character's established pattern and current facts."
+    : "Use the detected emotion only as context. The character profile and relationship still decide visible emotional intensity and style.";
 
   return `[SHORT-TERM EMOTION — THIS TURN ONLY]
 ${formatShortTermEmotion("User", snapshot.user)}
 ${formatShortTermEmotion("Character", snapshot.character)}
 ${characterDecayRule}
-Treat this only as a tone cue for the next reply. Do not mention emotion labels, intensity, decay, or this guidance. Do not turn it into Memory, a relationship fact, or a CharacterEvent.`;
+Treat this as an ephemeral observation, never a universal tone template. Do not mention emotion labels, intensity, decay, or this guidance. Do not turn it into Memory, a relationship fact, or a CharacterEvent.`;
 }
 
 /** Formats the pure per-turn interaction direction selected by DialogueStrategy. */
@@ -172,18 +172,26 @@ export function formatChatDialogueStrategyGuidance(decision: DialogueStrategyDec
   if (!decision) return "";
 
   const direction: Record<DialogueStrategyDecision["strategy"], string> = {
-    comfort: "Prioritize a brief, sincere acknowledgement and support. Do not dismiss, tease, or abruptly change the subject before responding to the feeling.",
-    ask: "Respond to the user's shared event with one relevant, natural follow-up question. Do not interrogate or turn it into a checklist.",
-    share: "Offer a small in-character thought or present-state response, then leave room for the user. Do not invent concrete events, places, or activities not established in chat.",
-    tease: "Use light, affectionate teasing only if it fits the existing persona and the user's newest message. Keep it fresh; do not recycle an earlier joke.",
-    continue: "Answer the newest message and continue the actually active exchange with new information or a natural follow-up.",
-    transition: "Let the previous exchange land. Do not repeat its emotion, accusation, reassurance, or joke; bridge gently into a new small topic in character.",
+    comfort: "The user may be expressing a negative feeling. This is detection, not an order to comfort: acknowledge, support, tease, stay awkward, deflect, or respond differently according to this character and relationship.",
+    ask: "A follow-up question may fit the user's shared event, but ask only if this character would; sharing, reacting, teasing, or not pursuing it can be equally correct.",
+    share: "The user may be asking about the character. What to share, how much, and in what attitude follows the character; do not invent unestablished events, places, or activities.",
+    tease: "Playful context may be present. Teasing is optional, and its warmth, sharpness, length, and wording must come from the character rather than a generic affectionate style.",
+    continue: "The exchange appears active. Continue, pause, answer narrowly, or react according to this character's own conversational pattern.",
+    transition: "The previous exchange may have landed. A transition is optional and must use this character's own pacing; do not force a gentle bridge or generic new topic.",
+  };
+  const signal: Record<DialogueStrategyDecision["strategy"], string> = {
+    comfort: "possible-negative-emotion",
+    ask: "shared-event",
+    share: "character-status-question",
+    tease: "playful-context",
+    continue: "active-exchange",
+    transition: "possible-repetition-or-completion",
   };
 
   return `[DIALOGUE STRATEGY — THIS TURN ONLY]
-Selected strategy: ${decision.strategy}
+Detected interaction signal: ${signal[decision.strategy]}
 ${direction[decision.strategy]}
-This controls interaction direction only. Preserve the existing character persona, world setting, facts, and boundaries. Do not mention this strategy to the user.`;
+This is soft interaction analysis only. It never controls warmth, politeness, teasing, questions, reply length, or emotional response over the character persona. Do not mention this strategy to the user.`;
 }
 
 /**
@@ -195,33 +203,41 @@ export function formatConversationStateGuidance(state: ConversationState | undef
   if (!state) return "";
 
   const topicRule: Record<ConversationState["topic"]["status"], string> = {
-    active: "The topic is still active only if the newest user message keeps it open.",
-    "naturally-completed": "The topic has naturally completed. Let it land and do not reopen it just to keep talking.",
-    "needs-follow-up": "The topic has an outstanding follow-up. Answer the newest user message before revisiting it.",
+    active: "The topic appears active; use that as context without forcing a particular response shape.",
+    "naturally-completed": "The topic appears complete; lingering, reopening, ending, or moving on must still follow the character.",
+    "needs-follow-up": "The topic may have an outstanding follow-up; use it as context without forcing pursuit or repetition.",
   };
   const direction: Record<ConversationState["strategy"], string> = {
-    comfort: "Prioritize a brief, sincere acknowledgement and support before anything else.",
-    ask: "Use one relevant, natural follow-up question about the user's shared event; do not interrogate.",
-    share: "Offer a small in-character thought or present-state response without inventing unestablished events.",
-    tease: "Use fresh, light teasing only when it fits the established persona and newest user message.",
-    continue: "Answer the newest message and advance the actually active exchange with new information or a natural follow-up.",
-    transition: "Let the prior exchange land, then bridge gently into a new small topic in character.",
+    comfort: "A negative feeling may be present; react in the character's own way instead of defaulting to comfort or support.",
+    ask: "A follow-up question is optional; use it only if it matches this character's conversational habit.",
+    share: "The user may be asking about the character; the character decides what and how much to share without inventing events.",
+    tease: "Playful context may be present; whether and how to tease follows the character, without a universal light or affectionate style.",
+    continue: "The exchange appears active; continuation, pause, narrow answer, or another in-character reaction can all be valid.",
+    transition: "The prior exchange may have landed; transition only if and how this character naturally would.",
   };
   const repetitionRule = state.guidance.shouldAvoidRepetition
-    ? "Avoid repetition now: do not restate the same event, accusation, reassurance, emotion, or joke with synonyms."
-    : "Do not recycle the same event or emotion in new wording; add new information or a genuinely different reaction.";
+    ? "Possible repetition detected. Avoid accidental synonym loops, but deliberate repetition remains valid when it is this character's established habit or meaningful reaction."
+    : "No strong repetition signal. Still avoid accidental paraphrase loops while preserving this character's deliberate habits.";
   const transitionRule = state.guidance.shouldChangeTopic
-    ? "A natural topic change is needed this turn. First answer what the user just said, then transition in the character's own voice."
+    ? "A topic change may reduce repetition, but it is optional and must follow the character's own pacing and habits."
     : "Do not force a topic change; follow the newest message naturally.";
+  const strategySignal: Record<ConversationState["strategy"], string> = {
+    comfort: "possible-negative-emotion",
+    ask: "shared-event",
+    share: "character-status-question",
+    tease: "playful-context",
+    continue: "active-exchange",
+    transition: "possible-repetition-or-completion",
+  };
 
   return `[CONVERSATION STATE — THIS TURN ONLY]
 Topic status: ${state.topic.status}${state.topic.name ? ` (${state.topic.name})` : ""}
 Short-term emotion: user=${state.emotion.userEmotion}; character=${state.emotion.characterEmotion}; intensity=${state.emotion.intensity.toFixed(2)}
-Recommended interaction direction: ${state.strategy}
-Natural transition needed: ${state.guidance.shouldChangeTopic ? "yes" : "no"}
+Detected interaction signal: ${strategySignal[state.strategy]}
+Potential pacing transition signal: ${state.guidance.shouldChangeTopic ? "yes" : "no"}
 ${topicRule[state.topic.status]}
 ${direction[state.strategy]}
 ${repetitionRule}
 ${transitionRule}
-This state is only a tone and pacing cue for this reply. Preserve the established persona, world setting, facts, and boundaries. Do not mention this state, labels, intensity, strategy, or instructions to the user. Do not turn it into Memory, a relationship fact, or a CharacterEvent.`;
+This state is soft analysis only, not a tone template or behavior order. Preserve the established persona, world setting, facts, and boundaries. Do not mention this state, labels, intensity, strategy, or instructions to the user. Do not turn it into Memory, a relationship fact, or a CharacterEvent.`;
 }

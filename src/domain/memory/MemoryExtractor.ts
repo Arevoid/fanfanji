@@ -4,6 +4,7 @@ import { evaluateKnowledgeWrite } from "../characterKnowledge/knowledgeWritePoli
 import { normalizeExtractedKnowledgeCandidate } from "../../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { isDuplicateMemory } from "./MemoryDeduplicator";
 import type { MemoryExtractionApi, MemoryExtractionContext, MemoryExtractionResult } from "./memoryTypes";
+import { serializeMessageContentForPrompt } from "../../features/chat/prompts/messagePromptSerializer";
 
 const hasTruthScope = (context: MemoryExtractionContext): boolean => Boolean(
   context.relationId?.trim()
@@ -23,7 +24,10 @@ export async function extractMemories(
   const history = context.recentMessages.map((message) => ({
     id: message.id,
     role: message.sender === "user" ? "user" as const : "model" as const,
-    text: message.content,
+    text: serializeMessageContentForPrompt(message, {
+      mode: "history",
+      characterName: context.character.name,
+    }),
   }));
   const data = await extractApi({
     history,
@@ -40,6 +44,18 @@ export async function extractMemories(
     ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
   });
 
+  // API adapters return an empty array alongside their error so callers can
+  // keep a stable response shape. Preserve the error before interpreting that
+  // empty array as an honest "no durable facts" extraction.
+  if (data.error) {
+    return {
+      extractedMemories: [],
+      acceptedClaims: [],
+      rejectedCandidateCount: 0,
+      apiError: data.error,
+    };
+  }
+
   const rawItems = Array.isArray(data.candidates) ? data.candidates : data.items;
   if (!Array.isArray(rawItems)) {
     return {
@@ -50,27 +66,17 @@ export async function extractMemories(
     };
   }
 
-  // Compatibility-only path for callers that predate a complete relationship
-  // scope. Production direct writes pass all scope fields and use Truth Policy.
+  // A memory without a complete relationship scope cannot be attributed to a
+  // specific user's relationship. Keep the result visible to the caller as a
+  // rejected extraction, but never manufacture a legacy long-term MemoryItem.
+  // This closes the old characterId-only fallback that could leak facts across
+  // identities or conversations.
   if (!hasTruthScope(context)) {
-    const validItems = rawItems
-      .filter((item): item is string => typeof item === "string")
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const acceptedItems = context.filterItems ? context.filterItems(validItems) : validItems;
-    if (acceptedItems.length === 0) return { extractedMemories: [], acceptedClaims: [], rejectedCandidateCount: 0 };
-    const candidate: MemoryItem = {
-      id: context.createId(),
-      characterId: context.characterId,
-      ...(context.relationId ? { relationId: context.relationId } : {}),
-      content: context.formatContent(acceptedItems),
-      timestamp: context.currentTime(),
-      importance: context.scenario === "offline" ? 4 : 5,
-      isManual: false,
+    return {
+      extractedMemories: [],
+      acceptedClaims: [],
+      rejectedCandidateCount: rawItems.length,
     };
-    return isDuplicateMemory(context.existingMemories, candidate)
-      ? { extractedMemories: [], acceptedClaims: [], rejectedCandidateCount: 0 }
-      : { extractedMemories: [candidate], acceptedClaims: [], rejectedCandidateCount: 0 };
   }
 
   const allowedMessageIds = new Set(context.recentMessages.map((message) => message.id));
@@ -94,7 +100,12 @@ export async function extractMemories(
     const sourceMessages = payload.sourceMessageIds
       .map((id) => context.recentMessages.find((message) => message.id === id))
       .filter(isMessage);
-    const quotedMessage = sourceMessages.find((message) => message.content.includes(payload.evidenceQuote));
+    const quotedMessage = sourceMessages.find((message) =>
+      message.content.includes(payload.evidenceQuote)
+      || serializeMessageContentForPrompt(message, {
+        mode: "history",
+        characterName: context.character.name,
+      }).includes(payload.evidenceQuote));
     if (!quotedMessage) {
       rejectedCandidateCount += 1;
       return;
@@ -163,6 +174,8 @@ export async function extractMemories(
     id: baseId,
     characterId: context.characterId,
     relationId: context.relationId,
+    ...(context.userIdentityId ? { userIdentityId: context.userIdentityId } : {}),
+    ...(context.conversationId ? { conversationId: context.conversationId } : {}),
     content: context.formatContent(
       trustedClaims.map((claim) => claim.statement),
       { displayItems: trustedClaims.map((claim) => displayTextByClaimId.get(claim.id) || claim.statement) },

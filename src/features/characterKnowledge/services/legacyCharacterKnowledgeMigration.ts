@@ -7,6 +7,7 @@ import {
   type ConversationSummaryRecord,
   type KnowledgeClaim,
 } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
+import { isExactTruthScope } from "../../../domain/characterKnowledge/knowledgeConflictPolicy";
 import { projectLegacyMemoryToKnowledgeClaim } from "../../../domain/characterKnowledge/legacyKnowledgeCompatibility";
 
 export type LegacyTruthMigrationDiagnostic =
@@ -76,8 +77,21 @@ const storyIdForMemory = (memory: MemoryItem, stories: readonly OfflineStory[]):
   return separator > 0 ? marker.slice(0, separator) : marker;
 };
 
-const hasSourceId = <T extends { id: string; sourceRecordId?: string }>(records: readonly T[], sourceRecordId: string): boolean =>
-  records.some((record) => record.sourceRecordId === sourceRecordId || record.id === `legacy-${sourceRecordId}`);
+const hasSourceId = <T extends { id: string; sourceRecordId?: string; relationId?: string }>(
+  records: readonly T[],
+  sourceRecordId: string,
+  relationId: string,
+): boolean => records.some((record) =>
+  (record.sourceRecordId === sourceRecordId && record.relationId === relationId)
+  || record.id === `legacy-${sourceRecordId}`,
+);
+
+const relationScope = (relation: CharacterRelationship) => ({
+  relationId: relation.id,
+  characterId: relation.characterId,
+  userIdentityId: relation.userIdentityId,
+  conversationId: relation.conversationId,
+});
 
 const summaryForRelation = (
   relation: CharacterRelationship,
@@ -152,7 +166,7 @@ export function migrateLegacyCharacterKnowledge(input: LegacyTruthMigrationInput
       };
       migratedMemoryIds.push(memory.id);
       migratedCorrectionIds.push(correction.id);
-      if (!hasSourceId(existingCorrections, memory.id)) corrections.push(correction);
+      if (!hasSourceId(existingCorrections, memory.id, relation.id)) corrections.push(correction);
       continue;
     }
 
@@ -179,14 +193,16 @@ export function migrateLegacyCharacterKnowledge(input: LegacyTruthMigrationInput
       }
       : projection.claim;
     migratedMemoryIds.push(memory.id);
-    if (!existingClaims.some((item) => item.id === claim.id || item.source.sourceRecordId === memory.id)) claims.push(claim);
+      if (!existingClaims.some((item) =>
+        item.id === claim.id
+        || (item.source.sourceRecordId === memory.id && isExactTruthScope(item, claim)))) claims.push(claim);
   }
 
   for (const relation of input.relationships) {
     if (!relation.compressedMemory?.trim()) continue;
     const summary = summaryForRelation(relation, relation.id, relation.compressedMemory, relation.updatedAt, "relationship-compressed-memory");
     migratedSummaryIds.push(summary.id);
-    if (!existingSummaries.some((item) => item.id === summary.id || item.sourceRecordId === relation.id)) summaries.push(summary);
+    if (!existingSummaries.some((item) => item.id === summary.id || (item.sourceRecordId === relation.id && isExactTruthScope(item, relationScope(relation))))) summaries.push(summary);
   }
 
   for (const character of input.characters) {
@@ -200,7 +216,7 @@ export function migrateLegacyCharacterKnowledge(input: LegacyTruthMigrationInput
     }
     const summary = summaryForRelation(candidates[0], character.id, character.compressedMemory, character.lastActiveTime || input.now, "character-compressed-memory");
     migratedSummaryIds.push(summary.id);
-    if (!existingSummaries.some((item) => item.id === summary.id || item.sourceRecordId === character.id)) summaries.push(summary);
+    if (!existingSummaries.some((item) => item.id === summary.id || (item.sourceRecordId === character.id && isExactTruthScope(item, relationScope(candidates[0]))))) summaries.push(summary);
   }
 
   return {

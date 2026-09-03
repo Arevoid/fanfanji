@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import { useBackgroundScheduler } from "../../../core/scheduler/useBackgroundScheduler";
 import type { ForumActivityRuntimeContext } from "../services/forumActivityRuntime";
 import { FORUM_ACTIVITY_CHECK_MIN_MS } from "../services/forumActivityService";
 import { runAutomaticForumActivityCheck } from "../services/forumActivityRuntime";
@@ -7,31 +8,15 @@ import { runAutomaticForumActivityCheck } from "../services/forumActivityRuntime
 export const useForumActivityEngine = (context: ForumActivityRuntimeContext): void => {
   const contextRef = useRef(context);
   contextRef.current = context;
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let disposed = false;
-    let inFlight = false;
-    const schedule = () => {
-      if (disposed || typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(tick, FORUM_ACTIVITY_CHECK_MIN_MS);
-    };
-    const tick = async () => {
-      if (disposed || inFlight || typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      inFlight = true;
-      try { await runAutomaticForumActivityCheck(contextRef.current); }
-      finally { inFlight = false; schedule(); }
-    };
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== "visible" && timer) clearTimeout(timer);
-      if (document.visibilityState === "visible") schedule();
-    };
-    if (typeof document === "undefined" || document.visibilityState === "visible") void tick();
-    document?.addEventListener?.("visibilitychange", onVisibilityChange);
-    return () => {
-      disposed = true;
-      if (timer) clearTimeout(timer);
-      document?.removeEventListener?.("visibilitychange", onVisibilityChange);
-    };
-  }, [context.ownerIdentityId]);
+  useBackgroundScheduler({
+    id: `forum-activity-${context.ownerIdentityId}`,
+    enabled: Boolean(context.ownerIdentityId),
+    intervalMs: FORUM_ACTIVITY_CHECK_MIN_MS,
+    initialDelayMs: 0,
+    taskType: "forum-activity",
+    reason: "scheduled-forum-activity-check",
+    recoveryPayload: { ownerIdentityId: context.ownerIdentityId, scope: "public-forum" },
+    run: async () => { await runAutomaticForumActivityCheck(contextRef.current); },
+    pauseWhenHidden: true,
+  });
 };

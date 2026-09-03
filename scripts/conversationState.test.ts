@@ -48,7 +48,8 @@ assert.deepEqual(combined, {
 const prompt = formatConversationStateGuidance(combined);
 assert.match(prompt, /CONVERSATION STATE/);
 assert.match(prompt, /Topic status: active/);
-assert.match(prompt, /Recommended interaction direction: ask/);
+assert.match(prompt, /Detected interaction signal: shared-event/);
+assert.match(prompt, /soft analysis only/);
 assert.equal(prompt.includes("relationId"), false);
 assert.equal(prompt.includes("characterId"), false);
 

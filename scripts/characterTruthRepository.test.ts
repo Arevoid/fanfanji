@@ -83,6 +83,14 @@ const summaries = appendConversationSummaries([], [summary("summary-a"), summary
 assert.equal(summaries.length, 2);
 assert.deepEqual(listConversationSummariesByRelation(scopeA, summaries).map((item) => item.id), ["summary-a"]);
 assert.deepEqual(removeConversationSummariesByRelations(summaries, [scopeA.relationId]).map((item) => item.id), ["summary-b"]);
+const summaryNew = { ...summary("summary-versioned"), generatedAt: 200, summary: "new summary" };
+const summaryOld = { ...summaryNew, generatedAt: 100, summary: "old summary" };
+assert.equal(appendConversationSummaries([], [summaryNew, summaryOld]).find((item) => item.id === summaryNew.id)?.summary, "new summary");
+assert.deepEqual(
+  listConversationSummariesByRelation(scopeA, [summary("summary-a"), { ...summary("summary-other-conversation"), conversationId: "direct:other" }]),
+  [summary("summary-a")],
+  "summary listing must not treat conversationId as a wildcard",
+);
 
 const correction = (id: string, scope = scopeA): BehaviorCorrectionRecord => ({
   id, ...scope, instruction: "Stay in character.", sourceMessageIds: [`message-${id}`], createdAt: 100, updatedAt: 100,

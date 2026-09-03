@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { formatStructuralWorldBookSection } from "../src/features/chat/prompts/chatWorldBookPromptSections";
 import { getOfflineStoriesContextForOnlineChat } from "../src/features/chat/prompts/onlineOfflineBoundary";
 import { buildTextAiRuntimeConfig } from "../src/features/chat/services/textAiRuntimeConfig";
-import { cleanAndExtractMoment, compactTopicHint, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp } from "../src/features/moments/services/chatMomentUtils";
+import { cleanAndExtractMoment, compactTopicHint, findMomentRelationshipCharacter, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp } from "../src/features/moments/services/chatMomentUtils";
 import type { Character, Moment, UserSettings } from "../src/types";
 import type { CharacterRelationship } from "../src/domain/relationship/characterRelationship";
 
@@ -34,4 +34,11 @@ Math.random = () => 0;
 assert.equal(getPostIntervalMs(character), 24 * 60 * 60 * 1000);
 Math.random = oldRandom;
 
-console.log("Chat module separation: 13 acceptance checks passed");
+const legacyContact = { ...character, id: "legacy-contact", isContactInstance: true, profileSourceId: character.id } as Character;
+assert.equal(
+  findMomentRelationshipCharacter([character, legacyContact], { ...relationship, characterId: legacyContact.id })?.id,
+  character.id,
+  "Moment posting and comments must resolve migrated contact relationships to the canonical character",
+);
+
+console.log("Chat module separation: 14 acceptance checks passed");

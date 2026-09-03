@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Sticker, StickerGroup, UserSettings } from "../types";
-import { stickerDb, compressImage as compressStickerImage, aiNameSticker } from "../utils/stickerDb";
+import { stickerDb, compressImage as compressStickerImage, aiAnalyzeSticker, loadStickerImageBlob } from "../utils/stickerDb";
 import { parseStickerImportLine } from "../utils/stickerImport";
+import { createId } from "../core/id/createId";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 import {
   Trash2,
   Link,
@@ -37,6 +39,7 @@ export default function StickerSettings({
   const [bulkUrls, setBulkUrls] = useState<string>("");
   const [isAiNamingActive, setIsAiNamingActive] = useState<boolean>(false);
   const [aiNamingProgress, setAiNamingProgress] = useState<string>( "");
+  const [stickerNameDrafts, setStickerNameDrafts] = useState<Record<string, string>>({});
   const [modalConfig, setModalConfig] = useState<{
     title: string;
     message: string;
@@ -133,7 +136,7 @@ export default function StickerSettings({
     const newStickers: Sticker[] = [];
 
     for (const file of fileList) {
-      const stickerId = `sticker-local-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const stickerId = createId("sticker-local");
       // Extract file name minus extension
       const originalName = file.name.replace(/\.[^/.]+$/, "");
 
@@ -192,7 +195,7 @@ export default function StickerSettings({
     const newStickers: Sticker[] = [];
     for (const importedLine of importedLines) {
       const { url } = importedLine;
-      const stickerId = `sticker-url-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const stickerId = createId("sticker-url");
       // Extract file name from URL segments
       let extractedName = importedLine.name || "未命名表情";
       try {
@@ -217,7 +220,7 @@ export default function StickerSettings({
 
       // Attempt to fetch, compress and save to IndexedDB as background enhancement!
       // If fails due to CORS, it simply stays as raw URL sticker. This is extremely robust!
-      fetch(url)
+      fetchWithTimeout(url, undefined, API_REQUEST_TIMEOUTS.remoteAsset)
         .then((res) => {
           if (res.ok) return res.blob();
           throw new Error("HTTP Fetch failed");
@@ -277,8 +280,18 @@ export default function StickerSettings({
   // Update sticker name manually
   const handleUpdateStickerName = async (stickerId: string, newName: string) => {
     if (!activeGroup) return;
+    const normalizedName = newName.trim().slice(0, 12);
+    const currentSticker = activeGroup.stickers.find((sticker) => sticker.id === stickerId);
+    if (!currentSticker || normalizedName === currentSticker.name) {
+      setStickerNameDrafts((drafts) => {
+        const next = { ...drafts };
+        delete next[stickerId];
+        return next;
+      });
+      return;
+    }
     const updatedStickers = activeGroup.stickers.map((s) =>
-      s.id === stickerId ? { ...s, name: newName } : s
+      s.id === stickerId ? { ...s, name: normalizedName || s.name } : s
     );
     const updatedGroup = { ...activeGroup, stickers: updatedStickers };
     try {
@@ -286,6 +299,11 @@ export default function StickerSettings({
       const updated = [...stickerGroups];
       updated[activeGroupIdx] = updatedGroup;
       onUpdateStickerGroups(updated);
+      setStickerNameDrafts((drafts) => {
+        const next = { ...drafts };
+        delete next[stickerId];
+        return next;
+      });
     } catch (err) {
       console.error("Failed to update sticker name:", err);
     }
@@ -317,31 +335,21 @@ export default function StickerSettings({
           setAiNamingProgress(`正在智能分析第 ${i + 1}/${updatedStickers.length} 张表情包: "${sticker.name}"...`);
 
           try {
-            let imageBlob: Blob | null = null;
-            // 1. Try to load from local IndexedDB first
-            imageBlob = await stickerDb.getStickerImage(sticker.id);
-
-            // 2. If it is a remote URL and not cached locally, try to fetch it
-            if (!imageBlob && sticker.url && !sticker.url.startsWith("blob:") && !sticker.url.startsWith("data:")) {
-              try {
-                const res = await fetch(sticker.url);
-                if (res.ok) {
-                  imageBlob = await res.blob();
-                }
-              } catch (e) {
-                console.warn("CORS/Fetch error loading remote image for AI naming:", e);
-              }
-            }
+            const imageBlob = await loadStickerImageBlob(sticker);
 
             if (imageBlob) {
-              const aiName = await aiNameSticker(
+              const analysis = await aiAnalyzeSticker(
                 imageBlob,
                 settings.apiKey,
                 settings.selectedModel,
                 settings.apiEndpoint
               );
-              if (aiName && aiName.trim()) {
-                updatedStickers[i] = { ...sticker, name: aiName.trim() };
+              if (analysis.name) {
+                updatedStickers[i] = {
+                  ...sticker,
+                  name: analysis.name,
+                  semanticDescription: analysis.description,
+                };
               }
             } else {
               console.log(`Skipping AI naming for "${sticker.name}" - image data is inaccessible due to CORS constraints.`);
@@ -413,8 +421,8 @@ export default function StickerSettings({
           return (
             <div
               key={group.id}
-              className={`border border-slate-100 rounded-[20px] overflow-hidden bg-white shadow-sm transition-all ${
-                isExpanded ? "ring-1 ring-slate-900/5 shadow-md" : "hover:shadow"
+              className={`overflow-hidden transition-all ${
+                isExpanded ? "" : "hover:bg-slate-50/60"
               }`}
             >
               {/* Collapsible Group Header Row */}
@@ -426,7 +434,7 @@ export default function StickerSettings({
                   }));
                   setActiveGroupIdx(idx);
                 }}
-                className="flex items-center justify-between p-3.5 bg-slate-50/50 hover:bg-slate-50 transition-colors cursor-pointer select-none group"
+                className="flex items-center justify-between border-b border-slate-200/70 p-3.5 transition-colors hover:bg-slate-50/70 cursor-pointer select-none group"
               >
                 {/* Left side: Chevron + Name + Count + Edit/Delete */}
                 <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -528,7 +536,7 @@ export default function StickerSettings({
 
               {/* Collapsible Content / Stickers Grid */}
               {isExpanded && (
-                <div className="p-3.5 border-t border-slate-100/60 bg-slate-50/25 animate-fade-in text-left">
+                <div className="py-3.5 animate-fade-in text-left">
                   {group.stickers.length > 0 ? (
                     <div className="space-y-3">
                       {/* Tips & AI Auto naming button */}
@@ -553,7 +561,7 @@ export default function StickerSettings({
                       </div>
 
                       {/* Grid structure */}
-                      <div className="grid grid-cols-4 gap-3 bg-white p-2.5 rounded-2xl border border-slate-100 shadow-sm">
+                      <div className="grid grid-cols-4 gap-x-3 gap-y-4">
                         {group.stickers.map((sticker) => (
                           <div
                             key={sticker.id}
@@ -561,11 +569,11 @@ export default function StickerSettings({
                               e.preventDefault();
                               handleDeleteSticker(sticker.id);
                             }}
-                            className="flex flex-col items-center bg-slate-50/50 hover:bg-white border border-slate-100 hover:border-slate-200 rounded-xl p-1.5 hover:shadow-sm transition-all relative group select-none overflow-hidden"
-                            title="修改底部输入框可自定义命名，双击或长按可删除"
+                            className="flex min-w-0 flex-col items-center transition-all relative group select-none overflow-visible"
+                            title="点击名称可编辑，右键或点击删除按钮移除"
                           >
                             {/* Sticker image thumbnail */}
-                            <div className="w-full aspect-square bg-white rounded-lg overflow-hidden flex items-center justify-center relative">
+                            <div className="w-full aspect-square rounded-xl overflow-hidden flex items-center justify-center relative bg-slate-100/70 ring-1 ring-slate-200/60">
                               <img
                                 src={sticker.url}
                                 alt={sticker.name}
@@ -587,14 +595,19 @@ export default function StickerSettings({
                               <X className="w-3 h-3 text-white" />
                             </button>
 
-                            {/* Direct name edit text field */}
+                            {/* Edit locally and persist once on blur/Enter instead of saving IndexedDB on every keystroke. */}
                             <input
                               type="text"
-                              value={sticker.name}
-                              onChange={(e) =>
-                                handleUpdateStickerName(sticker.id, e.target.value)
-                              }
-                              className="w-full text-[9px] font-extrabold text-slate-700 text-center mt-1.5 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded focus:outline-none bg-transparent hover:bg-slate-50 focus:bg-white truncate px-0.5"
+                              value={stickerNameDrafts[sticker.id] ?? sticker.name}
+                              onChange={(e) => setStickerNameDrafts((drafts) => ({ ...drafts, [sticker.id]: e.target.value }))}
+                              onBlur={(e) => void handleUpdateStickerName(sticker.id, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                              className="mt-1.5 w-full min-w-0 truncate border-0 bg-transparent px-0.5 text-center text-[9px] font-extrabold text-slate-700 outline-none placeholder:text-slate-400 focus:ring-0"
                               placeholder="命名"
                               maxLength={12}
                             />
@@ -603,7 +616,7 @@ export default function StickerSettings({
                       </div>
                     </div>
                   ) : (
-                    <div className="py-8 text-center bg-white rounded-2xl border border-dashed border-slate-200/80">
+                    <div className="py-8 text-center rounded-2xl border border-dashed border-slate-200/80">
                       <p className="text-xs text-slate-400">当前分组内暂无表情，请在右侧导入本地图片或输入链接 🐾</p>
                     </div>
                   )}
@@ -703,7 +716,7 @@ export default function StickerSettings({
                 onClick={async () => {
                   if (!newGroupNameVal.trim()) return;
                   const newGroup: StickerGroup = {
-                    id: `group-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                    id: createId("group"),
                     name: newGroupNameVal.trim(),
                     stickers: [],
                   };

@@ -1,13 +1,17 @@
 import type { CharacterPromptProjection } from "../../../domain/prompt/characterPromptProjector";
+import { CHARACTER_LANGUAGE_POLICY } from "../../../domain/prompt/characterPromptProjector";
+import { formatUserKnowledgeBoundary } from "../../../domain/prompt/userKnowledgeBoundary";
 import { LIVING_HUMAN_PROMPT } from "../../../utils/livingPrompt";
 import { assembleChatInstructions } from "./chatInstructionAssembler";
-import { CHARACTER_MEDIA_USAGE_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "./chatPromptPolicy";
+import { CHAT_BUBBLE_SEMANTIC_RULES, CHARACTER_MEDIA_USAGE_RULES, WORLD_BOOK_CONTEXT_PRIORITY } from "./chatPromptPolicy";
 
 export function finalizeCharacterChatSystemInstruction(input: {
   instructions: readonly string[];
   characterProjection: CharacterPromptProjection;
   characterDescriptionText: string;
   diagnosticLabel: "direct chat prompt" | "regenerate prompt";
+  finalPersonaRules?: readonly string[];
+  finalLanguageInstruction: string;
 }): string {
   const assembly = assembleChatInstructions(input.instructions, [
     { ...input.characterProjection.description, content: input.characterDescriptionText },
@@ -17,14 +21,23 @@ export function finalizeCharacterChatSystemInstruction(input: {
   if (assembly.diagnostics.duplicateBlockIds.length || assembly.diagnostics.duplicateSourceIds.length || assembly.diagnostics.duplicateContentBlockIds.length) {
     console.warn(`[${input.diagnosticLabel}] duplicate blocks removed`, assembly.diagnostics);
   }
-  return assembly.systemInstruction;
+  const personaRuleReminder = input.finalPersonaRules?.length
+    ? `\n\n[本轮常驻角色规则]\n${input.finalPersonaRules.join("\n\n").slice(0, 1800)}`
+    : "";
+  return `${assembly.systemInstruction}\n\n${input.characterProjection.expressionAnchor.content}${personaRuleReminder}\n\n---\n\n${input.finalLanguageInstruction}`;
 }
 
-export function buildGroupChatSystemInstruction(input: { userName: string; groupName: string; worldContext: string; memberDefinitions: string }): string {
+export function buildGroupChatSystemInstruction(input: { userName: string; userBio?: string; groupName: string; worldContext: string; memberDefinitions: string }): string {
   return `你正在扮演微信群聊中的多位群成员（AI角色），正在与机主“${input.userName}”在群名为“${input.groupName}”的群组中进行互动。${input.worldContext}
 
 以下是微信群聊成员的设定档案：
 ${input.memberDefinitions}
+
+User Profile (interacting with the group):
+- Nickname: ${input.userName}
+- Personality/Bio: ${input.userBio || ""}
+
+${formatUserKnowledgeBoundary()}
 
 【群聊互动核心原则】：
 【成员私密认知访问规则】每个 [MEMBER_PRIVATE_CONTEXT] 只属于标签中指定的 speaker。生成其他成员的发言时，把该区块视为不存在；其他成员不能提及或回应其中的私聊事实。只有已经出现在“群聊最近历史消息”里的公开内容才是全员可见事实。
@@ -32,18 +45,20 @@ ${input.memberDefinitions}
 1. 【角色表达顺序】：先按每个成员自己的核心人设、明确关系与说话习惯决定是否发言和如何表达，再结合最新消息与当前场景，最后使用本轮实际命中的世界书补充背景。世界书不得把一个成员的口癖、称呼或关系转移给另一成员；明确规定为稳定口癖的内容应持续遵守。
 2. 🚨【回复概率与不回复机制】：并非每个成员在每次互动时都必须发言！在真实的微信群聊中，人物是否回复信息要参考对方人设、自己的世界书日常时间线和日程、当前话题的兴趣度以及与发言人的关系等。
    - 例如：高冷、傲娇、忙碌、或正在执行专属世界书日程时间线上其他任务的角色（比如世界书设定某个角色此时应该在睡觉、在上班、或生病等），应该保持沉默，不返回任何回复，或者仅在极度契合的话题下简单插一句；而热情、空闲、爱凑热闹、或与发言人关系特别亲密的角色，则应该高频且积极地在群里接话。
-   - 在生成的单次互动中，你应该让 1 到 3 位在此时、该话题、该状态下最契合、最有可能说话的成员进行回复（视话题和人设状态而定）。如果大家都觉得没有需要发言的内容，甚至可以只有 0~1 个人回复。不要强求每个人都说话！
+   - 每次收到用户消息或继续互动请求时，至少让 1 位最契合的成员实际回复；不能返回空回复。每个成员本轮可以发送 0 至 6 条独立消息，具体是否发言、发几条必须根据人设、关系、上下文、剧情、时间状态和话题参与度自然决定，不能固定为 3 人，也不能为了凑人数强迫成员发言。
 3. 🚨【成员间互动】：成员之间不仅是单独回复机主，更重要的是他们也是群友。他们也可以互相回复、接话、吐槽、附和、拆台或私下八卦抬杠。
 4. 🚨【成员关系与称呼边界】：成员可以互相回应，但称呼、语气和熟悉程度必须严格符合人设、世界书或当前群聊中明确说明的关系。同处一个群聊不代表彼此熟悉，不代表可以使用昵称、亲昵称呼或虚构共同经历；明确写明“只见过几次”“不熟悉”或没有关系信息时，使用全名、名字或中性称呼并保持适当距离。只有明确提供昵称及允许使用该昵称的关系对象时才能使用昵称；只对机主使用的亲昵称呼不得转移给其他成员。
-5. 🚨【自然的多人轮次】：一次群聊生成可以有 0 至 6 条发言，通常只让当前话题最可能参与的 1 至 3 位成员开口；不要强迫全员回应。
+5. 🚨【自然的多人轮次】：每个成员本轮最多发送 6 条独立消息，不设整轮总消息数上限；可以只有一位成员发言，也可以有多位成员接话。每位成员是否发言、发几条以及是否连续发送，都必须服从其人设、关系、上下文剧情和当前话题；但整轮至少要有一位成员实际发言。
    - 每条发言都可以回应机主，或回应历史中另一位成员刚刚说过的话。成员之间的接话、赞同、反驳、打趣和追问都应基于真实群聊历史、人设、世界书和明确关系。
-   - 同一成员可以连续发送 2 至 3 条短消息，例如先回应再补充，或发出一句后被另一位成员接话再继续；每一条都必须独立使用自己的 [SENDER_NAME: 名字] 标记。
+   - 同一成员可以连续发送 0 至 6 条短消息，例如先回应再补充，或发出一句后被另一位成员接话再继续；每一条都必须独立使用自己的 [SENDER_NAME: 名字] 标记。0 条表示该成员本轮保持沉默，但不能让所有成员都保持沉默。
    - 不要为了“多人”而编造成员之间不存在的熟识、共同经历或关系；没有足够上下文时宁可让该成员保持沉默。
-6. 🚨【中国标点与格式规范】：
-   - 微信聊天简短而随意，请保持口语化、极度真实的微信聊天风格。
-   - 不要输出大段的长篇大论，尽量简短有力。
+6. 🚨【标点与格式规范】：
+   - 每个成员的口语或书面程度、长短、标点、气泡数量都服从其各自人设；不得把全员统一成简短随意的聊天模板。
    - 不要使用任何小说式的“旁白、场景描写、动作心理括号（如 '(笑)' 或 '（叹气）'）”。群聊里只能输出他们作为真人打字发在微信群里的文本。
-7. 🚨【特殊媒体克制使用】：日常群聊默认使用普通文字。除非成员人设或可用世界书明确偏好、当前语境确实需要声音或即时反应、或用户明确要求，否则不要输出语音或表情包标记；不要连续无理由发送特殊消息。
+7. 🚨【特殊媒体角色化使用】：各成员是否使用普通文字、语音、emoji 或表情包以及频率，服从该成员自己的明确习惯和当前语境；不得对全员套用同一默认频率。只需确保特殊消息格式有效，不要为了展示功能强迫使用。
+
+${CHARACTER_LANGUAGE_POLICY}
+群聊中每位成员必须分别依据自己的角色资料决定输出语言，不能把一位成员的国籍或语言设定套用给其他成员。
 
 【🚨🚨🚨 极其严格的输出格式规则】：
 你必须按照以下格式输出成员的发言。请确保在每条发言的前一行，用且仅用 \`[SENDER_NAME: 角色名字]\` 指定发送者。不要输出任何其他 markdown 标记，不要输出 JSON 块。
@@ -62,13 +77,13 @@ export function buildGroupChatTaskMessage(historyText: string, hasUserMessage: b
   if (hasUserMessage) return `当前群聊最新历史消息记录：
 ${historyText || "(暂无历史消息)"}
 
-请根据以上对话背景和人物状态，让合适的成员在群里发言（可回复最新消息，或承接之前的闲聊，或互相接话）。如果当前所有人设在此时都不适合发言，则不返回任何回复。
+请根据以上对话背景和人物状态，至少让一位合适的成员在群里发言（可回复最新消息，或承接之前的闲聊，或互相接话）。不得返回空回复；回复人数由实际群成员数和当前语境自然决定。
 按照规定的格式输出。`;
   return `当前群聊最新历史消息记录：
 ${historyText || "(暂无历史消息)"}
 
 【🚨重要：用户点击了“继续/发送”按钮，但没有输入任何文本。这表示用户希望看到群成员继续聊天或互动。】
-${historyText ? "请根据以上的群聊历史，让合适的一位或多位群成员（建议 1 到 2 位）继续发言，成员们可以互相对话、继续之前的聊天话题、发表看法、吐槽、开启新话题、或者活跃气氛等。" : "群聊中目前没有任何消息，请让合适的一位或多位群成员（建议 1 到 2 位）主动发言，向机主问好、唠嗑、开启有趣的话题或自我介绍。"}请务必让部分成员发言，不要保持沉默。
+${historyText ? "请根据以上的群聊历史，让至少一位合适的群成员继续发言；实际人数参考群成员总数，并根据人设、上下文剧情、关系和当前话题自然决定。成员们可以互相对话、继续之前的聊天话题、发表看法、吐槽、开启新话题、或者活跃气氛等。" : "群聊中目前没有任何消息，请让至少一位合适的群成员主动发言；实际人数参考群成员总数，并根据人设、关系和当前氛围自然决定，向机主问好、唠嗑、开启有趣的话题或自我介绍。"}请务必让部分成员发言，不要保持沉默。
 按照规定的格式输出。`;
 }
 
@@ -77,7 +92,13 @@ export function buildProactiveChatSystemInstruction(input: {
   userName: string; userBio: string; worldBook: string; timeContext: string;
   knowledgeBoundary: string; truthPrompt: string; conversationGuidance: string;
   taskPrompt: string; instructionsPrompt: string;
+  expressionAnchor: string;
+  finalPersonaRules?: readonly string[];
+  finalLanguageInstruction: string;
 }): string {
+  const personaRuleReminder = input.finalPersonaRules?.length
+    ? `\n\n[本轮常驻角色规则]\n${input.finalPersonaRules.join("\n\n").slice(0, 1800)}`
+    : "";
   return `${LIVING_HUMAN_PROMPT}
 
 ---
@@ -93,10 +114,17 @@ User Profile (interacting with you):
 - Nickname: ${input.userName}
 - Personality/Bio: ${input.userBio}
 
-${input.worldBook ? `[相关世界书背景设定]\n${input.worldBook}\n\n${WORLD_BOOK_CONTEXT_PRIORITY}\n\n` : ""}${input.timeContext}${input.knowledgeBoundary}${input.truthPrompt}\n\n${input.conversationGuidance}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
+${formatUserKnowledgeBoundary()}
+
+${input.worldBook ? `[相关世界书背景设定]\n${input.worldBook}\n\n${WORLD_BOOK_CONTEXT_PRIORITY}\n\n` : ""}${input.timeContext}${input.knowledgeBoundary}${input.truthPrompt}\n\n${input.conversationGuidance}\n\n${CHAT_BUBBLE_SEMANTIC_RULES}\n\n${CHARACTER_MEDIA_USAGE_RULES}\n\nPROACTIVE CONTACT TASK:
 ${input.taskPrompt}
 
 ${input.instructionsPrompt}
 
-发送前确认：回复内容、称呼、主动程度、话量和情感方向都与上方唯一的人设块一致。`;
+[发送前角色一致性确认]
+${input.expressionAnchor}${personaRuleReminder}
+
+---
+
+${input.finalLanguageInstruction}`;
 }

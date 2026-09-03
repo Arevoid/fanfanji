@@ -49,7 +49,8 @@ assert.deepEqual(isolated, {
 const prompt = formatChatEmotionGuidance(affectionDecay);
 assert.match(prompt, /SHORT-TERM EMOTION/);
 assert.match(prompt, /affectionate/);
-assert.match(prompt, /Lower the intensity/);
+assert.match(prompt, /repetition signal only/);
+assert.match(prompt, /character's established pattern/);
 assert.equal(prompt.includes("relationId"), false);
 assert.equal(prompt.includes("characterId"), false);
 

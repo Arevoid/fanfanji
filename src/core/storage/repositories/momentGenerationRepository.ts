@@ -3,7 +3,7 @@ import { readObject } from "./repositoryUtils";
 import { writeJson } from "../storageAdapter";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 
-export type MomentGenerationTaskStatus = "generated" | "deleted" | "skipped";
+export type MomentGenerationTaskStatus = "generated" | "deleted" | "skipped" | "blocked";
 
 export interface MomentGenerationTask {
   taskKey: string;
@@ -13,6 +13,7 @@ export interface MomentGenerationTask {
   date: string;
   type: "character-moment";
   status: MomentGenerationTaskStatus;
+  blockedReason?: "prohibited-content";
   momentId?: string;
   updatedAt: number;
 }
