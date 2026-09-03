@@ -144,8 +144,8 @@ const normalizedHistoryPhone = ensureCharacterPhoneContent({
 });
 assert.equal(
   normalizedHistoryPhone.browserHistory.filter((entry) => entry.title === duplicateSearch.title).length,
-  2,
-  "keeps repeated user searches but removes duplicate generated history",
+  1,
+  "removes legacy seed history while preserving the explicit user search",
 );
 
 const duplicateSchedule = phoneA.scheduleItems[0];
@@ -169,8 +169,8 @@ const normalizedSchedulePhone = ensureCharacterPhoneContent({
 });
 assert.equal(
   normalizedSchedulePhone.scheduleItems.filter((entry) => entry.title === duplicateSchedule.title).length,
-  2,
-  "keeps repeated user schedules but removes duplicate generated schedules",
+  1,
+  "removes legacy seed schedules while preserving the explicit user schedule",
 );
 
 console.log("character phone content isolation tests passed");

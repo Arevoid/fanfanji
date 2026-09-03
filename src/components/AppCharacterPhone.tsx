@@ -574,8 +574,12 @@ export default function AppCharacterPhone({
         : null,
     [phone, selectedCharacter, userIdentityId],
   );
+  const currentUserAvatar = activeIdentity?.avatar || settings?.avatar;
   useEffect(() => {
-    if (!selectedCharacter || !currentPhone) return;
+    // A locked phone must not materialize visible content. Synchronization is
+    // intentionally tied to a successful unlock so every character phone can
+    // generate/append from its own context at the moment it is opened.
+    if (!unlocked || isAdvancing || !selectedCharacter || !currentPhone) return;
     const synchronized = ensureCharacterPhoneContent({
       phone: currentPhone,
       character: selectedCharacter,
@@ -590,7 +594,7 @@ export default function AppCharacterPhone({
     if (synchronized === currentPhone) return;
     saveCharacterPhone(synchronized);
     setPhone(synchronized);
-  }, [activeIdentity, characters, currentPhone, messages, moments, musicTracks, relationships, selectedCharacter, worldBookEntries]);
+  }, [activeIdentity, characters, currentPhone, isAdvancing, messages, moments, musicTracks, relationships, selectedCharacter, unlocked, worldBookEntries]);
   const phoneCharacterLocation = useMemo(
     () => inferCharacterPhoneLocation([
       selectedCharacter?.personality,
@@ -805,6 +809,7 @@ export default function AppCharacterPhone({
         {
           id: `phone-post-user-${now}`,
           author: selectedCharacter.name,
+          authorAvatar: currentUserAvatar,
           content: postDraft.trim().slice(0, 500),
           timestamp: now,
           likes: 0,
@@ -916,13 +921,16 @@ export default function AppCharacterPhone({
         const generatedMessages = discoveredPhone.messages.filter(
           (message) => !openedPhone.messages.some((existing) => existing.id === message.id),
         );
+        const awarenessMessages = generatedMessages.filter(
+          (message) => message.id.startsWith("phone-awareness-") || message.id.startsWith("phone-discovery-"),
+        );
         const relation = relationships.find(
           (item) =>
             item.userIdentityId === userIdentityId &&
             item.characterId === selectedCharacter.id,
         );
         if (relation && onSendMessage)
-          generatedMessages
+          awarenessMessages
             .filter((generatedMessage) => !messages.some((message) => message.id === `phone-proactive-${generatedMessage.id}`))
             .forEach((generatedMessage) =>
             onSendMessage(
@@ -1501,7 +1509,7 @@ export default function AppCharacterPhone({
         <div className="max-w-md mx-auto px-4 divide-y divide-slate-100">
         {(currentPhone.posts ?? []).slice().sort((a, b) => b.timestamp - a.timestamp).map((post) => (
             <article key={post.id} className="flex gap-3 py-5">
-              <img src={post.authorAvatar || selectedCharacter.avatar} alt="" className="h-10 w-10 shrink-0 rounded-md border border-slate-100 bg-slate-50 object-cover" referrerPolicy="no-referrer" />
+              <img src={(post.source === "user" ? currentUserAvatar : undefined) || post.authorAvatar || selectedCharacter.avatar} alt="" className="h-10 w-10 shrink-0 rounded-md border border-slate-100 bg-slate-50 object-cover" referrerPolicy="no-referrer" />
               <div className="min-w-0 flex-1">
               <h4 className="truncate text-xs font-bold text-[#576b95]">{post.author || selectedCharacter.name}</h4>
               <p className="mt-1 whitespace-pre-wrap rounded p-1 text-xs leading-relaxed text-[var(--text-primary)]">{post.content}</p>
@@ -1550,14 +1558,12 @@ export default function AppCharacterPhone({
         <section className="rounded-3xl border border-slate-100 bg-white p-5 text-center shadow-sm">
           <img src={selectedCharacter.avatar} alt={selectedCharacter.name} className="mx-auto h-20 w-20 rounded-full border border-slate-100 object-cover" referrerPolicy="no-referrer" />
           <h3 className="mt-3 text-base font-bold">{selectedCharacter.remark || selectedCharacter.name}</h3>
-          <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{selectedCharacter.personality || "这个角色还没有留下个人签名。"}</p>
         </section>
         <div className="mt-4 overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
           {[
             { label: "朋友圈", detail: `${(currentPhone.posts ?? []).length} 条动态`, icon: Newspaper, action: () => setPhoneSocialTab("moments") },
             { label: "相册", detail: `${currentPhone.galleryItems.length} 张照片`, icon: Image, action: () => setActiveApp("gallery") },
             { label: "日记", detail: `${currentPhone.diaryEntries.length} 篇记录`, icon: BookHeart, action: () => setActiveApp("diary") },
-            { label: "设置", detail: "壁纸与应用图标", icon: Settings, action: () => setActiveApp("settings") },
           ].map(({ label, detail, icon: Icon, action }) => (
             <button key={label} type="button" onClick={action} className="flex w-full items-center gap-3 border-b border-slate-100/80 p-4 text-left last:border-b-0 hover:bg-slate-50">
               <Icon className="h-5 w-5 shrink-0 text-slate-700" /><span className="min-w-0 flex-1"><span className="block text-sm font-bold">{label}</span><span className="mt-0.5 block text-[10px] text-slate-400">{detail}</span></span><ChevronRight className="h-4 w-4 text-slate-300" />
@@ -1825,7 +1831,7 @@ export default function AppCharacterPhone({
               event.preventDefault();
               runPhoneBrowserSearch();
             }}
-            className="mx-2 mt-2 flex items-center gap-3 rounded-[17px] bg-white px-3 py-2.5"
+            className="mx-2 mt-2 flex items-center gap-3 rounded-[17px] bg-transparent px-3 py-2.5"
           >
             <button type="button" aria-label="新建标签页" className="shrink-0 rounded-full p-1 text-neutral-800">
               <Plus className="h-5 w-5" />
@@ -1842,15 +1848,6 @@ export default function AppCharacterPhone({
           </form>
           <div className="px-2 py-2">
             <div className="overflow-hidden rounded-[17px] bg-white">
-            <button
-              type="button"
-              onClick={() => setBrowserAddress("您复制的图片")}
-              className="flex w-full items-center gap-4 px-5 py-4 text-left"
-            >
-              <Search className="h-5 w-5 shrink-0 text-neutral-600" />
-              <span className="min-w-0 flex-1 truncate text-base">您复制的图片</span>
-              <Eye className="h-5 w-5 shrink-0 text-neutral-800" />
-            </button>
             {normalizeCharacterPhoneBrowserHistory(currentPhone.browserHistory).map((item) => (
               <button
                 key={item.id}
@@ -1863,7 +1860,7 @@ export default function AppCharacterPhone({
                 <ArrowUpLeft className="h-5 w-5 shrink-0 text-neutral-700" />
               </button>
             ))}
-            {currentPhone.browserHistory.length === 0 && (
+            {normalizeCharacterPhoneBrowserHistory(currentPhone.browserHistory).length === 0 && (
               <p className="border-t border-[#ebe5ef] px-5 py-10 text-center text-sm text-neutral-400">暂无浏览记录</p>
             )}
             </div>

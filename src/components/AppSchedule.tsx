@@ -90,11 +90,11 @@ export default function AppSchedule({ entries, appointments, characters, onOpenC
     setSelectedDate(toDateKey(next));
   };
   useEffect(() => {
-    if (!todaySignal) return;
+    if (variant !== "characterPhone" && !todaySignal) return;
     const today = new Date();
     setVisibleMonth(new Date(today.getFullYear(), today.getMonth(), 1));
     setSelectedDate(toDateKey(today));
-  }, [todaySignal]);
+  }, [todaySignal, variant]);
 
   const openCharacterPhoneAddForm = () => {
     setCharacterPhoneAddForm("schedule");
