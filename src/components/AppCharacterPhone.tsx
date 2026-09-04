@@ -75,6 +75,7 @@ import type { Appointment, ScheduleEntry } from "../domain/schedule/scheduleType
 import AppSchedule from "./AppSchedule";
 import { createCharacterTextMessage } from "../features/chat/services/messageFactory";
 import { advanceCharacterPhone } from "../features/characterPhone/characterPhoneProgression";
+import { ensureCharacterPhoneContent } from "../features/characterPhone/characterPhoneContent";
 import { buildCharacterPhoneAwarenessMessage } from "../features/characterPhone/characterPhoneReaction";
 import { discoverCharacterPhoneActions } from "../features/characterPhone/characterPhoneDetection";
 import {
@@ -241,36 +242,6 @@ const PHONE_SYSTEM_APP_TILE_CLASSES: Record<CharacterPhoneSystemAppId, string> =
   phone: "bg-white/95 text-slate-600",
   camera: "bg-white/95 text-slate-600",
 };
-const PHONE_MUSIC_TRACKS = [
-  {
-    id: "night-mood",
-    title: "Night Mood",
-    artist: "角色的深夜歌单",
-    duration: "4:39",
-    cover: "from-[#d6e8ed] via-[#f6efe4] to-[#e8cfd1]",
-  },
-  {
-    id: "quiet-city",
-    title: "Quiet City Lights",
-    artist: "City Pop Radio",
-    duration: "3:58",
-    cover: "from-[#e6e0f4] via-[#f7f1e7] to-[#d7e8e8]",
-  },
-  {
-    id: "soft-rain",
-    title: "Soft Rain",
-    artist: "The Evening Tapes",
-    duration: "5:12",
-    cover: "from-[#d6e1f1] via-[#e9edf4] to-[#c9d8d4]",
-  },
-  {
-    id: "first-light",
-    title: "First Light",
-    artist: "Sunday Morning",
-    duration: "3:41",
-    cover: "from-[#f6e7c9] via-[#f7f3e7] to-[#e1e9d4]",
-  },
-] as const;
 type CharacterPhoneMusicView = "home" | "playlist" | "player";
 const PHONE_MUSIC_COVER_GRADIENTS = [
   "from-[#d8e5df] via-[#f4eadc] to-[#ecd1d3]",
@@ -331,23 +302,45 @@ const LEGACY_CHARACTER_PHONE_WALLPAPERS = new Set([
 function openCharacterPhone(
   ownerIdentityId: string,
   character: Character,
+  context?: {
+    activeIdentity?: UserIdentity;
+    characters: Character[];
+    relationships: CharacterRelationship[];
+    messages: Message[];
+    moments: Moment[];
+    worldBookEntries: WorldBookEntry[];
+    musicTracks: MusicTrack[];
+  },
 ): CharacterPhoneRecord {
   const existing = getCharacterPhone(ownerIdentityId, character.id);
-  if (!existing) return createCharacterPhone(ownerIdentityId, character);
-  const normalizedPasscode = normalizeCharacterPhonePasscode(existing.passcode);
-  const isLocked = Boolean(existing.lockedUntil && existing.lockedUntil > Date.now());
-  const isExpiredLock = Boolean(existing.lockedUntil && existing.lockedUntil <= Date.now());
-  if (existing.passcode === normalizedPasscode && !isExpiredLock)
-    return existing;
-  const reopened = {
-    ...existing,
-    passcode: normalizedPasscode,
-    failedAttempts: isLocked ? existing.failedAttempts : 0,
-    lockedUntil: isLocked ? existing.lockedUntil : undefined,
-    updatedAt: Date.now(),
-  };
-  saveCharacterPhone(reopened);
-  return reopened;
+  const basePhone = existing || createCharacterPhone(ownerIdentityId, character);
+  const normalizedPasscode = normalizeCharacterPhonePasscode(basePhone.passcode);
+  const isLocked = Boolean(basePhone.lockedUntil && basePhone.lockedUntil > Date.now());
+  const isExpiredLock = Boolean(basePhone.lockedUntil && basePhone.lockedUntil <= Date.now());
+  const reopened = basePhone.passcode === normalizedPasscode && !isExpiredLock
+    ? basePhone
+    : {
+        ...basePhone,
+        passcode: normalizedPasscode,
+        failedAttempts: isLocked ? basePhone.failedAttempts : 0,
+        lockedUntil: isLocked ? basePhone.lockedUntil : undefined,
+        updatedAt: Date.now(),
+      };
+  const contextualPhone = context
+    ? ensureCharacterPhoneContent({
+        phone: reopened,
+        character,
+        characters: context.characters,
+        activeIdentity: context.activeIdentity,
+        relationships: context.relationships,
+        messages: context.messages,
+        moments: context.moments,
+        worldBookEntries: context.worldBookEntries,
+        musicTracks: context.musicTracks,
+      })
+    : reopened;
+  if (contextualPhone !== existing || reopened !== basePhone) saveCharacterPhone(contextualPhone);
+  return contextualPhone;
 }
 function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleTimeString("zh-CN", {
@@ -458,16 +451,25 @@ export default function AppCharacterPhone({
   const selectedCharacter = characters.find(
     (character) => character.id === selectedCharacterId,
   );
+  const phoneContext = {
+    activeIdentity,
+    characters,
+    relationships,
+    messages,
+    moments,
+    worldBookEntries,
+    musicTracks,
+  };
   const [phone, setPhone] = useState<CharacterPhoneRecord | null>(() =>
     selectedCharacter
-      ? openCharacterPhone(userIdentityId, selectedCharacter)
+      ? openCharacterPhone(userIdentityId, selectedCharacter, phoneContext)
       : null,
   );
   const previousIdentityIdRef = useRef(userIdentityId);
   useEffect(() => {
     if (!selectedCharacterId && characters[0]) {
       setSelectedCharacterId(characters[0].id);
-      setPhone(openCharacterPhone(userIdentityId, characters[0]));
+      setPhone(openCharacterPhone(userIdentityId, characters[0], phoneContext));
     }
   }, [characters, selectedCharacterId, userIdentityId]);
   useEffect(() => {
@@ -543,7 +545,7 @@ export default function AppCharacterPhone({
     previousIdentityIdRef.current = userIdentityId;
     const nextCharacter = characters[0];
     setSelectedCharacterId(nextCharacter?.id || "");
-    setPhone(nextCharacter ? openCharacterPhone(userIdentityId, nextCharacter) : null);
+    setPhone(nextCharacter ? openCharacterPhone(userIdentityId, nextCharacter, phoneContext) : null);
     setUnlocked(false);
     setActiveApp("home");
     setPhoneDialerTab("all");
@@ -612,8 +614,7 @@ export default function AppCharacterPhone({
     : phoneCallRecords;
   const roleMusicTracks = useMemo<CharacterPhoneDisplayTrack[]>(() => {
     const storedTracks = currentPhone?.musicTracks ?? [];
-    const source = storedTracks.length > 0 ? storedTracks : PHONE_MUSIC_TRACKS;
-    return source.map((track, index) => ({
+    return storedTracks.map((track, index) => ({
       id: track.id,
       title: track.title,
       artist: track.artist,
@@ -626,7 +627,7 @@ export default function AppCharacterPhone({
   const musicTodaySeconds = musicListeningHistory
     .filter((record) => record.startedAt >= characterPhoneGalleryDayStart(Date.now()))
     .reduce((total, record) => total + record.durationSeconds, 0);
-  const musicTodayMinutes = Math.max(1, Math.round(musicTodaySeconds / 60));
+  const musicTodayMinutes = Math.round(musicTodaySeconds / 60);
   const listeningHourCounts = musicListeningHistory.reduce<Record<number, number>>((counts, record) => {
     const hour = new Date(record.startedAt).getHours();
     counts[hour] = (counts[hour] || 0) + record.durationSeconds;
@@ -634,8 +635,9 @@ export default function AppCharacterPhone({
   }, {});
   const commonListeningHour = Object.entries(listeningHourCounts)
     .sort((left, right) => Number(right[1]) - Number(left[1]))[0]?.[0];
-  const commonListeningHourNumber = commonListeningHour === undefined ? 22 : Number(commonListeningHour);
-  const commonListeningPeriod = `${String(commonListeningHourNumber).padStart(2, "0")}:00—${String((commonListeningHourNumber + 2) % 24).padStart(2, "0")}:00`;
+  const commonListeningPeriod = commonListeningHour === undefined
+    ? "暂无记录"
+    : `${String(Number(commonListeningHour)).padStart(2, "0")}:00—${String((Number(commonListeningHour) + 2) % 24).padStart(2, "0")}:00`;
   const recentMusicTracks = musicListeningHistory
     .map((record) => roleMusicTracks.find((track) => track.id === record.trackId))
     .filter((track): track is CharacterPhoneDisplayTrack => Boolean(track))
@@ -649,6 +651,7 @@ export default function AppCharacterPhone({
     cover: PHONE_MUSIC_COVER_GRADIENTS[0],
   };
   const changeMusicTrack = (direction: 1 | -1) => {
+    if (roleMusicTracks.length === 0) return;
     setMusicTrackIndex((index) =>
       (index + direction + roleMusicTracks.length) % roleMusicTracks.length,
     );
@@ -823,7 +826,7 @@ export default function AppCharacterPhone({
     const character = characters.find((item) => item.id === characterId);
     if (!character) return;
     setSelectedCharacterId(characterId);
-    setPhone(openCharacterPhone(userIdentityId, character));
+    setPhone(openCharacterPhone(userIdentityId, character, phoneContext));
     setUnlocked(false);
     setActiveApp("home");
     setPhoneDialerTab("all");
@@ -846,6 +849,58 @@ export default function AppCharacterPhone({
     setCharacterTodoText("");
     setNotice("");
     setPhoneNotice("");
+  };
+
+  const generateCharacterPhoneContent = async () => {
+    if (!unlocked || !currentPhone || !selectedCharacter || isAdvancing) return;
+    const basePhone = currentPhone;
+    const now = Date.now();
+    setIsAdvancing(true);
+    try {
+      const advancedPhone = await advanceCharacterPhone({
+        phone: basePhone,
+        character: selectedCharacter,
+        characters,
+        activeIdentity,
+        relationships,
+        messages,
+        moments,
+        worldBookEntries,
+        musicTracks,
+        settings,
+      });
+      const discoveredPhone = discoverCharacterPhoneActions(advancedPhone, selectedCharacter, now);
+      saveCharacterPhone(discoveredPhone);
+      setPhone(discoveredPhone);
+      const generatedMessages = discoveredPhone.messages.filter(
+        (message) => !basePhone.messages.some((existing) => existing.id === message.id),
+      );
+      const awarenessMessages = generatedMessages.filter(
+        (message) => message.id.startsWith("phone-awareness-") || message.id.startsWith("phone-discovery-"),
+      );
+      const relation = relationships.find(
+        (item) =>
+          item.userIdentityId === userIdentityId &&
+          item.characterId === selectedCharacter.id,
+      );
+      if (relation && onSendMessage)
+        awarenessMessages
+          .filter((generatedMessage) => !messages.some((message) => message.id === `phone-proactive-${generatedMessage.id}`))
+          .forEach((generatedMessage) =>
+          onSendMessage(
+            createCharacterTextMessage({
+              id: `phone-proactive-${generatedMessage.id}`,
+              characterId: selectedCharacter.id,
+              relationId: relation.id,
+              conversationId: relation.conversationId,
+              content: generatedMessage.body,
+              timestamp: generatedMessage.timestamp,
+            }),
+          ),
+        );
+    } finally {
+      setIsAdvancing(false);
+    }
   };
 
   const verifyPasscode = async (passcode = input) => {
@@ -881,52 +936,6 @@ export default function AppCharacterPhone({
       setUnlocked(true);
       setInput("");
       setNotice("");
-      setIsAdvancing(true);
-      try {
-        const advancedPhone = await advanceCharacterPhone({
-          phone: openedPhone,
-          character: selectedCharacter,
-          characters,
-          activeIdentity,
-          relationships,
-          messages,
-          moments,
-          worldBookEntries,
-          musicTracks,
-          settings,
-        });
-        const discoveredPhone = discoverCharacterPhoneActions(advancedPhone, selectedCharacter, now);
-        saveCharacterPhone(discoveredPhone);
-        setPhone(discoveredPhone);
-        const generatedMessages = discoveredPhone.messages.filter(
-          (message) => !openedPhone.messages.some((existing) => existing.id === message.id),
-        );
-        const awarenessMessages = generatedMessages.filter(
-          (message) => message.id.startsWith("phone-awareness-") || message.id.startsWith("phone-discovery-"),
-        );
-        const relation = relationships.find(
-          (item) =>
-            item.userIdentityId === userIdentityId &&
-            item.characterId === selectedCharacter.id,
-        );
-        if (relation && onSendMessage)
-          awarenessMessages
-            .filter((generatedMessage) => !messages.some((message) => message.id === `phone-proactive-${generatedMessage.id}`))
-            .forEach((generatedMessage) =>
-            onSendMessage(
-              createCharacterTextMessage({
-                id: `phone-proactive-${generatedMessage.id}`,
-                characterId: selectedCharacter.id,
-                relationId: relation.id,
-                conversationId: relation.conversationId,
-                content: generatedMessage.body,
-                timestamp: generatedMessage.timestamp,
-              }),
-            ),
-          );
-      } finally {
-        setIsAdvancing(false);
-      }
       return;
     }
     const failedAttempts = currentPhone.failedAttempts + 1;
@@ -1820,7 +1829,7 @@ export default function AppCharacterPhone({
               value={browserAddress}
               onChange={(event) => setBrowserAddress(event.target.value)}
               placeholder="在 Google 中搜索或输入网址"
-              className="min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 text-sm outline-none shadow-none ring-0 placeholder:text-neutral-600 focus:bg-transparent focus:outline-none focus:ring-0"
+              className="min-w-0 flex-1 appearance-none rounded-none border-0 !bg-transparent p-0 text-sm outline-none shadow-none ring-0 placeholder:text-neutral-600 focus:!bg-transparent focus:outline-none focus:ring-0"
             />
             <button type="button" aria-label="扫描二维码" className="shrink-0 rounded-full p-1 text-neutral-800">
               <ScanLine className="h-5 w-5" />
@@ -2266,7 +2275,7 @@ export default function AppCharacterPhone({
                   onClick={() => setShowAllDiary(true)}
                   className="pt-1 text-[10px] text-white/60 transition-colors hover:text-white"
                 >
-                  See All ›
+                  See All
                 </button>
               </div>
               <div className="mt-9 grid grid-cols-3 divide-x divide-white/35">
@@ -2625,7 +2634,9 @@ export default function AppCharacterPhone({
                     <h3 className="text-xs font-semibold text-neutral-800">常听时段</h3>
                     <span className="text-[10px] text-neutral-500">一周统计</span>
                   </div>
-                  <p className="mt-5 text-sm font-semibold text-neutral-900">常在 {commonListeningPeriod}</p>
+                  <p className="mt-5 text-sm font-semibold text-neutral-900">
+                    {commonListeningHour === undefined ? "暂无收听时段" : `常在 ${commonListeningPeriod}`}
+                  </p>
                   <p className="mt-1 text-[10px] text-neutral-500">最喜欢在安静的时候听歌</p>
                   <div className="mt-4 flex h-14 items-end justify-between gap-1.5">
                     {[35, 48, 42, 68, 86, 72, 54].map((height, index) => (
@@ -3022,27 +3033,16 @@ export default function AppCharacterPhone({
               >
                 <ArrowLeft className="h-4 w-4" />
               </button>
-              <label className="relative flex min-w-0 max-w-[72%] cursor-pointer items-center gap-2 rounded-full py-1 text-right">
-                <span className="truncate text-xs font-semibold">{selectedCharacter.name}</span>
-                <img
-                  src={selectedCharacter.avatar}
-                  alt={selectedCharacter.name}
-                  className="h-7 w-7 shrink-0 rounded-full object-cover ring-1 ring-black/10"
-                  referrerPolicy="no-referrer"
-                />
-                <select
-                  aria-label="选择角色"
-                  value={selectedCharacter.id}
-                  onChange={(event) => selectCharacter(event.target.value)}
-                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                >
-                  {characters.map((character) => (
-                    <option key={character.id} value={character.id} className="text-black">
-                      {character.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <button
+                type="button"
+                onClick={() => void generateCharacterPhoneContent()}
+                disabled={isAdvancing}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-70"
+                aria-label="生成角色手机内容"
+                title="生成角色手机内容"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isAdvancing ? "animate-spin" : ""}`} />
+              </button>
             </div>
 
             <main className="min-h-0 flex-1 overflow-y-auto px-1 pb-3 pt-2">

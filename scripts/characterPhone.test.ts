@@ -11,6 +11,18 @@ const content = readFileSync(new URL("../src/features/characterPhone/characterPh
 const location = readFileSync(new URL("../src/features/characterPhone/characterPhoneLocation.ts", import.meta.url), "utf8");
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const store = readFileSync(new URL("../src/components/AppStore.tsx", import.meta.url), "utf8");
+const verifyPasscodeBlock = component.slice(
+  component.indexOf("const verifyPasscode"),
+  component.indexOf("const appendUnlockDigit"),
+);
+const openPhoneBlock = component.slice(
+  component.indexOf("function openCharacterPhone"),
+  component.indexOf("function formatTime"),
+);
+const generatePhoneContentBlock = component.slice(
+  component.indexOf("const generateCharacterPhoneContent"),
+  component.indexOf("const verifyPasscode"),
+);
 
 assert.match(component, /选择人物/);
 assert.match(component, /忘记密码/);
@@ -22,6 +34,12 @@ assert.match(component, /failedAttempts >= 5/);
 assert.match(component, /failedAttempts:\s*0,\s*lockedUntil:\s*undefined/);
 assert.match(component, /advanceCharacterPhone/);
 assert.match(component, /setIsAdvancing/);
+assert.match(openPhoneBlock, /ensureCharacterPhoneContent/);
+assert.doesNotMatch(openPhoneBlock, /advanceCharacterPhone|apiChat/);
+assert.match(component, /aria-label="生成角色手机内容"/);
+assert.match(generatePhoneContentBlock, /advanceCharacterPhone/);
+assert.match(generatePhoneContentBlock, /discoverCharacterPhoneActions/);
+assert.doesNotMatch(verifyPasscodeBlock, /advanceCharacterPhone|discoverCharacterPhoneActions/);
 assert.match(component, /角色已经知道有人尝试进入/);
 assert.match(component, /awarenessLevel/);
 assert.match(component, /phone-awareness/);

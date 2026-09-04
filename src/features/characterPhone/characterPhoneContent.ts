@@ -31,15 +31,22 @@ export interface CharacterPhoneContentInput {
   now?: number;
 }
 
-const DEFAULT_MUSIC_LIBRARY = [
-  { id: "night-mood", title: "Night Mood", artist: "角色的深夜歌单", duration: "4:39" },
-  { id: "quiet-city-lights", title: "Quiet City Lights", artist: "City Pop Radio", duration: "3:58" },
-  { id: "soft-rain", title: "Soft Rain", artist: "The Evening Tapes", duration: "5:12" },
-  { id: "first-light", title: "First Light", artist: "Sunday Morning", duration: "3:41" },
-];
+const LEGACY_MUSIC_TITLES = new Set([
+  "Night Mood",
+  "Quiet City Lights",
+  "Soft Rain",
+  "First Light",
+]);
 
 function scopedId(phoneId: string, kind: string, key: string): string {
   return `character-phone:${phoneId}:${kind}:${key}`;
+}
+
+function canonicalMusicSourceId(phoneId: string, value: string): string {
+  const prefix = `${scopedId(phoneId, "music", "")}`;
+  let sourceId = value;
+  while (sourceId.startsWith(prefix)) sourceId = sourceId.slice(prefix.length);
+  return sourceId || "unknown";
 }
 
 function includesAny(text: string, words: string[]): boolean {
@@ -153,9 +160,9 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
     input.characters
       .filter((candidate) => candidate.id !== input.character.id && !candidate.isGroupChat)
       .filter((candidate) => {
-        const name = candidate.name.toLowerCase();
         const context = buildContext(input.character, input.worldBookEntries);
-        return context.includes(name) || normalizedExisting.some((contact) => contact.name === candidate.name);
+        return context.includes(candidate.name.toLocaleLowerCase())
+          || normalizedExisting.some((contact) => contact.name === candidate.name);
       })
       .map((candidate) => candidate.id),
   );
@@ -205,49 +212,40 @@ function syncUserChat(
   };
 }
 
-function durationToSeconds(duration: string): number {
-  const [minutes, seconds] = duration.split(":").map(Number);
-  return Math.max(60, (minutes || 0) * 60 + (seconds || 0));
-}
-
 function syncMusic(
   phone: CharacterPhoneRecord,
-  character: Character,
   sourceTracks: MusicTrack[] | undefined,
-  now: number,
   context: string,
 ): { musicTracks: CharacterPhoneMusicTrack[]; listeningHistory: CharacterPhoneListeningRecord[]; musicPlaylists: CharacterPhoneMusicPlaylist[] } {
   const source = sourceTracks && sourceTracks.length > 0
     ? sourceTracks.slice(0, 12)
-    : (phone.musicTracks?.length ? phone.musicTracks : DEFAULT_MUSIC_LIBRARY);
+    : (phone.musicTracks?.length ? phone.musicTracks : []);
   const musicTracks = source.map((track, index) => {
     const sourceTrack = "url" in track ? track as MusicTrack : undefined;
     const sourceId = sourceTrack?.id || ("id" in track ? String(track.id) : `generated-${index}`);
     return {
-      id: scopedId(phone.id, "music", sourceId),
-      title: sourceTrack?.title || ("title" in track ? String(track.title) : DEFAULT_MUSIC_LIBRARY[index % DEFAULT_MUSIC_LIBRARY.length].title),
-      artist: sourceTrack?.artist || ("artist" in track ? String(track.artist) : character.name),
-      duration: sourceTrack?.duration || ("duration" in track ? String(track.duration) : "4:00"),
+      id: scopedId(phone.id, "music", canonicalMusicSourceId(phone.id, sourceId)),
+      title: sourceTrack?.title || ("title" in track ? String(track.title) : ""),
+      artist: sourceTrack?.artist || ("artist" in track ? String(track.artist) : ""),
+      duration: sourceTrack?.duration || ("duration" in track ? String(track.duration) : "0:00"),
       coverUrl: sourceTrack?.coverUrl,
       sourceTrackId: sourceTrack?.id,
     } satisfies CharacterPhoneMusicTrack;
-  });
+  }).filter((track) => track.title.trim());
   const history = phone.listeningHistory?.length
-    ? phone.listeningHistory
-    : musicTracks.slice(0, 4).map((track, index) => ({
-        id: scopedId(phone.id, "listen", `seed-${index}`),
-        trackId: track.id,
-        startedAt: now - (index + 1) * 90 * 60 * 1000,
-        durationSeconds: Math.min(durationToSeconds(track.duration), (index + 2) * 60),
-        source: sourceTracks && sourceTracks.length > 0 ? "user-library" as const : "generated" as const,
-      }));
+    ? phone.listeningHistory.filter((record) => musicTracks.some((track) => track.id === record.trackId))
+    : [];
   const playlist: CharacterPhoneMusicPlaylist = {
     id: scopedId(phone.id, "playlist", "daily"),
     name: includesAny(context, ["夜", "夜晚", "失眠", "安静"]) ? "深夜歌单" : "最近常听",
     trackIds: musicTracks.map((track) => track.id),
     source: sourceTracks && sourceTracks.length > 0 ? "user-library" : "generated",
   };
-  return { musicTracks, listeningHistory: history, musicPlaylists: [playlist] };
+  return { musicTracks, listeningHistory: history, musicPlaylists: musicTracks.length > 0 ? [playlist] : [] };
+}
+
+function isLegacyMusicTrack(track: CharacterPhoneMusicTrack): boolean {
+  return !track.sourceTrackId && LEGACY_MUSIC_TITLES.has(track.title);
 }
 
 function syncMoments(
@@ -317,6 +315,8 @@ function removeLegacyPresetContent(phone: CharacterPhoneRecord): CharacterPhoneR
       .filter((contact) => !(phone.threadMessages ?? []).some((message) => message.contactId === contact.id && (message.operatedByUser || message.sourceMessageId)))
       .map((contact) => contact.id),
   );
+  const retainedMusicTracks = (phone.musicTracks ?? []).filter((track) => !isLegacyMusicTrack(track));
+  const retainedMusicTrackIds = new Set(retainedMusicTracks.map((track) => track.id));
   return {
     ...phone,
     // These IDs belonged to the old demo fallback. User-authored messages and
@@ -334,7 +334,7 @@ function removeLegacyPresetContent(phone: CharacterPhoneRecord): CharacterPhoneR
     browserHistory: phone.browserHistory.filter((entry) => !isLegacyBrowserEntry(entry.id) && !isLegacyGenerated(entry.id)),
     diaryEntries: phone.diaryEntries.filter((entry) => !isLegacyDiaryEntry(entry.id) && !isLegacyGenerated(entry.id)),
     notes: (phone.notes ?? []).filter((note) => !isLegacyNote(note.id) && !isLegacyGenerated(note.id)),
-    todos: (phone.todos ?? []).filter((todo) => !isLegacyTodo(todo.id) && !isLegacyGenerated(todo.id) && todo.source !== "generated"),
+    todos: (phone.todos ?? []).filter((todo) => !isLegacyTodo(todo.id) && !isLegacyGenerated(todo.id)),
     scheduleItems: phone.scheduleItems.filter((entry) => !isLegacyScheduleItem(entry.id) && !isLegacyGenerated(entry.id)),
     // Old demo gallery items used phone-gallery-* without a real asset. Keep
     // received photos and any real/generated image that has an asset or a
@@ -343,6 +343,11 @@ function removeLegacyPresetContent(phone: CharacterPhoneRecord): CharacterPhoneR
       || !item.id.startsWith("phone-gallery-")
       || Boolean(item.imageAssetId || item.dataUrl || item.textImageForId)),
     posts: phone.posts.filter((post) => !isLegacyPost(post.id) && !isLegacyGenerated(post.id)),
+    musicTracks: retainedMusicTracks,
+    listeningHistory: (phone.listeningHistory ?? []).filter((record) => retainedMusicTrackIds.has(record.trackId)),
+    musicPlaylists: (phone.musicPlaylists ?? [])
+      .map((playlist) => ({ ...playlist, trackIds: playlist.trackIds.filter((trackId) => retainedMusicTrackIds.has(trackId)) }))
+      .filter((playlist) => playlist.trackIds.length > 0),
   };
 }
 
@@ -454,7 +459,7 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
     .map((relation) => relation.id);
   const chat = syncUserChat(sourcePhone, input.character, userContact, input.messages, input.relationships.filter((relation) => relationIds.includes(relation.id)));
   const moments = syncMoments(sourcePhone, input.character, input.characters, input.activeIdentity, input.moments, contacts);
-  const music = syncMusic(sourcePhone, input.character, input.musicTracks, now, context);
+  const music = syncMusic(sourcePhone, input.musicTracks, context);
 
   let next: CharacterPhoneRecord = {
     ...sourcePhone,

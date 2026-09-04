@@ -110,6 +110,9 @@ assert.ok(phoneA.contentSeededAt);
 assert.notEqual(phoneA.posts.find((post) => post.sourceMomentId === "moment-a")?.id, phoneB.posts.find((post) => post.sourceMomentId === "moment-b")?.id);
 assert.equal(phoneA.diaryEntries.length, 0, "does not seed a synthetic diary before a life event is generated");
 assert.equal(phoneA.scheduleItems.length, 0, "does not seed a synthetic schedule before a life event is generated");
+assert.equal(phoneA.musicTracks?.length, 0, "does not seed a synthetic music library without a user source");
+assert.equal(phoneA.listeningHistory?.length, 0, "does not seed synthetic listening history without a user source");
+assert.equal(phoneA.musicPlaylists?.length, 0, "does not seed a synthetic playlist without a user source");
 
 const duplicatePhoneAlert = {
   id: "phone-discovery-action-2",
@@ -215,5 +218,29 @@ assert.equal(legacyPhone.scheduleItems.some((entry) => entry.id === "phone-sched
 assert.equal(legacyPhone.posts.some((post) => post.id === "phone-post-old"), false);
 assert.equal(legacyPhone.galleryItems.some((item) => item.id === "phone-gallery-old"), false);
 assert.equal(legacyPhone.galleryItems.some((item) => item.id === "phone-gallery-received"), true, "preserves received photos");
+
+const repeatedMusicPrefix = `character-phone:${phoneA.id}:music:`;
+const normalizedMusicPhone = ensureCharacterPhoneContent({
+  phone: {
+    ...phoneA,
+    musicTracks: [{
+      id: `${repeatedMusicPrefix}${repeatedMusicPrefix}track-1`,
+      title: "海边散步",
+      artist: "林晓",
+      duration: "3:20",
+    }],
+    musicPlaylists: [{ id: "playlist", name: "最近常听", trackIds: [`${repeatedMusicPrefix}${repeatedMusicPrefix}track-1`] }],
+  },
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages,
+  moments,
+  worldBookEntries: worldBook,
+  now: 500,
+});
+assert.equal(normalizedMusicPhone.musicTracks?.[0]?.id, `${repeatedMusicPrefix}track-1`, "music IDs stay bounded across repeated phone syncs");
+assert.equal(normalizedMusicPhone.musicPlaylists?.[0]?.trackIds[0], `${repeatedMusicPrefix}track-1`);
 
 console.log("character phone content isolation tests passed");

@@ -7,6 +7,13 @@ import type { CharacterPhoneRecord } from "../../../domain/characterPhone/types"
 const load = () =>
   readArray<CharacterPhoneRecord>(storageKeys.characterPhones, []);
 
+const LEGACY_MUSIC_TITLES = new Set([
+  "Night Mood",
+  "Quiet City Lights",
+  "Soft Rain",
+  "First Light",
+]);
+
 export const CHARACTER_PHONE_DEFAULT_WALLPAPER =
   "linear-gradient(145deg, #eeeeec 0%, #fafaf9 48%, #e4e4e2 100%)";
 
@@ -24,11 +31,12 @@ export function getCharacterPhone(
   ownerIdentityId: string,
   characterId: string,
 ): CharacterPhoneRecord | undefined {
-  return load().value.find(
+  const phone = load().value.find(
     (phone) =>
       phone.ownerIdentityId === ownerIdentityId &&
       phone.characterId === characterId,
   );
+  return phone ? normalizeMusicPersistence(phone) : undefined;
 }
 
 export function createCharacterPhone(
@@ -68,10 +76,40 @@ export function createCharacterPhone(
   return phone;
 }
 
+function canonicalMusicId(phoneId: string, value: string): string {
+  const prefix = `character-phone:${phoneId}:music:`;
+  let sourceId = value;
+  while (sourceId.startsWith(prefix)) sourceId = sourceId.slice(prefix.length);
+  return `${prefix}${sourceId || "unknown"}`;
+}
+
+function normalizeMusicPersistence(phone: CharacterPhoneRecord): CharacterPhoneRecord {
+  if (!phone.musicTracks?.length && !phone.musicPlaylists?.length) return phone;
+  const musicTracks = phone.musicTracks?.map((track) => ({
+    ...track,
+    id: canonicalMusicId(phone.id, track.id),
+  })).filter((track) => track.sourceTrackId || !LEGACY_MUSIC_TITLES.has(track.title));
+  const musicTrackIds = new Set(musicTracks?.map((track) => track.id) ?? []);
+  const musicPlaylists = phone.musicPlaylists?.map((playlist) => ({
+    ...playlist,
+    trackIds: playlist.trackIds
+      .map((trackId) => canonicalMusicId(phone.id, trackId))
+      .filter((trackId) => musicTrackIds.has(trackId)),
+  })).filter((playlist) => playlist.trackIds.length > 0);
+  const listeningHistory = phone.listeningHistory?.filter((record) => musicTrackIds.has(canonicalMusicId(phone.id, record.trackId)));
+  return {
+    ...phone,
+    ...(musicTracks ? { musicTracks } : {}),
+    ...(musicPlaylists ? { musicPlaylists } : {}),
+    ...(listeningHistory ? { listeningHistory } : {}),
+  };
+}
+
 export function saveCharacterPhone(phone: CharacterPhoneRecord) {
-  const current = load().value;
+  const normalizedPhone = normalizeMusicPersistence(phone);
+  const current = load().value.map(normalizeMusicPersistence);
   return writeArray(storageKeys.characterPhones, [
-    ...current.filter((item) => item.id !== phone.id),
-    phone,
+    ...current.filter((item) => item.id !== normalizedPhone.id),
+    normalizedPhone,
   ]);
 }
