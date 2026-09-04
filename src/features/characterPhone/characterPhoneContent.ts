@@ -195,7 +195,6 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
     linkedCharacterId: network.linkedCharacterId,
     relationshipNetworkNpcId: network.npc.id,
     sourceRefs: [{ kind: "relationship-network", id: network.npc.id }],
-    remark: network.npc.role,
   });
   // Keep removed contacts in the record. They are a soft-unlink: the contact
   // disappears from the visible inbox but its old thread and deletion fact
@@ -223,7 +222,11 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
         linkedCharacterId: network.linkedCharacterId || contact.linkedCharacterId,
         relationshipNetworkNpcId: network.npc.id,
         sourceRefs: [{ kind: "relationship-network" as const, id: network.npc.id }, ...(contact.sourceRefs || [])],
-        remark: network.npc.role || contact.remark,
+        // Keep the NPC/linked character name as the visible contact title.
+        // The role is already available from the relationship label/context;
+        // storing it as remark would make the UI display e.g. “旧识” instead
+        // of the actual NPC name “林深”.
+        remark: contact.remark === network.npc.role ? undefined : contact.remark,
       };
     });
   const linkedIds = new Set(

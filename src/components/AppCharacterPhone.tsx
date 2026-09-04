@@ -25,6 +25,7 @@ import {
   Image,
   ListMusic,
   MapPin,
+  Mic,
   MessageCircle,
   MessageSquare,
   Music2,
@@ -335,6 +336,8 @@ function openCharacterPhone(
         messages: context.messages,
         moments: context.moments,
         worldBookEntries: context.worldBookEntries,
+        relationshipNetworkNpcs: context.relationshipNetworkNpcs,
+        relationshipNetworkMaps: context.relationshipNetworkMaps,
         musicTracks: context.musicTracks,
       })
     : reopened;
@@ -525,6 +528,7 @@ export default function AppCharacterPhone({
   const hidingTapCountRef = useRef(0);
   const hidingTapTimeoutRef = useRef<number | null>(null);
   const diaryScrollTopRef = useRef(0);
+  const gallerySwipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const [isDiaryFabVisible, setIsDiaryFabVisible] = useState(true);
   const [characterNotesTab, setCharacterNotesTab] = useState<"notes" | "todo">("notes");
   const [characterNoteQuery, setCharacterNoteQuery] = useState("");
@@ -1536,6 +1540,30 @@ export default function AppCharacterPhone({
   const selectedGallery =
     currentPhone.galleryItems.find((item) => item.id === selectedGalleryId) ||
     null;
+  const gallerySequence = visibleGallery
+    .slice()
+    .sort((left, right) => right.timestamp - left.timestamp);
+  const selectedGalleryIndex = selectedGallery
+    ? gallerySequence.findIndex((item) => item.id === selectedGallery.id)
+    : -1;
+  const moveGallerySelection = (direction: -1 | 1) => {
+    if (selectedGalleryIndex < 0) return;
+    const next = gallerySequence[selectedGalleryIndex + direction];
+    if (next) setSelectedGalleryId(next.id);
+  };
+  const handleGalleryPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    gallerySwipeStartRef.current = { x: event.clientX, y: event.clientY };
+  };
+  const handleGalleryPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = gallerySwipeStartRef.current;
+    gallerySwipeStartRef.current = null;
+    if (!start) return;
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) < 48 || Math.abs(deltaX) < Math.abs(deltaY) * 1.2) return;
+    moveGallerySelection(deltaX < 0 ? 1 : -1);
+  };
   const selectedBrowserEntry = selectedBrowserEntryId
     ? currentPhone.browserHistory.find((entry) => entry.id === selectedBrowserEntryId) || null
     : null;
@@ -1604,7 +1632,7 @@ export default function AppCharacterPhone({
     });
   };
   const phoneSocialNav = (
-    <div className="chat-tab-nav z-10 flex shrink-0 items-center justify-around border-t border-slate-200/60 bg-slate-50 py-2 text-[10px] font-bold text-slate-400" aria-label="聊天应用导航">
+    <div className="chat-tab-nav z-10 box-border flex h-14 min-h-14 max-h-14 shrink-0 items-center justify-around border-t border-slate-200/60 bg-slate-50 py-2 text-[10px] font-bold text-slate-400" aria-label="聊天应用导航">
       {[
         { id: "chats" as const, label: "聊天", icon: MessageSquare },
         { id: "contacts" as const, label: "通讯录", icon: Users },
@@ -1706,7 +1734,7 @@ export default function AppCharacterPhone({
   );
   const phoneMeView = (
     <div className="flex min-h-0 flex-1 flex-col bg-slate-50 text-[var(--text-primary)]">
-      <div className="relative flex shrink-0 items-center justify-between border-b border-[var(--divider)] bg-[var(--surface)]/95 px-4 py-1.5 backdrop-blur-md">
+      <div className="relative box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between border-b border-[var(--divider)] bg-[var(--surface)]/95 px-4 py-1.5 backdrop-blur-md">
         <button type="button" onClick={() => { setActiveApp("home"); setPhoneSocialTab("chats"); }} className="app-nav-icon-button z-10 flex h-8 w-8 items-center justify-center" aria-label="返回桌面"><ChevronLeft className="h-4 w-4 text-slate-700" /></button>
         <h2 className="absolute left-1/2 -translate-x-1/2 text-sm font-bold">我</h2>
         <span className="h-8 w-8" aria-hidden="true" />
@@ -1733,7 +1761,7 @@ export default function AppCharacterPhone({
   );
   const phoneChatView = phoneChatMode === "conversation" && selectedContact ? (
     <div className="flex h-full min-h-0 flex-col bg-[#f7f7f7]" style={{ "--app-bg": "#f7f7f7" } as React.CSSProperties}>
-      <div className="relative flex shrink-0 items-center justify-between border-b border-[var(--divider)] bg-[var(--surface)]/95 px-4 py-1.5 text-[var(--text-primary)] backdrop-blur-md">
+      <div className="relative box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between border-b border-[var(--divider)] bg-[var(--surface)]/95 px-4 py-1.5 text-[var(--text-primary)] backdrop-blur-md">
         <button
           type="button"
           onClick={() => { setPhoneChatMode("inbox"); setContactMenuOpen(false); }}
@@ -1807,7 +1835,7 @@ export default function AppCharacterPhone({
     </div>
   ) : phoneSocialTab === "moments" ? phoneMomentsView : phoneSocialTab === "me" ? phoneMeView : (
     <div className="flex h-full min-h-0 flex-col bg-white text-[var(--text-primary)]">
-      <div className="relative flex shrink-0 items-center justify-between border-b border-[var(--divider)] bg-[var(--surface)]/95 px-4 py-1.5 backdrop-blur-md">
+      <div className="relative box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between border-b border-[var(--divider)] bg-[var(--surface)]/95 px-4 py-1.5 backdrop-blur-md">
         <button
           type="button"
           onClick={() => setActiveApp("home")}
@@ -1961,8 +1989,8 @@ export default function AppCharacterPhone({
     ) : activeApp === "browser" ? (
       selectedBrowserEntry && selectedBrowserDetail ? (
         <div className="-mx-3 min-h-full bg-[#f7f8fa] text-[#202124]">
-          <div className="border-b border-[#e8eaed] bg-white pb-2">
-            <div className="flex items-center gap-2 px-3 pt-2">
+          <div className="box-border flex h-16 min-h-16 max-h-16 items-center border-b border-[#e8eaed] bg-white">
+            <div className="flex h-full w-full items-center gap-2 px-3">
               <button
                 type="button"
                 onClick={() => setSelectedBrowserEntryId(null)}
@@ -2014,42 +2042,59 @@ export default function AppCharacterPhone({
         </div>
       ) : (
       <>
-        <div className="-mx-3 min-h-full bg-[#fcfbfb] text-[#292833]">
+        <div className="-mx-5 min-h-full bg-white px-3 pb-4 pt-1 text-[#202124]">
+          <div className="flex justify-center pb-4 pt-1" aria-label="Google">
+            <div className="select-none text-[2.55rem] font-medium leading-none tracking-[-0.12em]" aria-hidden="true">
+              <span className="text-[#4285f4]">G</span>
+              <span className="text-[#ea4335]">o</span>
+              <span className="text-[#fbbc05]">o</span>
+              <span className="text-[#4285f4]">g</span>
+              <span className="text-[#34a853]">l</span>
+              <span className="text-[#ea4335]">e</span>
+            </div>
+          </div>
           <form
             onSubmit={(event) => {
               event.preventDefault();
               runPhoneBrowserSearch();
             }}
-            className="mx-2 mt-2 flex items-center gap-3 rounded-[17px] bg-transparent px-3 py-2.5"
+            className="flex items-center gap-2 rounded-full border border-[#dfe1e5] bg-white px-3 py-2 shadow-[0_1px_3px_rgba(60,64,67,0.18)]"
           >
-            <button type="button" aria-label="新建标签页" className="shrink-0 rounded-full p-1 text-neutral-800">
-              <Plus className="h-5 w-5" />
-            </button>
+            <Search className="h-4 w-4 shrink-0 text-[#5f6368]" />
             <input
               value={browserAddress}
               onChange={(event) => setBrowserAddress(event.target.value)}
-              placeholder="在 Google 中搜索或输入网址"
-              className="min-w-0 flex-1 appearance-none rounded-none border-0 !bg-transparent p-0 text-sm outline-none shadow-none ring-0 placeholder:text-neutral-600 focus:!bg-transparent focus:outline-none focus:ring-0"
+              placeholder="搜索或输入网址"
+              className="min-w-0 flex-1 appearance-none rounded-none border-0 !bg-transparent p-0 text-xs outline-none shadow-none ring-0 placeholder:text-[#70757a] focus:!bg-transparent focus:outline-none focus:ring-0"
             />
-            <button type="button" aria-label="扫描二维码" className="shrink-0 rounded-full p-1 text-neutral-800">
-              <ScanLine className="h-5 w-5" />
+            <button type="button" aria-label="语音搜索" className="shrink-0 rounded-full p-1 text-[#5f6368]">
+              <Mic className="h-4 w-4" />
+            </button>
+            <button type="button" aria-label="以图搜图" className="shrink-0 rounded-full p-1 text-[#5f6368]">
+              <ScanLine className="h-4 w-4" />
             </button>
           </form>
-          <div className="px-2 py-2">
-            <div className="overflow-hidden rounded-[17px] bg-white">
+          <section className="mt-4" aria-label="搜索记录">
+            <div className="flex items-center justify-between px-1 pb-1">
+              <h2 className="text-[11px] font-medium text-[#5f6368]">搜索记录</h2>
+              <button type="button" className="text-[10px] font-medium text-[#1a73e8]">管理记录</button>
+            </div>
+            <div className="overflow-hidden rounded-xl bg-white">
             {normalizeCharacterPhoneBrowserHistory(currentPhone.browserHistory).map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => setSelectedBrowserEntryId(item.id)}
-                className="flex w-full items-center gap-4 border-t border-[#ebe5ef] px-5 py-3.5 text-left transition-colors hover:bg-slate-50"
+                className="flex w-full items-center gap-3 border-t border-[#ebe5ef] px-1.5 py-2 text-left transition-colors hover:bg-slate-50"
                 aria-label={`查看${item.title || item.query}的搜索详情`}
               >
-                <History className="h-5 w-5 shrink-0 text-neutral-600" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-base">{item.title || item.query}</span>
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#f1f3f4]">
+                  <History className="h-3.5 w-3.5 text-[#70757a]" />
                 </span>
-                <ArrowUpLeft className="h-5 w-5 shrink-0 text-neutral-700" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs text-[#3c4043]">{item.title || item.query}</span>
+                </span>
+                <ArrowUpLeft className="h-4 w-4 shrink-0 text-[#70757a]" />
               </button>
             ))}
             {normalizeCharacterPhoneBrowserHistory(currentPhone.browserHistory).length === 0 && (
@@ -2059,7 +2104,7 @@ export default function AppCharacterPhone({
               />
             )}
             </div>
-          </div>
+          </section>
         </div>
       </>
       )
@@ -2194,14 +2239,16 @@ export default function AppCharacterPhone({
     ) : activeApp === "gallery" ? (
       <>
         {selectedGallery ? (
-          <div className="-mx-5 flex h-full min-h-0 flex-col overflow-hidden overscroll-none bg-black text-white">
-            <div className="flex shrink-0 items-center justify-between px-4 pb-3 pt-5">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden overscroll-none bg-black text-white">
+            <div className="box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between px-4 py-2">
               <button
                 type="button"
                 onClick={() => setSelectedGalleryId(null)}
-                className="text-sm"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-white/90 transition-colors hover:bg-white/10"
+                aria-label="返回相册"
+                title="返回相册"
               >
-                ‹ 相册
+                <ChevronLeft className="h-5 w-5" />
               </button>
               <span className="text-xs">
                 {new Date(selectedGallery.timestamp).toLocaleDateString(
@@ -2210,14 +2257,21 @@ export default function AppCharacterPhone({
               </span>
               <span className="h-5 w-5" aria-hidden="true" />
             </div>
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-5 touch-none select-none">
+            <div
+              className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-5 touch-none select-none"
+              role="group"
+              aria-label={`查看图片 ${selectedGalleryIndex + 1} / ${gallerySequence.length}`}
+              onPointerDown={handleGalleryPointerDown}
+              onPointerUp={handleGalleryPointerUp}
+              onPointerCancel={() => { gallerySwipeStartRef.current = null; }}
+            >
               {selectedGallery.dataUrl ? (
-                <img src={selectedGallery.dataUrl} alt={selectedGallery.title} draggable={false} className="max-h-[48vh] w-full rounded-2xl object-contain" />
+                <img src={selectedGallery.dataUrl} alt={selectedGallery.title} draggable={false} className="max-h-[58vh] w-full rounded-2xl object-contain" />
               ) : selectedGallery.imageAssetId ? (
                 <StoredCharacterPhoneImage
                   assetId={selectedGallery.imageAssetId}
                   alt={selectedGallery.title}
-                  className="max-h-[48vh] w-full rounded-2xl object-contain"
+                  className="max-h-[58vh] w-full rounded-2xl object-contain"
                   placeholderClassName="flex h-72 w-full items-center justify-center rounded-2xl bg-neutral-800 text-3xl text-white/50"
                 />
               ) : (
@@ -2455,36 +2509,30 @@ export default function AppCharacterPhone({
           </div>
         ) : selectedDiary ? (
           <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-4">
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setSelectedDiaryId(null)}
-                className="text-xs text-neutral-500"
-              >
-                ‹ 返回
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setDiaryDraft({
-                    title: selectedDiary.title,
-                    body: selectedDiary.body,
-                  });
-                  setDiaryEditing(true);
-                }}
-                className="text-xs text-neutral-500"
-              >
-                编辑
-              </button>
-            </div>
-            <article className="mt-4 rounded-3xl bg-white p-5 shadow-sm">
+            <article className="rounded-3xl bg-white p-5 shadow-sm">
               <h2 className="text-xl font-bold">{selectedDiary.title}</h2>
               <p className="mt-3 whitespace-pre-wrap text-sm leading-7">
                 {selectedDiary.body}
               </p>
-              <p className="mt-4 text-[10px] text-neutral-500">
-                {new Date(selectedDiary.timestamp).toLocaleString("zh-CN")}
-              </p>
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <p className="text-[10px] text-neutral-500">
+                  {new Date(selectedDiary.timestamp).toLocaleString("zh-CN")}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDiaryDraft({
+                      title: selectedDiary.title,
+                      body: selectedDiary.body,
+                    });
+                    setDiaryEditing(true);
+                  }}
+                  className="rounded-full px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800"
+                  aria-label="编辑日记"
+                >
+                  编辑
+                </button>
+              </div>
             </article>
             <button
               type="button"
@@ -2864,7 +2912,7 @@ export default function AppCharacterPhone({
               placeholder="开始输入你的笔记内容..."
               value={characterNoteDraft.content}
               onChange={(event) => setCharacterNoteDraft({ ...characterNoteDraft, content: event.target.value })}
-              className="min-h-0 flex-1 resize-none border-0 bg-transparent px-1 py-3 text-sm leading-7 text-slate-600 outline-none placeholder:text-slate-300"
+              className="mt-3 min-h-0 flex-1 resize-none border-0 bg-transparent px-1 py-3 text-sm leading-7 text-slate-600 outline-none placeholder:text-slate-300"
             />
           </div>
         ) : (
@@ -3093,6 +3141,8 @@ export default function AppCharacterPhone({
     ? phoneWallpaper
     : `url(${phoneWallpaper}) center/cover no-repeat`;
   const isBrowserDetail = activeApp === "browser" && Boolean(selectedBrowserEntry && selectedBrowserDetail);
+  const isBrowserHome = activeApp === "browser" && !isBrowserDetail;
+  const isGalleryDetail = activeApp === "gallery" && Boolean(selectedGallery);
   return (
     <div
       className="relative flex h-full min-h-0 w-full flex-col overflow-hidden text-neutral-900"
@@ -3322,7 +3372,10 @@ export default function AppCharacterPhone({
           </div>
         ) : (
           <div className={`relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden ${activeApp === "phone" ? "bg-[#fcfcfb]" : activeApp === "browser" || activeApp === "chat" || activeApp === "gallery" || activeApp === "schedule" ? "bg-[#fcfbfb]" : "bg-white/70 backdrop-blur-xl"}`}>
-            {!isBrowserDetail && <div className={`relative flex shrink-0 items-center justify-between px-4 py-3 text-neutral-900 ${activeApp === "schedule" || activeApp === "phone" || activeApp === "browser" || activeApp === "chat" || activeApp === "gallery" ? "bg-transparent border-b-0" : "border-b border-black/5"}`}>
+            {!isBrowserDetail && !isGalleryDetail && <div className={isBrowserHome
+              ? "pointer-events-none absolute inset-x-0 top-0 z-20 box-border flex h-16 min-h-16 max-h-16 items-center justify-between px-2 py-0 text-neutral-900"
+              : `relative box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between px-4 py-1.5 text-neutral-900 ${activeApp === "schedule" || activeApp === "phone" || activeApp === "browser" || activeApp === "chat" || activeApp === "gallery" ? "bg-transparent border-b-0" : "border-b border-black/5"}`}
+            >
               <button
                 type="button"
                 onClick={() => {
@@ -3331,15 +3384,20 @@ export default function AppCharacterPhone({
                     setSelectedCharacterNoteId(null);
                     return;
                   }
+                  if (activeApp === "diary" && selectedDiary) {
+                    setSelectedDiaryId(null);
+                    return;
+                  }
                   if (activeApp === "gallery") lockHiddenGallery();
                   setActiveApp("home");
                 }}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-600 hover:bg-black/5"
-                aria-label="返回桌面"
+                className={`flex h-8 w-8 items-center justify-center rounded-full text-neutral-600 hover:bg-black/5 ${isBrowserHome ? "pointer-events-auto" : ""}`}
+                aria-label={activeApp === "diary" && selectedDiary ? "返回日记页" : "返回桌面"}
+                title={activeApp === "diary" && selectedDiary ? "返回日记页" : "返回桌面"}
               >
                 <ArrowLeft className="h-5 w-5" />
               </button>
-              <h1 className="absolute left-1/2 -translate-x-1/2 text-sm font-bold">
+              <h1 className={isBrowserHome ? "sr-only" : "absolute left-1/2 -translate-x-1/2 text-sm font-bold"}>
                 {activeApp === "phone"
                   ? "拨号"
                   : activeApp === "notes" && characterNoteEditing
@@ -3350,7 +3408,7 @@ export default function AppCharacterPhone({
                 <button
                   type="button"
                   onClick={() => setScheduleTodaySignal((signal) => signal + 1)}
-                  className="h-9 min-w-9 px-1 text-xs font-medium uppercase tracking-[0.14em] text-neutral-400"
+                  className="h-8 min-w-8 px-1 text-xs font-medium uppercase tracking-[0.14em] text-neutral-400"
                 >
                   Today
                 </button>
@@ -3362,16 +3420,16 @@ export default function AppCharacterPhone({
                     : characterNotesTab === "notes"
                       ? () => handleOpenCharacterNote()
                       : () => setIsAddingCharacterTodo(true)}
-                  className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-600 hover:bg-black/5"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-600 hover:bg-black/5"
                   aria-label={characterNoteEditing ? "保存笔记" : characterNotesTab === "notes" ? "新建笔记" : "新建待办"}
                 >
                   {characterNoteEditing ? <Save className="h-4 w-4" /> : <Plus className="h-5 w-5" />}
                 </button>
               ) : (
-                <span className="h-9 w-9" aria-hidden="true" />
+                <span className="h-8 w-8" aria-hidden="true" />
               )}
             </div>}
-            <main className={`min-h-0 flex-1 px-5 ${activeApp === "diary" || activeApp === "notes" || activeApp === "camera" ? "pb-0" : "pb-6"} text-neutral-900 ${isBrowserDetail ? "overflow-y-auto pt-0" : activeApp === "schedule" || activeApp === "phone" || activeApp === "chat" || activeApp === "gallery" || activeApp === "camera" ? "flex flex-col overflow-hidden pt-0" : activeApp === "diary" || activeApp === "notes" ? "relative flex min-h-0 flex-col overflow-hidden pt-0" : activeApp === "music" && musicView === "player" ? "flex min-h-0 flex-col overflow-hidden pt-4" : "overflow-y-auto pt-4"}`}>
+            <main className={`min-h-0 flex-1 ${isGalleryDetail ? "px-0" : "px-5"} ${activeApp === "diary" || activeApp === "notes" || activeApp === "camera" ? "pb-0" : "pb-6"} text-neutral-900 ${isBrowserDetail ? "character-phone-browser-detail-main overflow-y-auto pt-0" : activeApp === "schedule" || activeApp === "phone" || activeApp === "chat" || activeApp === "gallery" || activeApp === "camera" ? "flex flex-col overflow-hidden pt-0" : activeApp === "diary" || activeApp === "notes" ? "relative flex min-h-0 flex-col overflow-hidden pt-0" : activeApp === "music" && musicView === "player" ? "flex min-h-0 flex-col overflow-hidden pt-4" : "overflow-y-auto pt-4"}`}>
               {appContent}
             </main>
             {activeApp === "music" && (

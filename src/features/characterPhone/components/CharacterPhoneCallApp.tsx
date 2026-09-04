@@ -94,7 +94,7 @@ export function CharacterPhoneCallApp({
         </div>
       </section>
       {notice && <p role="status" className="absolute bottom-[112px] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-neutral-900 px-4 py-2 text-xs text-white shadow-lg">{notice}</p>}
-      <nav className="grid shrink-0 grid-cols-3 border-t border-neutral-200/80 px-8 pb-3 pt-2 text-sm" aria-label="电话底部导航">
+      <nav className="box-border grid h-16 min-h-16 max-h-16 shrink-0 grid-cols-3 border-t border-neutral-200/80 px-8 py-2 text-sm" aria-label="电话底部导航">
         <button type="button" className="flex flex-col items-center gap-1 font-semibold text-[#2fbd59]"><PhoneCall className="h-8 w-8" />拨号</button>
         <button type="button" className="flex flex-col items-center gap-1 text-neutral-400"><Users className="h-8 w-8" />联系人</button>
         <button type="button" className="flex flex-col items-center gap-1 text-neutral-400"><Star className="h-8 w-8" />收藏</button>

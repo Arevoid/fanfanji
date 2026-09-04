@@ -238,6 +238,12 @@ button, input, textarea, select {
   }
 }
 
+/* Browser search details intentionally place their compact search bar at the
+   top of the app content, without inheriting the phone-wide content padding. */
+.phone-screen-container .character-phone-browser-detail-main.px-5 {
+  padding-top: 0 !important;
+}
+
 /* Hide default scrollbars globally */
 * {
   /* For Firefox */
