@@ -3,9 +3,9 @@ import { readArray, writeArray } from "./repositoryUtils";
 import { storageKeys } from "../storageKeys";
 import type { Character } from "../../../types";
 import type { CharacterPhoneRecord } from "../../../domain/characterPhone/types";
+import type { StorageWriteResult } from "../storageTypes";
 
-const load = () =>
-  readArray<CharacterPhoneRecord>(storageKeys.characterPhones, []);
+const load = () => readArray<CharacterPhoneRecord>(storageKeys.characterPhones, []);
 
 const LEGACY_MUSIC_TITLES = new Set([
   "Night Mood",
@@ -69,7 +69,9 @@ export function createCharacterPhone(
     notes: [],
     todos: [],
     scheduleItems: [],
+    phoneCalls: [],
     galleryItems: [],
+    lifeEvents: [],
     activities: [],
   };
   saveCharacterPhone(phone);
@@ -105,11 +107,64 @@ function normalizeMusicPersistence(phone: CharacterPhoneRecord): CharacterPhoneR
   };
 }
 
+function normalizeCharacterPhoneRecord(phone: CharacterPhoneRecord): CharacterPhoneRecord {
+  return normalizeMusicPersistence({
+    ...phone,
+    appIcons: phone.appIcons ?? {},
+    appOrder: phone.appOrder ?? ["chat", "browser", "schedule", "gallery", "diary", "notes", "music", "settings"],
+    messages: phone.messages ?? [],
+    contacts: phone.contacts ?? [],
+    threadMessages: phone.threadMessages ?? [],
+    posts: phone.posts ?? [],
+    browserHistory: phone.browserHistory ?? [],
+    diaryEntries: phone.diaryEntries ?? [],
+    notes: phone.notes ?? [],
+    todos: phone.todos ?? [],
+    scheduleItems: phone.scheduleItems ?? [],
+    phoneCalls: phone.phoneCalls ?? [],
+    galleryItems: phone.galleryItems ?? [],
+    musicTracks: phone.musicTracks ?? [],
+    listeningHistory: phone.listeningHistory ?? [],
+    musicPlaylists: phone.musicPlaylists ?? [],
+    actionLog: (phone.actionLog ?? []).slice(-300),
+    lifeEvents: (phone.lifeEvents ?? []).slice(-200),
+    activities: (phone.activities ?? []).slice(-300),
+  });
+}
+
 export function saveCharacterPhone(phone: CharacterPhoneRecord) {
-  const normalizedPhone = normalizeMusicPersistence(phone);
-  const current = load().value.map(normalizeMusicPersistence);
+  const loaded = load();
+  if (loaded.found && !loaded.valid) {
+    return { success: false as const, error: loaded.error ?? "parse" as const };
+  }
+  const normalizedPhone = normalizeCharacterPhoneRecord(phone);
+  const current = loaded.value.map(normalizeCharacterPhoneRecord);
   return writeArray(storageKeys.characterPhones, [
-    ...current.filter((item) => item.id !== normalizedPhone.id),
+    ...current.filter((item) => item.id !== normalizedPhone.id
+      && !(item.ownerIdentityId === normalizedPhone.ownerIdentityId && item.characterId === normalizedPhone.characterId)),
     normalizedPhone,
   ]);
+}
+
+export function removeCharacterPhonesByCharacterIds(characterIds: Iterable<string>): {
+  result: StorageWriteResult;
+  imageAssetIds: string[];
+} {
+  const loaded = load();
+  if (loaded.found && !loaded.valid) {
+    return {
+      result: { success: false, error: loaded.error ?? "parse" },
+      imageAssetIds: [],
+    };
+  }
+  const ids = new Set(characterIds);
+  const removed = loaded.value.filter((phone) => ids.has(phone.characterId));
+  const retained = loaded.value.filter((phone) => !ids.has(phone.characterId));
+  const result = writeArray(storageKeys.characterPhones, retained);
+  return {
+    result,
+    imageAssetIds: result.success
+      ? [...new Set(removed.flatMap((phone) => phone.galleryItems ?? []).map((item) => item.imageAssetId).filter((id): id is string => Boolean(id)))]
+      : [],
+  };
 }

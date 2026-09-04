@@ -2,6 +2,16 @@ import type { CharacterTruthScope, KnowledgeClaim } from "./characterKnowledgeTy
 import { isCompleteTruthScope, normalizeKnowledgeClaim } from "./knowledgeWritePolicy";
 
 const normalizeStatement = (value: string): string => value.trim().replace(/\s+/gu, " ").toLocaleLowerCase();
+const normalizeMeaning = (value: string): string => normalizeStatement(value)
+  .replace(/[\s\u200b，。！？、,.!?~～…；;：“”‘’"'（）()【】\[\]{}]/gu, "");
+
+const truthRank = (claim: KnowledgeClaim): number => {
+  if (claim.status === "active" && claim.truthStatus === "confirmed") return 0;
+  if (claim.status === "active" && claim.truthStatus === "asserted") return 1;
+  if (claim.status === "active" && claim.truthStatus === "inferred") return 2;
+  if (claim.status === "active") return 3;
+  return 4;
+};
 
 export function isSameTruthScope(left: CharacterTruthScope, right: CharacterTruthScope): boolean {
   return left.relationId === right.relationId
@@ -45,6 +55,49 @@ export function deduplicateKnowledgeClaims(claims: readonly KnowledgeClaim[]): K
     keys.add(key);
     return true;
   });
+}
+
+/**
+ * Collapses historical copies that describe the same scoped proposition but
+ * were produced with different evidence keys or generated IDs. Provenance is
+ * merged into the surviving claim, so cleanup removes visual/prompt repeats
+ * without discarding which source messages supported the fact.
+ */
+export function deduplicateKnowledgeClaimsByMeaning(claims: readonly KnowledgeClaim[]): KnowledgeClaim[] {
+  const records = new Map<string, KnowledgeClaim>();
+  for (const claim of claims) {
+    const key = [
+      claim.relationId,
+      claim.characterId,
+      claim.userIdentityId,
+      claim.conversationId || "",
+      claim.kind,
+      claim.subject,
+      normalizeMeaning(claim.statement),
+    ].join("\u0000");
+    const previous = records.get(key);
+    if (!previous) {
+      records.set(key, claim);
+      continue;
+    }
+    const winner = truthRank(claim) < truthRank(previous)
+      || (truthRank(claim) === truthRank(previous) && claim.recordedAt >= previous.recordedAt)
+      ? claim
+      : previous;
+    const other = winner === claim ? previous : claim;
+    const mergedMessageIds = Array.from(new Set([...(winner.source.messageIds || []), ...(other.source.messageIds || [])]));
+    records.set(key, {
+      ...winner,
+      source: {
+        ...winner.source,
+        ...(mergedMessageIds.length > 0 ? { messageIds: mergedMessageIds } : {}),
+      },
+      userConfirmed: winner.userConfirmed || other.userConfirmed,
+      recordedAt: Math.max(winner.recordedAt, other.recordedAt),
+      ...(winner.occurredAt === undefined && other.occurredAt !== undefined ? { occurredAt: other.occurredAt } : {}),
+    });
+  }
+  return Array.from(records.values());
 }
 
 export function appendKnowledgeClaims(existing: readonly KnowledgeClaim[], incoming: readonly KnowledgeClaim[]): KnowledgeClaim[] {

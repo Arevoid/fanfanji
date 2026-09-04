@@ -56,6 +56,15 @@ assert.deepEqual(findBySource(scopeA, { evidenceKey: "claim-a" }, isolated).map(
 
 const duplicate = { ...relationA, id: "claim-a-retry" };
 assert.equal(appendToKnowledgeClaims(isolated, [duplicate]).length, 2, "same evidence and statement is idempotent");
+const meaningDuplicate = {
+  ...relationA,
+  id: "claim-a-different-run",
+  source: { ...relationA.source, evidenceKey: "another-evidence", messageIds: ["message-another"] },
+  recordedAt: 200,
+};
+const normalizedMeaningDuplicates = normalizeKnowledgeClaims([relationA, meaningDuplicate]);
+assert.equal(normalizedMeaningDuplicates.length, 1, "historical copies with different ids/evidence collapse by scoped meaning");
+assert.deepEqual(normalizedMeaningDuplicates[0]?.source.messageIds, ["message-another", "message-claim-a"], "meaning cleanup retains source provenance");
 assert.equal(normalizeKnowledgeClaims([{ ...relationA, relationId: "" }]).length, 0, "unscoped persisted claims are rejected");
 
 const wrongScopeRetraction = retractKnowledgeClaim(isolated, scopeB, "claim-a", "wrong relation");
@@ -81,6 +90,10 @@ const summary = (id: string, scope = scopeA): ConversationSummaryRecord => ({
 });
 const summaries = appendConversationSummaries([], [summary("summary-a"), summary("summary-b", scopeB), summary("summary-a")]);
 assert.equal(summaries.length, 2);
+assert.equal(appendConversationSummaries([], [
+  { ...summary("summary-meaning-a"), summary: "相同摘要内容" },
+  { ...summary("summary-meaning-b"), summary: "相同摘要内容", generatedAt: 200 },
+]).length, 1, "historical summary copies collapse by exact relationship and meaning");
 assert.deepEqual(listConversationSummariesByRelation(scopeA, summaries).map((item) => item.id), ["summary-a"]);
 assert.deepEqual(removeConversationSummariesByRelations(summaries, [scopeA.relationId]).map((item) => item.id), ["summary-b"]);
 const summaryNew = { ...summary("summary-versioned"), generatedAt: 200, summary: "new summary" };

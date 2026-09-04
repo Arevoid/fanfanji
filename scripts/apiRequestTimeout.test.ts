@@ -4,6 +4,7 @@ import {
   describeApiRequestError,
   fetchWithTimeout,
   isApiRequestError,
+  readResponseTextWithTimeout,
 } from "../src/utils/fetchWithTimeout";
 
 const originalFetch = globalThis.fetch;
@@ -40,6 +41,17 @@ try {
 
   globalThis.fetch = (async () => new Response("ok", { status: 200 })) as typeof fetch;
   assert.equal(await (await fetchWithTimeout("https://ok.example", {}, 100)).text(), "ok");
+
+  let cancelledBody = false;
+  const stalledResponse = {
+    text: () => new Promise<string>(() => undefined),
+    body: { cancel: async () => { cancelledBody = true; } },
+  } as unknown as Response;
+  await assert.rejects(
+    () => readResponseTextWithTimeout(stalledResponse, 10),
+    (error: unknown) => isApiRequestError(error, "timeout"),
+  );
+  assert.equal(cancelledBody, true, "cancels a stalled response body after headers have arrived");
 
   assert.match(describeApiRequestError(new ApiRequestError("timeout", "timeout", { timeoutMs: 20_000 }), "聊天 API"), /聊天 API请求超时（20 秒）/);
   assert.match(describeApiRequestError(new ApiRequestError("network", "network"), "翻译 API"), /网络连接失败/);

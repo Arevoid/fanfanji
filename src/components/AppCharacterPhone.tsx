@@ -19,7 +19,6 @@ import {
   Disc3,
   Eye,
   Globe2,
-  Grid3X3,
   Heart,
   History,
   Home,
@@ -33,7 +32,6 @@ import {
   Newspaper,
   Pause,
   Phone,
-  PhoneCall,
   Plus,
   Play,
   RefreshCw,
@@ -41,11 +39,9 @@ import {
   Search,
   ScanLine,
   Settings,
-  Share2,
   SkipBack,
   SkipForward,
   StickyNote,
-  Star,
   Trash2,
   User,
   Users,
@@ -65,6 +61,7 @@ import type {
   CharacterPhoneAppId,
   CharacterPhoneActionRecord,
   CharacterPhoneContact,
+  CharacterPhoneGalleryItem,
   CharacterPhoneImageSaveInput,
   CharacterPhoneNote,
   CharacterPhoneRecord,
@@ -76,6 +73,7 @@ import AppSchedule from "./AppSchedule";
 import { createCharacterTextMessage } from "../features/chat/services/messageFactory";
 import { advanceCharacterPhone } from "../features/characterPhone/characterPhoneProgression";
 import { ensureCharacterPhoneContent } from "../features/characterPhone/characterPhoneContent";
+import { selectCharacterPhoneWorldBookEntries } from "../features/characterPhone/characterPhoneLifeContext";
 import { buildCharacterPhoneAwarenessMessage } from "../features/characterPhone/characterPhoneReaction";
 import { discoverCharacterPhoneActions } from "../features/characterPhone/characterPhoneDetection";
 import {
@@ -92,6 +90,12 @@ import { resolveDesktopBackground } from "../features/theme/desktopBackground";
 import type { ResolvedTheme } from "../features/theme/theme";
 import { StoredCharacterPhoneImage } from "../features/characterPhone/components/StoredCharacterPhoneImage";
 import { normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
+import { buildCharacterPhoneBrowserDetail } from "../features/characterPhone/characterPhoneBrowserDetails";
+import { CharacterPhoneCallApp, type CharacterPhoneDialerTab } from "../features/characterPhone/components/CharacterPhoneCallApp";
+import { CharacterPhoneCameraApp } from "../features/characterPhone/components/CharacterPhoneCameraApp";
+import { resolveCharacterPhoneHiddenGalleryPasscode } from "../features/characterPhone/characterPhoneGallerySecurity";
+import { createCharacterPhoneTextImageDataUrl } from "../features/characterPhone/characterPhoneTextImage";
+import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../domain/relationshipNetwork/relationshipNetworkTypes";
 
 interface AppCharacterPhoneProps {
   userIdentityId: string;
@@ -101,6 +105,8 @@ interface AppCharacterPhoneProps {
   messages?: Message[];
   moments?: Moment[];
   worldBookEntries?: WorldBookEntry[];
+  relationshipNetworkNpcs?: RelationshipNetworkNpc[];
+  relationshipNetworkMaps?: RelationshipNetworkMap[];
   settings?: UserSettings;
   musicTracks?: MusicTrack[];
   resolvedTheme?: ResolvedTheme;
@@ -110,7 +116,6 @@ interface AppCharacterPhoneProps {
   onClose: () => void;
 }
 type GalleryMode = "main" | "hidden" | "deleted";
-type PhoneDialerTab = "all" | "missed";
 type CharacterPhoneSystemAppId = "phone" | "camera";
 type CharacterPhoneIconAppId = CharacterPhoneAppId | CharacterPhoneSystemAppId;
 type CharacterPhoneView = "home" | CharacterPhoneAppId | CharacterPhoneSystemAppId;
@@ -201,20 +206,6 @@ const CHARACTER_PHONE_WALLPAPER_PRESETS = [
   { label: "薰衣草", value: "linear-gradient(145deg, #e5dff0 0%, #f8ebe9 100%)" },
   { label: "夜色", value: "linear-gradient(145deg, #252b35 0%, #667182 100%)" },
 ] as const;
-const PHONE_DIAL_PAD = [
-  ["1", ""],
-  ["2", "ABC"],
-  ["3", "DEF"],
-  ["4", "GHI"],
-  ["5", "JKL"],
-  ["6", "MNO"],
-  ["7", "PQRS"],
-  ["8", "TUV"],
-  ["9", "WXYZ"],
-  ["*", ""],
-  ["0", "+"],
-  ["#", ""],
-] as const;
 const CHARACTER_PHONE_UNLOCK_PAD = [
   ["1", ""],
   ["2", "ABC"],
@@ -299,6 +290,12 @@ const LEGACY_CHARACTER_PHONE_WALLPAPERS = new Set([
   "linear-gradient(145deg, #d8e5df 0%, #f4eadc 100%)",
   "linear-gradient(145deg, #bcd9f2 0%, #edf2f8 42%, #f3c5cf 78%, #f8ddd7 100%)",
 ]);
+
+// Keep the interactive phone recoverable if a provider accepts a request but
+// never completes its response body. The low-level API helper has its own
+// deadline; this UI boundary protects the generate button from any remaining
+// adapter or browser-fetch edge case.
+const CHARACTER_PHONE_GENERATION_TIMEOUT_MS = 120_000;
 function openCharacterPhone(
   ownerIdentityId: string,
   character: Character,
@@ -309,6 +306,8 @@ function openCharacterPhone(
     messages: Message[];
     moments: Moment[];
     worldBookEntries: WorldBookEntry[];
+    relationshipNetworkNpcs: RelationshipNetworkNpc[];
+    relationshipNetworkMaps: RelationshipNetworkMap[];
     musicTracks: MusicTrack[];
   },
 ): CharacterPhoneRecord {
@@ -349,6 +348,23 @@ function formatTime(timestamp: number) {
   });
 }
 
+function CharacterPhoneEvidenceEmpty({
+  title,
+  detail,
+  compact = false,
+}: {
+  title: string;
+  detail: string;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`${compact ? "my-2 px-3 py-3" : "mx-1 my-4 px-4 py-5"} rounded-2xl border border-dashed border-neutral-200 bg-white/60 text-center`}>
+      <p className="text-xs font-semibold text-neutral-500">{title}</p>
+      <p className="mt-1 text-[10px] leading-5 text-neutral-400">{detail}</p>
+    </div>
+  );
+}
+
 function withPhoneAction(
   phone: CharacterPhoneRecord,
   action: Omit<CharacterPhoneActionRecord, "id" | "timestamp" | "actor">,
@@ -358,8 +374,8 @@ function withPhoneAction(
     ...phone,
     actionLog: [
       ...(phone.actionLog ?? []),
-      { ...action, id: `phone-action-${now}-${phone.actionLog?.length ?? 0}`, timestamp: now, actor: "user" },
-    ],
+      { ...action, id: `phone-action-${now}-${phone.actionLog?.length ?? 0}`, timestamp: now, actor: "user" as const, phoneOpenCountAtAction: phone.phoneOpenCount ?? 0 },
+    ].slice(-300),
     updatedAt: now,
   };
 }
@@ -375,21 +391,6 @@ function characterPhoneGalleryDayStart(timestamp: number): number {
   const date = new Date(timestamp);
   date.setHours(0, 0, 0, 0);
   return date.getTime();
-}
-
-function createCharacterPhoneTextImageDataUrl(description: string, title: string): string {
-  const escapeXml = (value: string) => value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    "\"": "&quot;",
-    "'": "&apos;",
-  })[character] || character);
-  const compactDescription = description.trim().replace(/\s+/g, " ").slice(0, 96);
-  const safeTitle = escapeXml(title.trim().slice(0, 28));
-  const safeDescription = escapeXml(compactDescription || "一张值得留下的照片");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350"><rect width="1080" height="1350" fill="#f3eee8"/><circle cx="890" cy="180" r="260" fill="#e7d9d0" opacity=".7"/><circle cx="150" cy="1180" r="280" fill="#dce8e8" opacity=".8"/><text x="84" y="160" fill="#82756d" font-family="Arial, sans-serif" font-size="34" letter-spacing="7">PHOTO NOTE</text><text x="84" y="320" fill="#252a2d" font-family="Arial, sans-serif" font-size="68" font-weight="700">${safeTitle}</text><foreignObject x="84" y="410" width="900" height="360"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Arial,sans-serif;font-size:42px;line-height:1.6;color:#4b5558;">${safeDescription}</div></foreignObject><line x1="84" y1="1030" x2="996" y2="1030" stroke="#b9aaa0" stroke-width="2"/><text x="84" y="1110" fill="#82756d" font-family="Arial, sans-serif" font-size="28">角色手机 · 文字图</text></svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 function formatCharacterPhoneGalleryGroupLabel(
@@ -437,6 +438,8 @@ export default function AppCharacterPhone({
   messages = [],
   moments = [],
   worldBookEntries = [],
+  relationshipNetworkNpcs = [],
+  relationshipNetworkMaps = [],
   settings,
   musicTracks = [],
   resolvedTheme = "light",
@@ -458,6 +461,8 @@ export default function AppCharacterPhone({
     messages,
     moments,
     worldBookEntries,
+    relationshipNetworkNpcs,
+    relationshipNetworkMaps,
     musicTracks,
   };
   const [phone, setPhone] = useState<CharacterPhoneRecord | null>(() =>
@@ -489,8 +494,12 @@ export default function AppCharacterPhone({
   const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(
     null,
   );
+  const [hiddenGalleryUnlocked, setHiddenGalleryUnlocked] = useState(false);
+  const [hiddenGalleryInput, setHiddenGalleryInput] = useState("");
+  const [hiddenGalleryNotice, setHiddenGalleryNotice] = useState("");
   const [browserAddress, setBrowserAddress] = useState("");
-  const [phoneDialerTab, setPhoneDialerTab] = useState<PhoneDialerTab>("all");
+  const [selectedBrowserEntryId, setSelectedBrowserEntryId] = useState<string | null>(null);
+  const [phoneDialerTab, setPhoneDialerTab] = useState<CharacterPhoneDialerTab>("all");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [scheduleTodaySignal, setScheduleTodaySignal] = useState(0);
   const [phoneChatMode, setPhoneChatMode] = useState<"inbox" | "conversation">("inbox");
@@ -531,6 +540,20 @@ export default function AppCharacterPhone({
   const [notice, setNotice] = useState("");
   const [phoneNotice, setPhoneNotice] = useState("");
   const [isAdvancing, setIsAdvancing] = useState(false);
+  const generationRequestRef = useRef(0);
+  const mountedRef = useRef(true);
+  const phoneScopeRef = useRef({ ownerIdentityId: userIdentityId, characterId: selectedCharacterId });
+  phoneScopeRef.current = { ownerIdentityId: userIdentityId, characterId: selectedCharacterId };
+  useEffect(() => {
+    // React StrictMode mounts effects twice in development. Reset this flag
+    // in the setup phase so the first probe cleanup cannot permanently mark a
+    // live phone screen as unmounted.
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      generationRequestRef.current += 1;
+    };
+  }, []);
   useEffect(() => () => {
     if (hidingTapTimeoutRef.current !== null) {
       window.clearTimeout(hidingTapTimeoutRef.current);
@@ -542,17 +565,23 @@ export default function AppCharacterPhone({
   }, []);
   useEffect(() => {
     if (previousIdentityIdRef.current === userIdentityId) return;
+    generationRequestRef.current += 1;
+    setIsAdvancing(false);
     previousIdentityIdRef.current = userIdentityId;
     const nextCharacter = characters[0];
     setSelectedCharacterId(nextCharacter?.id || "");
     setPhone(nextCharacter ? openCharacterPhone(userIdentityId, nextCharacter, phoneContext) : null);
     setUnlocked(false);
+    setHiddenGalleryUnlocked(false);
+    setHiddenGalleryInput("");
+    setHiddenGalleryNotice("");
     setActiveApp("home");
     setPhoneDialerTab("all");
     setPhoneNumber("");
     setScheduleTodaySignal(0);
     setPhoneChatMode("inbox");
     setPhoneSocialTab("chats");
+    setSelectedBrowserEntryId(null);
     setMusicView("home");
     setMusicIsPlaying(false);
     setInput("");
@@ -578,18 +607,24 @@ export default function AppCharacterPhone({
   );
   const currentUserAvatar = activeIdentity?.avatar || settings?.avatar;
   const phoneCharacterLocation = useMemo(
-    () => inferCharacterPhoneLocation([
-      selectedCharacter?.personality,
-      selectedCharacter?.backstory,
-      ...(worldBookEntries
-        .filter((entry) => entry.isActive !== false
-          && (!entry.characterId
-            || entry.characterId === "global"
-            || entry.characterId === selectedCharacter?.id
-            || entry.characterIds?.includes(selectedCharacter?.id || "")))
-        .flatMap((entry) => [entry.title, entry.content])),
-    ], "角色所在地区"),
-    [selectedCharacter?.backstory, selectedCharacter?.id, selectedCharacter?.personality, worldBookEntries],
+    () => {
+      const characterId = selectedCharacter?.id || "";
+      const relationIds = relationships
+        .filter((relation) => relation.userIdentityId === userIdentityId && relation.characterId === characterId)
+        .map((relation) => relation.id);
+      const scopedEntries = selectCharacterPhoneWorldBookEntries({
+        entries: worldBookEntries,
+        characterId,
+        ownerIdentityId: userIdentityId,
+        relationIds,
+      });
+      return inferCharacterPhoneLocation([
+        selectedCharacter?.personality,
+        selectedCharacter?.backstory,
+        ...scopedEntries.map((entry) => entry.content),
+      ], "角色所在地区");
+    },
+    [relationships, selectedCharacter?.backstory, selectedCharacter?.id, selectedCharacter?.personality, userIdentityId, worldBookEntries],
   );
   const phoneUserLocation = useMemo(
     () => inferCharacterPhoneLocation([
@@ -600,18 +635,6 @@ export default function AppCharacterPhone({
     ], "我的位置"),
     [activeIdentity?.bio, activeIdentity?.signature, settings?.bio, settings?.signature],
   );
-  const phoneCallRecords = useMemo(
-    () => (currentPhone?.contacts ?? []).map((contact, index) => ({
-      ...contact,
-      number: ["157 0250 3638", "138 3548 8102", "157 0250 3554", "186 3547 1579"][index % 4],
-      timestamp: (currentPhone?.createdAt ?? Date.now()) - (index + 1) * 1000 * 60 * 60 * 24,
-      missed: index === 1,
-    })),
-    [currentPhone?.contacts, currentPhone?.createdAt],
-  );
-  const visiblePhoneCallRecords = phoneDialerTab === "missed"
-    ? phoneCallRecords.filter((record) => record.missed)
-    : phoneCallRecords;
   const roleMusicTracks = useMemo<CharacterPhoneDisplayTrack[]>(() => {
     const storedTracks = currentPhone?.musicTracks ?? [];
     return storedTracks.map((track, index) => ({
@@ -658,14 +681,6 @@ export default function AppCharacterPhone({
     setMusicProgress(0.08);
     setMusicIsPlaying(true);
   };
-  const appendPhoneDigit = (digit: string) => {
-    setPhoneNumber((value) => `${value}${digit}`.slice(0, 18));
-    setPhoneNotice("");
-  };
-  const deletePhoneDigit = () => {
-    setPhoneNumber((value) => value.slice(0, -1));
-    setPhoneNotice("");
-  };
   const placePhoneCall = (simLabel: string) => {
     if (!phoneNumber) return;
     setPhoneNotice(`正在通过${simLabel}拨打 ${phoneNumber}`);
@@ -678,8 +693,21 @@ export default function AppCharacterPhone({
       (contact) => contact.id === selectedContactId,
     ) || visiblePhoneContacts[0];
   const persistPhone = (next: CharacterPhoneRecord) => {
-    saveCharacterPhone(next);
+    const result = saveCharacterPhone(next);
+    if (!result.success) {
+      setPhoneNotice(result.error === "quota" ? "角色手机存储空间不足，修改未保存" : "角色手机数据保存失败，原数据已保留");
+      return false;
+    }
     setPhone(next);
+    return true;
+  };
+  const closeCharacterPhone = () => {
+    generationRequestRef.current += 1;
+    setIsAdvancing(false);
+    setHiddenGalleryUnlocked(false);
+    setHiddenGalleryInput("");
+    setHiddenGalleryNotice("");
+    onClose();
   };
   const openPhoneContact = (contact: CharacterPhoneContact) => {
     setSelectedContactId(contact.id);
@@ -744,6 +772,12 @@ export default function AppCharacterPhone({
     )
       return;
     const now = Date.now();
+    const relation = relationships.find(
+      (item) => item.userIdentityId === userIdentityId && item.characterId === selectedCharacter.id,
+    );
+    const sourceMessageId = selectedContact.kind === "user" && relation && onSendMessage
+      ? `phone-user-thread-${now}`
+      : undefined;
     const next = appendCharacterPhoneThreadMessage({
       phone: currentPhone,
       contactId: selectedContact.id,
@@ -751,6 +785,7 @@ export default function AppCharacterPhone({
       operatedByUser: true,
       character: selectedCharacter,
       now,
+      sourceMessageId,
     });
     const loggedNext = withPhoneAction(next, {
       kind: "chat_sent_as_character",
@@ -761,15 +796,22 @@ export default function AppCharacterPhone({
       discoveryAfterOpens: 2,
     }, now);
     persistPhone(loggedNext);
+    if (sourceMessageId && relation && onSendMessage) {
+      onSendMessage(createCharacterTextMessage({
+        id: sourceMessageId,
+        characterId: selectedCharacter.id,
+        relationId: relation.id,
+        conversationId: relation.conversationId,
+        content: draft.trim().slice(0, 1000),
+        timestamp: now,
+      }));
+    } else {
+      setPhoneNotice(selectedContact.kind === "group" ? "消息已发到群聊，群成员会在下一次生活生成中回应" : "消息已发出，联系人会在下一次生活生成中回应");
+    }
     setDraft("");
     const userEdits = loggedNext.activities.filter(
       (activity) => activity.type === "user_edit" && activity.relatedToUser,
     ).length;
-    const relation = relationships.find(
-      (item) =>
-        item.userIdentityId === userIdentityId &&
-        item.characterId === selectedCharacter.id,
-    );
     if (userEdits > 0 && userEdits % 3 === 0 && relation && onSendMessage)
       onSendMessage(
         createCharacterTextMessage({
@@ -792,12 +834,13 @@ export default function AppCharacterPhone({
         {
           id: `phone-post-user-${now}`,
           author: selectedCharacter.name,
-          authorAvatar: currentUserAvatar,
+          authorId: selectedCharacter.id,
+          authorAvatar: selectedCharacter.avatar,
           content: postDraft.trim().slice(0, 500),
           timestamp: now,
           likes: 0,
           comments: [],
-          source: "user" as const,
+          source: "generated" as const,
         },
       ],
       activities: [
@@ -825,9 +868,14 @@ export default function AppCharacterPhone({
   const selectCharacter = (characterId: string) => {
     const character = characters.find((item) => item.id === characterId);
     if (!character) return;
+    generationRequestRef.current += 1;
+    setIsAdvancing(false);
     setSelectedCharacterId(characterId);
     setPhone(openCharacterPhone(userIdentityId, character, phoneContext));
     setUnlocked(false);
+    setHiddenGalleryUnlocked(false);
+    setHiddenGalleryInput("");
+    setHiddenGalleryNotice("");
     setActiveApp("home");
     setPhoneDialerTab("all");
     setPhoneNumber("");
@@ -854,24 +902,70 @@ export default function AppCharacterPhone({
   const generateCharacterPhoneContent = async () => {
     if (!unlocked || !currentPhone || !selectedCharacter || isAdvancing) return;
     const basePhone = currentPhone;
+    const artifactCount = (value: CharacterPhoneRecord) =>
+      (value.contacts?.length ?? 0)
+      + (value.threadMessages?.length ?? 0)
+      + (value.phoneCalls?.length ?? 0)
+      + (value.browserHistory?.length ?? 0)
+      + (value.diaryEntries?.length ?? 0)
+      + (value.notes?.length ?? 0)
+      + (value.todos?.length ?? 0)
+      + (value.scheduleItems?.length ?? 0)
+      + (value.posts?.length ?? 0)
+      + (value.galleryItems?.length ?? 0);
     const now = Date.now();
+    const requestId = generationRequestRef.current + 1;
+    generationRequestRef.current = requestId;
+    const requestScope = {
+      ownerIdentityId: userIdentityId,
+      characterId: selectedCharacter.id,
+      phoneId: basePhone.id,
+    };
+    setPhoneNotice("");
     setIsAdvancing(true);
+    let generationTimeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
-      const advancedPhone = await advanceCharacterPhone({
-        phone: basePhone,
-        character: selectedCharacter,
-        characters,
-        activeIdentity,
-        relationships,
-        messages,
-        moments,
-        worldBookEntries,
-        musicTracks,
-        settings,
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        generationTimeout = setTimeout(() => {
+          timedOut = true;
+          reject(new Error("角色手机内容生成超时"));
+        }, CHARACTER_PHONE_GENERATION_TIMEOUT_MS);
       });
+      const advancedPhone = await Promise.race([
+        advanceCharacterPhone({
+          phone: basePhone,
+          character: selectedCharacter,
+          characters,
+          activeIdentity,
+          relationships,
+          messages,
+          moments,
+          worldBookEntries,
+          relationshipNetworkNpcs,
+          relationshipNetworkMaps,
+          musicTracks,
+          settings,
+        }),
+        timeoutPromise,
+      ]);
+      if (!mountedRef.current
+        || generationRequestRef.current !== requestId
+        || phoneScopeRef.current.ownerIdentityId !== requestScope.ownerIdentityId
+        || phoneScopeRef.current.characterId !== requestScope.characterId
+        || advancedPhone.id !== requestScope.phoneId) return;
       const discoveredPhone = discoverCharacterPhoneActions(advancedPhone, selectedCharacter, now);
-      saveCharacterPhone(discoveredPhone);
+      const saved = saveCharacterPhone(discoveredPhone);
+      if (!saved.success) {
+        setPhoneNotice(saved.error === "quota" ? "角色手机存储空间不足，生成内容未保存" : "生成内容保存失败，原数据已保留");
+        return;
+      }
       setPhone(discoveredPhone);
+      setPhoneNotice(
+        artifactCount(discoveredPhone) > artifactCount(basePhone)
+          ? "角色手机已生成新的生活痕迹"
+          : "本次没有生成新内容，请检查模型状态或补充最近聊天后重试",
+      );
       const generatedMessages = discoveredPhone.messages.filter(
         (message) => !basePhone.messages.some((existing) => existing.id === message.id),
       );
@@ -898,8 +992,20 @@ export default function AppCharacterPhone({
             }),
           ),
         );
+    } catch (error) {
+      if (timedOut && mountedRef.current && generationRequestRef.current === requestId) {
+        // Invalidate a late provider response so it cannot overwrite a retry.
+        generationRequestRef.current += 1;
+        setPhoneNotice("角色手机生成超时，请检查模型状态后重试");
+      } else if (!timedOut) {
+        throw error;
+      }
     } finally {
-      setIsAdvancing(false);
+      if (generationTimeout) clearTimeout(generationTimeout);
+      // The phone screen has no concurrent generation controls; once this
+      // invocation settles, always release the button for the mounted screen.
+      // Request-id guards above still prevent stale data from being saved.
+      if (mountedRef.current) setIsAdvancing(false);
     }
   };
 
@@ -1036,6 +1142,31 @@ export default function AppCharacterPhone({
     setNotice("暂时找不到这个角色的聊天入口");
   };
 
+  const lockHiddenGallery = () => {
+    setHiddenGalleryUnlocked(false);
+    setHiddenGalleryInput("");
+    setHiddenGalleryNotice("");
+  };
+
+  const requestHiddenGallery = () => {
+    setGalleryMode("hidden");
+    setSelectedGalleryId(null);
+    lockHiddenGallery();
+  };
+
+  const submitHiddenGalleryPasscode = (passcode = hiddenGalleryInput) => {
+    if (!currentPhone || !selectedCharacter) return;
+    const normalized = passcode.replace(/\D/g, "").slice(0, 4);
+    if (normalized === resolveCharacterPhoneHiddenGalleryPasscode(selectedCharacter, currentPhone)) {
+      setHiddenGalleryUnlocked(true);
+      setHiddenGalleryInput("");
+      setHiddenGalleryNotice("");
+      return;
+    }
+    setHiddenGalleryInput("");
+    setHiddenGalleryNotice("密码不正确，请重新输入");
+  };
+
   const openApp = (appId: CharacterPhoneAppId | CharacterPhoneSystemAppId) => {
     if (!currentPhone) return;
     const now = Date.now();
@@ -1067,6 +1198,7 @@ export default function AppCharacterPhone({
     }, now);
     saveCharacterPhone(next);
     setPhone(next);
+    if (appId === "browser") setSelectedBrowserEntryId(null);
     setActiveApp(appId);
   };
   const updatePhone = (patch: Partial<CharacterPhoneRecord>) => {
@@ -1081,6 +1213,27 @@ export default function AppCharacterPhone({
     }, now);
     saveCharacterPhone(next);
     setPhone(next);
+  };
+  const handleCharacterPhoneTextImageCreate = (description: string): boolean => {
+    if (!currentPhone || !selectedCharacter) return false;
+    const caption = description.trim().replace(/\s+/g, " ").slice(0, 160);
+    if (!caption) return false;
+    const duplicate = currentPhone.galleryItems.some((item) =>
+      !item.deletedAt && item.source === "user" && item.caption.trim() === caption,
+    );
+    if (duplicate) return false;
+    const now = Date.now();
+    const title = `${selectedCharacter.name || "角色"}的文字图`;
+    const item: CharacterPhoneGalleryItem = {
+      id: `camera-text-${now}`,
+      title,
+      caption,
+      timestamp: now,
+      source: "user",
+      dataUrl: createCharacterPhoneTextImageDataUrl(caption, title),
+    };
+    updatePhone({ galleryItems: [item, ...currentPhone.galleryItems] });
+    return true;
   };
   const readCharacterPhoneImage = (
     event: React.ChangeEvent<HTMLInputElement>,
@@ -1249,14 +1402,19 @@ export default function AppCharacterPhone({
     const query = browserAddress.trim();
     if (!query || !currentPhone) return;
     const now = Date.now();
+    const entryBase = {
+      id: `phone-search-user-${now}`,
+      query,
+      title: `关于“${query}”的搜索结果`,
+      timestamp: now,
+    };
+    const detail = buildCharacterPhoneBrowserDetail(entryBase, selectedCharacter?.name);
     persistPhone(withPhoneAction({
       ...currentPhone,
       browserHistory: [
         {
-          id: `phone-search-user-${now}`,
-          query,
-          title: `关于“${query}”的搜索结果`,
-          timestamp: now,
+          ...entryBase,
+          ...detail,
         },
         ...currentPhone.browserHistory,
       ],
@@ -1274,7 +1432,7 @@ export default function AppCharacterPhone({
       <div className="flex h-full flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
         <header className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
           <h1 className="text-base font-bold">角色手机</h1>
-          <button type="button" onClick={onClose} aria-label="关闭角色手机">
+          <button type="button" onClick={closeCharacterPhone} aria-label="关闭角色手机">
             <X className="h-5 w-5" />
           </button>
         </header>
@@ -1378,6 +1536,12 @@ export default function AppCharacterPhone({
   const selectedGallery =
     currentPhone.galleryItems.find((item) => item.id === selectedGalleryId) ||
     null;
+  const selectedBrowserEntry = selectedBrowserEntryId
+    ? currentPhone.browserHistory.find((entry) => entry.id === selectedBrowserEntryId) || null
+    : null;
+  const selectedBrowserDetail = selectedBrowserEntry
+    ? buildCharacterPhoneBrowserDetail(selectedBrowserEntry, selectedCharacter.name)
+    : null;
   const phoneScheduleEntries = useMemo<ScheduleEntry[]>(
     () =>
       currentPhone.scheduleItems.map((item) => {
@@ -1392,7 +1556,7 @@ export default function AppCharacterPhone({
           appointmentId: `${item.id}-appointment`,
           title: item.title,
           status: item.timestamp >= Date.now() ? "confirmed" : "completed",
-          dateKey: date.toISOString().slice(0, 10),
+          dateKey: characterPhoneGalleryDayKey(date.getTime()),
           startAt: item.timestamp,
           timePrecision: "exact",
           activity: item.detail,
@@ -1471,7 +1635,11 @@ export default function AppCharacterPhone({
   const phoneMomentsView = (
     <div data-theme-page="moments" className="flex min-h-0 flex-1 flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
       <div className="relative h-64 shrink-0 bg-slate-200">
-        <img src={selectedCharacter.momentsCover || "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&h=500&fit=crop"} alt="朋友圈背景" className="h-full w-full object-cover" />
+        {selectedCharacter.momentsCover ? (
+          <img src={selectedCharacter.momentsCover} alt="朋友圈背景" className="h-full w-full object-cover" />
+        ) : (
+          <div className="h-full w-full bg-gradient-to-br from-slate-700 via-slate-500 to-stone-300" aria-label="朋友圈默认背景" />
+        )}
         <button type="button" onClick={() => { setActiveApp("home"); setPhoneSocialTab("chats"); }} className="app-nav-icon-button absolute left-4 top-3 z-20 flex h-8 w-8 items-center justify-center text-white" aria-label="返回桌面">
           <ChevronLeft className="h-5 w-5" />
         </button>
@@ -1574,9 +1742,10 @@ export default function AppCharacterPhone({
         >
           <ChevronLeft className="h-4 w-4 text-slate-700" />
         </button>
-        <h2 className="absolute left-1/2 max-w-[68%] -translate-x-1/2 truncate text-sm font-bold">
-          {selectedContact.remark || selectedContact.name}
-        </h2>
+        <div className="absolute left-1/2 max-w-[68%] -translate-x-1/2 text-center">
+          <h2 className="truncate text-sm font-bold">{selectedContact.remark || selectedContact.name}</h2>
+          {selectedContact.kind === "group" && <p className="truncate text-[9px] text-neutral-400">{selectedContact.memberNames?.join("、") || "群聊"}</p>}
+        </div>
         <button
           type="button"
           onClick={() => { setContactMenuOpen((open) => !open); setContactRemarkEditing(false); setContactRemarkDraft(selectedContact.remark || ""); }}
@@ -1593,6 +1762,7 @@ export default function AppCharacterPhone({
             <div className="min-w-0">
               <p className="truncate text-sm font-bold">{selectedContact.name}</p>
               <p className="text-[10px] text-neutral-400">{selectedContact.relation}</p>
+              {selectedContact.kind === "group" && selectedContact.memberNames?.length ? <p className="mt-1 text-[10px] text-neutral-400">成员：{selectedContact.memberNames.join("、")}</p> : null}
             </div>
           </div>
           {contactRemarkEditing ? (
@@ -1621,7 +1791,7 @@ export default function AppCharacterPhone({
             </div>
           </div>
         ))}
-        {currentThreadMessages.length === 0 && <p className="py-12 text-center text-xs text-neutral-400">还没有和这个人的聊天记录</p>}
+        {currentThreadMessages.length === 0 && <p className="py-12 text-center text-xs text-neutral-400">{selectedContact.kind === "group" ? "这个群聊还没有聊天记录" : "还没有和这个人的聊天记录"}</p>}
       </div>
       <div className="flex shrink-0 gap-2 border-t border-black/5 bg-white/70 p-3">
         <input
@@ -1664,7 +1834,11 @@ export default function AppCharacterPhone({
             <button key={contact.id} type="button" onClick={() => openPhoneContact(contact)} className="relative flex w-full items-center gap-3 bg-[var(--surface)] p-3 text-left transition-colors hover:bg-[var(--surface-muted)]" aria-label={`打开与${contact.remark || contact.name}的聊天`}>
               <div className="relative shrink-0">
                 <img src={contact.avatar || selectedCharacter.avatar} alt="" className="h-11 w-11 rounded-full object-cover" referrerPolicy="no-referrer" />
-                {contact.source === "generated" && <span className="absolute -bottom-1 -right-1 rounded-full bg-amber-100 px-1 text-[8px] text-amber-700">NPC</span>}
+                {contact.kind === "group" ? (
+                  <span className="absolute -bottom-1 -right-1 rounded-full bg-sky-100 px-1 text-[8px] text-sky-700">群聊</span>
+                ) : contact.source === "generated" ? (
+                  <span className="absolute -bottom-1 -right-1 rounded-full bg-amber-100 px-1 text-[8px] text-amber-700">NPC</span>
+                ) : null}
               </div>
               <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[var(--text-primary)]">{contact.remark || contact.name}</p><p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">{phoneSocialTab === "contacts" ? contact.relation : latest?.content || contact.relation}</p></div>
             </button>
@@ -1697,34 +1871,6 @@ export default function AppCharacterPhone({
       detail: item.title,
       detectability: "none",
     }));
-  };
-  const createGalleryTextImage = (item: CharacterPhoneRecord["galleryItems"][number]) => {
-    const existing = currentPhone.galleryItems.find((candidate) => candidate.textImageForId === item.id);
-    if (existing) {
-      setSelectedGalleryId(existing.id);
-      return;
-    }
-    const now = Date.now();
-    const textImage = {
-      id: `character-phone-text-image-${item.id}-${now}`,
-      title: `${item.title} · 文字图`,
-      caption: item.caption,
-      timestamp: now,
-      source: "generated" as const,
-      textImageForId: item.id,
-      dataUrl: createCharacterPhoneTextImageDataUrl(item.caption, item.title),
-    };
-    persistPhone(withPhoneAction({
-      ...currentPhone,
-      galleryItems: [textImage, ...currentPhone.galleryItems],
-    }, {
-      kind: "gallery_text_image_created",
-      app: "gallery",
-      targetId: item.id,
-      detail: "本地生成文字图",
-      detectability: "none",
-    }, now));
-    setSelectedGalleryId(textImage.id);
   };
   const appContent =
     activeApp === "chat" ? phoneChatView : activeApp === "chat" && false ? (
@@ -1813,6 +1959,60 @@ export default function AppCharacterPhone({
         )}
       </>
     ) : activeApp === "browser" ? (
+      selectedBrowserEntry && selectedBrowserDetail ? (
+        <div className="-mx-3 min-h-full bg-[#f7f8fa] text-[#202124]">
+          <div className="border-b border-[#e8eaed] bg-white pb-2">
+            <div className="flex items-center gap-2 px-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setSelectedBrowserEntryId(null)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100"
+                aria-label="返回历史搜索"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-[#dfe1e5] bg-white px-3 py-2 shadow-[0_1px_3px_rgba(60,64,67,0.12)]">
+                <Search className="h-4 w-4 shrink-0 text-[#5f6368]" />
+                <span className="min-w-0 flex-1 truncate text-xs text-[#3c4043]">{selectedBrowserEntry.query}</span>
+                <Camera className="h-4 w-4 shrink-0 text-[#5f6368]" />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2 px-3 pb-6 pt-3">
+            {selectedBrowserDetail.results.map((result, index) => (
+              <article key={`${result.platform}-${result.title}-${index}`} className="rounded-[18px] bg-white px-3 py-3 shadow-[0_1px_3px_rgba(60,64,67,0.16)]">
+                <div className="flex items-start gap-2">
+                  <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${index === 0 ? "bg-[#f1f3f4] text-[#5f6368]" : index === 1 ? "bg-[#fff1e6] text-[#e05a2a]" : "bg-[#e8f0fe] text-[#1967d2]"}`}>
+                    {result.platform.slice(0, 1)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[11px] font-semibold text-[#3c4043]">{result.platform}</p>
+                    <p className="truncate text-[9px] text-[#70757a]">AI 整理 · 相关结果</p>
+                  </div>
+                  <MoreHorizontal className="h-4 w-4 shrink-0 text-[#70757a]" />
+                </div>
+                <h2 className="mt-2 text-[15px] font-semibold leading-5 text-[#1a73e8]">{result.title}</h2>
+                <p className="mt-1 text-[11px] leading-5 text-[#4d5156]">{result.snippet}</p>
+              </article>
+            ))}
+
+            <section aria-label="角色心声" className="rounded-[18px] border border-[#ffd9df] bg-[#fff1f3] px-3 py-3 shadow-[0_1px_3px_rgba(60,64,67,0.12)]">
+              <div className="flex items-start gap-2.5">
+                <img src={selectedCharacter.avatar} alt="" className="h-11 w-11 shrink-0 rounded-xl border border-white/80 bg-white object-cover shadow-sm" referrerPolicy="no-referrer" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <p className="truncate text-[11px] font-semibold text-[#3c4043]">{selectedCharacter.name}</p>
+                    <span className="rounded-full bg-[#ff6f83] px-1.5 py-0.5 text-[9px] font-bold text-white">心声</span>
+                  </div>
+                  <p className="mt-1 rounded-2xl rounded-tl-md bg-white/85 px-3 py-2 text-[12px] leading-5 text-[#4f3c43]">“{selectedBrowserDetail.reflection}”</p>
+                </div>
+              </div>
+              <p className="mt-2 pl-[53px] text-[10px] leading-4 text-[#a05e69]">角色刚刚留下的私人备注</p>
+            </section>
+          </div>
+        </div>
+      ) : (
       <>
         <div className="-mx-3 min-h-full bg-[#fcfbfb] text-[#292833]">
           <form
@@ -1841,21 +2041,28 @@ export default function AppCharacterPhone({
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setBrowserAddress(item.query)}
-                className="flex w-full items-center gap-4 border-t border-[#ebe5ef] px-5 py-3.5 text-left"
+                onClick={() => setSelectedBrowserEntryId(item.id)}
+                className="flex w-full items-center gap-4 border-t border-[#ebe5ef] px-5 py-3.5 text-left transition-colors hover:bg-slate-50"
+                aria-label={`查看${item.title || item.query}的搜索详情`}
               >
                 <History className="h-5 w-5 shrink-0 text-neutral-600" />
-                <span className="min-w-0 flex-1 truncate text-base">{item.title || item.query}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-base">{item.title || item.query}</span>
+                </span>
                 <ArrowUpLeft className="h-5 w-5 shrink-0 text-neutral-700" />
               </button>
             ))}
             {normalizeCharacterPhoneBrowserHistory(currentPhone.browserHistory).length === 0 && (
-              <p className="border-t border-[#ebe5ef] px-5 py-10 text-center text-sm text-neutral-400">暂无浏览记录</p>
+              <CharacterPhoneEvidenceEmpty
+                title="暂无浏览记录"
+                detail="只有角色资料、聊天或生活事件中出现明确的搜索意图时，才会生成浏览记录。"
+              />
             )}
             </div>
           </div>
         </div>
       </>
+      )
     ) : activeApp === "schedule" ? (
       <div className="-mx-5 min-h-0 flex-1 bg-[var(--app-bg)]">
         <AppSchedule
@@ -1987,8 +2194,8 @@ export default function AppCharacterPhone({
     ) : activeApp === "gallery" ? (
       <>
         {selectedGallery ? (
-          <div className="-mx-5 flex min-h-full flex-col bg-black text-white">
-            <div className="flex items-center justify-between px-4 pb-3 pt-5">
+          <div className="-mx-5 flex h-full min-h-0 flex-col overflow-hidden overscroll-none bg-black text-white">
+            <div className="flex shrink-0 items-center justify-between px-4 pb-3 pt-5">
               <button
                 type="button"
                 onClick={() => setSelectedGalleryId(null)}
@@ -2001,18 +2208,16 @@ export default function AppCharacterPhone({
                   "zh-CN",
                 )}
               </span>
-              <button type="button" aria-label="更多照片操作">
-                <MoreHorizontal className="h-5 w-5" />
-              </button>
+              <span className="h-5 w-5" aria-hidden="true" />
             </div>
-            <div className="flex flex-1 flex-col items-center justify-center px-5">
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-5 touch-none select-none">
               {selectedGallery.dataUrl ? (
-                <img src={selectedGallery.dataUrl} alt={selectedGallery.title} className="max-h-[60vh] w-full rounded-2xl object-contain" />
+                <img src={selectedGallery.dataUrl} alt={selectedGallery.title} draggable={false} className="max-h-[48vh] w-full rounded-2xl object-contain" />
               ) : selectedGallery.imageAssetId ? (
                 <StoredCharacterPhoneImage
                   assetId={selectedGallery.imageAssetId}
                   alt={selectedGallery.title}
-                  className="max-h-[60vh] w-full rounded-2xl object-contain"
+                  className="max-h-[48vh] w-full rounded-2xl object-contain"
                   placeholderClassName="flex h-72 w-full items-center justify-center rounded-2xl bg-neutral-800 text-3xl text-white/50"
                 />
               ) : (
@@ -2027,10 +2232,7 @@ export default function AppCharacterPhone({
                 {selectedGallery.caption}
               </p>
             </div>
-            <div className="flex items-center justify-center gap-9 border-t border-white/15 py-4 text-white/80">
-              <button type="button" aria-label="分享照片">
-                <Share2 className="h-5 w-5" />
-              </button>
+            <div className="flex shrink-0 items-center justify-center gap-9 border-t border-white/15 py-4 text-white/80">
               <button
                 type="button"
                 onClick={() =>
@@ -2041,8 +2243,11 @@ export default function AppCharacterPhone({
                 aria-label={
                   selectedGallery.hidden ? "移出隐藏相册" : "隐藏照片"
                 }
+                aria-pressed={Boolean(selectedGallery.hidden)}
+                title={selectedGallery.hidden ? "移出隐藏相册" : "隐藏照片"}
+                className={`rounded-full p-1 transition-colors ${selectedGallery.hidden ? "bg-white/20 text-emerald-200" : "text-white/80"}`}
               >
-                <EyeOff className="h-5 w-5" />
+                {selectedGallery.hidden ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
               </button>
               <button
                 type="button"
@@ -2070,40 +2275,77 @@ export default function AppCharacterPhone({
               >
                 {selectedGallery.deletedAt ? <RefreshCw className="h-5 w-5 text-emerald-200" /> : <Trash2 className="h-5 w-5 text-rose-300" />}
               </button>
-              <button type="button" onClick={() => createGalleryTextImage(selectedGallery)} aria-label="生成文字图">
-                <Image className="h-5 w-5" />
-              </button>
-              <button type="button" aria-label="下载照片">
-                <Share2 className="h-5 w-5" />
-              </button>
             </div>
           </div>
         ) : (
-          <div className="-mx-5 min-h-full bg-[#fcfbfb] text-[#1f2937]">
-            <div className="flex gap-2 overflow-x-auto px-4 pb-3 text-xs">
+          <div className="-mx-5 flex min-h-0 flex-1 flex-col bg-[#fcfbfb] text-[#1f2937]">
+            <div className="flex shrink-0 gap-2 overflow-x-auto px-4 pb-3 text-xs">
               <button
                 type="button"
-                onClick={() => setGalleryMode("main")}
+                onClick={() => {
+                  setGalleryMode("main");
+                  lockHiddenGallery();
+                }}
                 className={`shrink-0 rounded-full px-3 py-1.5 ${galleryMode === "main" ? "bg-black text-white" : "bg-white"}`}
               >
                 最近项目
               </button>
               <button
                 type="button"
-                onClick={() => setGalleryMode("hidden")}
+                onClick={requestHiddenGallery}
                 className={`shrink-0 rounded-full px-3 py-1.5 ${galleryMode === "hidden" ? "bg-black text-white" : "bg-white"}`}
               >
                 隐藏
               </button>
               <button
                 type="button"
-                onClick={() => setGalleryMode("deleted")}
+                onClick={() => {
+                  setGalleryMode("deleted");
+                  lockHiddenGallery();
+                }}
                 className={`shrink-0 rounded-full px-3 py-1.5 ${galleryMode === "deleted" ? "bg-black text-white" : "bg-white"}`}
               >
                 最近删除
               </button>
             </div>
-            <div className="space-y-7 px-4 pt-3 pb-5">
+            {galleryMode === "hidden" && !hiddenGalleryUnlocked ? (
+              <form
+                className="flex min-h-0 flex-1 flex-col items-center justify-center px-8 pb-10 text-center"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submitHiddenGalleryPasscode();
+                }}
+              >
+                <div className="grid h-16 w-16 place-items-center rounded-full bg-white text-neutral-500 shadow-sm" aria-hidden="true">
+                  <EyeOff className="h-7 w-7" />
+                </div>
+                <h2 className="mt-5 text-lg font-bold text-neutral-900">隐藏相册已锁定</h2>
+                <p className="mt-2 text-xs leading-5 text-neutral-500">输入密码后查看角色保存的私密照片</p>
+                <label className="sr-only" htmlFor="character-phone-hidden-gallery-passcode">隐藏相册密码</label>
+                <input
+                  id="character-phone-hidden-gallery-passcode"
+                  aria-label="隐藏相册密码"
+                  value={hiddenGalleryInput}
+                  onChange={(event) => {
+                    setHiddenGalleryInput(event.target.value.replace(/\D/g, "").slice(0, 4));
+                    setHiddenGalleryNotice("");
+                  }}
+                  inputMode="numeric"
+                  type="password"
+                  autoComplete="off"
+                  maxLength={4}
+                  placeholder="输入 4 位密码"
+                  className="mt-5 w-full max-w-[220px] rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-center text-sm tracking-[0.4em] outline-none focus:border-neutral-500"
+                />
+                <button type="submit" className="mt-3 w-full max-w-[220px] rounded-2xl bg-neutral-900 px-4 py-3 text-xs font-bold text-white transition-colors hover:bg-neutral-700">
+                  解锁隐藏相册
+                </button>
+                {hiddenGalleryNotice && <p role="status" className="mt-3 text-xs text-rose-500">{hiddenGalleryNotice}</p>}
+                <p className="mt-5 text-[10px] text-neutral-400">当前测试密码：3737</p>
+              </form>
+            ) : (
+            <>
+            <div className="min-h-0 flex-1 overflow-y-auto space-y-7 px-4 pt-3 pb-5">
               {galleryGroups.map((group) => (
                 <section key={group.key} aria-labelledby={`gallery-group-${group.key}`}>
                   <h2
@@ -2143,9 +2385,12 @@ export default function AppCharacterPhone({
               ))}
             </div>
             {visibleGallery.length === 0 && (
-              <p className="px-4 py-16 text-center text-xs text-neutral-500">
-                这个相册还没有照片
-              </p>
+              <CharacterPhoneEvidenceEmpty
+                title="这个相册还没有照片"
+                detail="相册只展示真实导入、接收或有文字图描述的内容；没有图片或文字图证据时不会自动编造。"
+              />
+            )}
+            </>
             )}
           </div>
         )}
@@ -2384,116 +2629,16 @@ export default function AppCharacterPhone({
         )}
       </div>
     ) : activeApp === "phone" ? (
-      <div className="relative -mx-5 flex h-full min-h-0 flex-col bg-[#fcfcfb] text-[#242424]">
-
-        <div className="flex shrink-0 justify-center px-6 py-2">
-          <div className="grid w-56 max-w-[70%] grid-cols-2 rounded-[18px] bg-neutral-100 p-0.5 text-lg font-semibold">
-            {(["all", "missed"] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setPhoneDialerTab(tab)}
-                className={`rounded-[16px] py-2 transition-colors ${phoneDialerTab === tab ? "bg-[#def4e5] text-emerald-600" : "text-neutral-400"}`}
-              >
-                {tab === "all" ? "全部" : "未接"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <section className="min-h-0 flex-1 overflow-y-auto px-6" aria-label="通话记录">
-          {visiblePhoneCallRecords.map((record) => (
-            <button
-              key={record.id}
-              type="button"
-              onClick={() => setPhoneNumber(record.number.replace(/\s/g, ""))}
-              className="flex w-full items-center gap-3 border-b border-neutral-200/80 py-5 text-left"
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[clamp(1.35rem,6vw,1.65rem)] font-medium tracking-tight text-neutral-900">
-                  {record.number}
-                </span>
-                <span className="mt-2 flex items-center gap-2 truncate text-sm text-neutral-400">
-                  <span className="flex h-5 min-w-5 items-center justify-center rounded bg-neutral-300 px-1 text-xs text-white">1</span>
-                  <span className={record.missed ? "text-rose-400" : "text-neutral-500"}>{record.name}</span>
-                  <span>· {record.relation}</span>
-                </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-3 text-lg text-neutral-300">
-                <span>{new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(record.timestamp)}</span>
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-100 text-neutral-700">
-                  <ChevronRight className="h-6 w-6" strokeWidth={2.8} />
-                </span>
-              </span>
-            </button>
-          ))}
-          {visiblePhoneCallRecords.length === 0 && (
-            <p className="py-14 text-center text-sm text-neutral-400">暂无未接来电</p>
-          )}
-        </section>
-
-        <section className="shrink-0 border-t border-neutral-200/80 px-5 pb-1 pt-1" aria-label="拨号键盘">
-          <p className="h-6 truncate text-center text-lg font-medium tracking-[0.08em] text-neutral-700" aria-live="polite">
-            {phoneNumber || " "}
-          </p>
-          <div className="grid grid-cols-3 gap-y-0.5">
-            {PHONE_DIAL_PAD.map(([digit, letters]) => (
-              <button
-                key={digit}
-                type="button"
-                onClick={() => appendPhoneDigit(digit)}
-                className="flex h-[clamp(42px,7vh,62px)] flex-col items-center justify-center rounded-2xl active:bg-neutral-100"
-                aria-label={`输入${digit}`}
-              >
-                <span className="text-[clamp(1.75rem,5vw,2.45rem)] font-medium leading-none tracking-tight">{digit}</span>
-                <span className="mt-0.5 h-4 text-sm font-medium tracking-wide text-[#8eac94]">{letters}</span>
-              </button>
-            ))}
-          </div>
-          <div className="mt-1 flex items-center justify-between gap-3">
-            <button type="button" aria-label="更多拨号方式" className="flex h-12 w-12 items-center justify-center rounded-full text-neutral-800">
-              <Grid3X3 className="h-7 w-7" />
-            </button>
-            <div className="grid flex-1 grid-cols-2 overflow-hidden rounded-full bg-[#2fbd59] text-white">
-              {(["移动", "电信"] as const).map((simLabel, index) => (
-                <button
-                  key={simLabel}
-                  type="button"
-                  onClick={() => placePhoneCall(simLabel)}
-                  disabled={!phoneNumber}
-                  className={`flex h-[clamp(42px,6vh,52px)] items-center justify-center gap-2 text-[clamp(0.85rem,3.8vw,1.125rem)] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-45 ${index === 1 ? "border-l-2 border-white/90" : ""}`}
-                >
-                  <PhoneCall className="h-5 w-5" />
-                  {index + 1} {simLabel}
-                </button>
-              ))}
-            </div>
-            <button type="button" onClick={deletePhoneDigit} aria-label="删除号码" className="flex h-12 w-12 items-center justify-center rounded-full text-[#b7a878]">
-              <Delete className="h-7 w-7" />
-            </button>
-          </div>
-        </section>
-
-        {phoneNotice && (
-          <p role="status" className="absolute bottom-[112px] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-neutral-900 px-4 py-2 text-xs text-white shadow-lg">
-            {phoneNotice}
-          </p>
-        )}
-        <nav className="grid shrink-0 grid-cols-3 border-t border-neutral-200/80 px-8 pb-3 pt-2 text-sm" aria-label="电话底部导航">
-          <button type="button" className="flex flex-col items-center gap-1 font-semibold text-[#2fbd59]">
-            <PhoneCall className="h-8 w-8" />
-            拨号
-          </button>
-          <button type="button" className="flex flex-col items-center gap-1 text-neutral-400">
-            <Users className="h-8 w-8" />
-            联系人
-          </button>
-          <button type="button" className="flex flex-col items-center gap-1 text-neutral-400">
-            <Star className="h-8 w-8" />
-            收藏
-          </button>
-        </nav>
-      </div>
+      <CharacterPhoneCallApp
+        phone={currentPhone}
+        tab={phoneDialerTab}
+        phoneNumber={phoneNumber}
+        notice={phoneNotice}
+        onTabChange={setPhoneDialerTab}
+        onPhoneNumberChange={(value) => { setPhoneNumber(value); setPhoneNotice(""); }}
+        onPlaceCall={placePhoneCall}
+        onOpenContact={openPhoneContact}
+      />
     ) : activeApp === "music" ? (
       <div className={`flex flex-col gap-[clamp(0.75rem,2.5vh,1rem)] px-1 pb-6 text-[#1d2730] ${musicView === "player" ? "h-full min-h-0 overflow-hidden pt-[clamp(0.75rem,4vh,1.25rem)]" : "min-h-full"}`}>
         {musicView === "player" ? (
@@ -2561,6 +2706,13 @@ export default function AppCharacterPhone({
               </div>
               <span className="pb-1 text-xs text-neutral-400">{roleMusicTracks.length} 首歌曲</span>
             </div>
+            {roleMusicTracks.length === 0 ? (
+              <CharacterPhoneEvidenceEmpty
+                title="暂无角色音乐"
+                detail="只有角色资料或本地音乐库提供明确曲目时，音乐应用才会显示播放列表。"
+              />
+            ) : (
+              <>
             <section className="flex items-center justify-between gap-3 rounded-[26px] bg-[#dcecf1] p-4 shadow-[0_5px_16px_rgba(48,62,72,0.05)]">
               <div className="min-w-0">
                 <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-[#6793a0]">Mood offers</p>
@@ -2608,6 +2760,8 @@ export default function AppCharacterPhone({
                 );
               })}
             </div>
+              </>
+            )}
           </>
         ) : (
           <>
@@ -2637,7 +2791,7 @@ export default function AppCharacterPhone({
                   <p className="mt-5 text-sm font-semibold text-neutral-900">
                     {commonListeningHour === undefined ? "暂无收听时段" : `常在 ${commonListeningPeriod}`}
                   </p>
-                  <p className="mt-1 text-[10px] text-neutral-500">最喜欢在安静的时候听歌</p>
+                  <p className="mt-1 text-[10px] text-neutral-500">{commonListeningHour === undefined ? "有收听记录后会显示习惯" : "根据实际播放时长统计"}</p>
                   <div className="mt-4 flex h-14 items-end justify-between gap-1.5">
                     {[35, 48, 42, 68, 86, 72, 54].map((height, index) => (
                       <span key={index} className="flex h-full flex-1 items-end rounded-full bg-white/45"><span className="block w-full rounded-full bg-[#d48f86]" style={{ height: `${height}%` }} /></span>
@@ -2823,7 +2977,9 @@ export default function AppCharacterPhone({
                       <div key={todo.id} role="button" tabIndex={0} onClick={() => handleToggleCharacterTodo(todo.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") handleToggleCharacterTodo(todo.id); }} className="group flex cursor-pointer items-center justify-between rounded-[10px] bg-[var(--surface)] px-3 py-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.06)] transition-colors hover:bg-[var(--surface-muted)]">
                         <div className="flex min-w-0 flex-1 items-center gap-2.5">
                           {todo.checked ? <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-md border border-[var(--success)] bg-[var(--success)] text-white"><Check className="h-3 w-3 stroke-[3px]" /></span> : <span className="h-4 w-4 shrink-0 rounded-md border-2 border-[var(--border-strong)] bg-[var(--surface)]" />}
-                          <span className={`truncate text-base font-semibold leading-none ${todo.checked ? "text-[var(--text-secondary)] line-through" : "text-[var(--text-primary)]"}`}>{todo.text}</span>
+                          <span className="min-w-0">
+                            <span className={`block truncate text-base font-semibold leading-none ${todo.checked ? "text-[var(--text-secondary)] line-through" : "text-[var(--text-primary)]"}`}>{todo.text}</span>
+                          </span>
                         </div>
                         <button type="button" onClick={(event) => { event.stopPropagation(); handleDeleteCharacterTodo(todo.id); }} className="shrink-0 rounded-lg p-1 text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-500" title="删除待办" aria-label={`删除${todo.text}`}><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
@@ -2916,15 +3072,13 @@ export default function AppCharacterPhone({
         </section>
       </div>
     ) : activeApp === "camera" ? (
-      <div className="flex min-h-full flex-col items-center justify-center px-6 py-12 text-center">
-        <div className={`flex h-20 w-20 items-center justify-center rounded-[24px] text-white shadow-lg ${APP_META[activeApp].color}`}>
-          {React.cloneElement(APP_META[activeApp].icon as React.ReactElement, { className: "h-9 w-9" })}
-        </div>
-        <h2 className="mt-5 text-xl font-bold">{APP_META[activeApp].label}</h2>
-        <p className="mt-2 max-w-[230px] text-xs leading-5 text-neutral-500">
-          这是角色手机的独立应用，功能内容将在后续版本逐步接入。
-        </p>
-      </div>
+      <CharacterPhoneCameraApp
+        phone={currentPhone}
+        character={selectedCharacter}
+        onSaveImage={onSaveImageToCharacterPhone}
+        onCreateTextImage={handleCharacterPhoneTextImageCreate}
+        onOpenGallery={() => openApp("gallery")}
+      />
     ) : null;
   const desktopBackground = resolveDesktopBackground({
     resolvedTheme,
@@ -2938,6 +3092,7 @@ export default function AppCharacterPhone({
   const phoneBackground = phoneWallpaper.startsWith("linear-gradient")
     ? phoneWallpaper
     : `url(${phoneWallpaper}) center/cover no-repeat`;
+  const isBrowserDetail = activeApp === "browser" && Boolean(selectedBrowserEntry && selectedBrowserDetail);
   return (
     <div
       className="relative flex h-full min-h-0 w-full flex-col overflow-hidden text-neutral-900"
@@ -3014,7 +3169,7 @@ export default function AppCharacterPhone({
               <button type="button" onClick={openForgotPasswordChat} className="rounded-lg px-2 py-1 hover:bg-white/10" aria-label="忘记密码，打开对应角色聊天">
                 忘记密码
               </button>
-              <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 hover:bg-white/10" aria-label="取消并返回桌面">
+              <button type="button" onClick={closeCharacterPhone} className="rounded-lg px-2 py-1 hover:bg-white/10" aria-label="取消并返回桌面">
                 取消
               </button>
             </div>
@@ -3027,7 +3182,7 @@ export default function AppCharacterPhone({
             <div className="flex h-11 shrink-0 items-center justify-between gap-3 px-1 text-neutral-700">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={closeCharacterPhone}
                 className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-black/5"
                 aria-label="关闭角色手机"
               >
@@ -3044,6 +3199,12 @@ export default function AppCharacterPhone({
                 <RefreshCw className={`h-3.5 w-3.5 ${isAdvancing ? "animate-spin" : ""}`} />
               </button>
             </div>
+
+            {phoneNotice && (
+              <p role="status" className="mx-1 mb-1 rounded-xl bg-white/80 px-3 py-2 text-center text-xs text-neutral-600 shadow-sm">
+                {phoneNotice}
+              </p>
+            )}
 
             <main className="min-h-0 flex-1 overflow-y-auto px-1 pb-3 pt-2">
               <section
@@ -3066,6 +3227,40 @@ export default function AppCharacterPhone({
                     </div>
                   ))}
                 </div>
+              </section>
+
+              <section
+                aria-label="最近生活轨迹"
+                className="mt-4 rounded-[26px] border border-black/5 bg-white/78 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)] backdrop-blur-xl"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-neutral-400">Life trace</p>
+                    <h2 className="mt-1 text-sm font-bold text-neutral-900">最近生活轨迹</h2>
+                  </div>
+                  <span className="text-[10px] text-neutral-400">{currentPhone.lifeEvents?.length ?? 0} 个事件</span>
+                </div>
+                {(currentPhone.lifeEvents ?? []).length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {(currentPhone.lifeEvents ?? []).slice().sort((left, right) => right.generatedAt - left.generatedAt).slice(0, 3).map((event) => (
+                      <div key={event.id} className="rounded-2xl bg-neutral-50 px-3 py-2.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="min-w-0 flex-1 text-xs font-semibold leading-5 text-neutral-800">{event.summary}</p>
+                          <span className="shrink-0 text-[10px] text-neutral-400">{formatTime(event.generatedAt)}</span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {event.artifactRefs.map((artifact) => (
+                            <button key={`${event.id}-${artifact.app}-${artifact.id}`} type="button" onClick={() => openApp(artifact.app === "phone" || artifact.app === "camera" ? artifact.app : artifact.app)} className="rounded-full bg-white px-2 py-1 text-[9px] font-semibold text-neutral-500 shadow-sm hover:text-neutral-900">
+                              {APP_META[artifact.app].label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-2xl border border-dashed border-neutral-200 px-3 py-3 text-center text-[11px] leading-5 text-neutral-400">生成后，这里会把同一件生活事件在聊天、浏览器、日记等应用里的痕迹串起来。</p>
+                )}
               </section>
 
               <div className="mt-8 grid grid-cols-4 gap-x-2 gap-y-7">
@@ -3127,7 +3322,7 @@ export default function AppCharacterPhone({
           </div>
         ) : (
           <div className={`relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden ${activeApp === "phone" ? "bg-[#fcfcfb]" : activeApp === "browser" || activeApp === "chat" || activeApp === "gallery" || activeApp === "schedule" ? "bg-[#fcfbfb]" : "bg-white/70 backdrop-blur-xl"}`}>
-            <div className={`relative flex shrink-0 items-center justify-between px-4 py-3 text-neutral-900 ${activeApp === "schedule" || activeApp === "phone" || activeApp === "browser" || activeApp === "chat" || activeApp === "gallery" ? "bg-transparent border-b-0" : "border-b border-black/5"}`}>
+            {!isBrowserDetail && <div className={`relative flex shrink-0 items-center justify-between px-4 py-3 text-neutral-900 ${activeApp === "schedule" || activeApp === "phone" || activeApp === "browser" || activeApp === "chat" || activeApp === "gallery" ? "bg-transparent border-b-0" : "border-b border-black/5"}`}>
               <button
                 type="button"
                 onClick={() => {
@@ -3136,6 +3331,7 @@ export default function AppCharacterPhone({
                     setSelectedCharacterNoteId(null);
                     return;
                   }
+                  if (activeApp === "gallery") lockHiddenGallery();
                   setActiveApp("home");
                 }}
                 className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-600 hover:bg-black/5"
@@ -3174,8 +3370,8 @@ export default function AppCharacterPhone({
               ) : (
                 <span className="h-9 w-9" aria-hidden="true" />
               )}
-            </div>
-            <main className={`min-h-0 flex-1 px-5 ${activeApp === "diary" || activeApp === "notes" ? "pb-0" : "pb-6"} text-neutral-900 ${activeApp === "schedule" || activeApp === "phone" || activeApp === "chat" ? "flex flex-col overflow-hidden pt-0" : activeApp === "diary" || activeApp === "notes" ? "relative flex min-h-0 flex-col overflow-hidden pt-0" : activeApp === "music" && musicView === "player" ? "flex min-h-0 flex-col overflow-hidden pt-4" : "overflow-y-auto pt-4"}`}>
+            </div>}
+            <main className={`min-h-0 flex-1 px-5 ${activeApp === "diary" || activeApp === "notes" || activeApp === "camera" ? "pb-0" : "pb-6"} text-neutral-900 ${isBrowserDetail ? "overflow-y-auto pt-0" : activeApp === "schedule" || activeApp === "phone" || activeApp === "chat" || activeApp === "gallery" || activeApp === "camera" ? "flex flex-col overflow-hidden pt-0" : activeApp === "diary" || activeApp === "notes" ? "relative flex min-h-0 flex-col overflow-hidden pt-0" : activeApp === "music" && musicView === "player" ? "flex min-h-0 flex-col overflow-hidden pt-4" : "overflow-y-auto pt-4"}`}>
               {appContent}
             </main>
             {activeApp === "music" && (

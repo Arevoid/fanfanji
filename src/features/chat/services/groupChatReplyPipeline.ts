@@ -72,7 +72,6 @@ export async function runGroupChatReplyPipeline(input: GroupChatReplyPipelineInp
     characters: input.characters,
     relationships: input.relationships,
     activeIdentityId: input.activeIdentityId,
-    memories: input.memories,
     claims: input.claims,
     summaries: input.summaries,
     corrections: input.corrections,

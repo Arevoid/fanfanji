@@ -7,7 +7,7 @@ import {
   type KnowledgeExtractionHistoryItem,
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
-import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError } from "./fetchWithTimeout";
+import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError, readResponseTextWithTimeout } from "./fetchWithTimeout";
 import { recordApiUsage, type ApiUsageOperation } from "../core/monitoring/apiUsageMetrics";
 import { emptyTextApiErrorDetails, parseTextApiErrorPayload, type TextApiErrorCode } from "./textApiError";
 
@@ -132,11 +132,11 @@ async function directClientChat(params: {
     }, API_REQUEST_TIMEOUTS.textGeneration);
 
     if (!responseFetch.ok) {
-      const details = parseTextApiErrorPayload(await responseFetch.text(), responseFetch.status);
+      const details = parseTextApiErrorPayload(await readResponseTextWithTimeout(responseFetch), responseFetch.status);
       throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason });
     }
 
-    const responseText = await responseFetch.text();
+    const responseText = await readResponseTextWithTimeout(responseFetch);
     let aiText = "";
     const trimmedText = responseText.trim();
     if (trimmedText.startsWith("data:") || trimmedText.includes("\ndata:")) {
@@ -248,7 +248,7 @@ async function directClientChat(params: {
       signal,
     }, API_REQUEST_TIMEOUTS.textGeneration);
 
-    const responseText = await responseFetch.text();
+    const responseText = await readResponseTextWithTimeout(responseFetch);
     if (!responseFetch.ok) {
       const details = parseTextApiErrorPayload(responseText, responseFetch.status);
       throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason });

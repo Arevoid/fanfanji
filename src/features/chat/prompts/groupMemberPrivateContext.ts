@@ -1,14 +1,12 @@
-import type { Character, MemoryItem } from "../../../types";
+import type { Character } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { findRelationshipForCanonicalCharacter } from "../../../domain/relationship/characterRelationship";
-import { MemoryService, formatMemoriesForPrompt } from "../../../domain/memory/MemoryService";
 import type {
   BehaviorCorrectionRecord,
   ConversationSummaryRecord,
   KnowledgeClaim,
 } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import {
-  countTruthRetrievalRecords,
   formatTruthRetrievalForPrompt,
   retrieveTruthForPrivatePrompt,
 } from "../../characterKnowledge/services/truthRetrievalService";
@@ -18,7 +16,6 @@ export interface GroupMemberPrivateContextInput {
   characters: readonly Character[];
   relationships: readonly CharacterRelationship[];
   activeIdentityId: string;
-  memories: readonly MemoryItem[];
   claims: readonly KnowledgeClaim[];
   summaries: readonly ConversationSummaryRecord[];
   corrections: readonly BehaviorCorrectionRecord[];
@@ -60,31 +57,11 @@ export function buildGroupMemberPrivateContext(input: GroupMemberPrivateContextI
     summaries: input.summaries,
     corrections: input.corrections,
   });
-  const shadowedLegacyMemoryIds = new Set(truth.shadowedLegacyMemoryIds);
-  const relationshipSummaryCount = relationship.compressedMemory?.trim() ? 1 : 0;
-  const legacyMemoryLimit = Math.max(0, input.limit - countTruthRetrievalRecords(truth) - relationshipSummaryCount);
-  const legacyMemories = legacyMemoryLimit > 0
-    ? MemoryService.retrieveRelevantMemories({
-      characterId: input.member.id,
-      relationId: relationship.id,
-      userIdentityId: relationship.userIdentityId,
-      conversationId: relationship.conversationId,
-      queryText: input.queryText,
-      existingMemories: input.memories,
-      limit: legacyMemoryLimit,
-      maxCharacters: 2400,
-      excludeCanonicalMirrors: true,
-      scenario: "group-chat",
-    }).filter((memory) =>
-      !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
-    ).slice(0, legacyMemoryLimit)
-    : [];
 
   const privateParts = [
     relationship.compressedMemory?.trim()
       ? `- 与用户的私聊关系摘要：\n${relationship.compressedMemory.trim()}`
       : "",
-    formatMemoriesForPrompt(legacyMemories, "- 该成员自己与用户的私聊记忆：\n"),
     formatTruthRetrievalForPrompt(truth),
   ].filter(Boolean);
   if (privateParts.length === 0) return "";

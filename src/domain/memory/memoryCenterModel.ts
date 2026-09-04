@@ -10,7 +10,6 @@ import {
   memoryRecordFromBehaviorCorrection,
   memoryRecordFromConversationSummary,
   memoryRecordFromKnowledgeClaim,
-  memoryRecordFromLegacyItem,
   type MemoryRecord,
   type MemoryRecordStatus,
   type MemorySourceApp,
@@ -73,17 +72,11 @@ const withType = (
   extra: Pick<MemoryCenterRecord, "truthStatus" | "temporalStatus"> = {},
 ): MemoryCenterRecord => ({ ...record, recordType, ...extra });
 
-const projectCompatibilityStatus = (memory: MemoryItem, claims: readonly KnowledgeClaim[]): MemoryRecord["status"] => {
-  const linkedClaims = claims.filter((claim) => memory.sourceKnowledgeClaimIds?.includes(claim.id));
-  if (linkedClaims.some((claim) => claim.status === "retracted" || claim.truthStatus === "retracted")) return "retracted";
-  if (linkedClaims.some((claim) => claim.supersededById)) return "superseded";
-  return "active";
-};
-
 /**
- * Builds a read-only view for the memory center. It never rewrites stored data
- * and deliberately keeps the legacy compatibility records visible alongside
- * their canonical sources until the UI adds an explicit deduplication view.
+ * Builds the active read-only view for the memory center. The legacy
+ * MemoryItem array is intentionally not projected here: the cutover has one
+ * canonical read path (Truth, summaries and rules), so the same event cannot
+ * appear twice as both a Truth record and a compatibility snapshot.
  */
 export function buildMemoryCenterRecords(input: {
   memories: readonly MemoryItem[];
@@ -98,10 +91,6 @@ export function buildMemoryCenterRecords(input: {
     })),
     ...input.summaries.map((summary) => withType(memoryRecordFromConversationSummary(summary), "summary")),
     ...input.corrections.map((correction) => withType(memoryRecordFromBehaviorCorrection(correction), "rule")),
-    ...input.memories.map((memory) => withType({
-      ...memoryRecordFromLegacyItem(memory),
-      status: projectCompatibilityStatus(memory, input.claims),
-    }, "compatibility")),
   ];
 
   return records.sort((left, right) =>

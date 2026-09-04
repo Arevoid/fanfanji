@@ -6,14 +6,13 @@ const chatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.
 const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
 const groupSource = readFileSync(new URL("../src/features/chat/prompts/groupMemberPrivateContext.ts", import.meta.url), "utf8");
 
-assert.match(chatSource, /countTruthRetrievalRecords/);
-assert.match(chatSource, /relationshipSummaryCount/);
-assert.match(chatSource, /topK - truthRecordCount - relationshipSummaryCount/);
+assert.match(chatSource, /retrieveTruthForPrivatePrompt/);
+assert.doesNotMatch(chatSource, /MemoryService\.retrieveRelevantMemories/);
 assert.match(chatSource, /maxFacts: 0/);
-assert.match(regenerationSource, /countTruthRetrievalRecords/);
-assert.match(regenerationSource, /relationshipSummaryCount/);
-assert.match(regenerationSource, /countTruthRetrievalRecords[\s\S]*relationshipSummaryCount/);
-assert.match(groupSource, /input\.limit - countTruthRetrievalRecords\(truth\)/);
+assert.match(regenerationSource, /retrieveTruthForPrivatePrompt/);
+assert.doesNotMatch(regenerationSource, /MemoryService\.retrieveRelevantMemories/);
+assert.doesNotMatch(groupSource, /MemoryService\.retrieveRelevantMemories/);
+assert.match(groupSource, /formatTruthRetrievalForPrompt/);
 
 const scope = { relationId: "r", characterId: "c", userIdentityId: "i", conversationId: "d:r" };
 const bounded = retrieveTruthForPrivatePrompt({

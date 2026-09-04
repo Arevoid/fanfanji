@@ -14,7 +14,7 @@ assert.match(
 );
 assert.match(
   lifecycleSource,
-  /finalizeStoryBeforeLeaving[\s\S]*handleSyncMemoryToBrain\(story, \{ userConfirmed: true, syncIntent: "automatic_end" \}\)/,
+  /finalizeStoryBeforeLeaving[\s\S]*await handleSyncMemoryToBrain\(story, \{ userConfirmed: true, syncIntent: "automatic_end" \}\)/,
   "ending or returning from a continuation confirms automatic memory sync",
 );
 assert.match(finalization, /if \(!completedStory\.archivedAt\)/, "leaving marks the current offline story as ended even without automatic sync");
@@ -32,8 +32,9 @@ assert.match(memorySync, /setMemorySyncingStoryId\(story\.id\)/, "sync starts a 
 assert.match(memorySync, /同步中，请稍候…/, "manual sync button reports progress");
 assert.match(memorySync, /当前进展已经同步，无需重复处理/, "already-synced clicks receive explicit feedback");
 assert.match(memorySync, /needsUninformativeSummaryRepair/, "legacy generic summaries remain eligible for a useful resync");
-assert.match(memorySync, /提炼接口未返回可用摘要，已保存可核对的安全剧情摘要/, "safe fallback success is distinguished from an AI-generated summary");
-assert.match(memorySync, /hasOfflineStorySummary\(story, mergedMemories\)/, "sync success verifies that the canonical story summary is present");
+assert.match(memorySync, /提炼接口未返回可用摘要/, "an unavailable extraction is distinguished from an AI-generated summary");
+assert.match(memorySync, /getOfflineStorySummaryId/, "offline summaries use a stable story-owned id");
+assert.match(memorySync, /appendSummaries/, "offline sync persists canonical summaries instead of compatibility memories");
 assert.match(source, /loading=\{memorySyncingStoryId === activeStory\.id\}/, "duplicate clicks are disabled while syncing");
 
 console.log("PASS offline continuation auto archive and fictional-branch manual sync wiring");

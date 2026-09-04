@@ -502,7 +502,7 @@ export default function AppCinema({
 
   const saveDiscussionToMemory = async (discussion: CinemaDiscussion) => {
     const relation = scopedRelations.find((item) => item.id === discussion.relationId);
-    if (!relation || !onSaveMemories) return;
+    if (!relation) return;
     const statement = `与用户一起观看《${selectedMedia?.title || "影视"}》时，在 ${formatSubtitleTime(discussion.positionMs)} 讨论：${discussion.userText}；角色回应：${discussion.characterText || ""}`.slice(0, 1000);
     const claim = createManualKnowledgeClaim({
       id: createId("claim-cinema"),
@@ -516,27 +516,9 @@ export default function AppCinema({
       setNotice("观影记忆保存失败");
       return;
     }
-    const memory: MemoryItem = {
-      id: createId("memory-cinema"),
-      characterId: relation.characterId,
-      relationId: relation.id,
-      userIdentityId: relation.userIdentityId,
-      conversationId: relation.conversationId,
-      sourceCinemaId: selectedMedia?.id,
-      content: statement,
-      timestamp: Date.now(),
-      importance: 4,
-      isManual: true,
-      sourceKnowledgeClaimIds: [claim.id],
-    };
     const write = await commitMemoryWriteBundle({
       claims: [claim],
-      memories: [memory, ...memories],
       appendClaims: appendKnowledgeClaims,
-      saveMemories: (nextMemories) => {
-        onSaveMemories([...nextMemories]);
-        return true;
-      },
     });
     if (!write.complete) {
       setNotice("观影记忆保存失败，已保护当前关系认知");
@@ -547,9 +529,8 @@ export default function AppCinema({
   };
 
   const archiveDiscussionsBeforeDelete = async (media: CinemaMedia, rooms: CinemaWatchRoom[], discussions: CinemaDiscussion[]) => {
-    if (!onSaveMemories || !discussions.length) return true;
+    if (!discussions.length) return true;
     const claims: KnowledgeClaim[] = [];
-    const newMemories: MemoryItem[] = [];
     for (const room of rooms) {
       const relation = scopedRelations.find((item) => item.id === room.relationId);
       const roomDiscussions = discussions.filter((discussion) => discussion.roomId === room.id);
@@ -570,29 +551,11 @@ export default function AppCinema({
       });
       if (!claim) continue;
       claims.push(claim);
-      newMemories.push({
-        id: createId("memory-cinema-archive"),
-        characterId: relation.characterId,
-        relationId: relation.id,
-        userIdentityId: relation.userIdentityId,
-        conversationId: relation.conversationId,
-        sourceCinemaId: media.id,
-        content: statement,
-        timestamp: Date.now(),
-        importance: 4,
-        isManual: true,
-        sourceKnowledgeClaimIds: [claim.id],
-      });
     }
     if (!claims.length) return true;
     const write = await commitMemoryWriteBundle({
       claims,
-      memories: [...newMemories, ...memories],
       appendClaims: appendKnowledgeClaims,
-      saveMemories: (nextMemories) => {
-        onSaveMemories([...nextMemories]);
-        return true;
-      },
     });
     if (!write.complete) {
       setNotice("观影讨论归档失败，已取消删除以保护数据");

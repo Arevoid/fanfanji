@@ -39,8 +39,8 @@ import { getWorldBookLocationReferences } from "../domain/worldbook/locationRefe
 import { isWorldBookEntryForAnyCharacter } from "../domain/worldbook/worldBookVisibility";
 import { aiAnalyzeRemoteSticker, aiAnalyzeSticker, loadStickerImageBlob, stickerDb } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
-import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../domain/memory/MemoryService";
-import { hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory } from "../domain/memory/offlineMemorySync";
+import { formatDelicateMemoryDiary, formatExtractedMemorySummary } from "../domain/memory/MemoryService";
+import { hasOfflineStoryCanonicalSummary, hasOfflineStorySummary, isOfflineStoryHandoffMemory, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory } from "../domain/memory/offlineMemorySync";
 import { PromptComposer } from "../domain/prompt/PromptComposer";
 import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/prompt/characterPromptProjector";
 import { buildCharacterBehaviorPrompt } from "../domain/prompt/characterBehaviorProfile";
@@ -137,7 +137,7 @@ import { loadKnowledgeClaims } from "../core/storage/repositories/characterKnowl
 import { loadConversationSummaries, saveConversationSummaries } from "../core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections } from "../core/storage/repositories/behaviorCorrectionRepository";
 import { behaviorCorrectionRepository } from "../core/storage/repositories/behaviorCorrectionRepository";
-import { countTruthRetrievalRecords, formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../features/characterKnowledge/services/truthRetrievalService";
+import { formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../features/characterKnowledge/services/truthRetrievalService";
 import { createConversationSummaryRecord } from "../features/characterKnowledge/services/conversationSummaryService";
 import { createDeterministicArtifactClaim } from "../features/characterKnowledge/services/deterministicKnowledgeCapture";
 import { buildRelationshipCognitiveProjection } from "../features/characterLife/services/relationshipCognitiveProjectionService";
@@ -645,7 +645,8 @@ export default function AppChat({
   });
   const recordPendingOfflineHandoffDelivery = (story?: OfflineStory) => {
     if (!story || story.onlineHandoff?.status !== "pending") return;
-    const durableSummaryReady = hasOfflineStorySummary(story, memories || []);
+    const durableSummaryReady = hasOfflineStoryCanonicalSummary(story, loadConversationSummaries().value)
+      || hasOfflineStorySummary(story, memories || []);
     onSaveOfflineStory(recordOfflineHandoffDelivery(story, Date.now(), 3, durableSummaryReady));
   };
   const buildPendingOfflineTimelineHandoff = (
@@ -679,6 +680,7 @@ export default function AppChat({
       currentChatMessages,
       offlineStories,
       memories: memories || [],
+      summaries: loadConversationSummaries().value,
     });
   };
   const getOfflineTimelineStoriesBetween = (previousAt: number | undefined, currentAt: number): OfflineStory[] => {
@@ -689,6 +691,7 @@ export default function AppChat({
       isGroup: Boolean(activeCharacter?.isGroupChat),
       offlineStories,
       memories: memories || [],
+      summaries: loadConversationSummaries().value,
     });
   };
   const activeStylePreset = resolveActiveChatStylePreset(
@@ -1193,17 +1196,6 @@ export default function AppChat({
     const previewPromptedMessages = currentChatMessages.slice(-resolveChatContextMemoryLimit(draftContextMemoryLimit));
     const latestUserMessage = [...currentChatMessages].reverse().find((message) => message.sender === "user");
     const queryText = latestUserMessage?.content || "";
-    const relevantMemories = MemoryService.retrieveRelevantMemories({
-      characterId: activeCharacter.id,
-      relationId: activeRelationship?.id,
-      userIdentityId: activeRelationship?.userIdentityId,
-      queryText,
-      existingMemories: memories || [],
-      limit: recallLimit,
-      maxCharacters: 3600,
-      excludeCanonicalMirrors: true,
-      scenario: "chat",
-    });
     const truthRetrieval = activeRelationship
       ? retrieveTruthForPrivatePrompt({
         scope: {
@@ -1226,22 +1218,8 @@ export default function AppChat({
         corrections: loadBehaviorCorrections().value,
       })
       : undefined;
-    const shadowedLegacyMemoryIds = new Set(truthRetrieval?.shadowedLegacyMemoryIds || []);
-    const relationshipSummaryCount = activeRelationship?.compressedMemory?.trim() ? 1 : 0;
-    const availableLegacyLimit = Math.max(
-      0,
-      recallLimit
-        - (truthRetrieval ? countTruthRetrievalRecords(truthRetrieval) : 0)
-        - relationshipSummaryCount,
-    );
-    const visibleLegacyMemories = relevantMemories
-      .filter((memory) => !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length))
-      .slice(0, availableLegacyLimit);
-    const legacyPrompt = visibleLegacyMemories.length > 0
-      ? formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆（仅作补充）:\n")
-      : "";
     const truthPrompt = truthRetrieval ? formatTruthRetrievalForPrompt(truthRetrieval) : "";
-    return `${legacyPrompt}${truthPrompt}`;
+    return truthPrompt;
   }, [activeCharacter, activeRelationship, currentChatMessages, draftContextMemoryLimit, draftRetrievalHistoryLimit, memories, settings.name]);
   const estimatedTokens = React.useMemo(() => estimateChatTokens({
     character: activeCharacter,
@@ -1543,6 +1521,7 @@ export default function AppChat({
         if ((contentDecision.shouldSave || translationDecision.shouldSave) && onSaveImageToCharacterPhone) {
           void imageDataUrlToBlob(groupUserImageDataUrl)
             .then((imageBlob) => onSaveImageToCharacterPhone({
+              ownerIdentityId: activeIdentityId,
               characterId: member.id,
               imageBlob,
               imageMimeType: imageBlob.type || "image/png",
@@ -1841,22 +1820,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
       // Recall memories from Memory Vault
       const topK = resolveChatLongTermMemoryLimit(activeCharacter.retrievalHistoryLimit);
-      const relevantMemories = shouldLoadLongTermMemory
-        ? activeCharacter?.isGroupChat
-          ? MemoryService.retrieveRelevantMemoriesForScopes({
-            existingMemories: memories || [],
-            scopes: (activeCharacter.memberIds || []).flatMap((memberId) => {
-              const member = characters.find((candidate) => candidate.id === memberId);
-              const relationship = member ? relationForCharacter(member.id) : undefined;
-              return relationship && member ? [{ characterId: member.id, relationId: relationship.id, userIdentityId: relationship.userIdentityId }] : [];
-            }),
-            queryText: currentMessageContextText,
-            limit: topK,
-            maxCharacters: 3600,
-            excludeCanonicalMirrors: true,
-          })
-          : MemoryService.retrieveRelevantMemories({ characterId: activeChatCharId || "", relationId: activeRelationship?.id, userIdentityId: activeRelationship?.userIdentityId, queryText: currentMessageContextText, existingMemories: memories || [], limit: topK, maxCharacters: 3600, excludeCanonicalMirrors: true, scenario: "chat" })
-        : [];
       const truthRetrieval = activeRelationship
         ? retrieveTruthForPrivatePrompt({
           scope: {
@@ -1879,17 +1842,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           corrections: loadBehaviorCorrections().value,
         })
         : undefined;
-      const shadowedLegacyMemoryIds = new Set(truthRetrieval?.shadowedLegacyMemoryIds || []);
-      const truthRecordCount = truthRetrieval ? countTruthRetrievalRecords(truthRetrieval) : 0;
-      const relationshipSummaryCount = activeRelationship?.compressedMemory?.trim() ? 1 : 0;
-      const visibleLegacyMemories = relevantMemories.filter((memory) =>
-        !shadowedLegacyMemoryIds.has(memory.id) && !(memory.sourceKnowledgeClaimIds?.length),
-      ).slice(0, Math.max(0, topK - truthRecordCount - relationshipSummaryCount));
-      const legacyMemoryPrompt = visibleLegacyMemories.length > 0
-        ? formatMemoriesForPrompt(visibleLegacyMemories, "\n- Reclaimed compatibility memories / 兼容旧记忆（仅作补充）:\n")
-        : "";
       const truthRetrievalPrompt = truthRetrieval ? formatTruthRetrievalForPrompt(truthRetrieval) : "";
-      characterContextText += legacyMemoryPrompt;
       characterContextText += truthRetrievalPrompt;
 
       // A continuation synchronized while leaving the offline app is an explicit
@@ -1936,31 +1889,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
         );
         if (primaryRelation) {
-          const primaryMemories = MemoryService.retrieveRelevantMemories({
-            characterId: activeCharacter.id,
-            relationId: primaryRelation.id,
-            queryText: currentMessageContextText,
-            existingMemories: memories || [],
-            limit: topK,
-            maxCharacters: 3600,
-            excludeCanonicalMirrors: true,
-            scenario: "chat",
-          });
-          const legacyCharacterMemories = MemoryService.retrieveRelevantMemories({
-            characterId: activeCharacter.id,
-            queryText: currentMessageContextText,
-            existingMemories: memories || [],
-            limit: topK,
-            maxCharacters: 3600,
-            excludeCanonicalMirrors: true,
-            scenario: "chat",
-          });
-          const eventMemories = [...primaryMemories, ...legacyCharacterMemories]
-            .filter((memory, index, all) => all.findIndex((candidate) => candidate.id === memory.id) === index)
-            .slice(0, topK)
-            .map((memory) => `- ${memory.content}`)
-            .join("\\n");
-          characterContextText += `\\n[角色自身关于另一位联系人的既有记忆]\\n这些是角色过去对主号联系人或相关事件的记忆，不是当前马甲的身份信息。当前说话者仍是陌生联系人；不得因为职业、措辞或事件相似就认定当前马甲是饭饭，也不得把主号聊天历史当作当前对话历史。只有当前联系人明确说“我就是饭饭”等内容时，才允许建立身份关联。\\n${primaryRelation.compressedMemory?.trim() ? `关系记忆：${primaryRelation.compressedMemory.trim()}\\n` : ""}${eventMemories || "暂无相关既有记忆"}`;
+          characterContextText += `\\n[角色自身关于另一位联系人的既有记忆]\\n这些是角色过去对主号联系人或相关事件的记忆，不是当前马甲的身份信息。当前说话者仍是陌生联系人；不得因为职业、措辞或事件相似就认定当前马甲是饭饭，也不得把主号聊天历史当作当前对话历史。只有当前联系人明确说“我就是饭饭”等内容时，才允许建立身份关联。\\n${primaryRelation.compressedMemory?.trim() ? `关系记忆：${primaryRelation.compressedMemory.trim()}` : "暂无相关既有记忆"}`;
         }
       }
       const userKnowledgeBoundary = formatUserKnowledgeBoundary();
@@ -2226,7 +2155,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
         history,
         message: `${promptMessage}${imageInstruction}`,
         historyInjections: wbBlocks.at_depth,
-        retrievalText: `${legacyMemoryPrompt}${truthRetrievalPrompt}`,
+        retrievalText: truthRetrievalPrompt,
         retrievalIncludedInSystem: true,
         hasImage: Boolean(imageDataUrl),
       });
@@ -2258,6 +2187,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
         if ((userImageSaveDecision.shouldSave || translationImageSaveDecision.shouldSave) && imageDataUrl && userMsg?.sender === "user" && !activeCharacter.isGroupChat && onSaveImageToCharacterPhone) {
           void imageDataUrlToBlob(imageDataUrl)
             .then((imageBlob) => onSaveImageToCharacterPhone({
+              ownerIdentityId: activeIdentityId,
               characterId: activeCharacter.id,
               imageBlob,
               imageMimeType: imageBlob.type || "image/png",
@@ -2727,6 +2657,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
           const imageBlob = await imageAssetDb.getImage(result.record.imageAssetId);
           if (imageBlob) {
             await onSaveImageToCharacterPhone({
+              ownerIdentityId: capturedContext.userIdentityId || activeIdentityId,
               characterId: result.record.characterId,
               imageBlob,
               imageMimeType: imageBlob.type || result.message.imageMimeType || "image/png",
@@ -3079,8 +3010,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
     latestActiveCharacterRef, settings, serializeMessageContentForPrompt, shouldUseCrossDayHistoryBoundary,
     activeAttachModal, callingStatus, callTranscript, detectCallTopicShift, partitionDirectChatHistoryByCurrentDay,
     formatHistoricalMessageForPrompt, describeHistoricalRelativeTime, serializeMessageToPromptTurns, buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt,
-    projectCharacterPrompt, recallSettings, MemoryService, memories, retrieveTruthForPrivatePrompt, countTruthRetrievalRecords,
-    loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatMemoriesForPrompt, formatUserKnowledgeBoundary,
+    projectCharacterPrompt, recallSettings, memories, retrieveTruthForPrivatePrompt,
+    loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatUserKnowledgeBoundary,
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
     getPendingOfflineHandoff, buildPendingOfflineTimelineHandoff, isOfflineStoryHandoffMemory,
     buildOfflineTimelineHandoff, allMoments, activeIdentityId, getKnownMomentsContextString,
@@ -4230,6 +4161,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
       if (onSaveImageToCharacterPhone) {
         try {
           await onSaveImageToCharacterPhone({
+            ownerIdentityId: activeIdentityId,
             characterId: character.id,
             imageBlob: generated.imageBlob,
             imageMimeType: generated.mimeType,

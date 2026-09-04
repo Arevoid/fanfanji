@@ -63,7 +63,6 @@ const MEMORY_CENTER_TYPE_OPTIONS: Array<{ value: MemoryCenterRecordType | "all";
   { value: "truth", label: MEMORY_CENTER_TYPE_LABELS.truth },
   { value: "summary", label: MEMORY_CENTER_TYPE_LABELS.summary },
   { value: "rule", label: MEMORY_CENTER_TYPE_LABELS.rule },
-  { value: "compatibility", label: MEMORY_CENTER_TYPE_LABELS.compatibility },
 ];
 
 type MemoryCenterDeleteMode = "retract" | "permanent";
@@ -498,30 +497,12 @@ export default function AppMemory({
       alert("长期认知写入失败，未保存兼容记忆。");
       return;
     }
-    const newItem: MemoryItem = {
-      id: memoryId,
-      characterId: relation.characterId,
-      relationId: newRelationId,
-      userIdentityId: relation.userIdentityId,
-      conversationId: relation.conversationId,
-      content: newContent.trim(),
-      timestamp: now,
-      importance: newImportance,
-      isManual: true,
-      sourceKnowledgeClaimIds: [claim.id],
-    };
-
     const write = await commitMemoryWriteBundle({
       claims: [claim],
-      memories: [newItem, ...normalizedMemories],
       appendClaims: appendKnowledgeClaims,
-      saveMemories: (nextMemories) => {
-        onSaveMemories([...nextMemories]);
-        return true;
-      },
     });
-    if (!write.canonicalWritten || !write.memoriesWritten) {
-      alert("长期认知写入失败，未保存兼容记忆。");
+    if (!write.canonicalWritten) {
+      alert("长期认知写入失败。");
       return;
     }
     setIsAddingItem(false);
@@ -554,18 +535,6 @@ export default function AppMemory({
     }
     const previousClaimIds = item.sourceKnowledgeClaimIds || [];
     const primaryClaimId = previousClaimIds[0];
-    const updated = memories.map((candidate) => candidate.id === item.id
-      ? {
-        ...candidate,
-        userIdentityId: relation.userIdentityId,
-        conversationId: relation.conversationId,
-        content: content.trim(),
-        timestamp: now,
-        isManual: true,
-        sourceKnowledgeClaimIds: [replacement.id],
-      }
-      : candidate);
-
     const write = await commitMemoryWriteBundle({
       claims: [replacement],
       writeClaims: () => {
@@ -574,18 +543,13 @@ export default function AppMemory({
           : appendKnowledgeClaim(replacement).success;
         if (!stored) return false;
         previousClaimIds.slice(1).forEach((claimId) => {
-          retractKnowledgeClaim(toTruthScope(relation), claimId, "compatibility_memory_manually_replaced");
+          retractKnowledgeClaim(toTruthScope(relation), claimId, "manual_memory_replaced");
         });
         return true;
       },
-      memories: updated,
-      saveMemories: (nextMemories) => {
-        onSaveMemories([...nextMemories]);
-        return true;
-      },
     });
-    if (!write.complete) {
-      alert("长期认知修改失败，兼容记忆保持不变。");
+    if (!write.canonicalWritten) {
+      alert("长期认知修改失败，原记录保持不变。");
       return false;
     }
     return true;
@@ -920,7 +884,7 @@ export default function AppMemory({
                 <p className="text-xs font-bold truncate">记忆提炼完成！</p>
                 <p className="text-[10px] text-emerald-600">
                   成功为 {displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name || "角色"} 提炼了 {immediateSummaryTask.extractedCount} 条长期内容
-                  {immediateSummaryTask.archiveStats && ` · 事实 ${immediateSummaryTask.archiveStats.acceptedTruthCount} · 摘要 ${immediateSummaryTask.archiveStats.summaryCount} · 兼容 ${immediateSummaryTask.archiveStats.compatibilityCount}`}
+                  {immediateSummaryTask.archiveStats && ` · 事实 ${immediateSummaryTask.archiveStats.acceptedTruthCount} · 摘要 ${immediateSummaryTask.archiveStats.summaryCount}`}
                 </p>
                 {immediateSummaryTask.archiveStats && immediateSummaryTask.archiveStats.rejectedCandidateCount > 0 && (
                   <p className="text-[9px] text-amber-600">另有 {immediateSummaryTask.archiveStats.rejectedCandidateCount} 条候选未写入，原聊天记录未受影响。</p>
@@ -1709,7 +1673,7 @@ export default function AppMemory({
                     </p>
                     {immediateSummaryTask.archiveStats && (
                       <p className="mt-1 text-[10px] text-slate-500">
-                        来源消息 {immediateSummaryTask.archiveStats.sourceMessageCount} 条 · 长期事实 {immediateSummaryTask.archiveStats.acceptedTruthCount} 条 · 摘要 {immediateSummaryTask.archiveStats.summaryCount} 条 · 兼容 {immediateSummaryTask.archiveStats.compatibilityCount} 条
+                        来源消息 {immediateSummaryTask.archiveStats.sourceMessageCount} 条 · 长期事实 {immediateSummaryTask.archiveStats.acceptedTruthCount} 条 · 摘要 {immediateSummaryTask.archiveStats.summaryCount} 条
                       </p>
                     )}
                     {immediateSummaryTask.archiveStats && immediateSummaryTask.archiveStats.rejectedCandidateCount > 0 && (

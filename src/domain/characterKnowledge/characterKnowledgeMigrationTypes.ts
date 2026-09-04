@@ -1,11 +1,12 @@
 export const CHARACTER_KNOWLEDGE_MIGRATION_SCHEMA_VERSION = 1;
-export const CHARACTER_KNOWLEDGE_MIGRATION_VERSION = 1;
+export const CHARACTER_KNOWLEDGE_MIGRATION_VERSION = 3;
 
 export type CharacterKnowledgeMigrationStatus = "idle" | "completed" | "failed";
 
 /**
- * Startup bookkeeping is diagnostic only. Legacy stores remain the source of
- * truth for rollback, while deterministic IDs make a repeated run harmless.
+ * The migration is a one-time cutover. Version 3 also rewrites historical
+ * canonical arrays through the meaning-level deduplicator before the legacy
+ * MemoryItem store is retired as an active source of truth.
  */
 export interface CharacterKnowledgeMigrationState {
   schemaVersion: number;
@@ -17,4 +18,5 @@ export interface CharacterKnowledgeMigrationState {
   migratedSummaryIds: string[];
   migratedCorrectionIds: string[];
   orphanRecordIds: string[];
+  legacyMemoryStoreCleared?: boolean;
 }

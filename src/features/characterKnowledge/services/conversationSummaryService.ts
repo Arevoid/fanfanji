@@ -76,6 +76,8 @@ export function createConversationSummaryRecord(input: {
   claims: readonly KnowledgeClaim[];
   sourceMessageIds: readonly string[];
   generatedAt: number;
+  /** Stable owner supplied by replaceable workflows such as offline stories. */
+  id?: string;
   generator?: string;
   rangeStartAt?: number;
   rangeEndAt?: number;
@@ -95,7 +97,7 @@ export function createConversationSummaryRecord(input: {
   const derivedRangeEndAt = claimTimes.length > 0 ? Math.max(...claimTimes) : undefined;
   const rangeStartAt = input.rangeStartAt ?? derivedRangeStartAt;
   const rangeEndAt = input.rangeEndAt ?? derivedRangeEndAt;
-  const id = `conversation-summary:${input.scope.relationId}:${sourceMessageIds[0]}:${sourceMessageIds[sourceMessageIds.length - 1]}`;
+  const id = input.id || `conversation-summary:${input.scope.relationId}:${sourceMessageIds[0]}:${sourceMessageIds[sourceMessageIds.length - 1]}`;
   return {
     id,
     ...input.scope,

@@ -75,3 +75,24 @@ export async function fetchWithTimeout(
     callerSignal?.removeEventListener("abort", abortFromCaller);
   }
 }
+
+/** `fetch()` resolves when headers arrive, so body consumption needs its own
+ * deadline or a provider can leave `response.text()` pending forever. */
+export async function readResponseTextWithTimeout(
+  response: Response,
+  timeoutMs: number = API_REQUEST_TIMEOUTS.textGeneration,
+): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bodyText = response.text();
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      void response.body?.cancel().catch(() => undefined);
+      reject(new ApiRequestError("timeout", `Response body timed out after ${timeoutMs}ms.`, { timeoutMs }));
+    }, Math.max(1, timeoutMs));
+  });
+  try {
+    return await Promise.race([bodyText, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}

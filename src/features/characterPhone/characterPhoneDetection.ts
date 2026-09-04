@@ -17,7 +17,8 @@ export function discoverCharacterPhoneActions(
   const openCount = phone.phoneOpenCount ?? 0;
   const candidate = (phone.actionLog ?? [])
     .filter((action) => !action.discovered && action.detectability !== "none")
-    .filter((action) => now - action.timestamp >= 10 * 60 * 1000 || openCount >= (action.discoveryAfterOpens ?? 2))
+    .filter((action) => now - action.timestamp >= 10 * 60 * 1000
+      || openCount - (action.phoneOpenCountAtAction ?? 0) >= (action.discoveryAfterOpens ?? 2))
     .sort((left, right) => left.timestamp - right.timestamp)[0];
   if (!candidate) return phone;
   const discovery = {

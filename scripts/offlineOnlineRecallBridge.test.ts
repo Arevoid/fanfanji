@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { acknowledgeOfflineHandoff, buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectInterveningOfflineHandoff, selectPendingOfflineHandoffStory } from "../src/domain/memory/offlineMemorySync";
+import { acknowledgeOfflineHandoff, buildOfflineHandoffTimelinePromptBlock, buildPendingOfflineHandoffPromptBlock, createPendingOfflineHandoff, getOfflineHandoffSourceMessagesForReturn, getOfflineStorySummaryId, hasOfflineStoryCanonicalSummary, recordOfflineHandoffDelivery, selectFreshOfflineHandoffMemory, selectInterveningOfflineHandoff, selectPendingOfflineHandoffStory } from "../src/domain/memory/offlineMemorySync";
 import type { MemoryItem, OfflineStory } from "../src/types";
 
 const handoff: MemoryItem = {
@@ -59,6 +59,31 @@ const intervening = selectInterveningOfflineHandoff({
   before: 450,
 });
 assert.equal(intervening?.story.id, story.id, "a synced offline event between two online sessions is selected without keyword overlap");
+const canonicalSummary = {
+  id: getOfflineStorySummaryId(story),
+  relationId: "relation-a",
+  characterId: "character-a",
+  userIdentityId: "identity-a",
+  conversationId: "conversation-a",
+  summary: "- [已确认事实] 用户与角色确认恋爱关系。",
+  sourceMessageIds: ["offline-user", "offline-character"],
+  sourceClaimIds: [],
+  generatedAt: 400,
+  generator: "offline-story.v2",
+  projectionVersion: 2,
+  status: "active" as const,
+  schemaVersion: 1,
+};
+assert.equal(hasOfflineStoryCanonicalSummary(story, [canonicalSummary]), true, "canonical story summary is discoverable without a MemoryItem");
+const canonicalIntervening = selectInterveningOfflineHandoff({
+  stories: [story],
+  memories: [],
+  summaries: [canonicalSummary],
+  relationId: "relation-a",
+  after: 100,
+  before: 450,
+});
+assert.equal(canonicalIntervening?.story.id, story.id, "canonical summary reaches the timeline handoff without legacy storage");
 assert.equal(selectInterveningOfflineHandoff({
   stories: [story],
   memories: [{ ...handoff, content: `【线下关键剧情归档】\n[offline-story:${story.id}:summary]` }],

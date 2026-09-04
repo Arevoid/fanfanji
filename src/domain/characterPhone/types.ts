@@ -1,4 +1,16 @@
 export type CharacterPhoneAppId = "chat" | "browser" | "schedule" | "gallery" | "diary" | "moments" | "notes" | "music" | "settings";
+export type CharacterPhoneLifeArtifactAppId = CharacterPhoneAppId | "phone" | "camera";
+
+export type CharacterPhoneSourceRef = { kind: "character" | "worldbook" | "chat" | "moment" | "phone" | "relationship-network"; id: string };
+
+export interface CharacterPhoneLifeEvent {
+  id: string;
+  summary: string;
+  startedAt: number;
+  generatedAt: number;
+  sourceRefs: CharacterPhoneSourceRef[];
+  artifactRefs: Array<{ app: CharacterPhoneLifeArtifactAppId; id: string }>;
+}
 
 export interface CharacterPhoneMessage {
   id: string;
@@ -12,10 +24,16 @@ export interface CharacterPhoneContact {
   id: string;
   name: string;
   relation: string;
+  kind?: "user" | "character" | "npc" | "group";
   isLongTerm: boolean;
   isNpc: boolean;
   avatar?: string;
   source?: "user" | "linked" | "generated";
+  linkedCharacterId?: string;
+  /** Stable lightweight NPC source when this contact comes from a relationship-network edge. */
+  relationshipNetworkNpcId?: string;
+  memberNames?: string[];
+  sourceRefs?: CharacterPhoneSourceRef[];
   remark?: string;
   removedAt?: number;
   lastMessage?: string;
@@ -30,6 +48,8 @@ export interface CharacterPhoneThreadMessage {
   timestamp: number;
   operatedByUser?: boolean;
   sourceMessageId?: string;
+  sourceRefs?: CharacterPhoneSourceRef[];
+  lifeEventId?: string;
   promise?: { summary: string; dueAt?: number };
   attachment?: { kind: "screenshot" | "text-image"; label: string; content: string };
 }
@@ -45,6 +65,14 @@ export interface CharacterPhonePost {
   authorId?: string;
   authorAvatar?: string;
   sourceMomentId?: string;
+  lifeEventId?: string;
+}
+
+export interface CharacterPhoneBrowserResult {
+  /** AI-generated source/platform label shown in the search result card. */
+  platform: string;
+  title: string;
+  snippet: string;
 }
 
 export interface CharacterPhoneBrowserEntry {
@@ -52,6 +80,15 @@ export interface CharacterPhoneBrowserEntry {
   query: string;
   title: string;
   timestamp: number;
+  lifeEventId?: string;
+  /** Optional cached detail; legacy history derives it from query/title at render time. */
+  summary?: string;
+  reflection?: string;
+  /** AI-generated 2–3 platform result cards for the browser detail view. */
+  results?: CharacterPhoneBrowserResult[];
+  /** Legacy compatibility fields; the detail UI does not expose external links. */
+  sourceUrl?: string;
+  sourceLabel?: string;
 }
 
 export interface CharacterPhoneDiaryEntry {
@@ -60,6 +97,7 @@ export interface CharacterPhoneDiaryEntry {
   body: string;
   timestamp: number;
   hidden?: boolean;
+  lifeEventId?: string;
 }
 
 export interface CharacterPhoneNote {
@@ -67,6 +105,7 @@ export interface CharacterPhoneNote {
   title: string;
   content: string;
   timestamp: number;
+  lifeEventId?: string;
 }
 
 export interface CharacterPhoneTodo {
@@ -75,6 +114,7 @@ export interface CharacterPhoneTodo {
   checked: boolean;
   dueAt?: number;
   source?: "generated" | "chat" | "schedule" | "user";
+  lifeEventId?: string;
 }
 
 export interface CharacterPhoneScheduleItem {
@@ -82,6 +122,18 @@ export interface CharacterPhoneScheduleItem {
   title: string;
   detail: string;
   timestamp: number;
+  lifeEventId?: string;
+}
+
+export interface CharacterPhoneCallRecord {
+  id: string;
+  contactId?: string;
+  contactName: string;
+  number?: string;
+  direction: "incoming" | "outgoing" | "missed";
+  timestamp: number;
+  durationSeconds?: number;
+  lifeEventId?: string;
 }
 
 export interface CharacterPhoneGalleryItem {
@@ -91,7 +143,7 @@ export interface CharacterPhoneGalleryItem {
   timestamp: number;
   hidden?: boolean;
   deletedAt?: number;
-  source?: "generated" | "received" | "user";
+  source?: "generated" | "received" | "camera" | "user";
   imageAssetId?: string;
   imageMimeType?: string;
   imageWidth?: number;
@@ -100,6 +152,7 @@ export interface CharacterPhoneGalleryItem {
   textImageForId?: string;
   /** Locally rendered text-image data URL; raw descriptions stay in caption. */
   dataUrl?: string;
+  lifeEventId?: string;
 }
 
 export interface CharacterPhoneMusicTrack {
@@ -155,9 +208,11 @@ export interface CharacterPhoneActionRecord {
   discovered?: boolean;
   discoveredAt?: number;
   discoveryAfterOpens?: number;
+  phoneOpenCountAtAction?: number;
 }
 
 export interface CharacterPhoneImageSaveInput {
+  ownerIdentityId: string;
   characterId: string;
   imageBlob: Blob;
   imageMimeType?: string;
@@ -165,7 +220,7 @@ export interface CharacterPhoneImageSaveInput {
   imageHeight?: number;
   title: string;
   caption?: string;
-  source: "generated" | "received";
+  source: "generated" | "received" | "camera";
   /** Stable source ID lets refreshes replace the same album item. */
   sourceKey?: string;
 }
@@ -183,6 +238,8 @@ export interface CharacterPhoneRecord {
   ownerIdentityId: string;
   characterId: string;
   passcode: string;
+  /** Optional per-character override for the hidden album gate. Falls back to the temporary test code when absent. */
+  hiddenGalleryPasscode?: string;
   failedAttempts: number;
   lockedUntil?: number;
   createdAt: number;
@@ -205,11 +262,13 @@ export interface CharacterPhoneRecord {
   notes?: CharacterPhoneNote[];
   todos?: CharacterPhoneTodo[];
   scheduleItems: CharacterPhoneScheduleItem[];
+  phoneCalls?: CharacterPhoneCallRecord[];
   galleryItems: CharacterPhoneGalleryItem[];
   musicTracks?: CharacterPhoneMusicTrack[];
   listeningHistory?: CharacterPhoneListeningRecord[];
   musicPlaylists?: CharacterPhoneMusicPlaylist[];
   actionLog?: CharacterPhoneActionRecord[];
+  lifeEvents?: CharacterPhoneLifeEvent[];
   activities: CharacterPhoneActivity[];
   awarenessLevel?: 0 | 1 | 2;
   awarenessUpdatedAt?: number;

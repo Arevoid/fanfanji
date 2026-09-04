@@ -1,9 +1,11 @@
 import type { MemoryItem, Message, OfflineStory } from "../../../types";
+import type { ConversationSummaryRecord } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import {
   buildOfflineHandoffTimelinePromptBlock,
   buildPendingOfflineHandoffPromptBlock,
   getOfflineMemorySourceMessages,
   hasOfflineStorySummary,
+  hasOfflineStoryCanonicalSummary,
   isOfflineStoryHandoffMemory,
   selectInterveningOfflineHandoff,
 } from "../../../domain/memory/offlineMemorySync";
@@ -59,6 +61,7 @@ export function getInterveningOfflineHandoff(input: {
   currentChatMessages: readonly Message[];
   offlineStories: readonly OfflineStory[];
   memories: readonly MemoryItem[];
+  summaries?: readonly ConversationSummaryRecord[];
 }) {
   if (!input.currentOnlineAt || (!input.relationId && !input.groupId)) return undefined;
   const currentDate = new Date(input.currentOnlineAt);
@@ -67,6 +70,7 @@ export function getInterveningOfflineHandoff(input: {
   return selectInterveningOfflineHandoff({
     stories: input.offlineStories,
     memories: input.memories,
+    summaries: input.summaries,
     relationId: input.relationId,
     groupId: input.groupId,
     after: previousOnlineAt,
@@ -81,11 +85,13 @@ export function getOfflineTimelineStoriesBetween(input: {
   isGroup: boolean;
   offlineStories: readonly OfflineStory[];
   memories: readonly MemoryItem[];
+  summaries?: readonly ConversationSummaryRecord[];
 }): OfflineStory[] {
   if (!input.previousAt || !input.relationId || input.isGroup) return [];
   return input.offlineStories
     .filter((story) => story.relationId === input.relationId)
-    .filter((story) => hasOfflineStorySummary(story, input.memories))
+    .filter((story) => hasOfflineStoryCanonicalSummary(story, input.summaries || [])
+      || hasOfflineStorySummary(story, input.memories))
     .filter((story) => {
       const occurredAt = story.onlineHandoff?.endedAt ?? story.archivedAt ?? story.lastMemorySyncAt ?? story.updatedAt;
       return occurredAt > input.previousAt! && occurredAt <= input.currentAt;

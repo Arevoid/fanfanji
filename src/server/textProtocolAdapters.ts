@@ -5,7 +5,7 @@ import {
   toOpenAiHistoryEntry,
   type TransportHistoryEntry,
 } from "../domain/prompt/promptTransport";
-import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError } from "../utils/fetchWithTimeout";
+import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError, readResponseTextWithTimeout } from "../utils/fetchWithTimeout";
 import { emptyTextApiErrorDetails, parseTextApiErrorPayload, redactTextApiError, type TextApiErrorCode } from "../utils/textApiError";
 
 export class TextApiError extends Error {
@@ -109,7 +109,7 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
         stream: input.streamCompatible === true,
       }),
     }, API_REQUEST_TIMEOUTS.textGeneration);
-    const raw = await response.text();
+    const raw = await readResponseTextWithTimeout(response);
     if (!response.ok) {
       const details = parseTextApiErrorPayload(raw, response.status);
       throw new TextApiError(response.status, details.message, details.code, details.reason);
@@ -147,7 +147,7 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
       ...(prompt.systemInstruction ? { systemInstruction: { parts: [{ text: prompt.systemInstruction }] } } : {}),
     }),
   }, API_REQUEST_TIMEOUTS.textGeneration);
-  const raw = await response.text();
+  const raw = await readResponseTextWithTimeout(response);
   if (!response.ok) {
     const details = parseTextApiErrorPayload(raw, response.status);
     throw new TextApiError(response.status, details.message, details.code, details.reason);
@@ -174,7 +174,7 @@ export async function fetchTextModels(input: { apiKey: string; apiEndpoint?: str
     input.apiEndpoint?.trim() ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined,
     API_REQUEST_TIMEOUTS.modelList,
   );
-  const raw = await response.text();
+  const raw = await readResponseTextWithTimeout(response, API_REQUEST_TIMEOUTS.modelList);
   if (!response.ok) {
     const details = parseTextApiErrorPayload(raw, response.status);
     throw new TextApiError(response.status, details.message, details.code, details.reason);

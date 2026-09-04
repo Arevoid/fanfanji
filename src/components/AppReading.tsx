@@ -37,10 +37,9 @@ import type {
   ReadingChapter,
   ReadingProgress,
 } from "../domain/reading/types";
-import type { Character, MemoryItem, UserSettings, WorldBookEntry } from "../types";
+import type { Character, UserSettings, WorldBookEntry } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import type { ReadingRoom } from "../domain/reading/coReadingTypes";
-import { loadMemories, saveMemories } from "../core/storage/repositories/memoryRepository";
 import { appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { createManualKnowledgeClaim } from "../features/characterKnowledge/services/manualKnowledgeService";
 import { commitMemoryWriteBundle } from "../domain/memory/memoryWriteCoordinator";
@@ -1104,7 +1103,6 @@ export default function AppReading({
   const deleteRoom = async (room: ReadingRoom, preserveMemory: boolean) => {
     try {
       const roomComments = listReadingComments(room);
-      const memories = loadMemories([]).value.filter((memory) => memory.sourceReadingRoomId !== room.readingRoomId);
       // Only the user's explicit comments are durable evidence. AI comments
       // describe the character's generated reaction and must not silently
       // become confirmed facts in the relationship memory.
@@ -1124,33 +1122,10 @@ export default function AppReading({
             recordedAt: comment.createdAt,
           })).filter((claim): claim is NonNullable<typeof claim> => Boolean(claim))
         : [];
-      const newMemories: MemoryItem[] = preserveMemory
-        ? userComments.map((comment, index) => ({
-            id: createId("reading-memory"),
-            characterId: comment.characterId,
-            relationId: comment.relationId,
-            userIdentityId: comment.userIdentityId,
-            conversationId: comment.conversationId,
-            content: "共读记录：" + comment.authorName + "：" + comment.body + (comment.textSnapshot ? "（原文片段：" + comment.textSnapshot.slice(0, 300) + "）" : ""),
-            timestamp: comment.createdAt,
-            importance: 5,
-            isManual: true,
-            sourceKnowledgeClaimIds: claims[index] ? [claims[index].id] : [],
-            sourceReadingRoomId: room.readingRoomId,
-            sourceReadingCommentId: comment.id,
-            sourceReadingEvidence: {
-              bookId: comment.bookId,
-              ...(comment.targetChapterId ? { chapterId: comment.targetChapterId } : {}),
-              ...(comment.targetParagraphAnchorId ? { paragraphAnchorId: comment.targetParagraphAnchorId } : {}),
-            },
-          }))
-        : [];
       if (preserveMemory && claims.length !== userComments.length) throw new Error("共读记录缺少有效关系作用域，未写入记忆");
       const write = await commitMemoryWriteBundle({
         claims,
-        memories: [...newMemories, ...memories],
         appendClaims: appendKnowledgeClaims,
-        saveMemories,
       });
       if (!write.complete) throw new Error("共读记忆保存失败");
       const result = deleteReadingRoom(room);

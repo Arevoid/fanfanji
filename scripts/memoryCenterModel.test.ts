@@ -61,7 +61,7 @@ const records = buildMemoryCenterRecords({
   }],
 });
 
-assert.deepEqual(countMemoryCenterRecords(records), { truth: 1, summary: 1, rule: 1, compatibility: 1 });
+assert.deepEqual(countMemoryCenterRecords(records), { truth: 1, summary: 1, rule: 1, compatibility: 0 });
 assert.equal(records[0]?.recordType, "rule");
 assert.equal(records.find((record) => record.recordType === "truth")?.layer, "core");
 assert.equal(records.find((record) => record.recordType === "truth")?.truthStatus, "confirmed");
@@ -71,11 +71,11 @@ assert.equal(filterMemoryCenterRecords(records, { recordType: "truth" }).length,
 assert.equal(filterMemoryCenterRecords(records, { characterId: "character-a", searchQuery: "摄影" }).length, 2);
 assert.equal(filterMemoryCenterRecords(records, { sourceApp: "chat", status: "active" }).length, 3);
 
-const retractedCompatibility = buildMemoryCenterRecords({
+const canonicalOnlyRecords = buildMemoryCenterRecords({
   memories: [{ id: "legacy-retracted", characterId: "character-a", relationId: "relation-a", content: "撤回事实兼容镜像", timestamp: 50, sourceKnowledgeClaimIds: ["claim:retracted"] }],
   claims: [{ ...claim, id: "claim:retracted", truthStatus: "retracted", status: "retracted" }],
   summaries: [],
   corrections: [],
-}).find((record) => record.recordType === "compatibility");
-assert.equal(retractedCompatibility?.status, "retracted", "compatibility mirrors inherit linked Truth retraction status");
+});
+assert.equal(canonicalOnlyRecords.some((record) => record.recordType === "compatibility"), false, "legacy compatibility records are not shown in the active center");
 console.log("PASS memory center categories and canonical read model");

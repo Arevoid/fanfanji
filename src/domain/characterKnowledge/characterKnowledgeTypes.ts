@@ -91,6 +91,7 @@ export type KnowledgeWriteRejectionReason =
   | "invalid_scope"
   | "invalid_candidate"
   | "missing_evidence"
+  | "low_information"
   | "question_or_instruction"
   | "behavior_correction_required"
   | "fictional_story_boundary";

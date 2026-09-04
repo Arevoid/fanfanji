@@ -2,6 +2,7 @@ import type { CharacterTruthScope, KnowledgeClaim, KnowledgeSourceRef } from "..
 import {
   appendKnowledgeClaims,
   deduplicateKnowledgeClaims,
+  deduplicateKnowledgeClaimsByMeaning,
   isExactTruthScope,
   removeKnowledgeClaimsByRelations,
   retractKnowledgeClaimsBySourceMessageIds,
@@ -18,9 +19,9 @@ import { readArray, writeArray } from "./repositoryUtils";
 const loadRawClaims = (): StorageResult<unknown[]> => readArray<unknown>(storageKeys.characterKnowledgeClaims, []);
 
 export function normalizeKnowledgeClaims(values: readonly unknown[]): KnowledgeClaim[] {
-  return deduplicateKnowledgeClaims(values
+  return deduplicateKnowledgeClaimsByMeaning(deduplicateKnowledgeClaims(values
     .map(normalizeKnowledgeClaim)
-    .filter((claim): claim is KnowledgeClaim => claim !== undefined));
+    .filter((claim): claim is KnowledgeClaim => claim !== undefined)));
 }
 
 export const loadKnowledgeClaims = (): StorageResult<KnowledgeClaim[]> => {

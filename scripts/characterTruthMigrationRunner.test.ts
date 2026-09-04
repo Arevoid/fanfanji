@@ -45,15 +45,16 @@ const oldMemory = (relationId: string): MemoryItem => ({
 
 const valid = <T>(value: T): StorageResult<T> => ({ value, found: true, valid: true });
 
-function createStores(options: { fail?: "claims" | "summaries" | "corrections" | "state" } = {}): {
+function createStores(options: { fail?: "claims" | "summaries" | "corrections" | "state" | "memories" } = {}): {
   stores: LegacyCharacterKnowledgeMigrationStores;
-  values: { claims: KnowledgeClaim[]; summaries: ConversationSummaryRecord[]; corrections: BehaviorCorrectionRecord[]; state: CharacterKnowledgeMigrationState };
+  values: { claims: KnowledgeClaim[]; summaries: ConversationSummaryRecord[]; corrections: BehaviorCorrectionRecord[]; state: CharacterKnowledgeMigrationState; memories: MemoryItem[] };
 } {
   const values: {
     claims: KnowledgeClaim[];
     summaries: ConversationSummaryRecord[];
     corrections: BehaviorCorrectionRecord[];
     state: CharacterKnowledgeMigrationState;
+    memories: MemoryItem[];
   } = {
     claims: [] as KnowledgeClaim[],
     summaries: [] as ConversationSummaryRecord[],
@@ -66,8 +67,9 @@ function createStores(options: { fail?: "claims" | "summaries" | "corrections" |
       migratedMemoryIds: [],
       migratedSummaryIds: [],
       migratedCorrectionIds: [],
-      orphanRecordIds: [],
+    orphanRecordIds: [],
     },
+    memories: [oldMemory(relationA.id), oldMemory(relationB.id)],
   };
   const write = <K extends keyof typeof values>(key: K, value: (typeof values)[K]): StorageWriteResult => {
     if (options.fail === key) return { success: false, error: "write" };
@@ -81,6 +83,7 @@ function createStores(options: { fail?: "claims" | "summaries" | "corrections" |
       summaries: { load: () => valid(values.summaries), save: (value) => write("summaries", [...value]) },
       corrections: { load: () => valid(values.corrections), save: (value) => write("corrections", [...value]) },
       state: { load: () => valid(values.state), save: (value) => write("state", value) },
+      legacyMemories: { load: () => valid(values.memories), save: (value) => write("memories", [...value]) },
     },
   };
 }
@@ -105,6 +108,7 @@ assert.deepEqual(
   ],
 );
 assert.equal(first.values.state.status, "completed");
+assert.equal(first.values.memories.length, 0, "successful migration clears the old MemoryItem store");
 
 const rerun = runLegacyCharacterKnowledgeMigration({ ...input, now: 200 }, first.stores);
 assert.equal(rerun.status, "skipped", "a repeat startup must not duplicate the migrated records");
@@ -120,6 +124,7 @@ const failedRun = runLegacyCharacterKnowledgeMigration({
 assert.equal(failedRun.status, "failed");
 assert.equal(failed.values.claims.length, 0, "a later target-store failure rolls back earlier claim writes");
 assert.equal(failed.values.state.status, "failed");
+assert.equal(failed.values.memories.length, 2, "failed migration restores the old MemoryItem store");
 assert.match(failed.values.state.lastError || "", /summaries/);
 
 const unsafe = createStores();

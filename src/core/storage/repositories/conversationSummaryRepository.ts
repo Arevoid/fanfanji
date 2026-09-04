@@ -55,10 +55,31 @@ export function normalizeConversationSummary(value: unknown): ConversationSummar
   };
 }
 
+const normalizeSummaryMeaning = (value: string): string => value.trim().replace(/[\s\u200b，。！？、,.!?~～…；;：“”‘’"'（）()【】\[\]{}]/gu, "").toLocaleLowerCase();
+
+const mergeSummary = (left: ConversationSummaryRecord, right: ConversationSummaryRecord): ConversationSummaryRecord => {
+  const winner = right.generatedAt >= left.generatedAt ? right : left;
+  const other = winner === right ? left : right;
+  return {
+    ...winner,
+    sourceMessageIds: Array.from(new Set([...winner.sourceMessageIds, ...other.sourceMessageIds])),
+    sourceClaimIds: Array.from(new Set([...winner.sourceClaimIds, ...other.sourceClaimIds])),
+  };
+};
+
 export const normalizeConversationSummaries = (values: readonly unknown[]): ConversationSummaryRecord[] => {
   const records = new Map<string, ConversationSummaryRecord>();
   values.map(normalizeConversationSummary).forEach((item) => {
-    if (item) records.set(item.id, item);
+    if (!item) return;
+    const meaningKey = [
+      item.relationId,
+      item.characterId,
+      item.userIdentityId,
+      item.conversationId || "",
+      normalizeSummaryMeaning(item.summary),
+    ].join("\u0000");
+    const previous = records.get(meaningKey);
+    records.set(meaningKey, previous ? mergeSummary(previous, item) : item);
   });
   return Array.from(records.values());
 };
@@ -77,18 +98,9 @@ export const appendConversationSummaries = (
   current: readonly ConversationSummaryRecord[],
   incoming: readonly ConversationSummaryRecord[],
 ): ConversationSummaryRecord[] => {
-  const records = new Map(normalizeConversationSummaries(current).map((record) => [record.id, record]));
-  const normalizedIncoming = new Map<string, ConversationSummaryRecord>();
-  incoming.map(normalizeConversationSummary).forEach((record) => {
-    if (!record) return;
-    const previousIncoming = normalizedIncoming.get(record.id);
-    if (!previousIncoming || record.generatedAt >= previousIncoming.generatedAt) normalizedIncoming.set(record.id, record);
-  });
-  normalizedIncoming.forEach((record) => {
-    const existing = records.get(record.id);
-    if (!existing || record.generatedAt >= existing.generatedAt) records.set(record.id, record);
-  });
-  return Array.from(records.values());
+  // Normalize the combined set so both stable-ID retries and historical
+  // copies with different IDs go through the same meaning-level merge.
+  return normalizeConversationSummaries([...current, ...incoming]);
 };
 export const removeConversationSummariesByRelations = (
   records: readonly ConversationSummaryRecord[], relationIds: readonly string[],

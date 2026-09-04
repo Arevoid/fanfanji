@@ -1,5 +1,5 @@
 import type { apiChat } from "../../../utils/apiHelper";
-import type { Character, MemoryItem, Message, UserSettings, WorldBookEntry } from "../../../types";
+import type { Character, Message, UserSettings, WorldBookEntry } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { requestAiReply } from "./aiReplyService";
 import { createGroupCharacterMessage } from "./messageFactory";
@@ -80,7 +80,6 @@ export function buildGroupMemberPromptContexts(input: {
   characters: readonly Character[];
   relationships: readonly CharacterRelationship[];
   activeIdentityId: string;
-  memories: readonly MemoryItem[];
   claims: GroupMemberPrivateContextInput["claims"];
   summaries: GroupMemberPrivateContextInput["summaries"];
   corrections: GroupMemberPrivateContextInput["corrections"];
@@ -111,7 +110,6 @@ export function buildGroupMemberPromptContexts(input: {
       characters: input.characters,
       relationships: input.relationships,
       activeIdentityId: input.activeIdentityId,
-      memories: input.memories,
       claims: input.claims,
       summaries: input.summaries,
       corrections: input.corrections,

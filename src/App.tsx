@@ -57,7 +57,7 @@ import {
   upsertIdentityMusicTrack,
 } from "./core/storage/repositories/musicWidgetRepository";
 import { imageAssetDb } from "./utils/imageAssetDb";
-import { createCharacterPhone, getCharacterPhone, saveCharacterPhone } from "./core/storage/repositories/characterPhoneRepository";
+import { createCharacterPhone, getCharacterPhone, removeCharacterPhonesByCharacterIds, saveCharacterPhone } from "./core/storage/repositories/characterPhoneRepository";
 import { normalizeCharacterPhoneProactiveMessages } from "./features/characterPhone/characterPhoneContent";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
 import { createRelationship, DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
@@ -65,7 +65,7 @@ import { resolveRelationshipNetworkNpcActor } from "./domain/relationshipNetwork
 import type { RelationshipNetworkNpc } from "./domain/relationshipNetwork/relationshipNetworkTypes";
 import { findRelationshipNetworkChatLink, loadRelationshipNetworkChatLinks } from "./core/storage/repositories/relationshipNetworkChatLinkRepository";
 import { findRelationshipNetworkNpcAutomationState, upsertRelationshipNetworkNpcAutomationState } from "./core/storage/repositories/relationshipNetworkNpcAutomationRepository";
-import { loadRelationshipNetworkNpcs } from "./core/storage/repositories/relationshipNetworkRepository";
+import { listRelationshipNetworkMapsForIdentity, listRelationshipNetworkNpcsForIdentity, loadRelationshipNetworkNpcs } from "./core/storage/repositories/relationshipNetworkRepository";
 import {
   appendRelationshipNetworkPendingMoment,
   listRelationshipNetworkPendingMomentsForIdentity,
@@ -1376,11 +1376,9 @@ export default function App() {
     if (momentsChanged) setMoments(migration.moments);
   }, [characters, memories, moments, offlineStories]);
 
-  // Truth Layer migration is deliberately additive. Legacy Memory and
-  // compressed-memory fields remain untouched for rollback and old-build
-  // readability. The runner snapshots all three target stores and the marker,
-  // so a later write or verification failure cannot leave a half-migrated
-  // Truth Layer behind.
+  // Truth Layer migration is a one-time cutover. The runner writes and verifies
+  // canonical stores before clearing the legacy MemoryItem store; after a
+  // successful cutover the React state must stop exposing those old records.
   useEffect(() => {
     if (characters.length === 0 || relationships.length === 0) return;
     const result = runLegacyCharacterKnowledgeMigration({
@@ -1392,6 +1390,9 @@ export default function App() {
     });
     if (result.status === "failed") {
       console.error("Failed to migrate legacy character knowledge:", result.error, result.rollbackErrors);
+    }
+    if (result.status === "completed" && result.legacyMemoryStoreCleared) {
+      setMemories((current) => current.length === 0 ? current : []);
     }
     result.migration.diagnostics.forEach((diagnostic) => {
       console.warn(`[character truth migration] ${diagnostic.recordId}: ${diagnostic.diagnostic}`);
@@ -1499,7 +1500,7 @@ export default function App() {
         userIdentityId: relation.userIdentityId,
         conversationId: relation.conversationId,
         recentMessages: msgsToSummarize,
-        existingMemories: memories,
+        existingMemories: [],
         scenario: "immediate-summary",
         apiKey: settings.apiKey,
         model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
@@ -1519,8 +1520,7 @@ export default function App() {
         }));
         return;
       }
-      const addedCount = result.extractedMemories.length;
-      const processedCount = Math.max(addedCount, result.acceptedClaims.length);
+      const processedCount = result.acceptedClaims.length;
       const extractedSummary = createConversationSummaryRecord({
         scope: {
           relationId: relation.id,
@@ -1537,17 +1537,12 @@ export default function App() {
       const write = await commitMemoryWriteBundle({
         claims: result.acceptedClaims,
         summary: extractedSummary,
-        memories: addedCount > 0 ? MemoryService.mergeMemories(memories, result.extractedMemories) : undefined,
         appendClaims: appendKnowledgeClaims,
         appendSummaries: (summaries) => conversationSummaryRepository.appendMany(summaries),
-        saveMemories: (nextMemories) => {
-          setMemories([...nextMemories]);
-          return true;
-        },
       });
-      if (!write.canonicalWritten || !write.memoriesWritten) {
-        console.error("Immediate summary memory bundle could not be persisted:", write.error || write.memoriesError);
-        setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "长期认知写入失败，未更新兼容记忆" }));
+      if (!write.canonicalWritten) {
+        console.error("Immediate summary memory bundle could not be persisted:", write.error);
+        setImmediateSummaryTask(prev => ({ ...prev, status: "error", error: "长期认知写入失败" }));
         return;
       }
       if (!write.summaryWritten) console.warn("Conversation summary cache could not be persisted:", write.summaryError);
@@ -1564,7 +1559,7 @@ export default function App() {
           acceptedTruthCount: result.acceptedClaims.length,
           summaryCount: write.summaryWritten ? 1 : 0,
           ruleCount: 0,
-          compatibilityCount: addedCount,
+          compatibilityCount: 0,
           rejectedCandidateCount: result.rejectedCandidateCount,
         },
       });
@@ -2356,7 +2351,8 @@ export default function App() {
     const character = charactersRef.current.find((candidate) => candidate.id === canonicalCharacterId);
     if (!character || character.isGroupChat) return;
 
-    const ownerIdentityId = activeIdentityId;
+    const ownerIdentityId = input.ownerIdentityId;
+    if (!ownerIdentityId) return;
     const phone = getCharacterPhone(ownerIdentityId, canonicalCharacterId)
       || createCharacterPhone(ownerIdentityId, character);
     const safeSourceKey = input.sourceKey?.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -2365,6 +2361,7 @@ export default function App() {
       : createId("character-phone-gallery");
     const existingItem = phone.galleryItems.find((item) => item.id === galleryItemId);
     const imageAssetId = existingItem?.imageAssetId || `character-phone-gallery-asset-${galleryItemId}`;
+    const previousBlob = existingItem?.imageAssetId ? await imageAssetDb.getImage(imageAssetId) : undefined;
     await imageAssetDb.saveImage(imageAssetId, input.imageBlob);
     const now = Date.now();
     const galleryItem = {
@@ -2380,11 +2377,16 @@ export default function App() {
       imageHeight: input.imageHeight,
       deletedAt: undefined,
     };
-    saveCharacterPhone({
+    const saved = saveCharacterPhone({
       ...phone,
       updatedAt: now,
       galleryItems: [galleryItem, ...phone.galleryItems.filter((item) => item.id !== galleryItemId)],
     });
+    if (!saved.success) {
+      if (previousBlob) await imageAssetDb.saveImage(imageAssetId, previousBlob);
+      else await imageAssetDb.deleteImage(imageAssetId);
+      throw new Error(`角色手机相册保存失败：${saved.error || "unknown"}`);
+    }
     window.dispatchEvent(new CustomEvent("character-phone-gallery-updated", {
       detail: { ownerIdentityId, characterId: canonicalCharacterId },
     }));
@@ -2522,6 +2524,14 @@ export default function App() {
         const character = characters.find((item) => item.id === characterId);
         if (character?.imageReferenceAssetId) imageAssetDb.deleteImage(character.imageReferenceAssetId).catch((error) => console.warn("Failed to delete character reference image:", error));
       });
+      const characterPhoneCleanup = removeCharacterPhonesByCharacterIds(deletedCharacterIds);
+      if (characterPhoneCleanup.result.success) {
+        characterPhoneCleanup.imageAssetIds.forEach((assetId) =>
+          imageAssetDb.deleteImage(assetId).catch((error) => console.warn("Failed to delete character phone image asset:", error)),
+        );
+      } else {
+        console.warn("Unable to clear character phone data for deleted character:", characterPhoneCleanup.result.error);
+      }
       setActiveChatCharId((current) => current && characterIds.has(current) ? null : current);
       setActiveChatRelationId((current) => current && relationIds.includes(current) ? null : current);
       setGlobalNotification((current) => current?.characterId && characterIds.has(current.characterId) ? null : current);
@@ -4606,6 +4616,8 @@ export default function App() {
                       messages={messages}
                       moments={moments}
                       worldBookEntries={worldBookEntries}
+                      relationshipNetworkNpcs={listRelationshipNetworkNpcsForIdentity(activeIdentityId)}
+                      relationshipNetworkMaps={listRelationshipNetworkMapsForIdentity(activeIdentityId)}
                       musicTracks={tracks}
                       settings={settings}
                       resolvedTheme={resolvedTheme}

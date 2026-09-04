@@ -1,9 +1,10 @@
-import type { Character, MemoryItem, MemoryVaultSettings, Message, OfflineStory, UserSettings } from "../../../types";
+import type { Character, MemoryVaultSettings, Message, OfflineStory, UserSettings } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { findRelationshipForCanonicalCharacter } from "../../../domain/relationship/characterRelationship";
-import { createOfflineStoryHandoffMemory, filterOfflineExtractedFacts, getOfflineStorySummaryMarker } from "../../../domain/memory/offlineMemorySync";
-import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "../../../domain/memory/MemoryService";
-import type { KnowledgeClaim } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
+import { filterOfflineExtractedFacts, getOfflineStorySummaryId } from "../../../domain/memory/offlineMemorySync";
+import { MemoryService } from "../../../domain/memory/MemoryService";
+import type { ConversationSummaryRecord, KnowledgeClaim } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
+import { createConversationSummaryRecord } from "../../characterKnowledge/services/conversationSummaryService";
 import type { MemoryExtractionApi, MemoryExtractionContext } from "../../../domain/memory/memoryTypes";
 import { createId } from "../../../core/id/createId";
 
@@ -18,12 +19,11 @@ export async function createOfflineGroupParticipantMemories(input: {
   now: number;
   settings: UserSettings;
   recallSettings: MemoryVaultSettings;
-  existingMemories: readonly MemoryItem[];
   offlineStoryPolicyInput?: MemoryExtractionContext["offlineStoryPolicyInput"];
   extractApi: MemoryExtractionApi;
-}): Promise<{ memories: MemoryItem[]; acceptedClaims: KnowledgeClaim[]; fallbackParticipantNames: string[] }> {
-  if (input.sourceMessages.length === 0) return { memories: [], acceptedClaims: [], fallbackParticipantNames: [] };
-  const memories: MemoryItem[] = [];
+}): Promise<{ summaries: ConversationSummaryRecord[]; acceptedClaims: KnowledgeClaim[]; fallbackParticipantNames: string[] }> {
+  if (input.sourceMessages.length === 0) return { summaries: [], acceptedClaims: [], fallbackParticipantNames: [] };
+  const summaries: ConversationSummaryRecord[] = [];
   const acceptedClaims: KnowledgeClaim[] = [];
   const fallbackParticipantNames: string[] = [];
   // Extract one participant at a time. Custom providers frequently enforce a
@@ -37,16 +37,8 @@ export async function createOfflineGroupParticipantMemories(input: {
       participant.id,
       input.characters,
     );
-    if (!relationship) return;
-    const isDelicate = participant.archiveTemplateType === "delicate";
-    const headerLabel = isDelicate
-      ? `【多人线下剧本《${input.story.title}》心境归档】`
-      : `【多人线下剧本《${input.story.title}》关键剧情归档】`;
-    const formatContent = (items: readonly string[], options?: { displayItems: readonly string[] }) =>
-      `${isDelicate
-        ? `${formatDelicateMemoryDiary(headerLabel, options?.displayItems || items)}\n【事实索引（系统）】\n${items.map((item) => `- ${item}`).join("\n")}`
-        : formatExtractedMemorySummary(headerLabel, items)}\n[${getOfflineStorySummaryMarker(input.story)}]`;
-    let extracted: MemoryItem[] = [];
+    if (!relationship) return { summaries, acceptedClaims, fallbackParticipantNames };
+    let extractedClaims: KnowledgeClaim[] = [];
     try {
       const result = await MemoryService.extractMemories({
         character: participant,
@@ -55,7 +47,6 @@ export async function createOfflineGroupParticipantMemories(input: {
         userIdentityId: relationship.userIdentityId,
         conversationId: relationship.conversationId,
         recentMessages: input.sourceMessages,
-        existingMemories: input.existingMemories,
         scenario: "offline",
         apiKey: input.settings.apiKey,
         model: !input.recallSettings.extractModel || input.recallSettings.extractModel === "default-chat-model"
@@ -63,47 +54,35 @@ export async function createOfflineGroupParticipantMemories(input: {
           : input.recallSettings.extractModel,
         apiEndpoint: input.settings.apiEndpoint,
         templateType: participant.archiveTemplateType,
+        existingMemories: [],
         createId: () => createId("mem"),
         currentTime: () => input.now,
         filterItems: filterOfflineExtractedFacts,
-        formatContent,
+        formatContent: (items) => items.join("\n"),
         offlineStoryPolicyInput: input.offlineStoryPolicyInput,
       }, input.extractApi);
-      extracted = result.extractedMemories;
+      extractedClaims = result.acceptedClaims;
       acceptedClaims.push(...result.acceptedClaims);
     } catch (error) {
       console.warn(`多人线下记忆提取失败（${participant.name}），使用安全交接摘要：`, error);
     }
-    if (extracted.length === 0) {
-      fallbackParticipantNames.push(participant.name);
-      const fallback = createOfflineStoryHandoffMemory({
-        story: input.story,
-        sourceMessages: input.sourceMessages,
-        characterId: participant.id,
+    const summary = createConversationSummaryRecord({
+      id: getOfflineStorySummaryId(input.story, participant.id),
+      scope: {
         relationId: relationship.id,
-        characterName: participant.name,
-        id: `offline-group-memory:${input.story.id}:${participant.id}`,
-        timestamp: input.now,
-        marker: "summary",
-        includeConfirmedExcerpts: false,
-      });
-      // Keep the fallback in the same display format as a normal extraction,
-      // including the selected refined/delicate archive template. The facts
-      // remain deterministic and participant-scoped; only their presentation
-      // is adapted here.
-      const fallbackFacts = fallback.content
-        .split("\n")
-        .filter((line) => line.startsWith("- "))
-        .map((line) => line.slice(2).trim())
-        .filter(Boolean);
-      extracted = [{
-        ...fallback,
-        content: formatContent(fallbackFacts.length > 0 ? fallbackFacts : [participant.name], {
-          displayItems: fallbackFacts.length > 0 ? fallbackFacts : [participant.name],
-        }),
-      }];
+        characterId: participant.id,
+        userIdentityId: relationship.userIdentityId,
+        conversationId: relationship.conversationId,
+      },
+      claims: extractedClaims,
+      sourceMessageIds: input.sourceMessages.map((message) => message.id),
+      generatedAt: input.now,
+      generator: "offline-story-participant.v2",
+    });
+    if (summary) summaries.push(summary);
+    else {
+      fallbackParticipantNames.push(participant.name);
     }
-    memories.push(...extracted);
   }
-  return { memories, acceptedClaims, fallbackParticipantNames };
+  return { summaries, acceptedClaims, fallbackParticipantNames };
 }

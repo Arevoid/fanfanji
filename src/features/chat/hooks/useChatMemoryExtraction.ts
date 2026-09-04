@@ -105,7 +105,6 @@ export function useChatMemoryExtraction({
         : 100;
       const archiveBatchSize = Math.min(200, Math.max(10, configuredBatchSize));
       const archiveBatches = splitChatArchiveBatches(unarchivedMessages, archiveBatchSize);
-      let workingMemories = [...(memories || [])];
       let totalExtracted = 0;
       const archiveStats: MemoryArchiveStats = {
         sourceMessageCount: 0,
@@ -188,46 +187,25 @@ export function useChatMemoryExtraction({
               rangeStartAt: messagesToCompress[0]?.timestamp,
               rangeEndAt: messagesToCompress[messagesToCompress.length - 1]?.timestamp,
             });
-            const addition = {
-              id: `group-summary:${recordKey}`,
-              characterId: member.id,
-              relationId: relation.id,
-              userIdentityId: activeIdentityId,
-              conversationId: groupConversationId,
-              content: `【群聊讨论摘要：${activeCharacter.name}】\n${summaryText}`,
-              timestamp: generatedAt,
-              importance: 4,
-              isManual: false,
-              sourceKnowledgeClaimIds: [decision.claim.id],
-            };
-            return [{ claim: decision.claim, summary: summaryRecord, addition }];
+            return [{ claim: decision.claim, summary: summaryRecord }];
           });
           const claims = groupRecords.map((record) => record.claim);
           const summaries = groupRecords.flatMap((record) => record.summary ? [record.summary] : []);
-          const additions = groupRecords.map((record) => record.addition);
           archiveStats.acceptedTruthCount += claims.length;
           archiveStats.summaryCount += summaries.length;
-          archiveStats.compatibilityCount += additions.length;
-          if (additions.length > 0) {
-            const nextMemories = MemoryService.mergeMemories(workingMemories, additions);
+          if (claims.length > 0 || summaries.length > 0) {
             const write = await commitMemoryWriteBundle({
               claims,
               summaries,
-              memories: nextMemories,
               appendClaims: appendKnowledgeClaims,
               appendSummaries: (next) => conversationSummaryRepository.appendMany(next),
-              saveMemories: (next) => {
-                onSaveMemories([...next]);
-                return true;
-              },
             });
-            if (!write.canonicalWritten || !write.summaryWritten || !write.memoriesWritten) {
-              console.error("Group chat memory bundle could not be persisted:", write.error || write.summaryError || write.memoriesError);
+            if (!write.canonicalWritten || !write.summaryWritten) {
+              console.error("Group chat canonical memory bundle could not be persisted:", write.error || write.summaryError);
               return -1;
             }
-            workingMemories = nextMemories;
           }
-          totalExtracted += additions.length;
+          totalExtracted += claims.length;
           await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
         }
         lastArchiveFeedbackRef.current = { ...archiveStats };
@@ -248,7 +226,7 @@ export function useChatMemoryExtraction({
           userIdentityId: extractionScope.userIdentityId,
           conversationId: extractionScope.conversationId,
           recentMessages: messagesToCompress,
-          existingMemories: workingMemories,
+          existingMemories: [],
           scenario: "chat",
           apiKey: settings.apiKey,
           model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
@@ -272,42 +250,27 @@ export function useChatMemoryExtraction({
           rangeStartAt: messagesToCompress[0]?.timestamp,
           rangeEndAt: messagesToCompress[messagesToCompress.length - 1]?.timestamp,
         });
-        const nextMemories = result.extractedMemories.length > 0
-          ? MemoryService.mergeMemories(workingMemories, result.extractedMemories)
-          : undefined;
         const write = await commitMemoryWriteBundle({
           claims: result.acceptedClaims,
           summary: extractedSummary,
-          memories: nextMemories,
           appendClaims: appendKnowledgeClaims,
           appendSummaries: (summaries) => conversationSummaryRepository.appendMany(summaries),
-          saveMemories: (next) => {
-            onSaveMemories([...next]);
-            return true;
-          },
         });
         if (!write.canonicalWritten) {
-          console.error("Knowledge claims could not be persisted; compatibility Memory was not updated.", write.error);
+          console.error("Knowledge claims could not be persisted.", write.error);
           return -1;
         }
         if (!write.summaryWritten) {
           // Do not move the archive marker past a batch whose derived summary
-          // did not persist. The canonical claims/compatibility projection are
-          // idempotent, so a later retry can safely rebuild the missing cache
-          // without deleting the original chat history.
+          // did not persist. A later retry can safely rebuild the canonical
+          // summary without deleting the original chat history.
           console.error("Conversation summary cache could not be persisted:", write.summaryError);
-          return -1;
-        }
-        if (!write.memoriesWritten) {
-          console.error("Compatibility memories could not be persisted:", write.memoriesError);
           return -1;
         }
         archiveStats.acceptedTruthCount += result.acceptedClaims.length;
         archiveStats.summaryCount += write.summaryWritten ? 1 : 0;
-        archiveStats.compatibilityCount += result.extractedMemories.length;
         archiveStats.rejectedCandidateCount += result.rejectedCandidateCount;
-        if (nextMemories) workingMemories = nextMemories;
-        totalExtracted += Math.max(result.extractedMemories.length, result.acceptedClaims.length);
+        totalExtracted += result.acceptedClaims.length;
         await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
       }
       lastArchiveFeedbackRef.current = { ...archiveStats };

@@ -29,6 +29,7 @@ import {
   loadCharacterKnowledgeMigrationState,
   saveCharacterKnowledgeMigrationState,
 } from "../../../core/storage/repositories/characterKnowledgeMigrationRepository";
+import { loadMemories, saveMemories } from "../../../core/storage/repositories/memoryRepository";
 import type { StorageResult, StorageWriteResult } from "../../../core/storage/storageTypes";
 import { migrateLegacyCharacterKnowledge, type LegacyTruthMigrationResult } from "./legacyCharacterKnowledgeMigration";
 
@@ -45,6 +46,7 @@ export interface LegacyCharacterKnowledgeMigrationRunnerResult {
   migration: LegacyTruthMigrationResult;
   error?: string;
   rollbackErrors: string[];
+  legacyMemoryStoreCleared?: boolean;
 }
 
 export interface LegacyCharacterKnowledgeMigrationStores {
@@ -64,6 +66,11 @@ export interface LegacyCharacterKnowledgeMigrationStores {
     load: () => StorageResult<CharacterKnowledgeMigrationState>;
     save: (value: CharacterKnowledgeMigrationState) => StorageWriteResult;
   };
+  /** The old MemoryItem store is cleared only after canonical verification. */
+  legacyMemories?: {
+    load: () => StorageResult<MemoryItem[]>;
+    save: (value: readonly MemoryItem[]) => StorageWriteResult;
+  };
 }
 
 const defaultStores: LegacyCharacterKnowledgeMigrationStores = {
@@ -71,6 +78,7 @@ const defaultStores: LegacyCharacterKnowledgeMigrationStores = {
   summaries: { load: loadConversationSummaries, save: saveConversationSummaries },
   corrections: { load: loadBehaviorCorrections, save: saveBehaviorCorrections },
   state: { load: loadCharacterKnowledgeMigrationState, save: saveCharacterKnowledgeMigrationState },
+  legacyMemories: { load: () => loadMemories([]), save: saveMemories },
 };
 
 const isSafeRead = (result: StorageResult<unknown>): boolean => result.valid || !result.found;
@@ -122,10 +130,11 @@ function restoreState(
 }
 
 /**
- * Persists the additive legacy migration as one logical transaction. Each
+ * Persists the legacy migration and cutover as one logical transaction. Each
  * localStorage key still has its own write, so a snapshot is kept and every
  * previously touched key is restored if a later key or the migration marker
- * fails. The old Memory and compressed-memory fields are never changed.
+ * fails. The old MemoryItem store is cleared only after canonical writes are
+ * ready, and is restored if verification fails.
  *
  * `stores` is injectable so the rollback and verification contract can be
  * tested without relying on a browser or mocking React state.
@@ -161,8 +170,26 @@ export function runLegacyCharacterKnowledgeMigration(
   }
 
   const previousState = stateBefore.value;
+  if (previousState.status === "completed"
+    && previousState.migrationVersion >= CHARACTER_KNOWLEDGE_MIGRATION_VERSION
+    && previousState.legacyMemoryStoreCleared === true) {
+    return { status: "skipped", migration, rollbackErrors: [], legacyMemoryStoreCleared: true };
+  }
+  const legacyMemoryStore = stores.legacyMemories;
+  const legacyBefore: StorageResult<MemoryItem[]> = legacyMemoryStore
+    ? legacyMemoryStore.load()
+    : { value: [...input.memories], found: input.memories.length > 0, valid: true };
+  if (!isSafeRead(legacyBefore)) {
+    return {
+      status: "failed",
+      migration,
+      error: `无法安全读取旧版 MemoryItem 存储（${legacyBefore.error || "invalid"}），已保留原始数据。`,
+      rollbackErrors: [],
+    };
+  }
   const result = migrateLegacyCharacterKnowledge({
     ...input,
+    memories: legacyBefore.value,
     existingClaims: claimsBefore.value,
     existingSummaries: summariesBefore.value,
     existingCorrections: correctionsBefore.value,
@@ -170,15 +197,22 @@ export function runLegacyCharacterKnowledgeMigration(
   const nextClaims = appendToKnowledgeClaims(claimsBefore.value, result.claims);
   const nextSummaries = appendConversationSummaries(summariesBefore.value, result.summaries);
   const nextCorrections = appendBehaviorCorrections(correctionsBefore.value, result.corrections);
-  const nextState = mergeState(previousState, result, input.now, "completed");
+  const nextState = {
+    ...mergeState(previousState, result, input.now, "completed"),
+    legacyMemoryStoreCleared: Boolean(legacyMemoryStore),
+  };
+  const needsCanonicalRewrite = previousState.migrationVersion < CHARACTER_KNOWLEDGE_MIGRATION_VERSION;
   const rollbackErrors: string[] = [];
   const writes: Array<{ label: string; changed: boolean; write: () => StorageWriteResult }> = [
-    { label: "claims", changed: !sameJson(nextClaims, claimsBefore.value), write: () => stores.claims.save(nextClaims) },
-    { label: "summaries", changed: !sameJson(nextSummaries, summariesBefore.value), write: () => stores.summaries.save(nextSummaries) },
-    { label: "corrections", changed: !sameJson(nextCorrections, correctionsBefore.value), write: () => stores.corrections.save(nextCorrections) },
+    { label: "claims", changed: needsCanonicalRewrite || !sameJson(nextClaims, claimsBefore.value), write: () => stores.claims.save(nextClaims) },
+    { label: "summaries", changed: needsCanonicalRewrite || !sameJson(nextSummaries, summariesBefore.value), write: () => stores.summaries.save(nextSummaries) },
+    { label: "corrections", changed: needsCanonicalRewrite || !sameJson(nextCorrections, correctionsBefore.value), write: () => stores.corrections.save(nextCorrections) },
+    ...(legacyMemoryStore && legacyBefore.value.length > 0
+      ? [{ label: "legacy MemoryItem store", changed: true, write: () => legacyMemoryStore.save([]) }]
+      : []),
     { label: "migration state", changed: !sameJson(nextState, previousState), write: () => stores.state.save(nextState) },
   ];
-  const touched = { claims: false, summaries: false, corrections: false };
+  const touched = { claims: false, summaries: false, corrections: false, legacyMemories: false };
 
   for (const entry of writes) {
     if (!entry.changed) continue;
@@ -187,6 +221,7 @@ export function runLegacyCharacterKnowledgeMigration(
       if (touched.claims) restoreStore("claims rollback", stores.claims.save, claimsBefore.value, rollbackErrors);
       if (touched.summaries) restoreStore("summaries rollback", stores.summaries.save, summariesBefore.value, rollbackErrors);
       if (touched.corrections) restoreStore("corrections rollback", stores.corrections.save, correctionsBefore.value, rollbackErrors);
+      if (touched.legacyMemories && legacyMemoryStore) restoreStore("legacy MemoryItem rollback", legacyMemoryStore.save, legacyBefore.value, rollbackErrors);
       if (entry.label === "migration state") restoreState("migration state rollback", stores.state.save, previousState, rollbackErrors);
       const error = `迁移写入 ${entry.label} 失败：${write.error || "write"}`;
       const failedState = mergeState(previousState, result, input.now, "failed", error, false);
@@ -197,12 +232,14 @@ export function runLegacyCharacterKnowledgeMigration(
     if (entry.label === "claims") touched.claims = true;
     if (entry.label === "summaries") touched.summaries = true;
     if (entry.label === "corrections") touched.corrections = true;
+    if (entry.label === "legacy MemoryItem store") touched.legacyMemories = true;
   }
 
   const claimsAfter = stores.claims.load();
   const summariesAfter = stores.summaries.load();
   const correctionsAfter = stores.corrections.load();
   const stateAfter = stores.state.load();
+  const legacyAfter = legacyMemoryStore?.load();
   const verificationFailed = !isSafeRead(claimsAfter)
     || !isSafeRead(summariesAfter)
     || !isSafeRead(correctionsAfter)
@@ -210,11 +247,13 @@ export function runLegacyCharacterKnowledgeMigration(
     || !sameJson(claimsAfter.value, nextClaims)
     || !sameJson(summariesAfter.value, nextSummaries)
     || !sameJson(correctionsAfter.value, nextCorrections)
-    || !sameJson(stateAfter.value, nextState);
+    || !sameJson(stateAfter.value, nextState)
+    || Boolean(legacyAfter && (!isSafeRead(legacyAfter) || legacyAfter.value.length > 0));
   if (verificationFailed) {
     if (touched.claims) restoreStore("claims verification rollback", stores.claims.save, claimsBefore.value, rollbackErrors);
     if (touched.summaries) restoreStore("summaries verification rollback", stores.summaries.save, summariesBefore.value, rollbackErrors);
     if (touched.corrections) restoreStore("corrections verification rollback", stores.corrections.save, correctionsBefore.value, rollbackErrors);
+    if (touched.legacyMemories && legacyMemoryStore) restoreStore("legacy MemoryItem verification rollback", legacyMemoryStore.save, legacyBefore.value, rollbackErrors);
     restoreState("migration state verification rollback", stores.state.save, previousState, rollbackErrors);
     const error = "迁移写入校验失败，已尝试恢复迁移前数据。";
     const failedState = mergeState(previousState, result, input.now, "failed", error, false);
@@ -229,5 +268,6 @@ export function runLegacyCharacterKnowledgeMigration(
       : "skipped",
     migration: result,
     rollbackErrors: [],
+    legacyMemoryStoreCleared: Boolean(legacyMemoryStore),
   };
 }

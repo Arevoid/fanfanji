@@ -7,6 +7,9 @@ import type {
   MusicTrack,
 } from "../../types";
 import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
+import { buildCharacterPhoneLifeContext } from "./characterPhoneLifeContext";
+import { listCharacterPhoneRelationshipNetworkContacts, type CharacterPhoneRelationshipNetworkContact } from "./characterPhoneRelationshipNetwork";
+export { selectCharacterPhoneWorldBookEntries } from "./characterPhoneLifeContext";
 import type {
   CharacterPhoneContact,
   CharacterPhoneMessage,
@@ -17,6 +20,7 @@ import type {
   CharacterPhoneListeningRecord,
   CharacterPhoneThreadMessage,
 } from "../../domain/characterPhone/types";
+import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../../domain/relationshipNetwork/relationshipNetworkTypes";
 
 export interface CharacterPhoneContentInput {
   phone: CharacterPhoneRecord;
@@ -27,6 +31,8 @@ export interface CharacterPhoneContentInput {
   messages: Message[];
   moments: Moment[];
   worldBookEntries: WorldBookEntry[];
+  relationshipNetworkNpcs?: RelationshipNetworkNpc[];
+  relationshipNetworkMaps?: RelationshipNetworkMap[];
   musicTracks?: MusicTrack[];
   now?: number;
 }
@@ -57,12 +63,8 @@ function contactKey(name: string): string {
   return name.trim().toLocaleLowerCase();
 }
 
-function relevantWorldBookEntries(entries: WorldBookEntry[], characterId: string): WorldBookEntry[] {
-  return entries.filter((entry) => entry.isActive !== false
-    && (!entry.characterId
-      || entry.characterId === "global"
-      || entry.characterId === characterId
-      || entry.characterIds?.includes(characterId)));
+function isGenericContactName(name: string): boolean {
+  return /^(?:很多|不少|一些|若干|几个|几位|一群|一堆|各种|多人|无|没有|未知|不详)$/.test(name.trim());
 }
 
 function buildContext(character: Character, entries: WorldBookEntry[]): string {
@@ -70,16 +72,8 @@ function buildContext(character: Character, entries: WorldBookEntry[]): string {
     character.name,
     character.personality,
     character.backstory,
-    ...relevantWorldBookEntries(entries, character.id).flatMap((entry) => [entry.title, entry.content]),
+    ...entries.map((entry) => entry.content),
   ].filter(Boolean).join(" ").toLowerCase();
-}
-
-function buildRawContext(character: Character, entries: WorldBookEntry[]): string {
-  return [
-    character.personality,
-    character.backstory,
-    ...relevantWorldBookEntries(entries, character.id).flatMap((entry) => [entry.title, entry.content]),
-  ].filter(Boolean).join("\n");
 }
 
 function toCharacterMessage(message: Message, phoneId: string, contactId: string): CharacterPhoneThreadMessage {
@@ -96,9 +90,13 @@ function toCharacterMessage(message: Message, phoneId: string, contactId: string
 function isCurrentUserMessage(
   message: Message,
   characterId: string,
-  relationIds: Set<string>,
+  relations: CharacterRelationship[],
 ): boolean {
-  return message.characterId === characterId && (!message.relationId || relationIds.has(message.relationId));
+  if (message.characterId !== characterId) return false;
+  const relationIds = new Set(relations.map((relation) => relation.id));
+  if (message.relationId) return relationIds.has(message.relationId);
+  const conversationIds = new Set(relations.map((relation) => relation.conversationId).filter(Boolean));
+  return Boolean(message.conversationId && conversationIds.has(message.conversationId));
 }
 
 function makeUserContact(phone: CharacterPhoneRecord, identity?: UserIdentity): CharacterPhoneContact {
@@ -106,10 +104,12 @@ function makeUserContact(phone: CharacterPhoneRecord, identity?: UserIdentity): 
     id: scopedId(phone.id, "contact", "user"),
     name: identity?.name?.trim() || "用户",
     relation: "与角色聊天",
+    kind: "user",
     isLongTerm: true,
     isNpc: false,
     avatar: identity?.avatar,
     source: "user",
+    sourceRefs: identity?.id ? [{ kind: "character", id: identity.id }] : [],
   };
 }
 
@@ -118,21 +118,42 @@ function buildContextContacts(
   character: Character,
   entries: WorldBookEntry[],
 ): CharacterPhoneContact[] {
-  const rawContext = buildRawContext(character, entries);
-  const candidates: Array<{ name: string; relation: string }> = [];
-  const addCandidate = (name: string, relation: string) => {
+  const candidates: Array<{
+    name: string;
+    relation: string;
+    kind: "npc" | "group";
+    memberNames?: string[];
+    sourceRef: { kind: "character" | "worldbook"; id: string };
+  }> = [];
+  const addCandidate = (
+    name: string,
+    relation: string,
+    sourceRef: { kind: "character" | "worldbook"; id: string },
+    kind: "npc" | "group" = "npc",
+    memberNames?: string[],
+  ) => {
     const normalizedName = name.replace(/[“”‘’"']/g, "").trim();
     if (normalizedName.length < 2 || normalizedName.length > 16) return;
+    if (isGenericContactName(normalizedName)) return;
     if (normalizedName === character.name || candidates.some((candidate) => candidate.name === normalizedName)) return;
-    candidates.push({ name: normalizedName, relation });
+    candidates.push({ name: normalizedName, relation, sourceRef, kind, memberNames });
   };
-  const relationPattern = /(?:家人|父亲|母亲|爸爸|妈妈|哥哥|姐姐|弟弟|妹妹|朋友|好友|同事|同学|老师|上司|邻居|前任|恋人|队友|搭档)\s*[：:]\s*([^\n。；;,，]+)/g;
-  for (const match of rawContext.matchAll(relationPattern)) {
-    const label = match[0].split(/[：:]/)[0]?.trim() || "联系人";
-    match[1].split(/[、，,及和与]/).forEach((name) => addCandidate(name, label));
-  }
-  const describedRelationPattern = /([A-Za-z\u4e00-\u9fff·]{2,16})\s*(?:是|为)[^\n。；;]{0,12}(家人|朋友|好友|同事|同学|老师|上司|邻居|前任|恋人|队友|搭档)/g;
-  for (const match of rawContext.matchAll(describedRelationPattern)) addCandidate(match[1], match[2]);
+  const parseSource = (rawContext: string, sourceRef: { kind: "character" | "worldbook"; id: string }) => {
+    const relationPattern = /(?:家人|父亲|母亲|爸爸|妈妈|哥哥|姐姐|弟弟|妹妹|朋友|好友|同事|同学|老师|上司|邻居|前任|恋人|队友|搭档)\s*[：:]\s*([^\n。；;,，]+)/g;
+    for (const match of rawContext.matchAll(relationPattern)) {
+      const label = match[0].split(/[：:]/)[0]?.trim() || "联系人";
+      match[1].split(/[、，,及和与]/).forEach((name) => addCandidate(name, label, sourceRef));
+    }
+    const describedRelationPattern = /([A-Za-z\u4e00-\u9fff·]{2,16})\s*(?:是|为)[^\n。；;]{0,12}(家人|朋友|好友|同事|同学|老师|上司|邻居|前任|恋人|队友|搭档)/g;
+    for (const match of rawContext.matchAll(describedRelationPattern)) addCandidate(match[1], match[2], sourceRef);
+    const groupPattern = /(?:群聊|群组|家庭群|家人群|工作群|朋友群|同事群|班级群)\s*[：:]\s*([^\n（(。；;]{2,24})(?:[（(](?:成员[：:]?)?([^)）]+)[)）])?/g;
+    for (const match of rawContext.matchAll(groupPattern)) {
+      const memberNames = match[2]?.split(/[、，,及和与]/).map((name) => name.trim()).filter(Boolean).slice(0, 20);
+      addCandidate(match[1], "群聊", sourceRef, "group", memberNames);
+    }
+  };
+  parseSource(`${character.personality || ""}\n${character.backstory || ""}`, { kind: "character", id: character.id });
+  entries.forEach((entry) => parseSource(entry.content, { kind: "worldbook", id: entry.id }));
 
   const existingNames = new Set((phone.contacts ?? []).map((contact) => contactKey(contact.name)));
   return candidates
@@ -141,21 +162,70 @@ function buildContextContacts(
       id: scopedId(phone.id, "contact", `context-${candidate.name}`),
       name: candidate.name,
       relation: candidate.relation,
+      kind: candidate.kind,
       isLongTerm: index === 0,
       isNpc: true,
       source: "generated" as const,
+      memberNames: candidate.memberNames,
+      sourceRefs: [candidate.sourceRef],
     }));
 }
 
 function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[] {
   const userContact = makeUserContact(input.phone, input.activeIdentity);
+  const networkContacts = listCharacterPhoneRelationshipNetworkContacts({
+    character: input.character,
+    ownerIdentityId: input.phone.ownerIdentityId,
+    characters: input.characters,
+    npcs: input.relationshipNetworkNpcs || [],
+    maps: input.relationshipNetworkMaps || [],
+  });
+  const networkByName = new Map(networkContacts.map((contact) => [contact.npc.name.trim().toLocaleLowerCase(), contact]));
+  const toNetworkContact = (network: CharacterPhoneRelationshipNetworkContact): CharacterPhoneContact => ({
+    id: scopedId(input.phone.id, "contact", `network-${network.npc.id}`),
+    name: network.npc.name,
+    relation: network.relationLabels.length > 0
+      ? `关系网：${network.relationLabels.join("、")}`
+      : "关系网联系人",
+    kind: "npc",
+    isLongTerm: true,
+    isNpc: true,
+    avatar: network.npc.avatar,
+    source: "linked",
+    linkedCharacterId: network.linkedCharacterId,
+    relationshipNetworkNpcId: network.npc.id,
+    sourceRefs: [{ kind: "relationship-network", id: network.npc.id }],
+    remark: network.npc.role,
+  });
   // Keep removed contacts in the record. They are a soft-unlink: the contact
   // disappears from the visible inbox but its old thread and deletion fact
   // must remain available to the character's later reactions.
   const existing = input.phone.contacts ?? [];
   const normalizedExisting = existing
     .filter((contact) => contact.id !== userContact.id)
-    .map((contact) => ({ ...contact, source: contact.source ?? (contact.isNpc ? "linked" : "user") }));
+    .filter((contact) => !isGenericContactName(contact.name))
+    .map((contact) => {
+      const network = networkByName.get(contactKey(contact.name));
+      if (!network) {
+        return {
+          ...contact,
+          source: contact.source ?? (contact.isNpc ? "linked" : "user"),
+          kind: contact.kind ?? (contact.source === "user" || !contact.isNpc ? "user" : contact.source === "linked" ? "character" : "npc"),
+        };
+      }
+      return {
+        ...contact,
+        relation: network.relationLabels.length > 0 ? `关系网：${network.relationLabels.join("、")}` : contact.relation,
+        kind: "npc" as const,
+        isNpc: true,
+        source: "linked" as const,
+        avatar: network.npc.avatar || contact.avatar,
+        linkedCharacterId: network.linkedCharacterId || contact.linkedCharacterId,
+        relationshipNetworkNpcId: network.npc.id,
+        sourceRefs: [{ kind: "relationship-network" as const, id: network.npc.id }, ...(contact.sourceRefs || [])],
+        remark: network.npc.role || contact.remark,
+      };
+    });
   const linkedIds = new Set(
     input.characters
       .filter((candidate) => candidate.id !== input.character.id && !candidate.isGroupChat)
@@ -173,13 +243,19 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
       id: scopedId(input.phone.id, "contact", `linked-${candidate.id}`),
       name: candidate.name,
       relation: "与角色有关联的联系人",
+      kind: "character" as const,
       isLongTerm: true,
       isNpc: true,
       avatar: candidate.avatar,
       source: "linked" as const,
+      linkedCharacterId: candidate.id,
+      sourceRefs: [{ kind: "character" as const, id: candidate.id }],
     }));
+  const networkLinkedContacts = networkContacts
+    .filter((network) => !normalizedExisting.some((contact) => contactKey(contact.name) === contactKey(network.npc.name)))
+    .map(toNetworkContact);
   const generated = buildContextContacts(input.phone, input.character, input.worldBookEntries);
-  return [userContact, ...normalizedExisting, ...linkedContacts, ...generated];
+  return [userContact, ...normalizedExisting, ...linkedContacts, ...networkLinkedContacts, ...generated];
 }
 
 function syncUserChat(
@@ -189,9 +265,8 @@ function syncUserChat(
   messages: Message[],
   relations: CharacterRelationship[],
 ): { threadMessages: CharacterPhoneThreadMessage[]; lastMessageId?: string } {
-  const relationIds = new Set(relations.filter((relation) => relation.characterId === character.id).map((relation) => relation.id));
   const sourceMessages = messages
-    .filter((message) => isCurrentUserMessage(message, character.id, relationIds))
+    .filter((message) => isCurrentUserMessage(message, character.id, relations))
     // Phone-generated notifications are persisted in the main chat for
     // awareness reactions, but they are not part of the user's real thread
     // mirror and must not be copied back as ordinary chat history.
@@ -202,10 +277,13 @@ function syncUserChat(
   const existingSynced = (phone.threadMessages ?? []).filter((message) => message.contactId === userContact.id && message.sourceMessageId);
   const bySourceId = new Map(existingSynced.map((message) => [message.sourceMessageId, message]));
   const merged = synced.map((message) => bySourceId.get(message.sourceMessageId || "") || message);
-  const fallback = phone.threadMessages?.some((message) => message.contactId === userContact.id)
-    ? phone.threadMessages.filter((message) => message.contactId === userContact.id)
-    : [];
-  const threadMessages = sourceMessages.length > 0 ? [...existing, ...merged] : [...existing, ...fallback];
+  // The user conversation is a strict mirror of the scoped main-chat
+  // messages. Keeping a phone-local fallback when the source thread is empty
+  // makes stale/generated messages look like real conversation history in the
+  // role phone even though the user's phone has no corresponding messages.
+  // User-authored role-phone messages are written back to the main chat with a
+  // sourceMessageId, so they are retained whenever their source still exists.
+  const threadMessages = [...existing, ...merged];
   return {
     threadMessages: threadMessages.sort((left, right) => left.timestamp - right.timestamp),
     lastMessageId: sourceMessages.at(-1)?.id,
@@ -255,15 +333,23 @@ function syncMoments(
   activeIdentity: UserIdentity | undefined,
   moments: Moment[],
   contacts: CharacterPhoneContact[],
+  relationshipNetworkContacts: CharacterPhoneRelationshipNetworkContact[],
 ): { posts: CharacterPhonePost[]; lastMomentId?: string } {
   const contactNames = new Set(contacts.filter((contact) => contact.isNpc).map((contact) => contact.name));
+  const networkNpcIds = new Set(relationshipNetworkContacts.map((contact) => contact.npc.id));
+  const networkCharacterIds = new Set(relationshipNetworkContacts.map((contact) => contact.linkedCharacterId).filter(Boolean));
   const relatedCharacterIds = new Set(
     characters.filter((candidate) => contactNames.has(candidate.name)).map((candidate) => candidate.id),
   );
   const relevant = moments.filter((moment) => {
+    const belongsToOwner = (moment.ownerIdentityId || "identity-1") === phone.ownerIdentityId;
+    if (!belongsToOwner) return false;
     if (moment.characterId === character.id) return true;
-    if (!moment.characterId) return !activeIdentity?.id || !moment.ownerIdentityId || moment.ownerIdentityId === activeIdentity.id;
-    return relatedCharacterIds.has(moment.characterId) || contactNames.has(moment.authorName);
+    if (!moment.characterId) return !activeIdentity?.id || moment.ownerIdentityId === activeIdentity.id;
+    return Boolean(moment.relationshipNetworkNpcId && networkNpcIds.has(moment.relationshipNetworkNpcId))
+      || relatedCharacterIds.has(moment.characterId)
+      || networkCharacterIds.has(moment.characterId)
+      || contactNames.has(moment.authorName);
   });
   const sourcePosts = relevant.map((moment) => {
     const isUserPost = !moment.characterId;
@@ -421,9 +507,11 @@ export function normalizeCharacterPhoneBrowserHistory(entries: CharacterPhoneRec
     .filter((entry) => {
       // Keep user-created searches, including repeated searches. Older
       // generated runs could append the same title repeatedly, so collapse
-      // only exact duplicates from generated history.
+      // duplicates from generated history after conservative whitespace/case
+      // normalization. User-created searches remain untouched.
       if (entry.id.startsWith("phone-search-user-")) return true;
-      const key = `${entry.query}|${entry.title}`;
+      const normalize = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+      const key = `${normalize(entry.query)}|${normalize(entry.title)}`;
       if (seenGenerated.has(key)) return false;
       seenGenerated.add(key);
       return true;
@@ -450,15 +538,37 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
   const now = input.now ?? Date.now();
   const sourcePhone = removeLegacyPresetContent(input.phone);
   const seeded = Boolean(sourcePhone.contentSeededAt);
-  const context = buildContext(input.character, input.worldBookEntries);
-  const scopedInput = { ...input, phone: sourcePhone };
+  const relationshipNetworkContacts = listCharacterPhoneRelationshipNetworkContacts({
+    character: input.character,
+    ownerIdentityId: sourcePhone.ownerIdentityId,
+    characters: input.characters,
+    npcs: input.relationshipNetworkNpcs || [],
+    maps: input.relationshipNetworkMaps || [],
+  });
+  const lifeContext = buildCharacterPhoneLifeContext({
+    phone: sourcePhone,
+    character: input.character,
+    activeIdentity: input.activeIdentity,
+    relationships: input.relationships,
+    messages: input.messages,
+    moments: input.moments,
+    worldBookEntries: input.worldBookEntries,
+    relationshipNetworkContacts,
+  });
+  const context = buildContext(input.character, lifeContext.worldBookEntries);
+  const scopedInput = {
+    ...input,
+    phone: sourcePhone,
+    activeIdentity: lifeContext.activeIdentity,
+    relationships: lifeContext.relationships,
+    messages: lifeContext.messages,
+    moments: lifeContext.moments,
+    worldBookEntries: lifeContext.worldBookEntries,
+  };
   const contacts = syncContacts(scopedInput);
   const userContact = contacts[0];
-  const relationIds = input.relationships
-    .filter((relation) => relation.userIdentityId === sourcePhone.ownerIdentityId && relation.characterId === input.character.id)
-    .map((relation) => relation.id);
-  const chat = syncUserChat(sourcePhone, input.character, userContact, input.messages, input.relationships.filter((relation) => relationIds.includes(relation.id)));
-  const moments = syncMoments(sourcePhone, input.character, input.characters, input.activeIdentity, input.moments, contacts);
+  const chat = syncUserChat(sourcePhone, input.character, userContact, lifeContext.messages, lifeContext.relationships);
+  const moments = syncMoments(sourcePhone, input.character, input.characters, lifeContext.activeIdentity, lifeContext.moments, contacts, relationshipNetworkContacts);
   const music = syncMusic(sourcePhone, input.musicTracks, context);
 
   let next: CharacterPhoneRecord = {
@@ -475,7 +585,7 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
     galleryItems: normalizeGalleryItems(sourcePhone.galleryItems),
     scheduleItems: normalizeScheduleItems(sourcePhone.scheduleItems),
     updatedAt: sourcePhone.updatedAt,
-    lastSyncedMessageId: chat.lastMessageId ?? sourcePhone.lastSyncedMessageId,
+    lastSyncedMessageId: chat.lastMessageId,
     lastSyncedMomentId: moments.lastMomentId ?? sourcePhone.lastSyncedMomentId,
   };
 

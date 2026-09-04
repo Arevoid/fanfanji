@@ -39,11 +39,14 @@ const sent = appendCharacterPhoneThreadMessage({
   operatedByUser: true,
   character,
   now: 100,
+  sourceMessageId: "main-chat-message-1",
 });
+assert.equal(sent.threadMessages.length, 1, "sending only records the action that actually happened");
 assert.equal(sent.threadMessages[0].operatedByUser, true);
-assert.ok(sent.threadMessages[0].promise?.summary.includes("答应周叔"));
-assert.equal(sent.todos?.[0]?.source, "chat");
-assert.match(sent.threadMessages[1].content, /怪怪的/);
+assert.equal(sent.threadMessages[0].sourceMessageId, "main-chat-message-1");
+assert.equal(sent.threadMessages[0].promise, undefined, "does not infer a promise from wording alone");
+assert.equal(sent.todos?.length, 0, "does not invent a todo from an outgoing message");
+assert.match(sent.activities[0]?.label || "", /联系人/);
 
 const discovered = discoverCharacterPhoneActions({
   ...sent,
@@ -74,4 +77,23 @@ const repeatedDiscovery = discoverCharacterPhoneActions({
   }],
 }, character, 301);
 assert.equal(repeatedDiscovery.messages.length, discovered.messages.length, "does not append an identical discovery alert twice");
+
+const notYetReopened = discoverCharacterPhoneActions({
+  ...phone,
+  phoneOpenCount: 8,
+  actionLog: [{
+    id: "action-after-many-opens",
+    kind: "contact_removed",
+    app: "chat",
+    detail: "刚刚删除联系人",
+    timestamp: 295,
+    actor: "user",
+    detectability: "likely",
+    discoveryAfterOpens: 2,
+    phoneOpenCountAtAction: 8,
+  }],
+}, character, 300);
+assert.equal(notYetReopened.actionLog?.[0]?.discovered, undefined, "counts opens after the action instead of lifetime opens");
+const reopenedTwice = discoverCharacterPhoneActions({ ...notYetReopened, phoneOpenCount: 10 }, character, 301);
+assert.equal(reopenedTwice.actionLog?.[0]?.discovered, true);
 console.log("character phone interaction tests passed");

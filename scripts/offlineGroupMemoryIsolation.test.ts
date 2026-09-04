@@ -2,7 +2,6 @@ import { strict as assert } from "node:assert";
 import { buildOfflineMemberKnowledgeSnapshots } from "../src/features/offline/services/offlineMemberMemorySnapshot";
 import { createOfflineGroupParticipantMemories } from "../src/features/offline/services/offlineGroupMemorySync";
 import { canSyncOfflineStoryToMemory } from "../src/domain/offlineStory/offlineStoryFactPolicy";
-import { hasOfflineStorySummary } from "../src/domain/memory/offlineMemorySync";
 import type { Character, MemoryItem, Message, OfflineStory } from "../src/types";
 import type { CharacterRelationship } from "../src/domain/relationship/characterRelationship";
 
@@ -43,16 +42,11 @@ const syncedResult = await createOfflineGroupParticipantMemories({
   activeIdentityId: "identity-1", sourceMessages, userName: "用户", now: 10,
   settings: { apiKey: "", selectedModel: "test-model", apiEndpoint: "" } as any,
   recallSettings: { extractModel: "test-model" } as any,
-  existingMemories: memories,
   extractApi: async () => ({ candidates: [] }),
 });
-const synced = syncedResult.memories;
-assert.equal(synced.length, 2);
-assert.deepEqual(synced.map((memory) => memory.relationId).sort(), ["ra", "rb"]);
-assert.equal(synced.every((memory) => memory.content.includes("offline-story:story-g:summary")), true);
-assert.equal(synced.every((memory) => !memory.content.includes("我推开门")), true);
+const synced = syncedResult.summaries;
+assert.equal(synced.length, 0, "no low-information extraction result creates no compatibility memory or empty summary");
 assert.deepEqual(syncedResult.fallbackParticipantNames.sort(), ["A", "B"]);
-assert.equal(hasOfflineStorySummary(story, synced), true);
 
 let activeRequests = 0;
 let maxActiveRequests = 0;
@@ -61,7 +55,6 @@ const sequentialResult = await createOfflineGroupParticipantMemories({
   activeIdentityId: "identity-1", sourceMessages, userName: "用户", now: 11,
   settings: { apiKey: "", selectedModel: "test-model", apiEndpoint: "" } as any,
   recallSettings: { extractModel: "test-model" } as any,
-  existingMemories: [],
   extractApi: async () => {
     activeRequests += 1;
     maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
@@ -71,6 +64,6 @@ const sequentialResult = await createOfflineGroupParticipantMemories({
   },
 });
 assert.equal(maxActiveRequests, 1);
-assert.equal(sequentialResult.memories.length, 2);
+assert.equal(sequentialResult.summaries.length, 0);
 
 console.log("PASS group offline snapshots and synced memories stay participant-scoped");

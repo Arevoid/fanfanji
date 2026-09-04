@@ -27,7 +27,7 @@ const cinemaSource = read("src/components/AppCinema.tsx");
 assert.match(cinemaSource, /sourceApp: "cinema"/);
 assert.match(cinemaSource, /userIdentityId: relation\.userIdentityId/);
 assert.match(cinemaSource, /conversationId: relation\.conversationId/);
-assert.match(cinemaSource, /sourceCinemaId/);
+assert.match(cinemaSource, /sourceRecordId/);
 
 const memorySource = read("src/components/AppMemory.tsx");
 assert.match(memorySource, /sourceApp: "memory"/);

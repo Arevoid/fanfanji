@@ -1,4 +1,5 @@
 import type { MemoryItem, Message, OfflineStory } from "../../types";
+import type { ConversationSummaryRecord } from "../characterKnowledge/characterKnowledgeTypes";
 import { serializeMessageContentForPrompt } from "../../features/chat/prompts/messagePromptSerializer";
 
 export function getOfflineStorySyncMarker(story: OfflineStory): string {
@@ -9,6 +10,10 @@ export function getOfflineStorySyncMarker(story: OfflineStory): string {
 /** A single canonical marker lets later syncs replace, rather than append to, a story handoff. */
 export function getOfflineStorySummaryMarker(story: OfflineStory): string {
   return `offline-story:${story.id}:summary`;
+}
+
+export function getOfflineStorySummaryId(story: OfflineStory, participantCharacterId = story.characterId): string {
+  return `offline-story-summary:${story.id}:${participantCharacterId}`;
 }
 
 export function getOfflineStoryMarkerPrefix(story: OfflineStory): string {
@@ -74,6 +79,37 @@ export function selectFreshOfflineHandoffMemory(input: {
     .sort((left, right) => right.timestamp - left.timestamp)[0];
 }
 
+/** Canonical equivalent of hasOfflineStorySummary; used after MemoryItem cutover. */
+export function hasOfflineStoryCanonicalSummary(
+  story: OfflineStory,
+  summaries: readonly ConversationSummaryRecord[],
+): boolean {
+  const participantIds = Array.from(new Set((story.characterIds || [story.characterId]).filter(Boolean)));
+  const requiredIds = story.relationId ? [story.characterId] : participantIds.filter((id) => id !== story.characterId);
+  return requiredIds.length > 0 && requiredIds.every((characterId) => summaries.some((summary) =>
+    summary.id === getOfflineStorySummaryId(story, characterId)
+      && summary.status === "active",
+  ));
+}
+
+/** Builds an ephemeral prompt adapter from a canonical summary; never persists a MemoryItem. */
+export function createOfflineStorySummaryMemory(
+  story: OfflineStory,
+  summary: ConversationSummaryRecord,
+): MemoryItem {
+  return {
+    id: summary.id,
+    characterId: summary.characterId,
+    relationId: summary.relationId,
+    userIdentityId: summary.userIdentityId,
+    conversationId: summary.conversationId,
+    content: `【线下剧本《${story.title}》线上交接】\n[${getOfflineStorySummaryMarker(story)}]\n${summary.summary}`,
+    timestamp: summary.generatedAt,
+    importance: 4,
+    isManual: false,
+  };
+}
+
 /**
  * Selects a confirmed offline event that chronologically occurred after the
  * previous dated online session and before the current message. Unlike
@@ -83,6 +119,7 @@ export function selectFreshOfflineHandoffMemory(input: {
 export function selectInterveningOfflineHandoff(input: {
   stories: readonly OfflineStory[];
   memories: readonly MemoryItem[];
+  summaries?: readonly ConversationSummaryRecord[];
   relationId?: string;
   groupId?: string;
   after?: number;
@@ -106,10 +143,15 @@ export function selectInterveningOfflineHandoff(input: {
     }))
     .filter(({ occurredAt }) => occurredAt > after && occurredAt <= before)
     .sort((left, right) => right.occurredAt - left.occurredAt)) {
+    const canonicalSummary = input.summaries
+      ?.filter((summary) => summary.status === "active")
+      .filter((summary) => summary.id === getOfflineStorySummaryId(story.story, summary.characterId))
+      .sort((left, right) => right.generatedAt - left.generatedAt)[0];
     const memory = input.memories
       .filter((candidate) => isOfflineStoryHandoffMemory(candidate, story.story))
       .filter((candidate) => candidate.content.includes(getOfflineStorySummaryMarker(story.story)))
-      .sort((left, right) => right.timestamp - left.timestamp)[0];
+      .sort((left, right) => right.timestamp - left.timestamp)[0]
+      || (canonicalSummary ? createOfflineStorySummaryMemory(story.story, canonicalSummary) : undefined);
     if (memory) return { ...story, memory };
   }
   return undefined;

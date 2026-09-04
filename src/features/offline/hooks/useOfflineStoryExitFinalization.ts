@@ -28,16 +28,10 @@ export function useOfflineStoryExitFinalization({
   const finalizeStoryBeforeLeaving = async (story: OfflineStory): Promise<OfflineStory> => {
     let completedStory = story;
     if (shouldSyncStoryMemory(story)) {
-      const sourceMessages = getOfflineHandoffSourceMessagesForReturn(story);
-      void handleSyncMemoryToBrain(story, { userConfirmed: true, syncIntent: "automatic_end" }).then((syncedStory) => {
-        const syncedWithHandoff = createPendingOfflineHandoff({
-          story: syncedStory,
-          sourceMessages,
-          now: Date.now(),
-        });
-        if (activeStoryRef.current?.id === syncedWithHandoff.id) saveActiveStorySnapshot(syncedWithHandoff);
-        else void onSaveOfflineStory(syncedWithHandoff);
-      });
+      // The exit path is the single automatic sync owner. Await it before
+      // creating the handoff so a second exit cannot race the first write and
+      // append another copy of the same offline memory.
+      completedStory = await handleSyncMemoryToBrain(story, { userConfirmed: true, syncIntent: "automatic_end" });
     }
     const handoffCreatedAt = Date.now();
     if (!completedStory.archivedAt) {

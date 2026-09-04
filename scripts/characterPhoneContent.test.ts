@@ -8,7 +8,7 @@ const characterA: Character = {
   name: "阿宁",
   avatar: "🌙",
   personality: "安静、克制，喜欢夜晚散步。",
-  backstory: "在海边城市工作，和林晓是旧识。",
+  backstory: "在海边城市工作，和林晓是旧识。舍友/朋友：很多，但都是泛泛之交。",
 };
 const characterB: Character = {
   id: "character-b",
@@ -45,11 +45,14 @@ const worldBook: WorldBookEntry[] = [{
 const messages: Message[] = [
   { id: "message-a", characterId: characterA.id, relationId: relation.id, sender: "user", content: "今晚还散步吗？", timestamp: 10 },
   { id: "message-b", characterId: characterB.id, sender: "user", content: "另一条关系的消息", timestamp: 11 },
+  { id: "message-unscoped", characterId: characterA.id, sender: "user", content: "没有归属的旧消息", timestamp: 12 },
+  { id: "message-other-relation", characterId: characterA.id, relationId: "relation-other", sender: "user", content: "其他身份的关系消息", timestamp: 13 },
 ];
 const moments: Moment[] = [
-  { id: "moment-a", characterId: characterA.id, authorName: characterA.name, authorAvatar: characterA.avatar, content: "海边的风很大。", timestamp: 20, likes: [], comments: [] },
-  { id: "moment-b", characterId: characterB.id, authorName: characterB.name, authorAvatar: characterB.avatar, content: "不属于阿宁的内容。", timestamp: 21, likes: [], comments: [] },
+  { id: "moment-a", ownerIdentityId: identity.id, characterId: characterA.id, authorName: characterA.name, authorAvatar: characterA.avatar, content: "海边的风很大。", timestamp: 20, likes: [], comments: [] },
+  { id: "moment-b", ownerIdentityId: identity.id, characterId: characterB.id, authorName: characterB.name, authorAvatar: characterB.avatar, content: "不属于阿宁的内容。", timestamp: 21, likes: [], comments: [] },
   { id: "moment-user", ownerIdentityId: identity.id, authorName: identity.name, authorAvatar: identity.avatar, content: "用户公开发布的内容。", timestamp: 22, likes: [], comments: [] },
+  { id: "moment-other-owner", ownerIdentityId: "identity-other", characterId: characterA.id, authorName: characterA.name, authorAvatar: characterA.avatar, content: "其他身份下的角色动态。", timestamp: 23, likes: [], comments: [] },
 ];
 
 function emptyPhone(id: string, characterId: string): CharacterPhoneRecord {
@@ -100,12 +103,16 @@ const phoneB = ensureCharacterPhoneContent({
 
 assert.equal(phoneA.contacts[0].name, identity.name);
 assert.ok(phoneA.contacts.some((contact) => contact.name === "林晓"));
+assert.ok(!phoneA.contacts.some((contact) => contact.name === "很多"), "does not treat quantity words as contact names");
 assert.ok(!phoneA.contacts.some((contact) => contact.name === "周岚"), "does not add hard-coded contacts without context");
 assert.ok(phoneA.threadMessages.some((message) => message.sourceMessageId === "message-a"));
 assert.ok(!phoneA.threadMessages.some((message) => message.content.includes("另一条关系")));
+assert.ok(!phoneA.threadMessages.some((message) => message.content.includes("没有归属")));
+assert.ok(!phoneA.threadMessages.some((message) => message.content.includes("其他身份")));
 assert.ok(phoneA.posts.some((post) => post.sourceMomentId === "moment-a"));
 assert.ok(phoneA.posts.some((post) => post.sourceMomentId === "moment-user"));
 assert.ok(!phoneA.posts.some((post) => post.sourceMomentId === "moment-b"));
+assert.ok(!phoneA.posts.some((post) => post.sourceMomentId === "moment-other-owner"));
 assert.ok(phoneA.contentSeededAt);
 assert.notEqual(phoneA.posts.find((post) => post.sourceMomentId === "moment-a")?.id, phoneB.posts.find((post) => post.sourceMomentId === "moment-b")?.id);
 assert.equal(phoneA.diaryEntries.length, 0, "does not seed a synthetic diary before a life event is generated");
@@ -113,6 +120,40 @@ assert.equal(phoneA.scheduleItems.length, 0, "does not seed a synthetic schedule
 assert.equal(phoneA.musicTracks?.length, 0, "does not seed a synthetic music library without a user source");
 assert.equal(phoneA.listeningHistory?.length, 0, "does not seed synthetic listening history without a user source");
 assert.equal(phoneA.musicPlaylists?.length, 0, "does not seed a synthetic playlist without a user source");
+
+const staleUserThreadPhone = emptyPhone("phone-stale-user-thread", characterA.id);
+staleUserThreadPhone.contacts = [{
+  id: "character-phone:phone-stale-user-thread:contact:user",
+  name: identity.name,
+  relation: "与角色聊天",
+  kind: "user",
+  isLongTerm: true,
+  isNpc: false,
+  source: "user",
+}];
+staleUserThreadPhone.threadMessages = [{
+  id: "stale-user-thread-message",
+  contactId: "character-phone:phone-stale-user-thread:contact:user",
+  sender: "contact",
+  content: "这条消息只存在于角色手机旧数据中。",
+  timestamp: 30,
+}];
+const reconciledStaleUserThread = ensureCharacterPhoneContent({
+  phone: staleUserThreadPhone,
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages: [],
+  moments: [],
+  worldBookEntries: worldBook,
+  now: 100,
+});
+assert.equal(
+  reconciledStaleUserThread.threadMessages.some((message) => message.id === "stale-user-thread-message"),
+  false,
+  "role-phone user thread strictly mirrors the main chat and drops stale local messages",
+);
 
 const duplicatePhoneAlert = {
   id: "phone-discovery-action-2",
@@ -242,5 +283,45 @@ const normalizedMusicPhone = ensureCharacterPhoneContent({
 });
 assert.equal(normalizedMusicPhone.musicTracks?.[0]?.id, `${repeatedMusicPrefix}track-1`, "music IDs stay bounded across repeated phone syncs");
 assert.equal(normalizedMusicPhone.musicPlaylists?.[0]?.trackIds[0], `${repeatedMusicPrefix}track-1`);
+
+const scopedWorldBookPhone = ensureCharacterPhoneContent({
+  phone: emptyPhone("phone-worldbook-scope", characterA.id),
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages,
+  moments,
+  worldBookEntries: [
+    ...worldBook,
+    {
+      id: "world-correct-relation",
+      title: "当前关系联系人",
+      category: "人物",
+      content: "朋友：顾南\n家庭群：我们一家（成员：妈妈、哥哥）",
+      timestamp: 2,
+      scope: { kind: "relationship", relationId: relation.id, characterId: characterA.id, userIdentityId: identity.id },
+      visibility: "private",
+      isActive: true,
+    },
+    {
+      id: "world-other-identity",
+      title: "其他身份联系人",
+      category: "人物",
+      content: "朋友：越界人物",
+      timestamp: 3,
+      scope: { kind: "identity", userIdentityId: "identity-other" },
+      visibility: "private",
+      isActive: true,
+    },
+  ],
+  now: 600,
+});
+assert.ok(scopedWorldBookPhone.contacts.some((contact) => contact.name === "顾南"), "uses the current relationship world book");
+assert.ok(!scopedWorldBookPhone.contacts.some((contact) => contact.name === "越界人物"), "rejects another identity's world book");
+const familyGroup = scopedWorldBookPhone.contacts.find((contact) => contact.name === "我们一家");
+assert.equal(familyGroup?.kind, "group", "extracts an explicitly described group chat");
+assert.deepEqual(familyGroup?.memberNames, ["妈妈", "哥哥"]);
+assert.deepEqual(familyGroup?.sourceRefs, [{ kind: "worldbook", id: "world-correct-relation" }]);
 
 console.log("character phone content isolation tests passed");

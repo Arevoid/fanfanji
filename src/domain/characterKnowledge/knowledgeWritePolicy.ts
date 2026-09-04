@@ -23,6 +23,8 @@ const TRUTH_STATUSES = new Set<TruthStatus>(["asserted", "confirmed", "inferred"
 const TEMPORAL_STATUSES = new Set<TemporalStatus>(["past", "present", "future", "timeless", "unknown"]);
 const SOURCE_KINDS = new Set(["user_message", "automatic_summary", "deterministic_action", "manual", "ooc_correction", "offline_story", "import", "legacy_memory"]);
 const SOURCE_AUTHORSHIP = new Set(["user", "character", "system", "unknown"]);
+const LOW_SIGNAL_ACKNOWLEDGEMENT = /^(?:好|好啊|好呀|好的|好吧|好耶|嗯+|哦+|行|行啊|可以|没问题|收到|知道了|你等我|来填空吧|来吧|等我|稍等|哈哈+|笑死|谢谢|不客气|晚安|早安|在吗|来了|对|是的|不是|没事)$/u;
+const DURABLE_MEANING_CUE = /(?:爱|喜欢|讨厌|不喜欢|想念|想要|需要|计划|打算|答应|约定|明天|今晚|下周|生日|住在|住址|工作|学校|家人|朋友|禁止|不能|过敏|重要|决定|记得|忘记|害怕|生气|难过|开心|约会|见面|旅行|搬家|考试|项目)/u;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
@@ -32,6 +34,19 @@ const cleanStringArray = (value: unknown): string[] | undefined => {
   if (!Array.isArray(value) || value.some((item) => !isNonEmpty(item))) return undefined;
   return Array.from(new Set(value.map((item) => (item as string).trim())));
 };
+
+/**
+ * A model may return perfectly valid JSON for a greeting, acknowledgement or
+ * filler phrase. Those phrases are evidence-bearing chat messages, but they
+ * are not durable knowledge and must not become one memory card each.
+ */
+export function isLowInformationKnowledgeStatement(statement: string): boolean {
+  const text = statement.trim().replace(/[\s\u200b]+/gu, "");
+  if (!text) return true;
+  const withoutPunctuation = text.replace(/[，。！？、,.!?~～…；;：“”‘’"'（）()【】\[\]{}]/gu, "");
+  if (LOW_SIGNAL_ACKNOWLEDGEMENT.test(withoutPunctuation)) return true;
+  return withoutPunctuation.length <= 6 && !DURABLE_MEANING_CUE.test(withoutPunctuation);
+}
 
 export function isCompleteTruthScope(scope: CharacterTruthScope, requireConversation = false): boolean {
   return isNonEmpty(scope.relationId)
@@ -112,6 +127,7 @@ export function evaluateKnowledgeWrite(candidate: KnowledgeWriteCandidate): Know
   }
 
   const cues = inspectKnowledgeLanguageCues(candidate.statement);
+  if (isLowInformationKnowledgeStatement(candidate.statement)) return { accepted: false, reason: "low_information" };
   if (candidate.evidenceForm && candidate.evidenceForm !== "statement") return { accepted: false, reason: "question_or_instruction" };
   if (cues.question || cues.suggestion || cues.roleplayOrAction || cues.systemInstruction) {
     return { accepted: false, reason: "question_or_instruction" };

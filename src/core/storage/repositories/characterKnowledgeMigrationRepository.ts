@@ -19,8 +19,9 @@ const fallbackState = (): CharacterKnowledgeMigrationState => ({
   lastRunAt: 0,
   migratedMemoryIds: [],
   migratedSummaryIds: [],
-  migratedCorrectionIds: [],
-  orphanRecordIds: [],
+    migratedCorrectionIds: [],
+    orphanRecordIds: [],
+    legacyMemoryStoreCleared: false,
 });
 
 export function normalizeCharacterKnowledgeMigrationState(value: unknown): CharacterKnowledgeMigrationState {
@@ -50,6 +51,7 @@ export function normalizeCharacterKnowledgeMigrationState(value: unknown): Chara
     migratedSummaryIds: cleanIds(record.migratedSummaryIds),
     migratedCorrectionIds: cleanIds(record.migratedCorrectionIds),
     orphanRecordIds: cleanIds(record.orphanRecordIds),
+    legacyMemoryStoreCleared: record.legacyMemoryStoreCleared === true,
   };
 }
 
