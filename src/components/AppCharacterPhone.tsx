@@ -107,6 +107,7 @@ import {
   getCharacterPhoneGalleryImageDataUrl,
 } from "../features/characterPhone/characterPhoneTextImage";
 import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../domain/relationshipNetwork/relationshipNetworkTypes";
+import { stickerDb } from "../utils/stickerDb";
 
 interface AppCharacterPhoneProps {
   userIdentityId: string;
@@ -382,6 +383,98 @@ function formatTime(timestamp: number) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+interface CharacterPhoneStickerPayload {
+  name: string;
+  stickerId: string;
+  fallbackUrl: string;
+}
+
+function parseCharacterPhoneStickerContent(content: string): CharacterPhoneStickerPayload | null {
+  if (!content.startsWith("[表情]|")) return null;
+  const parts = content.split("|");
+  const name = parts[1]?.trim() || "未命名表情";
+  const rawUrl = parts[2]?.trim() || "";
+  const stickerId = rawUrl.startsWith("sticker://") ? rawUrl.slice("sticker://".length) : "";
+  const fallbackUrl = rawUrl && !rawUrl.startsWith("sticker://") ? rawUrl : "";
+  return { name, stickerId, fallbackUrl };
+}
+
+function getCharacterPhoneMessagePreview(content: string): string {
+  const sticker = parseCharacterPhoneStickerContent(content);
+  return sticker ? `[表情] ${sticker.name}` : content;
+}
+
+/** Render the same sticker protocol used by the main chat instead of exposing
+ * the internal sticker:// reference as message text on the role phone. */
+function CharacterPhoneStickerMessage({ content }: { content: string }) {
+  const payload = parseCharacterPhoneStickerContent(content);
+  const [displayUrl, setDisplayUrl] = useState("");
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    if (!payload) {
+      setDisplayUrl("");
+      setImageFailed(false);
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setDisplayUrl(payload.fallbackUrl);
+    setImageFailed(false);
+
+    const resolveSticker = async () => {
+      if (!payload.stickerId) return;
+      try {
+        const blob = await stickerDb.getStickerImage(payload.stickerId);
+        if (blob) {
+          objectUrl = URL.createObjectURL(blob);
+        } else {
+          const groups = await stickerDb.getGroups();
+          const sticker = groups
+            .flatMap((group) => group.stickers)
+            .find((candidate) => candidate.id === payload.stickerId || candidate.name === payload.name);
+          if (sticker?.url) objectUrl = sticker.url;
+        }
+      } catch {
+        // A missing local asset is rendered as a readable name-only fallback.
+      }
+      if (cancelled) {
+        if (objectUrl?.startsWith("blob:")) URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      if (objectUrl) setDisplayUrl(objectUrl);
+    };
+    void resolveSticker();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl?.startsWith("blob:")) URL.revokeObjectURL(objectUrl);
+    };
+  }, [payload?.fallbackUrl, payload?.name, payload?.stickerId]);
+
+  if (!payload) return null;
+  if (displayUrl && !imageFailed) {
+    return (
+      <div className="character-phone-sticker-message max-w-[130px] overflow-hidden rounded-xl bg-white/60">
+        <img
+          src={displayUrl}
+          alt={payload.name}
+          className="block h-auto max-h-[130px] w-full object-contain"
+          referrerPolicy="no-referrer"
+          onError={() => setImageFailed(true)}
+        />
+        <span className="sr-only">[表情：{payload.name}]</span>
+      </div>
+    );
+  }
+  return (
+    <div className="character-phone-sticker-fallback rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+      <span className="mr-1.5 text-[10px] text-slate-400">表情</span>
+      {payload.name}
+    </div>
+  );
 }
 
 function CharacterPhoneEvidenceEmpty({
@@ -2085,7 +2178,11 @@ export default function AppCharacterPhone({
         {currentThreadMessages.map((message) => (
           <div key={message.id} className={`flex ${message.sender === "character" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${message.sender === "character" ? "rounded-tr-sm bg-[#95ec69] text-[#191919]" : "rounded-tl-sm border border-slate-100 bg-white text-slate-800"}`}>
-              <p className="whitespace-pre-wrap">{message.content}</p>
+                {parseCharacterPhoneStickerContent(message.content) ? (
+                  <CharacterPhoneStickerMessage content={message.content} />
+                ) : (
+                  <p className="whitespace-pre-wrap">{message.content}</p>
+                )}
               {message.attachment && <div className="mt-2 rounded-xl bg-black/10 p-2 text-[10px]">▣ {message.attachment.label}<br />{message.attachment.content}</div>}
             </div>
           </div>
@@ -2139,7 +2236,7 @@ export default function AppCharacterPhone({
                   <span className="absolute -bottom-1 -right-1 rounded-full bg-amber-100 px-1 text-[8px] text-amber-700">NPC</span>
                 ) : null}
               </div>
-              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[var(--text-primary)]">{contact.remark || contact.name}</p><p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">{latest?.content || "暂无聊天记录"}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[var(--text-primary)]">{contact.remark || contact.name}</p><p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">{latest ? getCharacterPhoneMessagePreview(latest.content) : "暂无聊天记录"}</p></div>
             </button>
           );
         })}
@@ -2229,7 +2326,11 @@ export default function AppCharacterPhone({
                     : selectedContact.name}
                   {message.operatedByUser ? " · 用户代发" : ""}
                 </p>
-                {message.content}
+                {parseCharacterPhoneStickerContent(message.content) ? (
+                  <CharacterPhoneStickerMessage content={message.content} />
+                ) : (
+                  <p className="whitespace-pre-wrap">{message.content}</p>
+                )}
                 {message.attachment && (
                   <div className="mt-2 rounded-xl bg-black/10 p-2 text-[10px]">
                     ▣ {message.attachment.label}
