@@ -15,6 +15,7 @@ import {
   Eye,
   EyeOff,
   Download,
+  Database,
   Upload,
   Volume2,
   Monitor,
@@ -78,6 +79,7 @@ import { useSettingsScopedSave } from "../features/settings/hooks/useSettingsSco
 import { useSettingsChatIconActions } from "../features/settings/hooks/useSettingsChatIconActions";
 import { useSettingsCssTemplateCopy } from "../features/settings/hooks/useSettingsCssTemplateCopy";
 import { getSettingsPreviewBubbleBackground, getSettingsPreviewBubbleStyle } from "../features/settings/settingsPreviewStyle";
+import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
 
 interface AppSettingsProps {
   settings: UserSettings;
@@ -680,6 +682,20 @@ export default function AppSettings({
                 </div>
                 <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
+
+              {/* Data Management */}
+              <button
+                onClick={() => setActiveTab("data")}
+                className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-5 h-5 flex items-center justify-center text-slate-800 shrink-0">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <span className="text-base font-medium text-slate-800">数据管理</span>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
+              </button>
             </div>
             
             <div className="text-center pt-3">
@@ -726,6 +742,10 @@ export default function AppSettings({
                 </div>
               </div>
             </div>
+          )}
+
+          {activeTab === "data" && (
+            <StorageCachePanel mode="user" />
           )}
 
           {activeTab === "profile" && (

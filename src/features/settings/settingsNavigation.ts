@@ -4,6 +4,7 @@ export type SettingsTab =
   | "image_api"
   | "appearance"
   | "beauty"
+  | "data"
   | "system_config"
   | "system"
   | "minimax"
@@ -15,6 +16,7 @@ const SETTINGS_TAB_TITLES: Record<Exclude<SettingsTab, null>, string> = {
   image_api: "图片设置",
   appearance: "外观设置",
   beauty: "美化样式",
+  data: "数据管理",
   system_config: "系统设置",
   system: "系统备份",
   minimax: "语音图片",

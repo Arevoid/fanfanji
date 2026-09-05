@@ -68,6 +68,13 @@ interface ReferencedAssetScan {
   complete: boolean;
 }
 
+export interface OrphanedResourceCleanupOptions {
+  /** Set to false to leave image assets untouched. Defaults to true. */
+  images?: boolean;
+  /** Set to false to leave sticker assets untouched. Defaults to true. */
+  stickers?: boolean;
+}
+
 /**
  * Creates a portable diagnostic report. It intentionally contains only
  * metadata, sizes, statuses and finding summaries; it never includes storage
@@ -101,12 +108,16 @@ export function buildStorageDiagnosticReport(
  * This function is never called automatically; the settings UI requires an
  * explicit user confirmation before invoking it.
  */
-export async function cleanupOrphanedStorageResources(): Promise<OrphanedResourceCleanupEntry[]> {
+export async function cleanupOrphanedStorageResources(
+  options: OrphanedResourceCleanupOptions = {},
+): Promise<OrphanedResourceCleanupEntry[]> {
   if (typeof window === "undefined") return [];
   const storage = window.localStorage;
+  const cleanImages = options.images !== false;
+  const cleanStickers = options.stickers !== false;
   const existingNames = await getExistingDatabaseNames();
   const result: OrphanedResourceCleanupEntry[] = [];
-  if (existingNames.has("FanfanImageAssets")) {
+  if (cleanImages && existingNames.has("FanfanImageAssets")) {
     const storedIds = new Set(await readStoreKeys("FanfanImageAssets", "images"));
     const referencedScan = await collectReferencedAssetIds(storage);
     if (!referencedScan.complete) {
@@ -126,7 +137,7 @@ export async function cleanupOrphanedStorageResources(): Promise<OrphanedResourc
     }
     result.push({ database: "FanfanImageAssets", store: "images", removed, failed });
   }
-  if (existingNames.has("StickerAppDB")) {
+  if (cleanStickers && existingNames.has("StickerAppDB")) {
     const storedIds = new Set(await readStoreKeys("StickerAppDB", "stickerImages"));
     const referencedIds = await readStickerGroupReferences("StickerAppDB");
     let removed = 0;

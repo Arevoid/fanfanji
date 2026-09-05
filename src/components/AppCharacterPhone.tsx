@@ -109,6 +109,7 @@ import {
 } from "../features/characterPhone/characterPhoneTextImage";
 import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../domain/relationshipNetwork/relationshipNetworkTypes";
 import { stickerDb } from "../utils/stickerDb";
+import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
 
 interface AppCharacterPhoneProps {
   userIdentityId: string;
@@ -3564,6 +3565,12 @@ export default function AppCharacterPhone({
             {phoneDataNotice && <p role="status" className="mt-2 rounded-xl bg-white/80 px-2.5 py-2 text-[10px] leading-4 text-rose-600">{phoneDataNotice}</p>}
           </div>
         </section>
+
+        <StorageCachePanel
+          mode="characterPhone"
+          characterId={selectedCharacter.id}
+          characterName={selectedCharacter.name}
+        />
       </div>
     ) : activeApp === "camera" ? (
       <CharacterPhoneCameraApp
