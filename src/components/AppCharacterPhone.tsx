@@ -1505,12 +1505,19 @@ export default function AppCharacterPhone({
     delete appIcons[appId];
     updatePhone({ appIcons });
   };
-  const renderCharacterPhoneIcon = (appId: CharacterPhoneIconAppId, className: string) => {
+  const renderCharacterPhoneIcon = (
+    appId: CharacterPhoneIconAppId,
+    defaultClassName: string,
+    customClassName = "h-full w-full",
+  ) => {
     const customIcon = currentPhone?.appIcons?.[appId];
     if (customIcon) {
-      return <img src={customIcon} alt="" className={`${className} rounded-[10px] object-cover`} />;
+      // Uploaded icons are artwork for the whole tile, not a glyph inside it.
+      // The fixed tile owns the crop, so source image dimensions cannot change
+      // the rendered icon size or make one app look smaller than another.
+      return <img src={customIcon} alt="" className={`${customClassName} block object-cover`} />;
     }
-    return React.cloneElement(APP_META[appId].icon as React.ReactElement, { className });
+    return React.cloneElement(APP_META[appId].icon as React.ReactElement, { className: defaultClassName });
   };
 
   const characterNotes = currentPhone?.notes ?? [];
@@ -3375,8 +3382,8 @@ export default function AppCharacterPhone({
               return (
                 <div key={appId} className="group flex min-w-0 flex-col items-center rounded-2xl border border-neutral-100 bg-neutral-50/70 px-1.5 py-2">
                   <label className="flex w-full cursor-pointer flex-col items-center rounded-xl transition-colors hover:bg-white/80">
-                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-black/5 shadow-sm ${tileClass}`}>
-                      {renderCharacterPhoneIcon(appId, "h-5 w-5")}
+                    <span className={`flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-black/5 shadow-sm ${tileClass}`}>
+                      {renderCharacterPhoneIcon(appId, "h-7 w-7")}
                     </span>
                     <span className="mt-1.5 w-full truncate text-center text-[10px] font-bold text-neutral-800">{APP_META[appId].label}</span>
                     <input type="file" accept="image/*" className="hidden" onChange={(event) => handleCharacterPhoneAppIconUpload(appId, event)} />
@@ -3615,15 +3622,15 @@ export default function AppCharacterPhone({
                         className="group flex min-w-0 flex-col items-center gap-1.5 text-neutral-700"
                         aria-label={`打开${APP_META[appId].label}`}
                       >
-                        <span className={`relative flex h-[58px] w-[58px] items-center justify-center rounded-[18px] border border-black/5 shadow-[0_4px_10px_rgba(15,23,42,0.08)] transition-transform group-active:scale-90 ${PHONE_APP_TILE_CLASSES[appId]}`}>
-                          {renderCharacterPhoneIcon(appId, "h-8 w-8")}
+                        <span className={`relative flex h-16 w-16 items-center justify-center overflow-hidden rounded-[18px] border border-black/5 shadow-[0_4px_10px_rgba(15,23,42,0.08)] transition-transform group-active:scale-90 ${PHONE_APP_TILE_CLASSES[appId]}`}>
+                          {renderCharacterPhoneIcon(appId, "h-9 w-9")}
                           {appId === "chat" && unreadCount > 0 && (
                             <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm">
                               {unreadCount}
                             </span>
                           )}
                         </span>
-                        <span className="max-w-[72px] truncate text-[11px] font-medium">{APP_META[appId].label}</span>
+                        <span className="max-w-[76px] truncate text-[11px] font-medium">{APP_META[appId].label}</span>
                       </button>
                     ))}
                   </div>
@@ -3691,11 +3698,11 @@ export default function AppCharacterPhone({
                     key={appId}
                     type="button"
                     onClick={() => openApp(appId)}
-                    className="group relative flex h-[58px] w-[58px] items-center justify-center transition-transform group-active:scale-90"
+                    className="group relative flex h-16 w-16 items-center justify-center transition-transform group-active:scale-90"
                     aria-label={`打开${APP_META[appId].label}`}
                   >
-                    <span className={`flex h-[58px] w-[58px] items-center justify-center rounded-[18px] border border-black/5 shadow-[0_3px_8px_rgba(15,23,42,0.07)] ${tileClass}`}>
-                      {renderCharacterPhoneIcon(appId, "h-8 w-8")}
+                    <span className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-[18px] border border-black/5 shadow-[0_3px_8px_rgba(15,23,42,0.07)] ${tileClass}`}>
+                      {renderCharacterPhoneIcon(appId, "h-9 w-9")}
                     </span>
                     {appId === "chat" && unreadCount > 0 && (
                       <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm">
