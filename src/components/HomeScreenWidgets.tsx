@@ -121,6 +121,46 @@ interface WidgetProps {
   relationships?: CharacterRelationship[];
 }
 
+export function WelcomeWidget({ isEditing, onRemove, activeIdentity, widgetBorderRadius }: WidgetProps) {
+  return (
+    <div
+      className="relative flex h-full w-full items-center gap-3.5 overflow-hidden rounded-[22px] border border-neutral-200/20 bg-white/40 p-3.5 text-neutral-850 shadow-sm backdrop-blur-md select-none"
+      style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}
+      aria-label="欢迎卡片"
+    >
+      <img
+        src={activeIdentity?.avatar || ""}
+        alt={activeIdentity?.name || ""}
+        className="h-12 w-12 shrink-0 rounded-full border border-slate-200/20 object-cover shadow-sm"
+        referrerPolicy="no-referrer"
+      />
+      <div className="min-w-0 flex-1">
+        <h2 className="truncate text-sm font-extrabold tracking-tight leading-tight text-neutral-900">
+          {activeIdentity?.name || "欢迎"}
+        </h2>
+        <p className="mt-1 line-clamp-1 text-[11px] leading-relaxed text-neutral-500">
+          {activeIdentity?.signature || "今天也要好好生活"}
+        </p>
+      </div>
+      {isEditing && onRemove && (
+        <button
+          type="button"
+          data-home-delete
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
+          className="absolute -left-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-stone-900/90 text-xs font-black text-white shadow transition-transform active:scale-90"
+          aria-label="删除欢迎卡片"
+        >
+          -
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBorderRadius }: WidgetProps) {
   const [customPhotos, setCustomPhotos] = useState<string[]>(() => readArray<string>(`album_widget_photos_${id}`, []).value);
 
@@ -1336,8 +1376,8 @@ export function AddWidgetSheet({ onAdd, onClose, settings }: AddWidgetSheetProps
               <User className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="text-xs font-black text-stone-800">置顶欢迎卡 (1×4)</h4>
-              <p className="text-[10px] text-stone-400 font-medium mt-0.5">恢复桌面1置顶的 1×4 机主名片</p>
+            <h4 className="text-xs font-black text-stone-800">欢迎卡片 (1×4)</h4>
+            <p className="text-[10px] text-stone-400 font-medium mt-0.5">恢复可自由移动的桌面名片</p>
             </div>
           </button>
         )}

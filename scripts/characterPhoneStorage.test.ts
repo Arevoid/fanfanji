@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createCharacterPhoneTextImageDataUrl } from "../src/features/characterPhone/characterPhoneTextImage";
-import { clearCharacterPhoneData, getCharacterPhone, saveCharacterPhone } from "../src/core/storage/repositories/characterPhoneRepository";
+import { clearCharacterPhoneData, getCharacterPhone, getCharacterPhoneStorageUsage, migrateLegacyCharacterPhones, saveCharacterPhone } from "../src/core/storage/repositories/characterPhoneRepository";
 import type { CharacterPhoneRecord } from "../src/domain/characterPhone/types";
 
 const values = new Map<string, string>();
@@ -47,14 +47,34 @@ const phone: CharacterPhoneRecord = {
 };
 
 assert.equal(saveCharacterPhone(phone).success, true);
-const serialized = values.get("phone_character_phones_v1") || "";
+const serialized = values.get(`phone_character_phone_v2_${encodeURIComponent(phone.id)}`) || "";
 assert.equal(serialized.includes("data:image/svg+xml"), false, "text SVG data URLs stay out of localStorage");
 assert.match(serialized, /textImageForId/);
+assert.match(values.get("phone_character_phone_index_v2") || "", /phone-storage-test/);
+assert.equal(values.has("phone_character_phones_v1"), false, "new phones no longer use the aggregate v1 record");
 
 const loaded = getCharacterPhone(phone.ownerIdentityId, phone.characterId);
 assert.equal(loaded?.galleryItems[0]?.dataUrl, undefined);
 assert.equal(loaded?.galleryItems[0]?.textImageForId, "phone-text-image-storage");
 assert.equal(loaded?.passcode, "8952", "legacy default phone passcodes migrate to the new default");
+const usage = getCharacterPhoneStorageUsage(phone.ownerIdentityId, phone.characterId);
+assert.ok(usage.currentPhoneBytes > 0);
+assert.equal(usage.legacyBytes, 0);
+
+values.clear();
+const legacyOtherPhone = { ...phone, id: "legacy-other-phone", characterId: "character-storage-test-2" };
+values.set("phone_character_phones_v1", JSON.stringify([phone, legacyOtherPhone]));
+const migrated = { ...phone, updatedAt: 10 };
+assert.equal(saveCharacterPhone(migrated).success, true, "legacy phone writes migrate only the changed phone");
+assert.equal(JSON.parse(values.get("phone_character_phones_v1") || "[]").length, 1);
+assert.ok(values.has(`phone_character_phone_v2_${encodeURIComponent(phone.id)}`));
+assert.equal(getCharacterPhone(phone.ownerIdentityId, phone.characterId)?.updatedAt, 10);
+const migration = migrateLegacyCharacterPhones();
+assert.equal(migration.result.success, true);
+assert.equal(migration.migratedCount, 1);
+assert.equal(migration.remainingLegacyCount, 0);
+assert.equal(values.has("phone_character_phones_v1"), false, "the aggregate legacy record is removed after all phones migrate");
+assert.ok(getCharacterPhone(legacyOtherPhone.ownerIdentityId, legacyOtherPhone.characterId));
 
 const populated: CharacterPhoneRecord = {
   ...phone,

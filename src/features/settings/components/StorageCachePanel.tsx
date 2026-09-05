@@ -19,9 +19,15 @@ import {
 import { compressStoredMemories } from "../../../core/storage/repositories/memoryRepository";
 import { formatMemoryCompressionResult } from "../../../core/storage/memoryCompression";
 import { formatStorageBytes } from "../../../core/storage/storageDiagnostics";
+import {
+  getCharacterPhoneStorageUsage,
+  migrateLegacyCharacterPhones,
+  type CharacterPhoneStorageUsage,
+} from "../../../core/storage/repositories/characterPhoneRepository";
 
 interface StorageCachePanelProps {
   mode: StorageCacheScope;
+  ownerIdentityId?: string;
   characterId?: string;
   characterName?: string;
   galleryAssetIds?: readonly string[];
@@ -37,10 +43,12 @@ function confirmationText(mode: StorageCacheScope, option: StorageCacheOption | 
   return `确定${targetLabel}吗？只会清理${owner}临时缓存，不会删除聊天、朋友圈、相册、日记、备忘录或其他正式数据。`;
 }
 
-export function StorageCachePanel({ mode, characterId, characterName, galleryAssetIds }: StorageCachePanelProps) {
+export function StorageCachePanel({ mode, ownerIdentityId, characterId, characterName, galleryAssetIds }: StorageCachePanelProps) {
   const options = optionsFor(mode);
   const targets = useMemo<readonly StorageCacheTarget[]>(() => [...options.map((option) => option.id), "all"], [options]);
   const [usage, setUsage] = useState(() => getRebuildableCacheUsage({ scope: mode, scopeId: characterId, targets }));
+  const [phoneStorage, setPhoneStorage] = useState<CharacterPhoneStorageUsage>(() =>
+    getCharacterPhoneStorageUsage(ownerIdentityId, characterId));
   const [busyTarget, setBusyTarget] = useState<StorageCacheTarget | null>(null);
   const [notice, setNotice] = useState("");
   const [browserStorage, setBrowserStorage] = useState<{ usage?: number; quota?: number }>({});
@@ -48,10 +56,21 @@ export function StorageCachePanel({ mode, characterId, characterName, galleryAss
 
   const refreshUsage = useCallback(() => {
     setUsage(getRebuildableCacheUsage({ scope: mode, scopeId: characterId, targets }));
-  }, [characterId, mode, targets]);
+    if (mode === "characterPhone") {
+      setPhoneStorage(getCharacterPhoneStorageUsage(ownerIdentityId, characterId));
+    }
+  }, [characterId, mode, ownerIdentityId, targets]);
 
   useEffect(() => {
     refreshUsage();
+    if (mode !== "characterPhone") return;
+    const migration = migrateLegacyCharacterPhones();
+    if (migration.migratedCount > 0) {
+      setNotice(`已整理 ${migration.migratedCount} 个角色手机的旧存储`);
+      refreshUsage();
+    } else if (!migration.result.success && migration.result.error === "quota") {
+      setNotice("角色手机旧存储仍有部分未迁移；当前浏览器空间不足，正式数据未被删除");
+    }
   }, [refreshUsage]);
 
   const refreshBrowserStorage = useCallback(async () => {
@@ -136,9 +155,21 @@ export function StorageCachePanel({ mode, characterId, characterName, galleryAss
           <p className="mt-1 text-[11px] leading-5 text-slate-400">{description}</p>
         </div>
         <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-500">
-          可清理 {formatStorageBytes(totalUsage)}
+          {mode === "characterPhone"
+            ? `正式数据 ${formatStorageBytes(phoneStorage.currentPhoneBytes)}`
+            : `可清理 ${formatStorageBytes(totalUsage)}`}
         </span>
       </div>
+      {mode === "characterPhone" && (
+        <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/60 px-3 py-2.5 text-[10px] leading-4 text-sky-700">
+          <p className="font-bold">当前角色手机正式数据：{formatStorageBytes(phoneStorage.currentPhoneBytes)}</p>
+          <p className="mt-0.5 text-sky-600/80">
+            全部角色手机本地数据：{formatStorageBytes(phoneStorage.totalPhoneBytes)}
+            {phoneStorage.legacyBytes > 0 ? "（含待迁移旧存储）" : ""}
+          </p>
+          <p className="mt-0.5 text-sky-600/80">下面的“可清理”只统计临时缓存，不会统计正式记录。</p>
+        </div>
+      )}
 
       <div className="mt-4 divide-y divide-slate-100 rounded-2xl border border-slate-100 bg-slate-50/50">
         {options.map((option) => {

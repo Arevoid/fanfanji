@@ -91,10 +91,12 @@ import {
   TodoWidget, 
   ReadingWidget,
   ChatStatsWidget,
+  WelcomeWidget,
   AddWidgetSheet 
 } from "./components/HomeScreenWidgets";
 import {
   HOME_GRID_COLUMNS,
+  MAX_HOME_GRID_ROWS,
   MAX_HOME_PAGES,
   canPlaceAt,
   findFirstAvailablePosition,
@@ -370,25 +372,28 @@ interface DragSession {
   swapWithId?: string;
 }
 
+const HOME_WELCOME_WIDGET_ID = "welcome_widget_1";
+
 const DEFAULT_HOME_SCREEN_ITEMS: HomeScreenItem[] = [
-  { id: "album_widget_1", type: "widget", widgetType: "album", size: "2x2", page: 0, position: { page: 0, row: 0, column: 0 } },
-  { id: "archives", type: "app", size: "1x1", page: 0, position: { page: 0, row: 0, column: 2 } },
-  { id: "worldbook", type: "app", size: "1x1", page: 0, position: { page: 0, row: 0, column: 3 } },
-  { id: "chat", type: "app", size: "1x1", page: 0, position: { page: 0, row: 1, column: 2 } },
-  { id: "offline", type: "app", size: "1x1", page: 0, position: { page: 0, row: 1, column: 3 } },
-  { id: "music", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 0 } },
-  { id: "memory", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 1 } },
-  { id: "music_widget_1", type: "widget", widgetType: "music", size: "2x2", page: 0, position: { page: 0, row: 2, column: 2 } },
-  { id: "store", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 0 } },
-  { id: "settings", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 1 } },
-  { id: "notes", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 0 } },
-  { id: "schedule", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 1 } },
-  { id: "character-phone", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 2 } },
-  { id: "forum", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 3 } },
-  { id: "reading", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 0 } },
-  { id: "cinema", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 1 } },
-  { id: "relationship-network", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 2 } },
-  { id: "diary", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 3 } },
+  { id: HOME_WELCOME_WIDGET_ID, type: "widget", widgetType: "welcome", size: "1x4", page: 0, position: { page: 0, row: 0, column: 0 } },
+  { id: "album_widget_1", type: "widget", widgetType: "album", size: "2x2", page: 0, position: { page: 0, row: 1, column: 0 } },
+  { id: "archives", type: "app", size: "1x1", page: 0, position: { page: 0, row: 1, column: 2 } },
+  { id: "worldbook", type: "app", size: "1x1", page: 0, position: { page: 0, row: 1, column: 3 } },
+  { id: "chat", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 2 } },
+  { id: "offline", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 3 } },
+  { id: "music", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 0 } },
+  { id: "memory", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 1 } },
+  { id: "music_widget_1", type: "widget", widgetType: "music", size: "2x2", page: 0, position: { page: 0, row: 3, column: 2 } },
+  { id: "store", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 0 } },
+  { id: "settings", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 1 } },
+  { id: "notes", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 0 } },
+  { id: "schedule", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 1 } },
+  { id: "character-phone", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 2 } },
+  { id: "forum", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 3 } },
+  { id: "reading", type: "app", size: "1x1", page: 0, position: { page: 0, row: 6, column: 0 } },
+  { id: "cinema", type: "app", size: "1x1", page: 0, position: { page: 0, row: 6, column: 1 } },
+  { id: "relationship-network", type: "app", size: "1x1", page: 0, position: { page: 0, row: 6, column: 2 } },
+  { id: "diary", type: "app", size: "1x1", page: 0, position: { page: 0, row: 6, column: 3 } },
 ];
 
 const DEFAULT_WORLDBOOK_ENTRIES: WorldBookEntry[] = [];
@@ -1315,11 +1320,48 @@ export default function App() {
       }
     } else {
       items = DEFAULT_HOME_SCREEN_ITEMS
+        .filter((item) => item.id !== HOME_WELCOME_WIDGET_ID || !settings.hideHomeWelcomeWidget)
         .filter((item) => seedFreshDesktopDefaults || !FRESH_DESKTOP_DEFAULT_APP_IDS.includes(item.id as typeof FRESH_DESKTOP_DEFAULT_APP_IDS[number]))
         .map((item) => ({
         ...item,
         position: item.position ? { ...item.position } : undefined,
         }));
+    }
+
+    items = items.filter((item) => item.id !== HOME_WELCOME_WIDGET_ID || !settings.hideHomeWelcomeWidget);
+    if (!settings.hideHomeWelcomeWidget && !items.some((item) => item.id === HOME_WELCOME_WIDGET_ID)) {
+      const positionedItems = normalizeHomeScreenLayout(items);
+      const canInsertAtTop = positionedItems
+        .filter((item) => item.position?.page === 0)
+        .every((item) => item.position && item.position.row + getHomeItemDimensions(item.size).height < MAX_HOME_GRID_ROWS);
+      const position = { page: 0, row: 0, column: 0 };
+      items = canInsertAtTop
+        ? [
+          {
+            id: HOME_WELCOME_WIDGET_ID,
+            type: "widget",
+            widgetType: "welcome",
+            size: "1x4",
+            page: 0,
+            position,
+          },
+          ...positionedItems.map((item) => item.position?.page === 0
+            ? { ...item, page: 0, position: { ...item.position, row: item.position.row + 1 } }
+            : item),
+        ]
+        : (() => {
+          const fallbackPosition = findFirstAvailablePosition(positionedItems, "1x4", 0, MAX_HOME_GRID_ROWS);
+          return fallbackPosition
+            ? [...positionedItems, {
+              id: HOME_WELCOME_WIDGET_ID,
+              type: "widget" as const,
+              widgetType: "welcome" as const,
+              size: "1x4" as const,
+              page: fallbackPosition.page,
+              position: fallbackPosition,
+            }]
+            : positionedItems;
+        })();
     }
 
     items = items
@@ -2099,6 +2141,23 @@ export default function App() {
   const handleAddWidget = (widgetType: "album" | "music" | "dual_music" | "anniversary" | "todo" | "calendar_album" | "time" | "reading" | "chat-stats" | "welcome") => {
     if (widgetType === "welcome") {
       setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: false }));
+      setHomeScreenItems((current) => {
+        if (current.some((item) => item.id === HOME_WELCOME_WIDGET_ID)) return current;
+        const position = findFirstAvailablePosition(current, "1x4", 0, homeGridRows);
+        if (!position) {
+          setHomeLayoutError(`桌面已达到 ${MAX_HOME_PAGES} 页上限，无法恢复欢迎卡片。`);
+          return current;
+        }
+        setTimeout(() => setCurrentPage(position.page), 50);
+        return [...current, {
+          id: HOME_WELCOME_WIDGET_ID,
+          type: "widget" as const,
+          widgetType: "welcome" as const,
+          size: "1x4" as const,
+          page: position.page,
+          position,
+        }];
+      });
       setIsShowingAddWidget(false);
       return;
     }
@@ -2152,6 +2211,9 @@ export default function App() {
   };
 
   const handleRemoveWidget = (id: string) => {
+    if (id === HOME_WELCOME_WIDGET_ID) {
+      setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: true }));
+    }
     setHomeScreenItems(current => current.filter(item => item.id !== id));
     setDualMusicConfigs((configs) => configs.filter((config) => config.widgetId !== id));
     removeStoredValue(`time_widget_font_color_${id}`);
@@ -2167,6 +2229,7 @@ export default function App() {
       case "anniversary": return AnniversaryWidget;
       case "reading": return ReadingWidget;
       case "chat-stats": return ChatStatsWidget;
+      case "welcome": return WelcomeWidget;
       case "todo": default: return TodoWidget;
     }
   };
@@ -3398,6 +3461,7 @@ export default function App() {
     }))
     .filter((item): item is { relationship: CharacterRelationship; character: Character } =>
       Boolean(item.character && !item.character.isGroupChat));
+  const homeWidgetOpacity = Math.max(0, Math.min(100, settings.widgetOpacity ?? 70)) / 100;
 
   return (
     <div
@@ -4119,48 +4183,6 @@ export default function App() {
                               key={pageIdx}
                               className="w-full h-full min-h-0 flex-shrink-0 flex flex-col select-none px-0"
                             >
-                              {/* Home Widget Card (Clock / Welcoming Card) inside Page 0 only */}
-                              {pageIdx === 0 && !settings.hideHomeWelcomeWidget && (
-                                <div className="relative shrink-0 mt-3 mb-3.5" style={{ marginLeft: `${gridPadding}px`, marginRight: `${gridPadding}px` }}>
-                                  <div 
-                                    className={`backdrop-blur-md border border-neutral-200/20 p-3.5 rounded-[22px] text-neutral-850 shadow-sm select-none flex items-center gap-3.5 w-full h-full ${
-                                      isEditingHomeScreen ? "animate-jiggle" : ""
-                                    }`}
-                                    style={{
-                                      backgroundColor: `rgba(255, 255, 255, ${(settings.widgetOpacity !== undefined ? settings.widgetOpacity : 70) / 100})`,
-                                      borderRadius: settings.widgetBorderRadius !== undefined ? `${settings.widgetBorderRadius}px` : "22px"
-                                    }}
-                                  >
-                                    <img
-                                      src={activeIdentity.avatar}
-                                      alt={activeIdentity.name}
-                                      className="w-12 h-12 rounded-full object-cover border border-slate-200/20 shadow-sm shrink-0"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                    <div className="min-w-0 flex-1">
-                                      <h2 className="text-sm font-extrabold text-neutral-900 tracking-tight leading-tight">
-                                        {activeIdentity.name}
-                                      </h2>
-                                      <p className="text-[11px] text-neutral-500 mt-1 line-clamp-1 leading-relaxed">
-                                        {activeIdentity.signature}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  {isEditingHomeScreen && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSettings(prev => ({ ...prev, hideHomeWelcomeWidget: true }));
-                                      }}
-                                      className="absolute -top-1.5 -left-1.5 w-5 h-5 bg-stone-900/90 hover:bg-stone-950 text-white rounded-full flex items-center justify-center text-xs font-black shadow z-30 transition-transform active:scale-90"
-                                    >
-                                      -
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-
                               {/* The grid of apps and widgets for this page */}
                               <div 
                                 ref={pageIdx === currentPage ? pageContainerRef : undefined}
@@ -4322,7 +4344,7 @@ export default function App() {
                                           isEditingHomeScreen && !isDragged 
                                             ? (index % 2 === 0 ? "animate-jiggle" : "animate-jiggle-reverse") 
                                             : ""
-                                        }`}>
+                                        }`} style={{ opacity: homeWidgetOpacity }}>
                                           <WidgetComponent 
                                             id={item.id} 
                                             isEditing={isEditingHomeScreen}
@@ -4924,7 +4946,8 @@ export default function App() {
               <div 
                 style={{ 
                   width: draggedItem.size === "1x4" || draggedItem.size === "2x4" ? "300px" : draggedItem.size === "2x3" ? "225px" : (settings.hideAppNames ? "154px" : "150px"),
-                  height: draggedItem.size === "1x4" ? "54px" : draggedItem.size === "2x4" || draggedItem.size === "2x3" ? "120px" : (settings.hideAppNames ? "154px" : "150px")
+                  height: draggedItem.size === "1x4" ? "54px" : draggedItem.size === "2x4" || draggedItem.size === "2x3" ? "120px" : (settings.hideAppNames ? "154px" : "150px"),
+                  opacity: draggedItem.type === "widget" ? homeWidgetOpacity : undefined,
                 }}
               >
                 {React.createElement(getWidgetComponent(draggedItem.widgetType), {

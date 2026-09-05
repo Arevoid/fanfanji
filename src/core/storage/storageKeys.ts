@@ -45,6 +45,8 @@ export const storageKeys = {
   behaviorCorrections: "phone_behavior_corrections",
   characterKnowledgeMigrationState: "phone_character_knowledge_migration_state",
   characterPhones: "phone_character_phones_v1",
+  characterPhonesIndexV2: "phone_character_phone_index_v2",
+  characterPhoneV2: (phoneId: string) => `phone_character_phone_v2_${encodeURIComponent(phoneId)}`,
   relationshipNetworkMaps: "phone_relationship_network_maps_v1",
   relationshipNetworkNpcs: "phone_relationship_network_npcs_v1",
   relationshipNetworkChatLinks: "phone_relationship_network_chat_links_v1",
