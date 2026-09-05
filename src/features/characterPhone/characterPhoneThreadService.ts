@@ -24,6 +24,9 @@ export function appendCharacterPhoneThreadMessage(input: {
   };
   return {
     ...input.phone,
+    contacts: (input.phone.contacts ?? []).map((item) => item.id === input.contactId
+      ? { ...item, lastMessage: message.content, lastMessageAt: now }
+      : item),
     threadMessages: [...(input.phone.threadMessages ?? []), message],
     activities: [...input.phone.activities, { id: createId("phone-activity"), type: "user_edit", label: `以角色身份向${contact?.kind === "group" ? "群聊" : "联系人"}发送消息${input.operatedByUser ? "（用户操作）" : ""}`, timestamp: now, relatedToUser: Boolean(input.operatedByUser) }],
     updatedAt: now,

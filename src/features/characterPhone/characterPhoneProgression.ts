@@ -24,6 +24,7 @@ import { buildCharacterPhoneBrowserDetail } from "./characterPhoneBrowserDetails
 import { buildCharacterPhoneLifeContext, type CharacterPhoneLifeContext } from "./characterPhoneLifeContext";
 import { listCharacterPhoneRelationshipNetworkContacts } from "./characterPhoneRelationshipNetwork";
 import { createCharacterPhoneTextImageDataUrl } from "./characterPhoneTextImage";
+import { createCharacterPhoneInitialAvatar, normalizeCharacterPhoneContactName } from "./characterPhoneContactVisuals";
 
 type GeneratedContactDraft = {
   name: string;
@@ -302,7 +303,7 @@ function parseContactDrafts(
   for (const item of value) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const candidate = item as Record<string, unknown>;
-    const name = cleanText(candidate.name, sourceFileName, 40);
+    const name = normalizeCharacterPhoneContactName(cleanText(candidate.name, sourceFileName, 40));
     const relation = cleanText(candidate.relation, sourceFileName, 80);
     if (!name || name === character.name || name === sourceStem || name === "这个角色" || name === "角色") continue;
     if (!context.includes(name)) continue;
@@ -342,6 +343,7 @@ function mergeGeneratedContacts(
       isLongTerm: draft.isLongTerm !== false,
       isNpc: true,
       source: "generated",
+      avatar: createCharacterPhoneInitialAvatar(draft.name),
       memberNames: draft.memberNames,
       sourceRefs,
     };
@@ -497,7 +499,7 @@ export async function advanceCharacterPhoneWithResult(
       history: [],
       systemInstruction: `你扮演真实存在的角色“${roleName}”，正在整理他自己的手机。\n${context}\n\n严格规则：
 1. 所有内容必须来自角色人设、世界书、最近上下文或已有手机记录的合理延伸；不能凭空制造与角色无关的人和事件。
-2. 联系人只能是角色现实中可能认识的人：用户、已有角色关系、世界书/人设明确提到的家人朋友同事，或有明确依据的新 NPC。群聊必须有明确的群名称或成员依据。不要读取或生成用户不认识该角色的好友。
+2. 联系人只能是角色现实中可能认识的人：用户、已有角色关系、世界书/人设明确提到的家人朋友同事，或有明确依据的新 NPC。群聊必须有明确的群名称或成员依据。不要读取或生成用户不认识该角色的好友。name 只能填写真实的人名或群聊名，不能填写“我可”“我都开始怀疑你是不”这类句子片段；无法确定正式名称时请留空并不要添加该联系人。
 3. threadContactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成聊天字段。不要把联系人聊天塞进用户与角色的聊天镜像。
 4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律，不要每个应用都强行生成一条，不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。
 5. 角色真实姓名、备注名和人设文件名是不同概念。绝不能把文件名、输入字段名、世界书标题当作角色姓名或正文内容。

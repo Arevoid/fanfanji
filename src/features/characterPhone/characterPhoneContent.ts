@@ -9,6 +9,7 @@ import type {
 import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
 import { buildCharacterPhoneLifeContext } from "./characterPhoneLifeContext";
 import { listCharacterPhoneRelationshipNetworkContacts, type CharacterPhoneRelationshipNetworkContact } from "./characterPhoneRelationshipNetwork";
+import { createCharacterPhoneInitialAvatar, normalizeCharacterPhoneContactName } from "./characterPhoneContactVisuals";
 export { selectCharacterPhoneWorldBookEntries } from "./characterPhoneLifeContext";
 import type {
   CharacterPhoneContact,
@@ -107,7 +108,7 @@ function makeUserContact(phone: CharacterPhoneRecord, identity?: UserIdentity): 
     kind: "user",
     isLongTerm: true,
     isNpc: false,
-    avatar: identity?.avatar,
+    avatar: identity?.avatar || createCharacterPhoneInitialAvatar(identity?.name?.trim() || "用户"),
     source: "user",
     sourceRefs: identity?.id ? [{ kind: "character", id: identity.id }] : [],
   };
@@ -132,9 +133,8 @@ function buildContextContacts(
     kind: "npc" | "group" = "npc",
     memberNames?: string[],
   ) => {
-    const normalizedName = name.replace(/[“”‘’"']/g, "").trim();
-    if (normalizedName.length < 2 || normalizedName.length > 16) return;
-    if (isGenericContactName(normalizedName)) return;
+    const normalizedName = normalizeCharacterPhoneContactName(name, [], { allowPronounStart: kind === "group" });
+    if (!normalizedName || isGenericContactName(normalizedName)) return;
     if (normalizedName === character.name || candidates.some((candidate) => candidate.name === normalizedName)) return;
     candidates.push({ name: normalizedName, relation, sourceRef, kind, memberNames });
   };
@@ -168,6 +168,7 @@ function buildContextContacts(
       source: "generated" as const,
       memberNames: candidate.memberNames,
       sourceRefs: [candidate.sourceRef],
+      avatar: createCharacterPhoneInitialAvatar(candidate.name),
     }));
 }
 
@@ -190,7 +191,7 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
     kind: "npc",
     isLongTerm: true,
     isNpc: true,
-    avatar: network.npc.avatar,
+    avatar: network.npc.avatar || createCharacterPhoneInitialAvatar(network.npc.name),
     source: "linked",
     linkedCharacterId: network.linkedCharacterId,
     relationshipNetworkNpcId: network.npc.id,
@@ -200,25 +201,49 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
   // disappears from the visible inbox but its old thread and deletion fact
   // must remain available to the character's later reactions.
   const existing = input.phone.contacts ?? [];
+  const knownContactNames = [
+    ...input.characters.map((candidate) => candidate.name),
+    ...networkContacts.map((contact) => contact.npc.name),
+  ].filter(Boolean);
   const normalizedExisting = existing
     .filter((contact) => contact.id !== userContact.id)
     .filter((contact) => !isGenericContactName(contact.name))
-    .map((contact) => {
-      const network = networkByName.get(contactKey(contact.name));
+    .flatMap((contact) => {
+      const normalizedName = normalizeCharacterPhoneContactName(
+        contact.name,
+        knownContactNames,
+        { allowPronounStart: contact.kind === "group" },
+      );
+      // Malformed AI-generated titles are discarded instead of resurfacing
+      // as broken contacts after a phone refresh. Linked names are protected
+      // by the known-name fast path above.
+      if (!normalizedName) return [];
+      const normalizedContact = { ...contact, name: normalizedName };
+      const network = networkByName.get(contactKey(normalizedContact.name));
       if (!network) {
-        return {
-          ...contact,
-          source: contact.source ?? (contact.isNpc ? "linked" : "user"),
-          kind: contact.kind ?? (contact.source === "user" || !contact.isNpc ? "user" : contact.source === "linked" ? "character" : "npc"),
-        };
+        const source = normalizedContact.source ?? (normalizedContact.isNpc
+          ? (normalizedContact.linkedCharacterId || normalizedContact.relationshipNetworkNpcId ? "linked" : "generated")
+          : "user");
+        const hasLinkedAvatar = source === "user"
+          || source === "linked"
+          || Boolean(normalizedContact.linkedCharacterId || normalizedContact.relationshipNetworkNpcId);
+        return [{
+          ...normalizedContact,
+          source,
+          kind: normalizedContact.kind ?? (source === "user" || !normalizedContact.isNpc ? "user" : source === "linked" ? "character" : "npc"),
+          // Generated NPCs must never inherit the role's avatar. Only the
+          // user, linked characters, and relationship-network NPCs keep a
+          // real avatar; other contacts get stable initials avatars.
+          avatar: hasLinkedAvatar ? normalizedContact.avatar : createCharacterPhoneInitialAvatar(normalizedName),
+        }];
       }
-      return {
-        ...contact,
-        relation: network.relationLabels.length > 0 ? `关系网：${network.relationLabels.join("、")}` : contact.relation,
+      return [{
+        ...normalizedContact,
+        relation: network.relationLabels.length > 0 ? `关系网：${network.relationLabels.join("、")}` : normalizedContact.relation,
         kind: "npc" as const,
         isNpc: true,
         source: "linked" as const,
-        avatar: network.npc.avatar || contact.avatar,
+        avatar: network.npc.avatar || createCharacterPhoneInitialAvatar(network.npc.name),
         linkedCharacterId: network.linkedCharacterId || contact.linkedCharacterId,
         relationshipNetworkNpcId: network.npc.id,
         sourceRefs: [{ kind: "relationship-network" as const, id: network.npc.id }, ...(contact.sourceRefs || [])],
@@ -227,7 +252,7 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
         // storing it as remark would make the UI display e.g. “旧识” instead
         // of the actual NPC name “林深”.
         remark: contact.remark === network.npc.role ? undefined : contact.remark,
-      };
+      }];
     });
   const linkedIds = new Set(
     input.characters
@@ -249,7 +274,7 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
       kind: "character" as const,
       isLongTerm: true,
       isNpc: true,
-      avatar: candidate.avatar,
+      avatar: candidate.avatar || createCharacterPhoneInitialAvatar(candidate.name),
       source: "linked" as const,
       linkedCharacterId: candidate.id,
       sourceRefs: [{ kind: "character" as const, id: candidate.id }],
@@ -290,6 +315,56 @@ function syncUserChat(
   return {
     threadMessages: threadMessages.sort((left, right) => left.timestamp - right.timestamp),
     lastMessageId: sourceMessages.at(-1)?.id,
+  };
+}
+
+function buildContactStarterMessage(contact: CharacterPhoneContact): string {
+  if (contact.lastMessage?.trim()) return contact.lastMessage.trim().slice(0, 1000);
+  if (contact.kind === "group") return "最近群里在聊一件事，有空记得看看。";
+  const relation = (contact.relation || "").replace(/^关系网：/u, "");
+  if (/(母亲|妈妈|父亲|爸爸|家人|哥哥|姐姐|弟弟|妹妹)/u.test(relation)) return "最近过得怎么样？有空回家吃饭。";
+  if (/(朋友|好友|同事|同学|队友|搭档)/u.test(relation)) return "最近忙什么呢？有空出来聊聊。";
+  if (/(老师|上司|邻居|前任|恋人)/u.test(relation)) return "最近还好吗？有空聊聊。";
+  return "最近还好吗？有空聊聊。";
+}
+
+/**
+ * Context/world-book contacts are real people in the role's life, but they
+ * did not necessarily have a mirrored main-chat thread. Give an evidenced
+ * contact a single small incoming opener so opening the contact is useful and
+ * does not show a broken empty conversation. User chat remains a strict mirror.
+ */
+function syncContactThreads(
+  phone: CharacterPhoneRecord,
+  contacts: CharacterPhoneContact[],
+  threadMessages: CharacterPhoneThreadMessage[],
+  now: number,
+): { contacts: CharacterPhoneContact[]; threadMessages: CharacterPhoneThreadMessage[] } {
+  const nextMessages = [...threadMessages];
+  const seededAt = Math.max(0, now - 2 * 60 * 1000);
+  contacts
+    .filter((contact) => !contact.removedAt && contact.source !== "user")
+    .forEach((contact) => {
+      const existing = nextMessages.some((message) => message.contactId === contact.id);
+      if (existing) return;
+      nextMessages.push({
+        id: scopedId(phone.id, "contact-thread-starter", contact.id),
+        contactId: contact.id,
+        sender: "contact",
+        content: buildContactStarterMessage(contact),
+        timestamp: seededAt,
+        ...(contact.sourceRefs?.length ? { sourceRefs: contact.sourceRefs } : {}),
+      });
+    });
+  const sorted = nextMessages.sort((left, right) => left.timestamp - right.timestamp);
+  return {
+    threadMessages: sorted,
+    contacts: contacts.map((contact) => {
+      const latest = sorted.filter((message) => message.contactId === contact.id).at(-1);
+      return latest
+        ? { ...contact, lastMessage: latest.content, lastMessageAt: latest.timestamp }
+        : contact;
+    }),
   };
 }
 
@@ -597,14 +672,15 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
   const contacts = syncContacts(scopedInput);
   const userContact = contacts[0];
   const chat = syncUserChat(sourcePhone, input.character, userContact, lifeContext.messages, lifeContext.relationships);
-  const moments = syncMoments(sourcePhone, input.character, input.characters, lifeContext.activeIdentity, lifeContext.moments, contacts, relationshipNetworkContacts);
+  const contactThreads = syncContactThreads(sourcePhone, contacts, chat.threadMessages, now);
+  const moments = syncMoments(sourcePhone, input.character, input.characters, lifeContext.activeIdentity, lifeContext.moments, contactThreads.contacts, relationshipNetworkContacts);
   const music = syncMusic(sourcePhone, input.musicTracks, context);
 
   let next: CharacterPhoneRecord = {
     ...sourcePhone,
     messages: normalizeCharacterPhoneMessages(sourcePhone.messages),
-    contacts,
-    threadMessages: chat.threadMessages,
+    contacts: contactThreads.contacts,
+    threadMessages: contactThreads.threadMessages,
     posts: moments.posts,
     musicTracks: music.musicTracks,
     listeningHistory: music.listeningHistory,

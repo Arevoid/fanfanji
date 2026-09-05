@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { ensureCharacterPhoneContent, normalizeCharacterPhoneMessages } from "../src/features/characterPhone/characterPhoneContent";
 import type { Character, Message, Moment, UserIdentity, WorldBookEntry } from "../src/types";
 import type { CharacterPhoneRecord } from "../src/domain/characterPhone/types";
+import { createCharacterPhoneInitialAvatar, normalizeCharacterPhoneContactName } from "../src/features/characterPhone/characterPhoneContactVisuals";
 
 const characterA: Character = {
   id: "character-a",
@@ -323,5 +324,39 @@ const familyGroup = scopedWorldBookPhone.contacts.find((contact) => contact.name
 assert.equal(familyGroup?.kind, "group", "extracts an explicitly described group chat");
 assert.deepEqual(familyGroup?.memberNames, ["妈妈", "哥哥"]);
 assert.deepEqual(familyGroup?.sourceRefs, [{ kind: "worldbook", id: "world-correct-relation" }]);
+
+assert.equal(normalizeCharacterPhoneContactName("我都开始怀疑你是不是"), "", "rejects sentence fragments as generated contact names");
+assert.equal(normalizeCharacterPhoneContactName("顾沉"), "顾沉");
+assert.equal(normalizeCharacterPhoneContactName("我们一家", [], { allowPronounStart: true }), "我们一家");
+assert.notEqual(createCharacterPhoneInitialAvatar("顾沉"), createCharacterPhoneInitialAvatar("温知遥"), "initial avatars are deterministic but not shared");
+const contextContact = phoneA.contacts.find((contact) => contact.name === "林晓");
+assert.ok(contextContact?.avatar?.startsWith("data:image/svg+xml"), "unlinked context contacts use initials avatars");
+assert.ok(phoneA.threadMessages.some((message) => message.contactId === contextContact?.id), "context contacts open with an evidenced conversation opener");
+assert.equal(contextContact?.lastMessage, "最近忙什么呢？有空出来聊聊。");
+
+const repairedMalformedPhone = ensureCharacterPhoneContent({
+  phone: {
+    ...phoneA,
+    contacts: [...phoneA.contacts, {
+      id: "phone-life-contact-malformed",
+      name: "我都开始怀疑你是不",
+      relation: "朋友",
+      kind: "npc",
+      isLongTerm: true,
+      isNpc: true,
+      source: "generated",
+      avatar: characterA.avatar,
+    }],
+  },
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages,
+  moments,
+  worldBookEntries: worldBook,
+  now: 700,
+});
+assert.ok(!repairedMalformedPhone.contacts.some((contact) => contact.name === "我都开始怀疑你是不"));
 
 console.log("character phone content isolation tests passed");

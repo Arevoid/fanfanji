@@ -98,6 +98,7 @@ import { StoredCharacterPhoneImage } from "../features/characterPhone/components
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
 import { buildCharacterPhoneBrowserDetail } from "../features/characterPhone/characterPhoneBrowserDetails";
+import { resolveCharacterPhoneContactAvatar } from "../features/characterPhone/characterPhoneContactVisuals";
 import { CharacterPhoneCallApp, type CharacterPhoneDialerTab } from "../features/characterPhone/components/CharacterPhoneCallApp";
 import { CharacterPhoneCameraApp } from "../features/characterPhone/components/CharacterPhoneCameraApp";
 import { resolveCharacterPhoneHiddenGalleryPasscode } from "../features/characterPhone/characterPhoneGallerySecurity";
@@ -1965,7 +1966,7 @@ export default function AppCharacterPhone({
       {contactMenuOpen && (
         <div className="absolute inset-x-4 top-14 z-30 rounded-2xl border border-black/5 bg-white p-4 shadow-xl" role="dialog" aria-label="联系人设置">
           <div className="flex items-center gap-3">
-            <img src={selectedContact.avatar || selectedCharacter.avatar} alt="" className="h-11 w-11 rounded-full object-cover" referrerPolicy="no-referrer" />
+            <img src={resolveCharacterPhoneContactAvatar(selectedContact)} alt="" className="h-11 w-11 rounded-full object-cover" referrerPolicy="no-referrer" />
             <div className="min-w-0">
               <p className="truncate text-sm font-bold">{selectedContact.name}</p>
               <p className="text-[10px] text-neutral-400">{selectedContact.relation}</p>
@@ -2040,14 +2041,14 @@ export default function AppCharacterPhone({
           return (
             <button key={contact.id} type="button" onClick={() => openPhoneContact(contact)} className="relative flex w-full items-center gap-3 bg-[var(--surface)] p-3 text-left transition-colors hover:bg-[var(--surface-muted)]" aria-label={`打开与${contact.remark || contact.name}的聊天`}>
               <div className="relative shrink-0">
-                <img src={contact.avatar || selectedCharacter.avatar} alt="" className="h-11 w-11 rounded-full object-cover" referrerPolicy="no-referrer" />
+                <img src={resolveCharacterPhoneContactAvatar(contact)} alt="" className="h-11 w-11 rounded-full object-cover" referrerPolicy="no-referrer" />
                 {contact.kind === "group" ? (
                   <span className="absolute -bottom-1 -right-1 rounded-full bg-sky-100 px-1 text-[8px] text-sky-700">群聊</span>
                 ) : contact.source === "generated" ? (
                   <span className="absolute -bottom-1 -right-1 rounded-full bg-amber-100 px-1 text-[8px] text-amber-700">NPC</span>
                 ) : null}
               </div>
-              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[var(--text-primary)]">{contact.remark || contact.name}</p><p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">{phoneSocialTab === "contacts" ? contact.relation : latest?.content || contact.relation}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[var(--text-primary)]">{contact.remark || contact.name}</p><p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">{latest?.content || "暂无聊天记录"}</p></div>
             </button>
           );
         })}
