@@ -54,6 +54,7 @@ assert.match(serialized, /textImageForId/);
 const loaded = getCharacterPhone(phone.ownerIdentityId, phone.characterId);
 assert.equal(loaded?.galleryItems[0]?.dataUrl, undefined);
 assert.equal(loaded?.galleryItems[0]?.textImageForId, "phone-text-image-storage");
+assert.equal(loaded?.passcode, "8952", "legacy default phone passcodes migrate to the new default");
 
 const populated: CharacterPhoneRecord = {
   ...phone,

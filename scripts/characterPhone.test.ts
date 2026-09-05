@@ -57,6 +57,7 @@ assert.match(component, /sentFromCharacterPhone: true/);
 assert.match(component, /消息已发出，联系人会在下一次生活生成中回应/);
 assert.match(component, /messages|browserHistory|diaryEntries/);
 assert.match(repository, /storageKeys\.characterPhones/);
+assert.match(repository, /CHARACTER_PHONE_DEFAULT_PASSCODE = "8952"/);
 assert.match(repository, /phone\.ownerIdentityId === ownerIdentityId[\s\S]*phone\.characterId === characterId/);
 assert.match(repository, /loaded\.found && !loaded\.valid/);
 assert.match(progression, /lastOpenedAt/);

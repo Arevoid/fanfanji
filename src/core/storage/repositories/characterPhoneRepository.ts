@@ -17,6 +17,9 @@ const LEGACY_MUSIC_TITLES = new Set([
 export const CHARACTER_PHONE_DEFAULT_WALLPAPER =
   "linear-gradient(145deg, #eeeeec 0%, #fafaf9 48%, #e4e4e2 100%)";
 
+const CHARACTER_PHONE_DEFAULT_PASSCODE = "8952";
+const LEGACY_CHARACTER_PHONE_DEFAULT_PASSCODE = "0000";
+
 export function normalizeCharacterPhonePasscode(value: unknown): string {
   const digits = String(value ?? "").replace(/\D/g, "");
   return digits.padStart(4, "0").slice(-4);
@@ -24,7 +27,7 @@ export function normalizeCharacterPhonePasscode(value: unknown): string {
 
 const passcodeFor = (character: Character) => {
   void character;
-  return "0000";
+  return CHARACTER_PHONE_DEFAULT_PASSCODE;
 };
 
 export function getCharacterPhone(
@@ -126,8 +129,14 @@ function normalizeGalleryPersistence(items: CharacterPhoneRecord["galleryItems"]
 }
 
 function normalizeCharacterPhoneRecord(phone: CharacterPhoneRecord): CharacterPhoneRecord {
+  const normalizedPasscode = normalizeCharacterPhonePasscode(phone.passcode);
   return normalizeMusicPersistence({
     ...phone,
+    // Phones created before the default changed used 0000 and had no custom
+    // password UI, so migrate that legacy default when the record is opened.
+    passcode: normalizedPasscode === LEGACY_CHARACTER_PHONE_DEFAULT_PASSCODE
+      ? CHARACTER_PHONE_DEFAULT_PASSCODE
+      : normalizedPasscode,
     appIcons: phone.appIcons ?? {},
     appOrder: phone.appOrder ?? ["chat", "browser", "schedule", "gallery", "diary", "notes", "music", "settings"],
     messages: phone.messages ?? [],
