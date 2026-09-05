@@ -3371,7 +3371,7 @@ export default function AppCharacterPhone({
             {appContent}
           </div>
         ) : (
-          <div className={`relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden ${activeApp === "phone" ? "bg-[#fcfcfb]" : activeApp === "browser" || activeApp === "chat" || activeApp === "gallery" || activeApp === "schedule" ? "bg-[#fcfbfb]" : "bg-white/70 backdrop-blur-xl"}`}>
+          <div className={`relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden ${activeApp === "phone" || activeApp === "browser" ? "bg-white" : activeApp === "chat" || activeApp === "gallery" || activeApp === "schedule" ? "bg-[#fcfbfb]" : "bg-white/70 backdrop-blur-xl"}`}>
             {!isBrowserDetail && !isGalleryDetail && <div className={isBrowserHome
               ? "pointer-events-none absolute inset-x-0 top-0 z-20 box-border flex h-16 min-h-16 max-h-16 items-center justify-between px-4 py-1.5 text-neutral-900"
               : `relative box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between px-4 py-1.5 text-neutral-900 ${activeApp === "schedule" || activeApp === "phone" || activeApp === "browser" || activeApp === "chat" || activeApp === "gallery" ? "bg-transparent border-b-0" : "border-b border-black/5"}`}
