@@ -336,6 +336,11 @@ const AppIcons = {
   wallet: (className = "w-6 h-6") => <WalletCards className={className} strokeWidth={1.8} />,
 };
 
+// Keep the user's desktop and Dock tiles visually aligned with the role
+// phone: the role phone uses a 64px tile with a 36px glyph.
+const HOME_APP_ICON_SIZE = 64;
+const HOME_APP_ICON_GLYPH_CLASS = "h-9 w-9";
+
 const hexToRgba = (hex: string, opacityPercent: number) => {
   if (!hex || !hex.startsWith("#")) {
     return `rgba(255, 255, 255, ${opacityPercent / 100})`;
@@ -1618,7 +1623,7 @@ export default function App() {
     typeof window === "undefined" ? 343 : Math.max(0, window.innerWidth - 32),
   );
   const [homeGridHeight, setHomeGridHeight] = useState(0);
-  const homeGridIconWidth = settings.hideAppNames ? 60 : 52;
+  const homeGridIconWidth = HOME_APP_ICON_SIZE;
   const homeGridPadding = 12;
   const homeGridInnerWidth = homeGridWidth - homeGridPadding * 2;
   const homeGridGap = 16;
@@ -2970,82 +2975,82 @@ export default function App() {
     {
       id: "character-phone",
       name: "手机",
-      icon: AppIcons["character-phone"](),
+      icon: AppIcons["character-phone"](HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "chat",
       name: "聊天",
-      icon: AppIcons.chat(),
+      icon: AppIcons.chat(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "archives",
       name: "档案馆",
-      icon: AppIcons.archives(),
+      icon: AppIcons.archives(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "worldbook",
       name: "世界书",
-      icon: AppIcons.worldbook(),
+      icon: AppIcons.worldbook(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "music",
       name: "音乐",
-      icon: AppIcons.music(),
+      icon: AppIcons.music(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "forum",
       name: "论坛",
-      icon: AppIcons.forum(),
+      icon: AppIcons.forum(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "store",
       name: "应用商店",
-      icon: AppIcons.store(),
+      icon: AppIcons.store(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "notes",
       name: "备忘录",
-      icon: AppIcons.notes(),
+      icon: AppIcons.notes(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "diary",
       name: "日记",
-      icon: AppIcons.diary(),
+      icon: AppIcons.diary(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "memory",
       name: "记忆书",
-      icon: AppIcons.memory(),
+      icon: AppIcons.memory(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "offline",
       name: "线下",
-      icon: AppIcons.offline(),
+      icon: AppIcons.offline(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "schedule",
       name: "日程",
-      icon: AppIcons.schedule(),
+      icon: AppIcons.schedule(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "reading",
       name: "阅读",
-      icon: AppIcons.reading(),
+      icon: AppIcons.reading(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "cinema",
       name: "影视",
-      icon: AppIcons.cinema(),
+      icon: AppIcons.cinema(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "relationship-network",
       name: "关系网",
-      icon: AppIcons["relationship-network"](),
+      icon: AppIcons["relationship-network"](HOME_APP_ICON_GLYPH_CLASS),
     },
     {
       id: "settings",
       name: "设置",
-      icon: AppIcons.settings(),
+      icon: AppIcons.settings(HOME_APP_ICON_GLYPH_CLASS),
     }
   ];
   const activeIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
@@ -4049,9 +4054,10 @@ export default function App() {
                         {Array.from({ length: totalPages }).map((_, pageIdx) => {
                           const isHiddenNames = !!settings.hideAppNames;
                           const iconWidth = homeGridIconWidth;
-                          const iconSizeStyle = isHiddenNames 
-                            ? { width: "60px", height: "60px" } 
-                            : { width: "52px", height: "52px" };
+                          const iconSizeStyle = {
+                            width: `${HOME_APP_ICON_SIZE}px`,
+                            height: `${HOME_APP_ICON_SIZE}px`,
+                          };
 
                           const gridPadding = homeGridPadding; // 12px padding left/right (matches px-3 of dock!)
                           const gapWidth = homeGridColumnGap;
@@ -4352,11 +4358,11 @@ export default function App() {
 
               {/* Elegant Dock section (containing quick indicators) */}
               {(() => {
-                const isHiddenNames = !!settings.hideAppNames;
-                const iconWidth = isHiddenNames ? 60 : 52;
-                const iconSizeStyle = isHiddenNames 
-                  ? { width: "60px", height: "60px" } 
-                  : { width: "52px", height: "52px" };
+                const iconWidth = HOME_APP_ICON_SIZE;
+                const iconSizeStyle = {
+                  width: `${HOME_APP_ICON_SIZE}px`,
+                  height: `${HOME_APP_ICON_SIZE}px`,
+                };
                 const dockAppIds = (settings.dockApps?.length === 4
                   ? settings.dockApps
                   : ["chat", "music", "archives", "settings"]);
@@ -4393,7 +4399,7 @@ export default function App() {
                               <img src={customIcon} alt="" className={`w-full h-full ${isTransparentIcon ? "object-contain" : "object-cover"}`} />
                             ) : (
                               <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                                {appIcon ? appIcon() : AppIcons.chat()}
+                                {appIcon ? appIcon(HOME_APP_ICON_GLYPH_CLASS) : AppIcons.chat(HOME_APP_ICON_GLYPH_CLASS)}
                               </div>
                             )}
                           </button>
@@ -4859,8 +4865,8 @@ export default function App() {
                     borderRadius: isTransparencyPreservedImage(settings.customIcons[draggedItem.id])
                       ? 0
                       : "var(--app-icon-radius, 35%)",
-                    width: settings.hideAppNames ? "52px" : "44px",
-                    height: settings.hideAppNames ? "52px" : "44px"
+                    width: `${HOME_APP_ICON_SIZE}px`,
+                    height: `${HOME_APP_ICON_SIZE}px`
                   }}
                 >
                   {settings.customIcons[draggedItem.id] ? (
