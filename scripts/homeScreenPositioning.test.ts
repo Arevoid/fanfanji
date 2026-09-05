@@ -267,9 +267,9 @@ assert.match(appSource, /onDragStartCapture=\{\(event\) => event\.preventDefault
 assert.match(appSource, /gridTemplateColumns:\s*`repeat\(\$\{HOME_GRID_COLUMNS\}, minmax\(0, 1fr\)\)`/);
 assert.match(appSource, /justifyContent:\s*"stretch"/);
 assert.match(appSource, /gridTemplateRows:\s*`repeat\(\$\{homeGridRows\}/);
-assert.match(appSource, /const HOME_APP_ICON_SIZE = 60/);
+assert.match(appSource, /const HOME_APP_ICON_SIZE = 64/);
 assert.match(appSource, /width: `\$\{HOME_APP_ICON_SIZE\}px`/);
-assert.match(appSource, /const HOME_APP_ICON_GLYPH_CLASS = "h-9 w-9"/);
+assert.match(appSource, /const HOME_APP_ICON_GLYPH_CLASS = "h-10 w-10"/);
 assert.match(appSource, /const homeGridRowGap = homeGridGap/);
 assert.match(appSource, /const homeGridRowHeight = homeGridTrackWidth/);
 assert.match(appSource, /desktop-app-label text-\[10px\] leading-3[\s\S]*mt-0\.5/);

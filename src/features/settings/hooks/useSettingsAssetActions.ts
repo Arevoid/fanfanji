@@ -7,10 +7,17 @@ interface UseSettingsAssetActionsOptions {
   handleSave: (updatedFields: Partial<UserSettings>) => boolean;
   setAvatar: Dispatch<SetStateAction<string>>;
   setWallpaper: Dispatch<SetStateAction<string>>;
+  onIconStatusChange?: (message: string) => void;
 }
 
 /** Owns settings image compression/upload actions while preserving existing limits and save boundaries. */
-export function useSettingsAssetActions({ settings, handleSave, setAvatar, setWallpaper }: UseSettingsAssetActionsOptions) {
+export function useSettingsAssetActions({
+  settings,
+  handleSave,
+  setAvatar,
+  setWallpaper,
+  onIconStatusChange,
+}: UseSettingsAssetActionsOptions) {
   const handleAvatarUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -36,13 +43,22 @@ export function useSettingsAssetActions({ settings, handleSave, setAvatar, setWa
   };
 
   const handleIconUpload = async (appKey: string, event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    // Allow selecting the same file again. Without resetting the input,
+    // browsers do not emit `change` when the chosen path is unchanged.
+    input.value = "";
+    onIconStatusChange?.("");
     if (!file) return;
     try {
       const compressed = await compressImagePreservingTransparency(file, 120, 120, 0.8);
-      handleSave({ customIcons: { ...settings.customIcons, [appKey]: compressed } });
+      const saved = handleSave({ customIcons: { ...settings.customIcons, [appKey]: compressed } });
+      onIconStatusChange?.(saved
+        ? "应用图标已更新"
+        : "应用图标保存失败，请检查浏览器存储空间后重试");
     } catch (error) {
       console.error("Icon compression failed:", error);
+      onIconStatusChange?.("图片读取或压缩失败，请使用 PNG、JPG 或 WebP 图片");
     }
   };
 

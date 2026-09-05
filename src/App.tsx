@@ -337,10 +337,10 @@ const AppIcons = {
   wallet: (className = "w-6 h-6") => <WalletCards className={className} strokeWidth={1.8} />,
 };
 
-// Keep the user's desktop and Dock tiles compact while preserving the role
-// phone's 60px visual scale.
-const HOME_APP_ICON_SIZE = 60;
-const HOME_APP_ICON_GLYPH_CLASS = "h-9 w-9";
+// Keep the user's desktop and Dock tiles consistent with the larger iOS-like
+// visual scale used by the main phone.
+const HOME_APP_ICON_SIZE = 64;
+const HOME_APP_ICON_GLYPH_CLASS = "h-10 w-10";
 
 const hexToRgba = (hex: string, opacityPercent: number) => {
   if (!hex || !hex.startsWith("#")) {
@@ -4231,9 +4231,7 @@ export default function App() {
                                               <img
                                                 src={customIconUrl}
                                                 alt={app.name}
-                                                className={`w-full h-full ${
-                                                  isTransparentCustomIcon ? "object-contain" : "object-cover"
-                                                }`}
+                                                className="w-full h-full object-cover"
                                               />
                                             ) : (
                                               <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
@@ -4420,7 +4418,7 @@ export default function App() {
                             style={{ borderRadius: isTransparentIcon ? 0 : "var(--app-icon-radius, 35%)", ...iconSizeStyle }}
                           >
                             {customIcon ? (
-                              <img src={customIcon} alt="" className={`w-full h-full ${isTransparentIcon ? "object-contain" : "object-cover"}`} />
+                              <img src={customIcon} alt="" className="w-full h-full object-cover" />
                             ) : (
                               <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
                                 {appIcon ? appIcon(HOME_APP_ICON_GLYPH_CLASS) : AppIcons.chat(HOME_APP_ICON_GLYPH_CLASS)}
@@ -4897,11 +4895,7 @@ export default function App() {
                     <img
                       src={settings.customIcons[draggedItem.id]}
                       alt=""
-                      className={`w-full h-full ${
-                        isTransparencyPreservedImage(settings.customIcons[draggedItem.id])
-                          ? "object-contain"
-                          : "object-cover"
-                      }`}
+                      className="w-full h-full object-cover"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">

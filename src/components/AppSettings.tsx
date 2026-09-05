@@ -305,6 +305,7 @@ export default function AppSettings({
   const { activeTab, setActiveTab } = useSettingsNavigationState();
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
   const effectiveBubbleStylePreset = bubbleStylePreset || settings.globalChatStylePreset || "default";
+  const [iconUploadMessage, setIconUploadMessage] = React.useState("");
 
   const { isPwaInstallable, isStandalone, handlePwaInstall } = usePwaInstall();
 
@@ -480,6 +481,7 @@ export default function AppSettings({
     handleSave,
     setAvatar,
     setWallpaper,
+    onIconStatusChange: setIconUploadMessage,
   });
 
   const { handleSaveCurrentAsPreset } = useSettingsPresetActions({
@@ -1320,6 +1322,11 @@ export default function AppSettings({
                         恢复所有默认图标
                       </button>
                     </div>
+                    {iconUploadMessage && (
+                      <p role="status" className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] font-semibold text-slate-500">
+                        {iconUploadMessage}
+                      </p>
+                    )}
 
                     <div className="grid grid-cols-4 gap-2.5">
                       {appKeys.map((item) => {
@@ -1343,7 +1350,7 @@ export default function AppSettings({
                                   <img
                                     src={customImg}
                                     alt={item.label}
-                                    className={`w-full h-full ${isTransparentIcon ? "object-contain" : "object-cover"}`}
+                                    className="w-full h-full object-cover"
                                   />
                                 ) : (
                                   <Sliders className="w-4 h-4 text-slate-400" />

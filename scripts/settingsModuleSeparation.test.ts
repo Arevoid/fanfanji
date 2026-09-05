@@ -52,6 +52,8 @@ assert.match(connectionActions, /handleTestConnection/);
 assert.doesNotMatch(settings, /const handleTestConnection =/);
 assert.match(settings, /useSettingsAssetActions/);
 assert.match(assetActions, /compressImagePreservingTransparency/);
+assert.match(assetActions, /input\.value = ""/);
+assert.match(assetActions, /onIconStatusChange/);
 assert.match(assetActions, /wallpaperSource: "user"/);
 assert.match(assetActions, /handleRestoreAllIcons/);
 assert.doesNotMatch(settings, /const handleAvatarUpload =/);
