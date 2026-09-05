@@ -16,6 +16,8 @@ import {
   compressStickerAssets,
   formatMediaCompressionResult,
 } from "../../../core/storage/mediaCompression";
+import { compressStoredMemories } from "../../../core/storage/repositories/memoryRepository";
+import { formatMemoryCompressionResult } from "../../../core/storage/memoryCompression";
 import { formatStorageBytes } from "../../../core/storage/storageDiagnostics";
 
 interface StorageCachePanelProps {
@@ -42,7 +44,7 @@ export function StorageCachePanel({ mode, characterId, characterName, galleryAss
   const [busyTarget, setBusyTarget] = useState<StorageCacheTarget | null>(null);
   const [notice, setNotice] = useState("");
   const [browserStorage, setBrowserStorage] = useState<{ usage?: number; quota?: number }>({});
-  const [compressionBusy, setCompressionBusy] = useState<"all" | "images" | "stickers" | null>(null);
+  const [compressionBusy, setCompressionBusy] = useState<"all" | "images" | "stickers" | "memory" | null>(null);
 
   const refreshUsage = useCallback(() => {
     setUsage(getRebuildableCacheUsage({ scope: mode, scopeId: characterId, targets }));
@@ -88,19 +90,28 @@ export function StorageCachePanel({ mode, characterId, characterName, galleryAss
     }
   };
 
-  const handleCompress = async (kind: "all" | "images" | "stickers") => {
+  const handleCompress = async (kind: "all" | "images" | "stickers" | "memory") => {
     if (busyTarget || compressionBusy) return;
-    const label = kind === "all" ? "图片和表情包" : kind === "images" ? "相册图片" : "表情包";
-    if (!window.confirm(`确定压缩${label}吗？图片尺寸和正常展示会保持不变，正式记录不会被删除。`)) return;
+    const label = kind === "all" ? "图片和表情包" : kind === "images" ? "相册图片" : kind === "stickers" ? "表情包" : "旧记忆";
+    const detail = kind === "memory"
+      ? "只整理较久以前的非手动记忆，手动记忆和高重要性记忆不会改动。"
+      : "图片尺寸和正常展示会保持不变，正式记录不会被删除。";
+    if (!window.confirm(`确定压缩${label}吗？${detail}`)) return;
     setCompressionBusy(kind);
     setNotice("");
     try {
-      const result = kind === "all"
-        ? await compressMediaAssets()
-        : kind === "images"
-          ? await compressImageAssets(mode === "characterPhone" ? (galleryAssetIds || []) : undefined)
-          : await compressStickerAssets();
-      setNotice(formatMediaCompressionResult(result));
+      if (kind === "memory") {
+        const memoryResult = compressStoredMemories();
+        if (!memoryResult.write.success) throw new Error("记忆压缩结果保存失败，原数据未被改动");
+        setNotice(formatMemoryCompressionResult(memoryResult.result));
+      } else {
+        const result = kind === "all"
+          ? await compressMediaAssets()
+          : kind === "images"
+            ? await compressImageAssets(mode === "characterPhone" ? (galleryAssetIds || []) : undefined)
+            : await compressStickerAssets();
+        setNotice(formatMediaCompressionResult(result));
+      }
       void refreshBrowserStorage();
     } catch (error) {
       setNotice(`压缩失败，正式数据未被改动：${error instanceof Error ? error.message : "未知错误"}`);
@@ -187,15 +198,26 @@ export function StorageCachePanel({ mode, characterId, characterName, galleryAss
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => void handleCompress("all")}
-          disabled={Boolean(busyTarget || compressionBusy)}
-          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[11px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
-        >
-          {compressionBusy === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-          压缩图片和表情包
-        </button>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => void handleCompress("all")}
+            disabled={Boolean(busyTarget || compressionBusy)}
+            className="flex items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2.5 text-[10px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+          >
+            {compressionBusy === "all" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            压缩图片和表情包
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleCompress("memory")}
+            disabled={Boolean(busyTarget || compressionBusy)}
+            className="flex items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2.5 text-[10px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+          >
+            {compressionBusy === "memory" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            压缩旧记忆
+          </button>
+        </div>
       )}
 
       <div className="mt-3 flex items-start gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-[10px] leading-4 text-emerald-700">
