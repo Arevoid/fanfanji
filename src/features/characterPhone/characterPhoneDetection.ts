@@ -25,11 +25,14 @@ export function discoverCharacterPhoneActions(
     || candidate.kind === "contact_removed"
     || candidate.kind === "contact_remark_changed"
     || isAttentivePerson(character);
+  const previousDiscoveryCount = phone.messages.filter((message) =>
+    message.id.startsWith("phone-discovery-") || message.id.startsWith("phone-awareness-"),
+  ).length;
   const discovery = shouldAsk
     ? {
         id: `phone-discovery-${candidate.id}`,
         sender: character.name,
-        body: buildCharacterPhoneActionDiscoveryMessage(character, candidate),
+        body: buildCharacterPhoneActionDiscoveryMessage(character, candidate, { previousDiscoveryCount }),
         timestamp: now,
         unread: true,
       }

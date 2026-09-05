@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { appendCharacterPhoneThreadMessage } from "../src/features/characterPhone/characterPhoneThreadService";
 import { discoverCharacterPhoneActions } from "../src/features/characterPhone/characterPhoneDetection";
+import { buildCharacterPhoneActionDiscoveryMessage, buildCharacterPhoneAwarenessMessage } from "../src/features/characterPhone/characterPhoneReaction";
 import type { CharacterPhoneRecord } from "../src/domain/characterPhone/types";
 
 const character = {
@@ -9,6 +10,26 @@ const character = {
   personality: "冷静、克制",
   backstory: "习惯简短表达",
 } as any;
+
+const unlockVariants = new Set(Array.from({ length: 8 }, (_, index) =>
+  buildCharacterPhoneAwarenessMessage(character, 1, { attemptCount: index + 1 }),
+));
+assert.ok(unlockVariants.size > 1, "unlock awareness wording varies with attempt context");
+assert.doesNotMatch([...unlockVariants].join("\n"), /承认/u, "unlock awareness never invents an admission");
+
+const discoveryVariants = new Set(Array.from({ length: 8 }, (_, index) =>
+  buildCharacterPhoneActionDiscoveryMessage(character, {
+    id: `chat-action-${index}`,
+    kind: "chat_sent_as_character",
+    app: "chat",
+    detail: "向周叔发送消息",
+    timestamp: 100 + index,
+    actor: "user",
+    detectability: "likely",
+  }),
+));
+assert.ok(discoveryVariants.size > 1, "chat discovery wording varies by action context");
+assert.doesNotMatch([...discoveryVariants].join("\n"), /承认/u, "phone discovery never claims the user admitted an action");
 const phone: CharacterPhoneRecord = {
   id: "phone-1",
   ownerIdentityId: "user-1",

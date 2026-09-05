@@ -386,6 +386,35 @@ function repairImmediateCharacterPhoneProxyReply(text: string, proxyMessage?: Me
   return `${authorshipQuestion}\n${trimmed}`;
 }
 
+/**
+ * A phone-change alert is only an observation. If a model nevertheless turns
+ * it into an accusation (“承认了”“认领了”“痛快”), remove that unsupported
+ * sentence unless the user explicitly described their own operation.
+ */
+function repairCharacterPhoneAwarenessReply(
+  text: string,
+  awarenessMessages: Message[],
+  userMessage?: Message,
+): string {
+  const trimmed = text.trim();
+  if (!trimmed || awarenessMessages.length === 0) return text;
+  const userText = userMessage?.sender === "user" ? userMessage.content : "";
+  const explicitlyDescribedOperation = /(?:是我|我(?:动过|改了|删了|发了|搜了|写了|碰过|点了)|对[，, ]*是我|我做的)/u.test(userText);
+  if (explicitlyDescribedOperation || !/(承认|认领|痛快)/u.test(trimmed)) return text;
+  const remaining = trimmed
+    .split(/(?<=[。！？!?])/u)
+    .filter((sentence) => !/(承认|认领|痛快)/u.test(sentence))
+    .join("")
+    .trim();
+  const latestAlert = awarenessMessages.at(-1)?.content || "";
+  const lead = latestAlert.includes("消息")
+    ? "我只是在核对这条消息的来源，还没有把它算在你头上。"
+    : latestAlert.includes("相册") || latestAlert.includes("日记") || latestAlert.includes("备忘录")
+      ? "我只是根据手机留下的痕迹问问，目前没有足够证据下结论。"
+      : "我看到了一点异常，所以先问问；现在还不能确定是谁操作的。";
+  return remaining ? `${lead}\n${remaining}` : lead;
+}
+
 const isOfflineStoryActiveFor = (relationId: string) =>
   readString(getOfflineModeStorageKey(relationId)).value === "true";
 
@@ -1833,6 +1862,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const characterPhoneProxyMessages = sourceMsgs.filter((message) =>
         message.sender === "character" && message.sentFromCharacterPhone,
       );
+      const characterPhoneAwarenessMessages = sourceMsgs.filter((message) =>
+        message.sender === "character"
+        && (/^phone-proactive-phone-(?:discovery|awareness)-/u.test(message.id)
+          || message.id.startsWith("phone-operation-alert-")),
+      );
       if (characterPhoneProxyMessages.length > 0) {
         const latestProxyMessages = characterPhoneProxyMessages.slice(-3).map((message) =>
           `- “${serializeMessageContentForPrompt(message, {
@@ -1842,6 +1876,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           })}”`,
         ).join("\n");
         characterContextText += `\n【角色手机代发事实（高优先级）】\n以下消息虽然在用户手机聊天界面显示为角色发出，但实际是用户刚才在你的手机上操作后发给自己的：\n${latestProxyMessages}\n你没有亲自发送这些内容，不得把它们当成你的台词、观点、决定或记忆。若用户追问、质问或因这些消息产生误会，应按你的人设自然澄清来源，再继续回应当前话题；不要改口说成“我刚刚只是开玩笑”、替这条代发消息辩解，或把它写成你主动说过的话。`;
+      }
+      if (characterPhoneAwarenessMessages.length > 0) {
+        const latestAwarenessMessages = characterPhoneAwarenessMessages.slice(-3).map((message) =>
+          `- “${message.content.slice(0, 240)}”`,
+        ).join("\n");
+        characterContextText += `\n【角色手机异常提醒归因（高优先级）】\n以下内容是你根据手机操作痕迹产生的怀疑、观察或询问，不是用户的承认、认领或操作证据：\n${latestAwarenessMessages}\n除非用户在当前消息中明确说“是我”“我改了/发了/删了”等，否则不得说“你承认了”“这次倒是痛快”等，也不要替用户回答或把沉默、转移话题当作承认。你可以保留不确定性，例如说明“我只是问问，还没有证据”或先回应当前话题。`;
       }
       if (crossDayHistoricalReference) characterContextText += `\n${crossDayHistoricalReference}`;
 
@@ -2233,6 +2273,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
         if (data.translation) data.translation = translationImageSaveDecision.visibleText;
         data.text = repairImmediateCharacterPhoneProxyReply(data.text, immediateCharacterPhoneProxyMessage);
         if (data.translation) data.translation = repairImmediateCharacterPhoneProxyReply(data.translation, immediateCharacterPhoneProxyMessage);
+        data.text = repairCharacterPhoneAwarenessReply(data.text, characterPhoneAwarenessMessages, userMsg);
+        if (data.translation) data.translation = repairCharacterPhoneAwarenessReply(data.translation, characterPhoneAwarenessMessages, userMsg);
         if ((userImageSaveDecision.shouldSave || translationImageSaveDecision.shouldSave) && imageDataUrl && userMsg?.sender === "user" && !activeCharacter.isGroupChat && onSaveImageToCharacterPhone) {
           void imageDataUrlToBlob(imageDataUrl)
             .then((imageBlob) => onSaveImageToCharacterPhone({

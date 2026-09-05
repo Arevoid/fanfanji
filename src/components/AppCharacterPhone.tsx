@@ -1142,20 +1142,6 @@ export default function AppCharacterPhone({
       setPhone(discoveredNext);
     }
     setDraft("");
-    const userEdits = loggedNext.activities.filter(
-      (activity) => activity.type === "user_edit" && activity.relatedToUser,
-    ).length;
-    if (userEdits > 0 && userEdits % 3 === 0 && relation && onSendMessage)
-      onSendMessage(
-        createCharacterTextMessage({
-          id: `phone-operation-alert-${Date.now()}`,
-          characterId: selectedCharacter.id,
-          relationId: relation.id,
-          conversationId: relation.conversationId,
-          content: buildCharacterPhoneAwarenessMessage(selectedCharacter, 1),
-          timestamp: Date.now(),
-        }),
-      );
   };
   const publishPost = () => {
     if (!currentPhone || !selectedCharacter || !postDraft.trim()) return;
@@ -1373,6 +1359,7 @@ export default function AppCharacterPhone({
             body: buildCharacterPhoneAwarenessMessage(
               selectedCharacter,
               awarenessLevel,
+              { attemptCount: failedAttempts },
             ),
             timestamp: now,
             unread: true,
