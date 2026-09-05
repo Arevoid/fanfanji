@@ -52,6 +52,7 @@ assert.match(connectionActions, /handleTestConnection/);
 assert.doesNotMatch(settings, /const handleTestConnection =/);
 assert.match(settings, /useSettingsAssetActions/);
 assert.match(assetActions, /compressImagePreservingTransparency/);
+assert.match(settings, /\{ key: "character-phone", label: "手机" \}/);
 assert.match(assetActions, /input\.value = ""/);
 assert.match(assetActions, /onIconStatusChange/);
 assert.match(assetActions, /wallpaperSource: "user"/);

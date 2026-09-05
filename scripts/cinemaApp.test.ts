@@ -23,6 +23,6 @@ assert.match(appSource, /conversationId: relation\.conversationId/);
 assert.match(appSource, /保存为观影记忆/);
 assert.match(appSource, /imageDataUrl/);
 assert.match(appShell, /id: "cinema"/);
-assert.doesNotMatch(appShell.slice(appShell.indexOf("const DEFAULT_HOME_SCREEN_ITEMS"), appShell.indexOf("const DEFAULT_WORLDBOOK_ENTRIES")), /id: "cinema"/);
+assert.match(appShell.slice(appShell.indexOf("const DEFAULT_HOME_SCREEN_ITEMS"), appShell.indexOf("const DEFAULT_WORLDBOOK_ENTRIES")), /id: "cinema"/);
 
 console.log("PASS cinemaApp.test.ts");

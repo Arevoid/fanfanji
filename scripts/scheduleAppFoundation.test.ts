@@ -22,7 +22,7 @@ const settingsSource = readFileSync(new URL("../src/components/AppSettings.tsx",
 assert.match(appSource, /const loadAppSchedule = \(\) => import\("\.\/components\/AppSchedule"\)/);
 assert.match(appSource, /activeApp === "schedule"/);
 assert.match(appSource, /id: "schedule",\s+name: "日程"/);
-assert.match(appSource, /item\.id !== "schedule" \|\| seedScheduleForFreshInstall/, "Schedule is seeded only for untouched installs");
+assert.match(appSource, /seedFreshDesktopDefaults \|\| !FRESH_DESKTOP_DEFAULT_APP_IDS\.includes/, "new default apps are seeded only for untouched installs");
 assert.match(storeSource, /id: "schedule",\s+name: "日程"/);
 assert.match(scheduleSource, /暂时没有线下约定/);
 assert.match(scheduleSource, /variant === "characterPhone"/);

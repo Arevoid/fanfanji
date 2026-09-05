@@ -17,6 +17,16 @@ const EXISTING_USER_DATA_KEYS = [
 
 type StorageReader = Pick<Storage, "getItem">;
 
+export const FRESH_DESKTOP_DEFAULT_APP_IDS = [
+  "schedule",
+  "character-phone",
+  "forum",
+  "reading",
+  "cinema",
+  "relationship-network",
+  "diary",
+] as const;
+
 const containsUserData = (raw: string | null): boolean => {
   if (raw === null || raw.trim() === "") return false;
   try {
@@ -31,7 +41,7 @@ const containsUserData = (raw: string | null): boolean => {
 };
 
 /** Only a genuinely untouched phone receives newly-added default desktop apps. */
-export function shouldSeedScheduleForFreshInstall(storage: StorageReader): boolean {
+export function shouldSeedFreshDesktopDefaults(storage: StorageReader): boolean {
   if (storage.getItem("phone_homescreen_items") !== null
     || storage.getItem("phone_installed_apps") !== null) return false;
   return !EXISTING_USER_DATA_KEYS.some((key) => containsUserData(storage.getItem(key)));

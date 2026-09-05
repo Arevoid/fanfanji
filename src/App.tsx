@@ -137,7 +137,10 @@ import {
 import StatusBar from "./components/StatusBar";
 import { resolveActiveChatStylePreset } from "./features/chat/styles/chatStylePreset";
 import { useForumActivityEngine } from "./features/forum/hooks/useForumActivityEngine";
-import { shouldSeedScheduleForFreshInstall } from "./features/home/freshInstallPolicy";
+import {
+  FRESH_DESKTOP_DEFAULT_APP_IDS,
+  shouldSeedFreshDesktopDefaults,
+} from "./features/home/freshInstallPolicy";
 import {
   BookOpen,
   BookOpenText,
@@ -380,6 +383,12 @@ const DEFAULT_HOME_SCREEN_ITEMS: HomeScreenItem[] = [
   { id: "settings", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 1 } },
   { id: "notes", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 0 } },
   { id: "schedule", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 1 } },
+  { id: "character-phone", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 2 } },
+  { id: "forum", type: "app", size: "1x1", page: 0, position: { page: 0, row: 4, column: 3 } },
+  { id: "reading", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 0 } },
+  { id: "cinema", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 1 } },
+  { id: "relationship-network", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 2 } },
+  { id: "diary", type: "app", size: "1x1", page: 0, position: { page: 0, row: 5, column: 3 } },
 ];
 
 const DEFAULT_WORLDBOOK_ENTRIES: WorldBookEntry[] = [];
@@ -560,8 +569,8 @@ export default function App() {
     const handle = window.setTimeout(preloadIdleApps, 600);
     return () => window.clearTimeout(handle);
   }, []);
-  const seedScheduleForFreshInstall = useRef(
-    typeof window !== "undefined" && shouldSeedScheduleForFreshInstall(window.localStorage),
+  const seedFreshDesktopDefaults = useRef(
+    typeof window !== "undefined" && shouldSeedFreshDesktopDefaults(window.localStorage),
   ).current;
   const isCharacterPhoneTest = typeof window !== "undefined"
     && new URLSearchParams(window.location.search).get("characterPhoneTest") === "1";
@@ -1075,7 +1084,9 @@ export default function App() {
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
     const raw = readString("phone_installed_apps").value;
     let parsed: string[] = ["chat", "archives", "worldbook", "music", "notes", "offline", "store", "settings"];
-    if (!raw && seedScheduleForFreshInstall) parsed.push("schedule");
+    if (!raw && seedFreshDesktopDefaults) {
+      parsed.push(...FRESH_DESKTOP_DEFAULT_APP_IDS);
+    }
     if (raw) {
       try {
         const candidate = JSON.parse(raw);
@@ -1304,7 +1315,7 @@ export default function App() {
       }
     } else {
       items = DEFAULT_HOME_SCREEN_ITEMS
-        .filter((item) => item.id !== "schedule" || seedScheduleForFreshInstall)
+        .filter((item) => seedFreshDesktopDefaults || !FRESH_DESKTOP_DEFAULT_APP_IDS.includes(item.id as typeof FRESH_DESKTOP_DEFAULT_APP_IDS[number]))
         .map((item) => ({
         ...item,
         position: item.position ? { ...item.position } : undefined,

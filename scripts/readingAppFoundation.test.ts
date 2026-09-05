@@ -13,7 +13,7 @@ assert.match(appSource, /const loadAppReading = \(\) => import\("\.\/components\
 assert.match(appSource, /reading:\s+withModuleRetry\(loadAppReading\)/);
 assert.match(appSource, /const AppReading = React\.lazy\(loadAppReading\)/);
 assert.match(appSource, /reading: \(className = "w-6 h-6"\) => <BookOpenText/);
-assert.match(appSource, /id: "reading",[\s\S]*?name: "阅读",[\s\S]*?icon: AppIcons\.reading\(\)/);
+assert.match(appSource, /id: "reading",[\s\S]*?name: "阅读",[\s\S]*?icon: AppIcons\.reading\(HOME_APP_ICON_GLYPH_CLASS\)/);
 assert.match(appSource, /activeApp === "reading"[\s\S]*?<AppReading[\s\S]*?userIdentityId=\{activeIdentityId\}/);
 assert.match(storeSource, /id: "reading",[\s\S]*?name: "阅读",[\s\S]*?本地阅读与 AI 好友共读/);
 assert.match(settingsSource, /\{ key: "reading", label: "阅读" \}/);
@@ -23,13 +23,13 @@ const defaultLayoutSection = appSource.slice(
   appSource.indexOf("const DEFAULT_HOME_SCREEN_ITEMS"),
   appSource.indexOf("const DEFAULT_WORLDBOOK_ENTRIES"),
 );
-assert.doesNotMatch(defaultLayoutSection, /id: "reading"/, "Reading is not silently placed on a fresh desktop");
+assert.match(defaultLayoutSection, /id: "reading"/, "Reading is placed on a fresh desktop");
 
 const installedDefaultsSection = appSource.slice(
   appSource.indexOf("const [installedAppIds"),
   appSource.indexOf("// Global Music Player State"),
 );
-assert.doesNotMatch(installedDefaultsSection, /"reading"/, "Reading is installed only after an explicit store action");
+assert.match(installedDefaultsSection, /FRESH_DESKTOP_DEFAULT_APP_IDS/, "Reading is installed on a fresh desktop");
 
 const uninstallSection = appSource.slice(
   appSource.indexOf("const handleUninstallApp"),

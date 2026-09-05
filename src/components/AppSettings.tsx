@@ -501,6 +501,7 @@ export default function AppSettings({
   const activePresetsList = [...DEFAULT_PRESETS, ...presets];
 
   const appKeys = [
+    { key: "character-phone", label: "手机" },
     { key: "diary", label: "日记" },
     { key: "chat", label: "聊天" },
     { key: "archives", label: "档案馆" },
