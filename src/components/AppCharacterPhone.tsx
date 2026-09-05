@@ -3166,31 +3166,36 @@ export default function AppCharacterPhone({
             <h2 className="mt-1 text-base font-bold text-neutral-900">应用图标</h2>
             <p className="mt-1 text-[11px] leading-5 text-neutral-400">为这个角色手机上传专属图标，桌面和 Dock 会同步更新。</p>
           </div>
-          <div className="mt-3 space-y-2">
+          <div className="mt-3 grid grid-cols-4 gap-2.5">
             {PHONE_ICON_APPS.map((appId) => {
               const customIcon = currentPhone.appIcons?.[appId];
               const tileClass = appId === "phone" || appId === "camera"
                 ? PHONE_SYSTEM_APP_TILE_CLASSES[appId]
                 : PHONE_APP_TILE_CLASSES[appId];
               return (
-                <div key={appId} className="flex items-center gap-3 rounded-2xl bg-neutral-50 px-3 py-2.5">
-                  <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-black/5 shadow-sm ${tileClass}`}>
-                    {renderCharacterPhoneIcon(appId, "h-5 w-5")}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-xs font-bold text-neutral-800">{APP_META[appId].label}</span>
-                  <label className="shrink-0 cursor-pointer rounded-lg px-2 py-1.5 text-[10px] font-bold text-neutral-500 transition-colors hover:bg-white hover:text-neutral-900">
-                    {customIcon ? "更换" : "上传"}
+                <div key={appId} className="group flex min-w-0 flex-col items-center rounded-2xl border border-neutral-100 bg-neutral-50/70 px-1.5 py-2">
+                  <label className="flex w-full cursor-pointer flex-col items-center rounded-xl transition-colors hover:bg-white/80">
+                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-black/5 shadow-sm ${tileClass}`}>
+                      {renderCharacterPhoneIcon(appId, "h-5 w-5")}
+                    </span>
+                    <span className="mt-1.5 w-full truncate text-center text-[10px] font-bold text-neutral-800">{APP_META[appId].label}</span>
                     <input type="file" accept="image/*" className="hidden" onChange={(event) => handleCharacterPhoneAppIconUpload(appId, event)} />
                   </label>
-                  {customIcon && (
-                    <button
-                      type="button"
-                      onClick={() => handleResetCharacterPhoneAppIcon(appId)}
-                      className="shrink-0 rounded-lg px-2 py-1.5 text-[10px] font-bold text-neutral-400 transition-colors hover:bg-white hover:text-rose-500"
-                    >
-                      默认
-                    </button>
-                  )}
+                  <div className="mt-1 flex items-center justify-center gap-0.5">
+                    <label className="cursor-pointer rounded-md px-1 py-0.5 text-[9px] font-bold text-neutral-500 transition-colors hover:bg-white hover:text-neutral-900">
+                      {customIcon ? "更换" : "上传"}
+                      <input type="file" accept="image/*" className="hidden" onChange={(event) => handleCharacterPhoneAppIconUpload(appId, event)} />
+                    </label>
+                    {customIcon && (
+                      <button
+                        type="button"
+                        onClick={() => handleResetCharacterPhoneAppIcon(appId)}
+                        className="rounded-md px-1 py-0.5 text-[9px] font-bold text-neutral-400 transition-colors hover:bg-white hover:text-rose-500"
+                      >
+                        默认
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
