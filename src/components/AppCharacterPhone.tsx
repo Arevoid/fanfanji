@@ -416,6 +416,45 @@ function withPhoneAction(
   };
 }
 
+type CharacterPhoneMutationPolicy = Pick<CharacterPhoneActionRecord, "detectability" | "discoveryAfterMs" | "discoveryAfterOpens">;
+
+function getCharacterPhoneMutationPolicy(
+  app: CharacterPhoneActionRecord["app"],
+  character: Character,
+): CharacterPhoneMutationPolicy {
+  const defaults: Record<string, CharacterPhoneMutationPolicy> = {
+    browser: { detectability: "possible", discoveryAfterMs: 6 * 60 * 60 * 1000, discoveryAfterOpens: 3 },
+    schedule: { detectability: "possible", discoveryAfterMs: 3 * 60 * 60 * 1000, discoveryAfterOpens: 2 },
+    gallery: { detectability: "possible", discoveryAfterMs: 24 * 60 * 60 * 1000, discoveryAfterOpens: 3 },
+    diary: { detectability: "possible", discoveryAfterMs: 48 * 60 * 60 * 1000, discoveryAfterOpens: 3 },
+    notes: { detectability: "possible", discoveryAfterMs: 24 * 60 * 60 * 1000, discoveryAfterOpens: 2 },
+    moments: { detectability: "possible", discoveryAfterMs: 8 * 60 * 60 * 1000, discoveryAfterOpens: 2 },
+    music: { detectability: "possible", discoveryAfterMs: 72 * 60 * 60 * 1000, discoveryAfterOpens: 4 },
+    settings: { detectability: "likely", discoveryAfterMs: 30 * 60 * 1000, discoveryAfterOpens: 1 },
+    camera: { detectability: "possible", discoveryAfterMs: 24 * 60 * 60 * 1000, discoveryAfterOpens: 3 },
+    phone: { detectability: "possible", discoveryAfterMs: 6 * 60 * 60 * 1000, discoveryAfterOpens: 3 },
+  };
+  const base = defaults[app] || { detectability: "none" as const, discoveryAfterMs: Number.POSITIVE_INFINITY, discoveryAfterOpens: 99 };
+  const personality = `${character.personality || ""} ${character.backstory || ""}`;
+  const attentive = /(敏感|细心|警觉|多疑|观察|谨慎|控制欲|在意细节|记性好)/u.test(personality);
+  const distracted = /(粗心|迟钝|健忘|随和|忙碌|忙|不在意|大大咧咧)/u.test(personality);
+  if (attentive) {
+    return {
+      ...base,
+      discoveryAfterMs: Math.round((base.discoveryAfterMs || 0) * 0.45),
+      discoveryAfterOpens: Math.max(1, (base.discoveryAfterOpens || 1) - 1),
+    };
+  }
+  if (distracted) {
+    return {
+      ...base,
+      discoveryAfterMs: Number.isFinite(base.discoveryAfterMs) ? base.discoveryAfterMs * 2.5 : base.discoveryAfterMs,
+      discoveryAfterOpens: (base.discoveryAfterOpens || 1) + 2,
+    };
+  }
+  return base;
+}
+
 function characterPhoneGalleryDayKey(timestamp: number): string {
   const date = new Date(timestamp);
   return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
@@ -652,6 +691,34 @@ export default function AppCharacterPhone({
         : null,
     [phone, selectedCharacter, userIdentityId],
   );
+  const discoverAndForwardPhoneActions = (
+    candidatePhone: CharacterPhoneRecord,
+    baselinePhone: CharacterPhoneRecord,
+    now: number,
+  ): CharacterPhoneRecord => {
+    if (!selectedCharacter) return candidatePhone;
+    const discoveredPhone = discoverCharacterPhoneActions(candidatePhone, selectedCharacter, now);
+    const awarenessMessages = discoveredPhone.messages.filter(
+      (message) => (message.id.startsWith("phone-awareness-") || message.id.startsWith("phone-discovery-"))
+        && !baselinePhone.messages.some((existing) => existing.id === message.id),
+    );
+    const relation = relationships.find(
+      (item) => item.userIdentityId === userIdentityId && item.characterId === selectedCharacter.id,
+    );
+    if (relation && onSendMessage) {
+      awarenessMessages
+        .filter((message) => !messages.some((item) => item.id === `phone-proactive-${message.id}`))
+        .forEach((message) => onSendMessage(createCharacterTextMessage({
+          id: `phone-proactive-${message.id}`,
+          characterId: selectedCharacter.id,
+          relationId: relation.id,
+          conversationId: relation.conversationId,
+          content: message.body,
+          timestamp: message.timestamp,
+        })));
+    }
+    return discoveredPhone;
+  };
   const syncCharacterPhonePost = (post: CharacterPhonePost) => {
     if (!selectedCharacter || !onSyncCharacterPhonePost || post.source !== "generated" || post.authorId !== selectedCharacter.id) return;
     const marker = JSON.stringify({
@@ -744,13 +811,37 @@ export default function AppCharacterPhone({
     duration: "0:00",
     cover: PHONE_MUSIC_COVER_GRADIENTS[0],
   };
+  const recordMusicListening = (trackId: string) => {
+    if (!currentPhone || trackId === "empty") return;
+    const now = Date.now();
+    const history = currentPhone.listeningHistory ?? [];
+    if (history.some((record) => record.trackId === trackId && now - record.startedAt < 30 * 1000)) return;
+    const track = roleMusicTracks.find((candidate) => candidate.id === trackId);
+    if (!track) return;
+    updatePhone({
+      listeningHistory: [
+        { id: `phone-listening-${now}`, trackId, startedAt: now, durationSeconds: 30, source: "user-library" as const },
+        ...history,
+      ],
+    }, {
+      kind: "data_changed",
+      app: "music",
+      detail: `播放《${track.title}》`,
+    });
+  };
+  const toggleMusicPlayback = () => {
+    const nextPlaying = !musicIsPlaying;
+    setMusicIsPlaying(nextPlaying);
+    if (nextPlaying) recordMusicListening(musicTrack.id);
+  };
   const changeMusicTrack = (direction: 1 | -1) => {
     if (roleMusicTracks.length === 0) return;
-    setMusicTrackIndex((index) =>
-      (index + direction + roleMusicTracks.length) % roleMusicTracks.length,
-    );
+    const nextIndex = (musicTrackIndex + direction + roleMusicTracks.length) % roleMusicTracks.length;
+    const nextTrack = roleMusicTracks[nextIndex];
+    setMusicTrackIndex(nextIndex);
     setMusicProgress(0.08);
     setMusicIsPlaying(true);
+    recordMusicListening(nextTrack.id);
   };
   const placePhoneCall = (simLabel: string) => {
     if (!phoneNumber) return;
@@ -934,8 +1025,9 @@ export default function AppCharacterPhone({
       app: "chat",
       targetId: selectedContact.id,
       detail: `向${selectedContact.remark || selectedContact.name}发送消息`,
-      detectability: selectedContact.source === "user" ? "none" : "possible",
-      discoveryAfterOpens: 2,
+      detectability: "likely",
+      discoveryAfterMs: 0,
+      discoveryAfterOpens: 0,
     }, now);
     persistPhone(loggedNext);
     if (sourceMessageId && relation && onSendMessage) {
@@ -950,6 +1042,11 @@ export default function AppCharacterPhone({
       }));
     } else {
       setPhoneNotice(selectedContact.kind === "group" ? "消息已发到群聊，群成员会在下一次生活生成中回应" : "消息已发出，联系人会在下一次生活生成中回应");
+    }
+    const discoveredNext = discoverAndForwardPhoneActions(loggedNext, currentPhone, now);
+    if (discoveredNext !== loggedNext) {
+      persistPhone(discoveredNext);
+      setPhone(discoveredNext);
     }
     setDraft("");
     const userEdits = loggedNext.activities.filter(
@@ -1003,7 +1100,7 @@ export default function AppCharacterPhone({
       kind: "data_changed",
       app: "moments",
       detail: "以角色身份发布朋友圈",
-      detectability: "none",
+      ...getCharacterPhoneMutationPolicy("moments", selectedCharacter),
     }, now);
     saveCharacterPhone(next);
     setPhone(next);
@@ -1096,7 +1193,7 @@ export default function AppCharacterPhone({
         || phoneScopeRef.current.characterId !== requestScope.characterId
         || advancedResult.phone.id !== requestScope.phoneId) return;
       const advancedPhone = advancedResult.phone;
-      const discoveredPhone = discoverCharacterPhoneActions(advancedPhone, selectedCharacter, now);
+      const discoveredPhone = discoverAndForwardPhoneActions(advancedPhone, basePhone, now);
       const saved = saveCharacterPhone(discoveredPhone);
       if (!saved.success) {
         setPhoneNotice(saved.error === "quota"
@@ -1116,32 +1213,6 @@ export default function AppCharacterPhone({
       setPhoneNotice(advancedResult.status === "generated"
         ? "角色手机已生成新的生活痕迹"
         : characterPhoneGenerationNoChangeNotice(advancedResult.reason));
-      const generatedMessages = discoveredPhone.messages.filter(
-        (message) => !basePhone.messages.some((existing) => existing.id === message.id),
-      );
-      const awarenessMessages = generatedMessages.filter(
-        (message) => message.id.startsWith("phone-awareness-") || message.id.startsWith("phone-discovery-"),
-      );
-      const relation = relationships.find(
-        (item) =>
-          item.userIdentityId === userIdentityId &&
-          item.characterId === selectedCharacter.id,
-      );
-      if (relation && onSendMessage)
-        awarenessMessages
-          .filter((generatedMessage) => !messages.some((message) => message.id === `phone-proactive-${generatedMessage.id}`))
-          .forEach((generatedMessage) =>
-          onSendMessage(
-            createCharacterTextMessage({
-              id: `phone-proactive-${generatedMessage.id}`,
-              characterId: selectedCharacter.id,
-              relationId: relation.id,
-              conversationId: relation.conversationId,
-              content: generatedMessage.body,
-              timestamp: generatedMessage.timestamp,
-            }),
-          ),
-        );
     } catch (error) {
       if (timedOut && mountedRef.current && generationRequestRef.current === requestId) {
         // Invalidate a late provider response so it cannot overwrite a retry.
@@ -1169,7 +1240,7 @@ export default function AppCharacterPhone({
       return;
     }
     if (passcode === normalizeCharacterPhonePasscode(currentPhone.passcode)) {
-      const openedPhone = withPhoneAction({
+      const openedPhone = discoverAndForwardPhoneActions(withPhoneAction({
         ...currentPhone,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -1186,7 +1257,7 @@ export default function AppCharacterPhone({
         app: "phone",
         detail: `进入${selectedCharacter.name}的角色手机`,
         detectability: "none",
-      }, now);
+      }, now), currentPhone, now);
       setPhone(openedPhone);
       saveCharacterPhone(openedPhone);
       setUnlocked(true);
@@ -1351,15 +1422,24 @@ export default function AppCharacterPhone({
     if (appId === "browser") setSelectedBrowserEntryId(null);
     setActiveApp(appId);
   };
-  const updatePhone = (patch: Partial<CharacterPhoneRecord>) => {
+  const updatePhone = (
+    patch: Partial<CharacterPhoneRecord>,
+    actionPatch?: Partial<Pick<CharacterPhoneActionRecord, "kind" | "app" | "detail" | "detectability" | "discoveryAfterMs" | "discoveryAfterOpens">>,
+  ) => {
     if (!currentPhone) return;
     const now = Date.now();
+    const logicalApp = activeApp === "chat" && phoneSocialTab === "moments"
+      ? "moments"
+      : activeApp === "home"
+        ? "system"
+        : activeApp;
+    const policy = getCharacterPhoneMutationPolicy(logicalApp, selectedCharacter!);
     const next = withPhoneAction({ ...currentPhone, ...patch, updatedAt: now }, {
-      kind: "data_changed",
-      app: activeApp === "home" ? "system" : activeApp,
-      detail: `更新${activeApp === "home" ? "手机数据" : APP_META[activeApp].label}`,
-      detectability: activeApp === "settings" || activeApp === "schedule" ? "possible" : "none",
-      ...(activeApp === "settings" || activeApp === "schedule" ? { discoveryAfterOpens: 2 } : {}),
+      kind: actionPatch?.kind || "data_changed",
+      app: actionPatch?.app || logicalApp,
+      detail: actionPatch?.detail || `更新${activeApp === "home" ? "手机数据" : APP_META[activeApp].label}`,
+      ...policy,
+      ...actionPatch,
     }, now);
     persistPhone(next);
   };
@@ -1382,7 +1462,11 @@ export default function AppCharacterPhone({
       textImageForId: `camera-text-${now}`,
       dataUrl: createCharacterPhoneTextImageDataUrl(caption, title),
     };
-    updatePhone({ galleryItems: [item, ...currentPhone.galleryItems] });
+    updatePhone({ galleryItems: [item, ...currentPhone.galleryItems] }, {
+      kind: "gallery_text_image_created",
+      app: "gallery",
+      detail: item.title,
+    });
     return true;
   };
   const readCharacterPhoneImage = (
@@ -1576,7 +1660,7 @@ export default function AppCharacterPhone({
       kind: "browser_searched",
       app: "browser",
       detail: `搜索：${query}`,
-      detectability: "none",
+      ...getCharacterPhoneMutationPolicy("browser", selectedCharacter!),
     }, now));
     setBrowserAddress("");
   };
@@ -2068,7 +2152,14 @@ export default function AppCharacterPhone({
         item.id === id ? { ...item, ...patch } : item,
       ),
     };
-    persistPhone(action ? withPhoneAction(nextPhone, action) : nextPhone);
+    const policy = getCharacterPhoneMutationPolicy(action?.app || "gallery", selectedCharacter!);
+    persistPhone(withPhoneAction(nextPhone, {
+      kind: action?.kind || "data_changed",
+      app: action?.app || "gallery",
+      detail: action?.detail || `更新${selectedCharacter?.name || "角色"}的相册`,
+      ...policy,
+      ...action,
+    }));
   };
   const openGalleryItem = (item: CharacterPhoneRecord["galleryItems"][number]) => {
     setSelectedGalleryId(item.id);
@@ -2910,7 +3001,7 @@ export default function AppCharacterPhone({
               </button>
               <button
                 type="button"
-                onClick={() => setMusicIsPlaying((playing) => !playing)}
+                onClick={toggleMusicPlayback}
                 className="flex h-[clamp(3rem,12vw,3.5rem)] w-[clamp(3rem,12vw,3.5rem)] items-center justify-center rounded-full bg-[#75b4ce] text-white shadow-[0_8px_18px_rgba(86,151,177,0.25)] transition-transform active:scale-95"
                 aria-label={musicIsPlaying ? "暂停播放" : "播放"}
               >
@@ -2978,7 +3069,12 @@ export default function AppCharacterPhone({
                       onClick={() => {
                         setMusicTrackIndex(index);
                         setMusicProgress(isCurrentTrack ? musicProgress : 0.08);
-                        setMusicIsPlaying((playing) => (isCurrentTrack ? !playing : true));
+                        if (isCurrentTrack) {
+                          toggleMusicPlayback();
+                        } else {
+                          setMusicIsPlaying(true);
+                          recordMusicListening(track.id);
+                        }
                       }}
                       className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${isCurrentTrack ? "bg-[#72b0c8] text-white" : "bg-white text-neutral-500 shadow-sm"}`}
                       aria-label={isCurrentTrack && musicIsPlaying ? `暂停${track.title}` : `播放${track.title}`}
@@ -3045,6 +3141,7 @@ export default function AppCharacterPhone({
                           setMusicTrackIndex(Math.max(0, roleMusicTracks.findIndex((candidate) => candidate.id === track.id)));
                           setMusicProgress(0.08);
                           setMusicIsPlaying(true);
+                          recordMusicListening(track.id);
                           setMusicView("player");
                         }}
                         className="flex w-full min-w-0 items-center gap-2 text-left"
@@ -3066,7 +3163,7 @@ export default function AppCharacterPhone({
                   </div>
                   <div className="mt-2 flex items-center justify-between border-t border-neutral-200/70 pt-2">
                     <button type="button" onClick={() => changeMusicTrack(-1)} className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-500 hover:bg-black/5" aria-label="上一首"><SkipBack className="h-4 w-4" /></button>
-                    <button type="button" onClick={() => setMusicIsPlaying((playing) => !playing)} className="flex h-10 w-10 items-center justify-center rounded-full bg-[#75b4ce] text-white" aria-label={musicIsPlaying ? "暂停播放" : "播放"}>
+                    <button type="button" onClick={toggleMusicPlayback} className="flex h-10 w-10 items-center justify-center rounded-full bg-[#75b4ce] text-white" aria-label={musicIsPlaying ? "暂停播放" : "播放"}>
                       {musicIsPlaying ? <Pause className="h-4 w-4" fill="currentColor" /> : <Play className="ml-0.5 h-4 w-4" fill="currentColor" />}
                     </button>
                     <button type="button" onClick={() => changeMusicTrack(1)} className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-500 hover:bg-black/5" aria-label="下一首"><SkipForward className="h-4 w-4" /></button>

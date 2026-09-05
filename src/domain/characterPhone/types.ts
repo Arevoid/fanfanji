@@ -213,7 +213,11 @@ export interface CharacterPhoneActionRecord {
   detectability: "none" | "possible" | "likely";
   discovered?: boolean;
   discoveredAt?: number;
+  /** Minimum elapsed time before the character can notice this operation. */
+  discoveryAfterMs?: number;
   discoveryAfterOpens?: number;
+  /** Whether the character confronts the user or keeps the observation private. */
+  discoveryResponse?: "ask" | "silent";
   phoneOpenCountAtAction?: number;
 }
 

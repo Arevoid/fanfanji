@@ -17,18 +17,24 @@ export function discoverCharacterPhoneActions(
   const openCount = phone.phoneOpenCount ?? 0;
   const candidate = (phone.actionLog ?? [])
     .filter((action) => !action.discovered && action.detectability !== "none")
-    .filter((action) => now - action.timestamp >= 10 * 60 * 1000
+    .filter((action) => now - action.timestamp >= (action.discoveryAfterMs ?? 10 * 60 * 1000)
       || openCount - (action.phoneOpenCountAtAction ?? 0) >= (action.discoveryAfterOpens ?? 2))
     .sort((left, right) => left.timestamp - right.timestamp)[0];
   if (!candidate) return phone;
-  const discovery = {
-    id: `phone-discovery-${candidate.id}`,
-    sender: character.name,
-    body: buildCharacterPhoneActionDiscoveryMessage(character, candidate),
-    timestamp: now,
-    unread: true,
-  };
-  const alreadyReported = phone.messages.some((message) =>
+  const shouldAsk = candidate.kind === "chat_sent_as_character"
+    || candidate.kind === "contact_removed"
+    || candidate.kind === "contact_remark_changed"
+    || isAttentivePerson(character);
+  const discovery = shouldAsk
+    ? {
+        id: `phone-discovery-${candidate.id}`,
+        sender: character.name,
+        body: buildCharacterPhoneActionDiscoveryMessage(character, candidate),
+        timestamp: now,
+        unread: true,
+      }
+    : undefined;
+  const alreadyReported = discovery && phone.messages.some((message) =>
     (message.id.startsWith("phone-discovery-") || message.id.startsWith("phone-awareness-"))
     && message.sender === discovery.sender
     && message.body === discovery.body,
@@ -36,11 +42,17 @@ export function discoverCharacterPhoneActions(
   return {
     ...phone,
     actionLog: (phone.actionLog ?? []).map((action) => action.id === candidate.id
-      ? { ...action, discovered: true, discoveredAt: now }
+      ? { ...action, discovered: true, discoveredAt: now, discoveryResponse: shouldAsk ? "ask" : "silent" }
       : action),
-    messages: normalizeCharacterPhoneMessages(alreadyReported ? phone.messages : [...phone.messages, discovery]),
-    awarenessLevel: Math.max(phone.awarenessLevel ?? 0, 1) as 0 | 1 | 2,
-    awarenessUpdatedAt: now,
+    messages: normalizeCharacterPhoneMessages(alreadyReported || !discovery ? phone.messages : [...phone.messages, discovery]),
+    awarenessLevel: discovery ? Math.max(phone.awarenessLevel ?? 0, 1) as 0 | 1 | 2 : phone.awarenessLevel,
+    awarenessUpdatedAt: discovery ? now : phone.awarenessUpdatedAt,
     updatedAt: now,
   };
+}
+
+function isAttentivePerson(character: Character): boolean {
+  const personality = `${character.personality || ""} ${character.backstory || ""}`;
+  if (/(粗心|迟钝|健忘|随和|忙碌|忙|不在意|大大咧咧)/u.test(personality)) return false;
+  return /(敏感|细心|警觉|多疑|观察|谨慎|控制欲|在意细节|记性好)/u.test(personality);
 }

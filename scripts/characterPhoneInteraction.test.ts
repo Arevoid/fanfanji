@@ -96,4 +96,61 @@ const notYetReopened = discoverCharacterPhoneActions({
 assert.equal(notYetReopened.actionLog?.[0]?.discovered, undefined, "counts opens after the action instead of lifetime opens");
 const reopenedTwice = discoverCharacterPhoneActions({ ...notYetReopened, phoneOpenCount: 10 }, character, 301);
 assert.equal(reopenedTwice.actionLog?.[0]?.discovered, true);
+
+const immediateChatDiscovery = discoverCharacterPhoneActions({
+  ...phone,
+  messages: [],
+  phoneOpenCount: 1,
+  actionLog: [{
+    id: "action-chat-as-character",
+    kind: "chat_sent_as_character",
+    app: "chat",
+    detail: "向周叔发送消息",
+    timestamp: 500,
+    actor: "user",
+    detectability: "likely",
+    discoveryAfterMs: 0,
+    discoveryAfterOpens: 0,
+    phoneOpenCountAtAction: 1,
+  }],
+}, character, 500);
+assert.equal(immediateChatDiscovery.actionLog?.[0]?.discovered, true, "chat messages sent as the character are noticed immediately");
+assert.equal(immediateChatDiscovery.actionLog?.[0]?.discoveryResponse, "ask");
+assert.match(immediateChatDiscovery.messages.at(-1)?.body || "", /不是我发的/);
+
+const quietDiaryDiscovery = discoverCharacterPhoneActions({
+  ...phone,
+  messages: [],
+  phoneOpenCount: 1,
+  actionLog: [{
+    id: "action-quiet-diary",
+    kind: "data_changed",
+    app: "diary",
+    detail: "修改日记",
+    timestamp: 100,
+    actor: "user",
+    detectability: "possible",
+    discoveryAfterMs: 0,
+    discoveryAfterOpens: 0,
+    phoneOpenCountAtAction: 1,
+  }],
+}, { ...character, personality: "粗心、随和" }, 100);
+assert.equal(quietDiaryDiscovery.actionLog?.[0]?.discovered, true);
+assert.equal(quietDiaryDiscovery.actionLog?.[0]?.discoveryResponse, "silent", "non-attentive characters can quietly notice routine app edits");
+assert.equal(quietDiaryDiscovery.messages.length, 0, "quiet discovery does not inject an immediate confrontation message");
+
+const readOnlyAction = discoverCharacterPhoneActions({
+  ...phone,
+  actionLog: [{
+    id: "action-read-only",
+    kind: "diary_read",
+    app: "diary",
+    detail: "查看日记",
+    timestamp: 100,
+    actor: "user",
+    detectability: "none",
+  }],
+}, character, 1000);
+assert.equal(readOnlyAction.actionLog?.[0]?.discovered, undefined, "read-only actions stay invisible to the character");
+assert.equal(readOnlyAction.messages.length, 0);
 console.log("character phone interaction tests passed");
