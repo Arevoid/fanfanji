@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { advanceCharacterPhone } from "../src/features/characterPhone/characterPhoneProgression";
+import {
+  advanceCharacterPhone,
+  advanceCharacterPhoneWithResult,
+} from "../src/features/characterPhone/characterPhoneProgression";
 import { createTextImageMarkup } from "../src/features/chat/services/messageParser";
 import type { Character, Message, UserIdentity, UserSettings, WorldBookEntry } from "../src/types";
 import type { CharacterPhoneContact, CharacterPhoneRecord } from "../src/domain/characterPhone/types";
@@ -198,6 +201,33 @@ try {
   assert.match(systemInstruction, /不同平台/);
   assert.match(systemInstruction, /短句、停顿、犹豫/);
   assert.match(String(request.message || ""), /lifeEventSummary/);
+
+  const missingApiConfig = await advanceCharacterPhoneWithResult({
+    phone,
+    character,
+    activeIdentity: identity,
+    relationships: [relation],
+    messages,
+    moments: [],
+    worldBookEntries: worldBook,
+  });
+  assert.equal(missingApiConfig.status, "no_change");
+  assert.equal(missingApiConfig.reason, "missing_api_config");
+
+  responsePayload = "not-json" as unknown as Record<string, unknown>;
+  const invalidProviderResponse = await advanceCharacterPhoneWithResult({
+    phone,
+    character,
+    activeIdentity: identity,
+    relationships: [relation],
+    messages,
+    moments: [],
+    worldBookEntries: worldBook,
+    settings,
+    now: 1_200,
+  });
+  assert.equal(invalidProviderResponse.status, "no_change");
+  assert.equal(invalidProviderResponse.reason, "invalid_response");
 
   responsePayload = {
     lifeEventSummary: "把聊天里那张文字图收进相册",

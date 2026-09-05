@@ -72,7 +72,10 @@ import type {
 import type { Appointment, ScheduleEntry } from "../domain/schedule/scheduleTypes";
 import AppSchedule from "./AppSchedule";
 import { createCharacterTextMessage } from "../features/chat/services/messageFactory";
-import { advanceCharacterPhone } from "../features/characterPhone/characterPhoneProgression";
+import {
+  advanceCharacterPhoneWithResult,
+  type CharacterPhoneGenerationNoChangeReason,
+} from "../features/characterPhone/characterPhoneProgression";
 import { ensureCharacterPhoneContent } from "../features/characterPhone/characterPhoneContent";
 import { selectCharacterPhoneWorldBookEntries } from "../features/characterPhone/characterPhoneLifeContext";
 import { buildCharacterPhoneAwarenessMessage } from "../features/characterPhone/characterPhoneReaction";
@@ -95,7 +98,10 @@ import { buildCharacterPhoneBrowserDetail } from "../features/characterPhone/cha
 import { CharacterPhoneCallApp, type CharacterPhoneDialerTab } from "../features/characterPhone/components/CharacterPhoneCallApp";
 import { CharacterPhoneCameraApp } from "../features/characterPhone/components/CharacterPhoneCameraApp";
 import { resolveCharacterPhoneHiddenGalleryPasscode } from "../features/characterPhone/characterPhoneGallerySecurity";
-import { createCharacterPhoneTextImageDataUrl } from "../features/characterPhone/characterPhoneTextImage";
+import {
+  createCharacterPhoneTextImageDataUrl,
+  getCharacterPhoneGalleryImageDataUrl,
+} from "../features/characterPhone/characterPhoneTextImage";
 import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../domain/relationshipNetwork/relationshipNetworkTypes";
 
 interface AppCharacterPhoneProps {
@@ -297,6 +303,26 @@ const LEGACY_CHARACTER_PHONE_WALLPAPERS = new Set([
 // deadline; this UI boundary protects the generate button from any remaining
 // adapter or browser-fetch edge case.
 const CHARACTER_PHONE_GENERATION_TIMEOUT_MS = 120_000;
+function characterPhoneGenerationNoChangeNotice(
+  reason?: CharacterPhoneGenerationNoChangeReason,
+): string {
+  switch (reason) {
+    case "missing_api_config":
+      return "请先在设置中配置文本 API 和模型，再生成角色手机内容";
+    case "provider_error":
+      return "模型请求失败，请检查 API 地址、Key 和模型后重试";
+    case "invalid_response":
+      return "模型返回格式无法识别，请重试或更换模型";
+    case "missing_evidence":
+      return "暂时没有可引用的聊天或世界书证据，请先补充最近对话后重试";
+    case "context_synced":
+      return "已同步现有聊天和联系人，暂未生成新的生活痕迹";
+    case "duplicate_content":
+      return "已有相同记录，本次没有新增生活痕迹";
+    default:
+      return "本次没有生成新的生活痕迹，请补充最近聊天后重试";
+  }
+}
 function openCharacterPhone(
   ownerIdentityId: string,
   character: Character,
@@ -699,7 +725,9 @@ export default function AppCharacterPhone({
   const persistPhone = (next: CharacterPhoneRecord) => {
     const result = saveCharacterPhone(next);
     if (!result.success) {
-      setPhoneNotice(result.error === "quota" ? "角色手机存储空间不足，修改未保存" : "角色手机数据保存失败，原数据已保留");
+      setPhoneNotice(result.error === "quota"
+        ? "角色手机存储空间不足，请先清理旧图片或文字图；本次修改未保存"
+        : "角色手机数据保存失败，原数据已保留");
       return false;
     }
     setPhone(next);
@@ -906,17 +934,6 @@ export default function AppCharacterPhone({
   const generateCharacterPhoneContent = async () => {
     if (!unlocked || !currentPhone || !selectedCharacter || isAdvancing) return;
     const basePhone = currentPhone;
-    const artifactCount = (value: CharacterPhoneRecord) =>
-      (value.contacts?.length ?? 0)
-      + (value.threadMessages?.length ?? 0)
-      + (value.phoneCalls?.length ?? 0)
-      + (value.browserHistory?.length ?? 0)
-      + (value.diaryEntries?.length ?? 0)
-      + (value.notes?.length ?? 0)
-      + (value.todos?.length ?? 0)
-      + (value.scheduleItems?.length ?? 0)
-      + (value.posts?.length ?? 0)
-      + (value.galleryItems?.length ?? 0);
     const now = Date.now();
     const requestId = generationRequestRef.current + 1;
     generationRequestRef.current = requestId;
@@ -936,8 +953,8 @@ export default function AppCharacterPhone({
           reject(new Error("角色手机内容生成超时"));
         }, CHARACTER_PHONE_GENERATION_TIMEOUT_MS);
       });
-      const advancedPhone = await Promise.race([
-        advanceCharacterPhone({
+      const advancedResult = await Promise.race([
+        advanceCharacterPhoneWithResult({
           phone: basePhone,
           character: selectedCharacter,
           characters,
@@ -957,19 +974,20 @@ export default function AppCharacterPhone({
         || generationRequestRef.current !== requestId
         || phoneScopeRef.current.ownerIdentityId !== requestScope.ownerIdentityId
         || phoneScopeRef.current.characterId !== requestScope.characterId
-        || advancedPhone.id !== requestScope.phoneId) return;
+        || advancedResult.phone.id !== requestScope.phoneId) return;
+      const advancedPhone = advancedResult.phone;
       const discoveredPhone = discoverCharacterPhoneActions(advancedPhone, selectedCharacter, now);
       const saved = saveCharacterPhone(discoveredPhone);
       if (!saved.success) {
-        setPhoneNotice(saved.error === "quota" ? "角色手机存储空间不足，生成内容未保存" : "生成内容保存失败，原数据已保留");
+        setPhoneNotice(saved.error === "quota"
+          ? "角色手机存储空间不足，请先在设置中清理旧图片或文字图后重试；原有数据未改动"
+          : "生成内容保存失败，原数据已保留");
         return;
       }
       setPhone(discoveredPhone);
-      setPhoneNotice(
-        artifactCount(discoveredPhone) > artifactCount(basePhone)
-          ? "角色手机已生成新的生活痕迹"
-          : "本次没有生成新内容，请检查模型状态或补充最近聊天后重试",
-      );
+      setPhoneNotice(advancedResult.status === "generated"
+        ? "角色手机已生成新的生活痕迹"
+        : characterPhoneGenerationNoChangeNotice(advancedResult.reason));
       const generatedMessages = discoveredPhone.messages.filter(
         (message) => !basePhone.messages.some((existing) => existing.id === message.id),
       );
@@ -1215,8 +1233,7 @@ export default function AppCharacterPhone({
       detectability: activeApp === "settings" || activeApp === "schedule" ? "possible" : "none",
       ...(activeApp === "settings" || activeApp === "schedule" ? { discoveryAfterOpens: 2 } : {}),
     }, now);
-    saveCharacterPhone(next);
-    setPhone(next);
+    persistPhone(next);
   };
   const handleCharacterPhoneTextImageCreate = (description: string): boolean => {
     if (!currentPhone || !selectedCharacter) return false;
@@ -1234,6 +1251,7 @@ export default function AppCharacterPhone({
       caption,
       timestamp: now,
       source: "user",
+      textImageForId: `camera-text-${now}`,
       dataUrl: createCharacterPhoneTextImageDataUrl(caption, title),
     };
     updatePhone({ galleryItems: [item, ...currentPhone.galleryItems] });
@@ -2265,8 +2283,8 @@ export default function AppCharacterPhone({
               onPointerUp={handleGalleryPointerUp}
               onPointerCancel={() => { gallerySwipeStartRef.current = null; }}
             >
-              {selectedGallery.dataUrl ? (
-                <img src={selectedGallery.dataUrl} alt={selectedGallery.title} draggable={false} className="max-h-[58vh] w-full rounded-2xl object-contain" />
+              {getCharacterPhoneGalleryImageDataUrl(selectedGallery) ? (
+                <img src={getCharacterPhoneGalleryImageDataUrl(selectedGallery)} alt={selectedGallery.title} draggable={false} className="max-h-[58vh] w-full rounded-2xl object-contain" />
               ) : selectedGallery.imageAssetId ? (
                 <StoredCharacterPhoneImage
                   assetId={selectedGallery.imageAssetId}
@@ -2417,8 +2435,8 @@ export default function AppCharacterPhone({
                         className="group relative aspect-square overflow-hidden rounded-[2px] bg-neutral-200 outline-none transition-transform focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-1 active:scale-[0.98]"
                         aria-label={`打开相册${item.title}`}
                       >
-                        {item.dataUrl ? (
-                          <img src={item.dataUrl} alt={item.title} className="h-full w-full object-cover" />
+                        {getCharacterPhoneGalleryImageDataUrl(item) ? (
+                          <img src={getCharacterPhoneGalleryImageDataUrl(item)} alt={item.title} className="h-full w-full object-cover" />
                         ) : item.imageAssetId ? (
                           <StoredCharacterPhoneImage
                             assetId={item.imageAssetId}

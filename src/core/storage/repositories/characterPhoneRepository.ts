@@ -36,7 +36,7 @@ export function getCharacterPhone(
       phone.ownerIdentityId === ownerIdentityId &&
       phone.characterId === characterId,
   );
-  return phone ? normalizeMusicPersistence(phone) : undefined;
+  return phone ? normalizeCharacterPhoneRecord(phone) : undefined;
 }
 
 export function createCharacterPhone(
@@ -107,6 +107,24 @@ function normalizeMusicPersistence(phone: CharacterPhoneRecord): CharacterPhoneR
   };
 }
 
+const TEXT_IMAGE_DATA_URL_PATTERN = /^data:image\/svg\+xml(?:;[^,]*)?,/i;
+
+/**
+ * Generated/camera text images are deterministic SVGs built from caption and
+ * title. Keep only a marker in localStorage and recreate the SVG at render
+ * time; real uploaded photos continue to live in IndexedDB via imageAssetId.
+ */
+function normalizeGalleryPersistence(items: CharacterPhoneRecord["galleryItems"]): CharacterPhoneRecord["galleryItems"] {
+  return items.map((item) => {
+    if (!item.dataUrl || item.imageAssetId || !TEXT_IMAGE_DATA_URL_PATTERN.test(item.dataUrl)) return item;
+    return {
+      ...item,
+      dataUrl: undefined,
+      textImageForId: item.textImageForId || item.id,
+    };
+  });
+}
+
 function normalizeCharacterPhoneRecord(phone: CharacterPhoneRecord): CharacterPhoneRecord {
   return normalizeMusicPersistence({
     ...phone,
@@ -122,7 +140,7 @@ function normalizeCharacterPhoneRecord(phone: CharacterPhoneRecord): CharacterPh
     todos: phone.todos ?? [],
     scheduleItems: phone.scheduleItems ?? [],
     phoneCalls: phone.phoneCalls ?? [],
-    galleryItems: phone.galleryItems ?? [],
+    galleryItems: normalizeGalleryPersistence(phone.galleryItems ?? []),
     musicTracks: phone.musicTracks ?? [],
     listeningHistory: phone.listeningHistory ?? [],
     musicPlaylists: phone.musicPlaylists ?? [],

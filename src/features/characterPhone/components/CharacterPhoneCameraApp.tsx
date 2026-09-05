@@ -3,6 +3,7 @@ import { Camera, Image, LoaderCircle, ScanLine, Type } from "lucide-react";
 import type { Character } from "../../../types";
 import type { CharacterPhoneImageSaveInput, CharacterPhoneRecord } from "../../../domain/characterPhone/types";
 import { StoredCharacterPhoneImage } from "./StoredCharacterPhoneImage";
+import { getCharacterPhoneGalleryImageDataUrl } from "../characterPhoneTextImage";
 
 interface CharacterPhoneCameraAppProps {
   phone: CharacterPhoneRecord;
@@ -37,7 +38,7 @@ export function CharacterPhoneCameraApp({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const recentImages = useMemo(
     () => phone.galleryItems
-      .filter((item) => !item.deletedAt && !item.hidden && (item.imageAssetId || item.dataUrl))
+      .filter((item) => !item.deletedAt && !item.hidden && (item.imageAssetId || getCharacterPhoneGalleryImageDataUrl(item)))
       .slice()
       .sort((left, right) => right.timestamp - left.timestamp)
       .slice(0, 4),
@@ -193,7 +194,7 @@ export function CharacterPhoneCameraApp({
           <div className="mt-3 grid grid-cols-4 gap-2">
             {recentImages.map((item) => (
               <button key={item.id} type="button" onClick={onOpenGallery} className="aspect-square overflow-hidden rounded-xl bg-white/10 text-left">
-                {item.imageAssetId ? <StoredCharacterPhoneImage assetId={item.imageAssetId} alt={item.title} className="h-full w-full object-cover" /> : item.dataUrl ? <img src={item.dataUrl} alt={item.title} className="h-full w-full object-cover" /> : null}
+                {item.imageAssetId ? <StoredCharacterPhoneImage assetId={item.imageAssetId} alt={item.title} className="h-full w-full object-cover" /> : getCharacterPhoneGalleryImageDataUrl(item) ? <img src={getCharacterPhoneGalleryImageDataUrl(item)} alt={item.title} className="h-full w-full object-cover" /> : null}
               </button>
             ))}
           </div>

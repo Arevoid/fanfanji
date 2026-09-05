@@ -382,7 +382,22 @@ function isPrivateGalleryEvidence(value: string): boolean {
   return /私密|隐秘|秘密|不公开|仅自己|不能让人看|不想让别人看到|藏起来|私藏|锁屏|偷偷保存|私人|只给自己看|private|secret|personal|intimate|only me/iu.test(value);
 }
 
-export async function advanceCharacterPhone(input: {
+export type CharacterPhoneGenerationNoChangeReason =
+  | "missing_api_config"
+  | "provider_error"
+  | "invalid_response"
+  | "missing_evidence"
+  | "duplicate_content"
+  | "context_synced";
+
+export interface CharacterPhoneGenerationResult {
+  phone: CharacterPhoneRecord;
+  status: "generated" | "no_change";
+  reason?: CharacterPhoneGenerationNoChangeReason;
+  createdCount: number;
+}
+
+type CharacterPhoneProgressionInput = {
   phone: CharacterPhoneRecord;
   character: Character;
   characters?: Character[];
@@ -396,7 +411,16 @@ export async function advanceCharacterPhone(input: {
   musicTracks?: MusicTrack[];
   settings?: UserSettings;
   now?: number;
-}): Promise<CharacterPhoneRecord> {
+};
+
+/**
+ * Advances the phone and keeps the reason for a no-op separate from the
+ * resulting record. The public compatibility wrapper below still returns
+ * only a record for callers that do not need diagnostics.
+ */
+export async function advanceCharacterPhoneWithResult(
+  input: CharacterPhoneProgressionInput,
+): Promise<CharacterPhoneGenerationResult> {
   const now = input.now ?? Date.now();
   const characters = input.characters ?? [input.character];
   const relationships = input.relationships ?? [];
@@ -439,7 +463,9 @@ export async function advanceCharacterPhone(input: {
 
   // No API means no invented diary, schedule, search, contact, or chat. The
   // phone keeps real synchronized data instead of falling back to templates.
-  if (!input.settings?.apiKey || !input.settings.selectedModel) return base;
+  if (!input.settings?.apiKey || !input.settings.selectedModel) {
+    return { phone: base, status: "no_change", reason: "missing_api_config", createdCount: 0 };
+  }
 
   const context = buildRecentContext({
     character: input.character,
@@ -489,14 +515,14 @@ export async function advanceCharacterPhone(input: {
       streamCompatible: input.settings.streamCompatible,
     });
   } catch {
-    return base;
+    return { phone: base, status: "no_change", reason: "provider_error", createdCount: 0 };
   }
 
   let raw: GeneratedPhonePayload;
   try {
     raw = parseJson(response.text) as GeneratedPhonePayload;
   } catch {
-    return base;
+    return { phone: base, status: "no_change", reason: "invalid_response", createdCount: 0 };
   }
 
   const sourceFileName = input.character.sourceFileName;
@@ -509,7 +535,9 @@ export async function advanceCharacterPhone(input: {
     .filter((source): source is NonNullable<typeof source> => Boolean(source));
   // A phone trace is a projection of evidence, not a new Truth-layer fact.
   // If the provider cannot point at any scoped source, keep the phone unchanged.
-  if (validatedSourceRefs.length === 0) return base;
+  if (validatedSourceRefs.length === 0) {
+    return { phone: base, status: "no_change", reason: "missing_evidence", createdCount: 0 };
+  }
   const contactEvidenceText = [
     input.character.personality,
     input.character.backstory,
@@ -663,6 +691,7 @@ export async function advanceCharacterPhone(input: {
       caption: galleryCaption || galleryTitle,
       timestamp: now - 25 * 60 * 1000,
       source: "generated",
+      textImageForId: `phone-life-gallery-${lifeEventId}`,
       dataUrl: createCharacterPhoneTextImageDataUrl(galleryCaption || galleryTitle, galleryTitle),
       ...(referencedTextImage ? { sourceId: referencedTextImage.sourceId } : {}),
     };
@@ -687,6 +716,7 @@ export async function advanceCharacterPhone(input: {
       timestamp: now - 20 * 60 * 1000,
       hidden: true,
       source: "generated",
+      textImageForId: `phone-life-hidden-gallery-${lifeEventId}`,
       dataUrl: createCharacterPhoneTextImageDataUrl(hiddenGalleryCaption || hiddenGalleryTitle, hiddenGalleryTitle),
       ...(validatedPrivateTextImage ? { sourceId: validatedPrivateTextImage.sourceId } : {}),
     };
@@ -708,5 +738,25 @@ export async function advanceCharacterPhone(input: {
     next.lifeEvents?.push({ id: lifeEventId, summary, startedAt, generatedAt: now, sourceRefs: validatedSourceRefs, artifactRefs });
   }
 
-  return generated ? { ...next, lastGeneratedAt: now, updatedAt: now } : base;
+  if (generated) {
+    return {
+      phone: { ...next, lastGeneratedAt: now, updatedAt: now },
+      status: "generated",
+      createdCount: artifactRefs.length + mergedContacts.added.length,
+    };
+  }
+  return {
+    phone: base,
+    status: "no_change",
+    reason: contextualPhone !== input.phone ? "context_synced" : "duplicate_content",
+    createdCount: 0,
+  };
+}
+
+/** Backwards-compatible record-only API used by existing generation tests. */
+export async function advanceCharacterPhone(
+  input: CharacterPhoneProgressionInput,
+): Promise<CharacterPhoneRecord> {
+  const result = await advanceCharacterPhoneWithResult(input);
+  return result.phone;
 }
