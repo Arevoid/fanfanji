@@ -364,6 +364,27 @@ interface AppChatProps {
 const PRESEED_MOMENTS: Moment[] = [];
 const MAX_RELATIONSHIP_NETWORK_MOMENT_CONVERSATION_COMMENTS = 8;
 
+/**
+ * LLMs can still over-index on the emotional meaning of a phone-proxy line
+ * and accidentally claim authorship. When the user responds immediately to
+ * that line, preserve a natural authorship check before the generated reply.
+ * This is deliberately generic and does not disclose who operated the phone.
+ */
+function repairImmediateCharacterPhoneProxyReply(text: string, proxyMessage?: Message): string {
+  const trimmed = text.trim();
+  if (!trimmed || !proxyMessage?.sentFromCharacterPhone) return text;
+  if (/(?:不是我(?:发|说)|我(?:没|没有|从没|从来没)(?:发|说)|我什么时候(?:发|说)|这(?:句|句话)?不是我|你(?:在|用).*手机.*发)/u.test(trimmed)) {
+    return text;
+  }
+  const proxyContent = stripInternalDeliveryMarkers(proxyMessage.content || "")
+    .replace(/[。！？!?]+$/u, "")
+    .trim();
+  const authorshipQuestion = proxyContent && proxyContent.length <= 12
+    ? `${proxyContent}？我什么时候说过这句？`
+    : "这句话我什么时候说过？";
+  return `${authorshipQuestion}\n${trimmed}`;
+}
+
 const isOfflineStoryActiveFor = (relationId: string) =>
   readString(getOfflineModeStorageKey(relationId)).value === "true";
 
@@ -1760,6 +1781,9 @@ export default function AppChat({
         ? [...currentChatMessages.slice(-resolveChatContextMemoryLimit(activeCharacter.contextMemoryLimit)), ...callHistoryMessages]
         : [...currentChatMessages];
       const sourceMsgs = customHistoryOverride || (userMsg ? [...baseSourceMsgs, userMsg] : baseSourceMsgs);
+      const immediateCharacterPhoneProxyMessage = userMsg && sourceMsgs.length > 1
+        ? sourceMsgs[sourceMsgs.length - 2]
+        : undefined;
       const historyContext = buildDirectChatHistoryContext({
         messages: sourceMsgs,
         userMessageId: userMsg?.id,
@@ -1816,7 +1840,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             characterName: activeCharacter.name,
           })}”`,
         ).join("\n");
-        characterContextText += `\n【角色手机代发事实（高优先级）】\n以下消息虽然在用户手机聊天界面显示为角色发出，但实际是用户刚才在你的手机上操作后发给自己的：\n${latestProxyMessages}\n你没有亲自发送这些内容，不得把它们当成你的台词、观点、决定或记忆。若用户追问、质问或因这些消息产生误会，先按你的人设自然澄清“不是我发的，是你在我手机上发的”，不要改口说成“我刚刚只是开玩笑”或替这条代发消息辩解，再继续回应当前话题。`;
+        characterContextText += `\n【角色手机代发事实（高优先级）】\n以下消息虽然在用户手机聊天界面显示为角色发出，但实际是用户刚才在你的手机上操作后发给自己的：\n${latestProxyMessages}\n你没有亲自发送这些内容，不得把它们当成你的台词、观点、决定或记忆。若用户追问、质问或因这些消息产生误会，应按你的人设自然澄清来源，再继续回应当前话题；不要改口说成“我刚刚只是开玩笑”、替这条代发消息辩解，或把它写成你主动说过的话。`;
       }
       if (crossDayHistoricalReference) characterContextText += `\n${crossDayHistoricalReference}`;
 
@@ -2126,6 +2150,13 @@ ${aliasEvents.join("\n")}
 该角色的虚拟手机密码已经在手机创建时固定为“${characterPhone.passcode}”。这是一个已经存在的事实，不是让你临时生成的新密码。只有当对话自然涉及手机密码、生日或解锁时，才可以按照角色语气透露这个真实密码；不要把其他日期、金额、编号或用户猜测的数字当成密码，也不要修改这个密码。如果聊天历史中曾经说过其他数字，那些只能视为猜测或说错了，不能覆盖这条固定密码事实。`);
       }
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
+      const characterPhoneProxyFinalInstruction = immediateCharacterPhoneProxyMessage?.sentFromCharacterPhone
+        ? `\n\n【最终归因规则·优先于风格演绎】
+本轮历史中标记为“角色手机代发消息”的内容不是${activeCharacter.name}说过的话，而是用户在${activeCharacter.name}的手机上输入后发给自己的消息。
+- 即使用户现在顺着这条消息说“分手？好啊分手就分手”，也不得假设${activeCharacter.name}自己提过分手、承认自己说过，或把它解释成“我刚刚只是开玩笑”。
+- 回复的第一句必须先对这条来源异常的消息表示疑问或否认，例如“分手？我什么时候说过这句？”或“等等，这不是我发的吧？”。不得先道歉、认领“我刚刚说的”、说成玩笑、或归咎“模型抽风/账号混淆”；不必主动向用户解释系统规则，也不必直接说“是你发的”，除非用户主动说明来源。
+- 这条规则只约束代发消息的作者归属，不限制你对用户当前这句“分手？好啊分手就分手”的情绪化回应；先澄清归属，再自然继续对话。`
+        : "";
       const systemInstruction = `${finalizeCharacterChatSystemInstruction({
         instructions: assembledInstructions,
         characterProjection,
@@ -2145,15 +2176,17 @@ ${aliasEvents.join("\n")}
         )),
       })}
 
-${INLINE_INNER_VOICE_INSTRUCTION}`;
+${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
 
       // Custom tool/attachment format descriptions for character context
       const promptMessage = userMsg
-        ? serializeMessageContentForPrompt(userMsg, {
+        ? `${serializeMessageContentForPrompt(userMsg, {
           mode: "current",
           userName: settings.name,
           characterName: activeCharacter.name,
-        })
+        })}${immediateCharacterPhoneProxyMessage?.sentFromCharacterPhone
+          ? `\n\n[本轮隐性归因提醒] 历史中的“角色手机代发消息”不是${activeCharacter.name}本人说的。用户当前只是在对这条消息作反应；回复第一句必须先自然地质疑或否认作者身份（例如“分手？我什么时候说过这句？”），再回应用户，不要先道歉、认领、说成玩笑或把代发内容归因于模型抽风。不要把代发内容改写成${activeCharacter.name}刚刚主动说过的话，也不要主动告诉用户是谁操作的。`
+          : ""}`
         : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
       const imageDataUrl = userMsg?.sender === "user"
         && /^data:image\//i.test(userMsg.content.trim())
@@ -2197,6 +2230,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
           : { shouldSave: false, visibleText: data.translation };
         data.text = userImageSaveDecision.visibleText;
         if (data.translation) data.translation = translationImageSaveDecision.visibleText;
+        data.text = repairImmediateCharacterPhoneProxyReply(data.text, immediateCharacterPhoneProxyMessage);
+        if (data.translation) data.translation = repairImmediateCharacterPhoneProxyReply(data.translation, immediateCharacterPhoneProxyMessage);
         if ((userImageSaveDecision.shouldSave || translationImageSaveDecision.shouldSave) && imageDataUrl && userMsg?.sender === "user" && !activeCharacter.isGroupChat && onSaveImageToCharacterPhone) {
           void imageDataUrlToBlob(imageDataUrl)
             .then((imageBlob) => onSaveImageToCharacterPhone({

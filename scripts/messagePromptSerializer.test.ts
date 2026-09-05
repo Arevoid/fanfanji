@@ -102,6 +102,9 @@ assert.equal((chatRuntimeSource.match(/mode: "current"/g) || []).length >= 2, tr
 assert.doesNotMatch(appChat, /let promptMessage = userMsg \? userMsg\.content/);
 assert.match(appChat, /Boolean\(msg\.sentFromCharacterPhone\)/, "phone-originated messages must keep their avatar visible");
 assert.match(appChat, /角色手机代发事实/, "phone-originated messages must be explicitly attributed in the model context");
+assert.match(appChat, /最终归因规则·优先于风格演绎/, "phone-originated attribution must remain a final high-priority rule");
+assert.match(appChat, /回复的第一句必须先对这条来源异常的消息表示疑问或否认/, "phone-originated replies must deny authorship before reacting");
+assert.match(appChat, /我什么时候说过这句/, "phone-proxy replies need a deterministic authorship safeguard");
 
 for (const relativePath of [
   "../src/domain/memory/MemoryExtractor.ts",
