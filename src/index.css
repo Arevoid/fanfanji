@@ -251,6 +251,20 @@ button, input, textarea, select {
   padding-top: 0 !important;
 }
 
+/* The role phone is an app surface rather than a document. Keep browser
+   pinch-zoom and scroll chaining from scaling or dragging the whole shell;
+   each page exposes its own intentional overflow region instead. */
+.phone-screen-container {
+  touch-action: pan-x pan-y;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+.phone-screen-container .overflow-y-auto,
+.phone-screen-container .overflow-auto {
+  overscroll-behavior: contain;
+}
+
 /* Hide default scrollbars globally */
 * {
   /* For Firefox */

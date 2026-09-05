@@ -2081,7 +2081,7 @@ export default function AppCharacterPhone({
           <button type="button" onClick={removePhoneContact} className="mt-2 w-full rounded-xl bg-rose-50 px-3 py-2 text-left text-xs font-bold text-rose-600">删除好友（保留聊天记录）</button>
         </div>
       )}
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4">
+      <div className="character-phone-chat-messages min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain touch-pan-y px-3 py-4">
         {currentThreadMessages.map((message) => (
           <div key={message.id} className={`flex ${message.sender === "character" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${message.sender === "character" ? "rounded-tr-sm bg-[#95ec69] text-[#191919]" : "rounded-tl-sm border border-slate-100 bg-white text-slate-800"}`}>

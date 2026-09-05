@@ -2,11 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- Keep the viewport contract conservative for iOS Safari.  The visual
-         viewport controller handles keyboard resizing; the non-standard
-         interactive-widget/max-scale flags can make Safari open a pushed PWA
-         in a non-standalone, letterboxed layout. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- The phone shell is a fixed-size app surface. Browser-level zoom would
+         scale the entire shell and crop its navigation/content, so all app
+         scrolling must happen inside the page's own scroll regions instead. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>米饭机</title>
     
     <!-- PWA primary settings -->

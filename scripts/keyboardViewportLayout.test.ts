@@ -7,6 +7,8 @@ const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const viewport = readFileSync(new URL("../src/features/viewport/visualViewport.ts", import.meta.url), "utf8");
 
 assert.match(indexHtml, /<meta name="viewport"[^>]*viewport-fit=cover/);
+assert.match(indexHtml, /<meta name="viewport"[^>]*maximum-scale=1/);
+assert.match(indexHtml, /<meta name="viewport"[^>]*user-scalable=no/);
 assert.equal((indexHtml.match(/<meta name="viewport"/g) || []).length, 1);
 assert.match(indexCss, /height: var\(--app-viewport-height, 100dvh\)/);
 assert.match(indexCss, /\.app-viewport-root[\s\S]*min-height: 0/);

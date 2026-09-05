@@ -146,6 +146,7 @@ assert.match(browserDetails, /不是突然想做功课/);
 assert.match(component, /CharacterPhoneCallApp/);
 assert.match(callApp, /phoneCalls/);
 assert.match(component, /chat-tab-nav z-10 box-border flex h-14 min-h-14 max-h-14/);
+assert.match(component, /character-phone-chat-messages min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain touch-pan-y/);
 assert.ok((component.match(/box-border flex h-16 min-h-16 max-h-16/g) || []).length >= 7, "角色手机顶部导航应统一为 64px");
 assert.match(component, /relative z-20 box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between border-b-0 bg-transparent px-4 py-1\.5/);
 assert.match(component, /activeApp === "phone" \|\| activeApp === "browser" \|\| activeApp === "schedule" \? "bg-white"/);
@@ -153,6 +154,8 @@ assert.match(component, /className="h-8 min-w-8 px-1 text-xs font-medium normal-
 assert.match(component, /onClick=\{\(\) => setScheduleTodaySignal\(\(signal\) => signal \+ 1\)\}/);
 assert.match(component, /activeApp === "schedule" \? "character-phone-schedule-main"/);
 assert.match(css, /character-phone-schedule-main\.px-5/);
+assert.match(css, /\.phone-screen-container \{[\s\S]*touch-action: pan-x pan-y/);
+assert.match(css, /\.phone-screen-container \.overflow-y-auto,[\s\S]*overscroll-behavior: contain/);
 assert.match(callApp, /nav className="box-border grid h-16 min-h-16 max-h-16/);
 assert.doesNotMatch(component, /CharacterPhoneLifeEventTag|renderLifeEventTag|同一生活事件/);
 assert.doesNotMatch(callApp, /CharacterPhoneLifeEventTag|同一生活事件/);
