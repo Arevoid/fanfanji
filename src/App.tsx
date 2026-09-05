@@ -339,8 +339,8 @@ const AppIcons = {
 
 // Keep the user's desktop and Dock tiles consistent with the larger iOS-like
 // visual scale used by the main phone.
-const HOME_APP_ICON_SIZE = 64;
-const HOME_APP_ICON_GLYPH_CLASS = "h-10 w-10";
+const HOME_APP_ICON_SIZE = 60;
+const HOME_APP_ICON_GLYPH_CLASS = "h-9 w-9";
 
 const hexToRgba = (hex: string, opacityPercent: number) => {
   if (!hex || !hex.startsWith("#")) {
