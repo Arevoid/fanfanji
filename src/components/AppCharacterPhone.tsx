@@ -110,6 +110,7 @@ import {
 import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../domain/relationshipNetwork/relationshipNetworkTypes";
 import { stickerDb } from "../utils/stickerDb";
 import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
+import { clearRebuildableCache } from "../core/storage/rebuildableCache";
 
 interface AppCharacterPhoneProps {
   userIdentityId: string;
@@ -965,7 +966,7 @@ export default function AppCharacterPhone({
     const result = saveCharacterPhone(next);
     if (!result.success) {
       setPhoneNotice(result.error === "quota"
-        ? "角色手机存储空间不足，请先清理旧图片或文字图；本次修改未保存"
+        ? "角色手机存储空间不足，请在设置→数据管理中清理缓存或压缩数据；本次修改未保存"
         : "角色手机数据保存失败，原数据已保留");
       return false;
     }
@@ -983,6 +984,41 @@ export default function AppCharacterPhone({
         .forEach((post) => syncCharacterPhonePost(post));
     }
     return true;
+  };
+  const saveCharacterPhoneWithCacheRecovery = async (
+    next: CharacterPhoneRecord,
+    requestId?: number,
+  ): Promise<boolean> => {
+    const firstAttempt = saveCharacterPhone(next);
+    if (firstAttempt.success) return true;
+    if (firstAttempt.error !== "quota" || !selectedCharacter) {
+      setPhoneNotice(firstAttempt.error === "quota"
+        ? "角色手机存储空间不足，请在设置→数据管理中清理缓存或压缩数据；本次修改未保存"
+        : "角色手机数据保存失败，原数据已保留");
+      return false;
+    }
+
+    setPhoneNotice("存储空间不足，正在清理可重建缓存并重试…");
+    try {
+      await clearRebuildableCache({
+        scope: "characterPhone",
+        scopeId: selectedCharacter.id,
+        target: "all",
+      });
+    } catch {
+      // A cache provider can be unavailable in an embedded browser. The
+      // original failed write is still handled by the explicit message below.
+    }
+    if (requestId !== undefined && (!mountedRef.current || generationRequestRef.current !== requestId)) return false;
+    const retry = saveCharacterPhone(next);
+    if (retry.success) {
+      setPhoneNotice("已清理可重建缓存并保存角色手机内容");
+      return true;
+    }
+    setPhoneNotice(retry.error === "quota"
+      ? "清理缓存后空间仍不足，请在设置→数据管理中压缩数据；本次修改未保存"
+      : "角色手机数据保存失败，原数据已保留");
+    return false;
   };
   const clearCurrentCharacterPhoneData = async () => {
     if (!currentPhone || !selectedCharacter) return;
@@ -1287,13 +1323,8 @@ export default function AppCharacterPhone({
         || advancedResult.phone.id !== requestScope.phoneId) return;
       const advancedPhone = advancedResult.phone;
       const discoveredPhone = discoverAndForwardPhoneActions(advancedPhone, basePhone, now);
-      const saved = saveCharacterPhone(discoveredPhone);
-      if (!saved.success) {
-        setPhoneNotice(saved.error === "quota"
-          ? "角色手机存储空间不足，请先在设置中清理旧图片或文字图后重试；原有数据未改动"
-          : "生成内容保存失败，原数据已保留");
-        return;
-      }
+      const saved = await saveCharacterPhoneWithCacheRecovery(discoveredPhone, requestId);
+      if (!saved) return;
       setPhone(discoveredPhone);
       const newGeneratedPosts = discoveredPhone.posts.filter(
         (post) => post.source === "generated"
@@ -3704,9 +3735,18 @@ export default function AppCharacterPhone({
             </div>
 
             {phoneNotice && (
-              <p role="status" className="mx-1 mb-1 rounded-xl bg-white/80 px-3 py-2 text-center text-xs text-neutral-600 shadow-sm">
+              <div role="status" className="mx-1 mb-1 rounded-xl bg-white/80 px-3 py-2 text-center text-xs text-neutral-600 shadow-sm">
                 {phoneNotice}
-              </p>
+                {(phoneNotice.includes("存储空间不足") || phoneNotice.includes("空间仍不足")) && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveApp("settings")}
+                    className="mt-1.5 rounded-lg bg-neutral-900 px-2.5 py-1 text-[10px] font-bold text-white"
+                  >
+                    去数据管理
+                  </button>
+                )}
+              </div>
             )}
 
             <main

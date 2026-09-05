@@ -34,6 +34,7 @@ export function StorageCachePanel({ mode, characterId, characterName }: StorageC
   const [usage, setUsage] = useState(() => getRebuildableCacheUsage({ scope: mode, scopeId: characterId, targets }));
   const [busyTarget, setBusyTarget] = useState<StorageCacheTarget | null>(null);
   const [notice, setNotice] = useState("");
+  const [browserStorage, setBrowserStorage] = useState<{ usage?: number; quota?: number }>({});
 
   const refreshUsage = useCallback(() => {
     setUsage(getRebuildableCacheUsage({ scope: mode, scopeId: characterId, targets }));
@@ -42,6 +43,20 @@ export function StorageCachePanel({ mode, characterId, characterName }: StorageC
   useEffect(() => {
     refreshUsage();
   }, [refreshUsage]);
+
+  const refreshBrowserStorage = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.storage?.estimate) return;
+    try {
+      const estimate = await navigator.storage.estimate();
+      setBrowserStorage({ usage: estimate.usage, quota: estimate.quota });
+    } catch {
+      // Embedded browsers may expose no quota estimate; cleanup still works.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshBrowserStorage();
+  }, [refreshBrowserStorage]);
 
   const usageFor = (target: StorageCacheTarget) => usage.find((entry) => entry.target === target);
   const totalUsage = usageFor("all")?.bytes ?? usage
@@ -57,6 +72,7 @@ export function StorageCachePanel({ mode, characterId, characterName }: StorageC
       const result = await clearRebuildableCache({ scope: mode, target, scopeId: characterId });
       setNotice(formatStorageCacheCleanupResult(result));
       refreshUsage();
+      void refreshBrowserStorage();
     } catch (error) {
       setNotice(`清理失败，正式数据未被改动：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
@@ -124,8 +140,16 @@ export function StorageCachePanel({ mode, characterId, characterName }: StorageC
         <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>安全保障：清理白名单之外的正式数据不会被触碰。</span>
       </div>
+      {(browserStorage.usage !== undefined || browserStorage.quota !== undefined) && (
+        <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[10px] leading-4 text-slate-500">
+          浏览器存储：{browserStorage.usage === undefined ? "未知" : formatStorageBytes(browserStorage.usage)}
+          {browserStorage.quota === undefined ? "" : ` / ${formatStorageBytes(browserStorage.quota)}`}
+          {browserStorage.usage !== undefined && browserStorage.quota
+            ? `（${Math.round((browserStorage.usage / browserStorage.quota) * 100)}%）`
+            : ""}
+        </div>
+      )}
       {notice && <p role="status" className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-[10px] leading-4 text-slate-600">{notice}</p>}
     </section>
   );
 }
-
