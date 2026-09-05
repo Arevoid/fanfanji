@@ -1,3 +1,5 @@
+import type { MomentVisibility } from "../../types";
+
 export type CharacterPhoneAppId = "chat" | "browser" | "schedule" | "gallery" | "diary" | "moments" | "notes" | "music" | "settings";
 export type CharacterPhoneLifeArtifactAppId = CharacterPhoneAppId | "phone" | "camera";
 
@@ -66,6 +68,10 @@ export interface CharacterPhonePost {
   authorAvatar?: string;
   sourceMomentId?: string;
   lifeEventId?: string;
+  /** Audience selected when the role posts from their simulated phone. */
+  visibility?: MomentVisibility;
+  /** Character/identity ids selected for a specific audience. */
+  visibilityTargetIds?: string[];
 }
 
 export interface CharacterPhoneBrowserResult {

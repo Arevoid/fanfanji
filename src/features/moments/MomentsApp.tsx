@@ -134,7 +134,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
           <img src={tabAvatar} alt="" className="w-16 h-16 rounded-[12px] border-2 border-white object-cover bg-white shadow-md z-40" />
         </div>
       </div>
-      <div className="h-10" />
+      <div className="h-0" aria-hidden="true" />
       {pendingRelationshipNetworkInteractions.length > 0 && (
         <button type="button" onClick={() => setShowPendingInteractions(true)} className="mx-4 my-2 flex w-[calc(100%-2rem)] items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-left text-[11px] text-amber-800 shadow-sm">
           <span className="font-bold">✨ 待确认互动</span>
@@ -232,7 +232,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
             const comments = getMomentComments(moment);
             const liked = moment.likes.includes(settings.name);
             return (
-              <div key={moment.id} className="py-5 flex gap-3">
+              <div key={moment.id} className="py-5 first:pt-2 flex gap-3">
                 <img src={authorAvatar} alt="" className="w-10 h-10 rounded-[6px] object-cover bg-slate-50 shrink-0 border border-slate-100" />
                 <div className="flex-1 min-w-0">
                   <h4 className="text-xs font-bold text-[#576b95] hover:underline cursor-pointer">{authorName}</h4>

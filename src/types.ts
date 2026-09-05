@@ -290,6 +290,9 @@ export interface MomentComment {
   replyToCommentId?: string;
 }
 
+/** Audience for a character's social post. Legacy moments without this field are public. */
+export type MomentVisibility = "public" | "private" | "user" | "specific";
+
 export interface Moment {
   id: string;
   characterId?: string; // If posted by a character, otherwise user
@@ -316,6 +319,12 @@ export interface Moment {
   imageDescription?: string;
   /** The user identity whose social circle this post belongs to. */
   ownerIdentityId?: string;
+  /** Who can see this post. `private` stays on the character phone; `user` is visible to the owner only. */
+  visibility?: MomentVisibility;
+  /** Character or identity ids selected for `specific` visibility. */
+  visibilityTargetIds?: string[];
+  /** Stable link back to the originating character-phone post. */
+  sourceCharacterPhonePostId?: string;
 }
 
 export interface ForumPublicAuthor {

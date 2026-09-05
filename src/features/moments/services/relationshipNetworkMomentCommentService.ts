@@ -219,6 +219,9 @@ export function listRelationshipNetworkMomentCommentCandidates(input: {
   force?: boolean;
   action?: RelationshipNetworkInteractionAction;
 }): RelationshipNetworkMomentCommentCandidate[] {
+  // Private and user-only character-phone posts are intentionally excluded
+  // from NPC relationship-network interactions.
+  if (input.currentMoment && (input.currentMoment.visibility || "public") !== "public") return [];
   const targetCharacter = input.targetCharacterId
     ? input.characters.find((character) =>
       character.id === input.targetCharacterId

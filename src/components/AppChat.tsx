@@ -195,6 +195,7 @@ import {
   type RelationshipNetworkMomentCommentCandidate,
 } from "../features/moments/services/relationshipNetworkMomentCommentService";
 import { generateAutomaticMomentReply } from "../features/moments/services/automaticMomentReplyPipeline";
+import { isMomentVisibleToUser, isMomentPublic } from "../features/moments/services/momentVisibility";
 import {
   appendRelationshipNetworkInteractionRecord,
   listRelationshipNetworkInteractionRecordsForIdentity,
@@ -2854,7 +2855,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
 
   // Pre-seed moments if state empty
   const allMoments = (moments.length === 0 ? PRESEED_MOMENTS : moments)
-    .filter((moment) => belongsToActiveIdentity(moment.ownerIdentityId));
+    .filter((moment) => isMomentVisibleToUser(moment, activeIdentityId));
 
   const latestActiveMessageId = messages
     .filter((message) => !message.isOffline && (activeRelationship
@@ -3762,6 +3763,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
   };
 
   const handleRelationshipNetworkCommentsOnMoment = async (newMo: Moment, options: { force?: boolean; showEmptyToast?: boolean } = {}): Promise<number> => {
+    if (!isMomentPublic(newMo)) return 0;
     if (relationshipNetworkCommentBlockedRef.current
       || (newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
     const candidates = listRelationshipNetworkMomentCommentCandidates({
@@ -3877,7 +3879,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
   };
 
   const handleRelationshipNetworkLikesOnMoment = async (newMo: Moment, options: { force?: boolean } = {}): Promise<number> => {
-    if ((newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
+    if (!isMomentPublic(newMo) || (newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
     const candidates = listRelationshipNetworkMomentCommentCandidates({
       ownerIdentityId: activeIdentityId,
       ...(newMo.characterId
@@ -3928,7 +3930,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
   };
 
   const handleRelationshipNetworkRepliesOnMoment = async (newMo: Moment, options: { force?: boolean } = {}): Promise<number> => {
-    if (relationshipNetworkCommentBlockedRef.current
+    if (!isMomentPublic(newMo) || relationshipNetworkCommentBlockedRef.current
       || (newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
     const npcAuthorCanonicalId = newMo.characterId
       ? resolveCanonicalCharacterId(newMo.characterId, characters)
@@ -4069,6 +4071,25 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       showToast("当前没有符合权限和关系条件的 NPC 可参与这条朋友圈");
     }
   };
+
+  const characterPhoneMomentsSeenRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const phoneMoments = moments.filter((moment) => Boolean(moment.sourceCharacterPhonePostId));
+    if (characterPhoneMomentsSeenRef.current === null) {
+      characterPhoneMomentsSeenRef.current = new Set(phoneMoments.map((moment) => moment.id));
+      return;
+    }
+    const seen = characterPhoneMomentsSeenRef.current;
+    const newlyPublished = phoneMoments
+      .filter((moment) => !seen.has(moment.id))
+      .sort((left, right) => left.timestamp - right.timestamp);
+    newlyPublished.forEach((moment) => seen.add(moment.id));
+    // A single phone generation is intentionally bridged one post at a time;
+    // run interactions only for public posts and cap the batch defensively.
+    newlyPublished.filter(isMomentPublic).slice(-1).forEach((moment) => {
+      void handleRelationshipNetworkInteractionsOnMoment(moment);
+    });
+  }, [moments]);
 
   useEffect(() => {
     const newlyPublishedNpcMoments = moments.filter((moment) =>

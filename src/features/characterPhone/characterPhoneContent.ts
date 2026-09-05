@@ -347,6 +347,11 @@ function syncMoments(
   const relevant = moments.filter((moment) => {
     const belongsToOwner = (moment.ownerIdentityId || "identity-1") === phone.ownerIdentityId;
     if (!belongsToOwner) return false;
+    // A role's own phone can always display its private posts, while private or
+    // user-only posts from everyone else stay out of this phone's social feed.
+    if ((moment.visibility || "public") !== "public" && moment.characterId !== character.id) {
+      if (moment.visibility !== "specific" || !moment.visibilityTargetIds?.includes(character.id)) return false;
+    }
     if (moment.characterId === character.id) return true;
     if (!moment.characterId) return !activeIdentity?.id || moment.ownerIdentityId === activeIdentity.id;
     return Boolean(moment.relationshipNetworkNpcId && networkNpcIds.has(moment.relationshipNetworkNpcId))
@@ -367,15 +372,36 @@ function syncMoments(
     comments: moment.comments.map((comment) => comment.content),
     source: moment.characterId === character.id ? "generated" as const : !moment.characterId ? "user" as const : "npc" as const,
     sourceMomentId: moment.id,
+    visibility: moment.visibility || "public",
+    visibilityTargetIds: moment.visibilityTargetIds,
     };
   });
   const existingSourceIds = new Set((phone.posts ?? []).map((post) => post.sourceMomentId).filter(Boolean));
-  const newPosts = sourcePosts.filter((post) => !existingSourceIds.has(post.sourceMomentId));
+  const mirroredPhonePostIds = new Set(
+    relevant
+      .map((moment) => moment.sourceCharacterPhonePostId)
+      .filter((id): id is string => Boolean(id) && (phone.posts ?? []).some((post) => post.id === id)),
+  );
+  const newPosts = sourcePosts.filter((post) => {
+    const mirroredSourceId = relevant.find((moment) => moment.id === post.sourceMomentId)?.sourceCharacterPhonePostId;
+    return !existingSourceIds.has(post.sourceMomentId)
+      && !(mirroredSourceId && mirroredPhonePostIds.has(mirroredSourceId));
+  });
   const refreshedExistingPosts = (phone.posts ?? []).map((post) => {
     const sourcePost = sourcePosts.find((candidate) => candidate.sourceMomentId === post.sourceMomentId);
-    return sourcePost?.source === "user" && sourcePost.authorAvatar
-      ? { ...post, author: sourcePost.author, authorAvatar: sourcePost.authorAvatar }
-      : post;
+    if (!sourcePost) return post;
+    return {
+      ...post,
+      author: sourcePost.author,
+      authorId: sourcePost.authorId,
+      authorAvatar: sourcePost.authorAvatar,
+      content: sourcePost.content,
+      timestamp: sourcePost.timestamp,
+      likes: sourcePost.likes,
+      comments: sourcePost.comments,
+      visibility: sourcePost.visibility,
+      visibilityTargetIds: sourcePost.visibilityTargetIds,
+    };
   });
   return {
     posts: [...refreshedExistingPosts, ...newPosts].sort((left, right) => right.timestamp - left.timestamp),

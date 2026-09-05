@@ -79,6 +79,7 @@ import { messageMatchesMutationScope, type MessageMutationScope } from "./featur
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, removePaymentStatusesForMessages, type RedPacketStatusMap } from "./features/chat/services/paymentScope";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
 import type { CharacterPhoneImageSaveInput } from "./domain/characterPhone/types";
+import type { CharacterPhonePost } from "./domain/characterPhone/types";
 import { 
   AlbumWidget, 
   CalendarAlbumWidget,
@@ -2660,6 +2661,57 @@ export default function App() {
     setMoments((prev) => upsertMomentPreservingOrder(prev, normalized));
   };
 
+  const handleSyncCharacterPhonePost = ({ post, character, ownerIdentityId }: { post: CharacterPhonePost; character: Character; ownerIdentityId: string }) => {
+    const existing = moments.find((moment) =>
+      moment.sourceCharacterPhonePostId === post.id
+      || (post.sourceMomentId && moment.id === post.sourceMomentId),
+    );
+    const relation = relationships.find((candidate) =>
+      candidate.userIdentityId === ownerIdentityId && candidate.characterId === character.id,
+    );
+    const comments = existing?.comments ? [...existing.comments] : [];
+    for (const [index, content] of post.comments.entries()) {
+      if (!comments.some((comment) => comment.content === content)) {
+        comments.push({
+          id: `character-phone-comment-${post.id}-${index}`,
+          characterId: character.id,
+          relationId: relation?.id,
+          authorName: character.remark || character.name,
+          authorAvatar: character.avatar,
+          content,
+          timestamp: post.timestamp + index,
+        });
+      }
+    }
+    const likes = existing?.likes ? [...existing.likes] : [];
+    while (likes.length < post.likes) likes.push(`${character.remark || character.name}·手机`);
+    const normalized: Moment = {
+      ...(existing || {}),
+      id: existing?.id || post.sourceMomentId || `character-phone-moment-${post.id}`,
+      characterId: character.id,
+      relationId: relation?.id,
+      ownerIdentityId,
+      authorName: character.remark || character.name,
+      authorAvatar: character.avatar,
+      content: sanitizeMomentPublishText(post.content),
+      timestamp: post.timestamp,
+      likes,
+      comments,
+      visibility: post.visibility || existing?.visibility || "public",
+      visibilityTargetIds: post.visibilityTargetIds || existing?.visibilityTargetIds,
+      sourceCharacterPhonePostId: post.id,
+    };
+    if (!normalized.content) return;
+    setMoments((previous) => upsertMomentPreservingOrder(previous, normalized));
+  };
+
+  const handleDeleteCharacterPhonePost = ({ post }: { post: CharacterPhonePost; character: Character; ownerIdentityId: string }) => {
+    setMoments((previous) => previous.filter((moment) =>
+      moment.sourceCharacterPhonePostId !== post.id
+      && (!post.sourceMomentId || moment.id !== post.sourceMomentId),
+    ));
+  };
+
   const handleLikeMoment = (id: string, userName: string) => {
     setMoments((prev) =>
       prev.map((mom) => {
@@ -4623,6 +4675,8 @@ export default function App() {
                       resolvedTheme={resolvedTheme}
                       onSendMessage={handleSendMessage}
                       onSaveImageToCharacterPhone={saveImageToCharacterPhone}
+                      onSyncCharacterPhonePost={handleSyncCharacterPhonePost}
+                      onDeleteCharacterPhonePost={handleDeleteCharacterPhonePost}
                       onOpenChat={(characterId, relationId) => {
                         openChatForCurrentIdentity(characterId, relationId);
                       }}

@@ -724,7 +724,7 @@ export async function advanceCharacterPhoneWithResult(
   }
   const postContent = cleanGeneratedText(raw.postContent, sourceFileName);
   if (postContent) {
-    const entry: CharacterPhonePost = { id: createId("phone-life-post"), author: roleName, authorId: input.character.id, authorAvatar: input.character.avatar, content: postContent, timestamp: now - 2 * 60 * 1000, likes: 0, comments: [], source: "generated" };
+    const entry: CharacterPhonePost = { id: createId("phone-life-post"), author: roleName, authorId: input.character.id, authorAvatar: input.character.avatar, content: postContent, timestamp: now - 2 * 60 * 1000, likes: 0, comments: [], source: "generated", visibility: "public" };
     pushArtifact("moments", next.posts, entry, (value) => normalizeArtifactText(value.content));
   }
 

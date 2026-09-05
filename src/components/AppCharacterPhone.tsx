@@ -49,7 +49,7 @@ import {
   EyeOff,
   X,
 } from "lucide-react";
-import type { Character, Message, Moment, MusicTrack, UserIdentity, UserSettings, WorldBookEntry } from "../types";
+import type { Character, Message, Moment, MomentVisibility, MusicTrack, UserIdentity, UserSettings, WorldBookEntry } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import {
   CHARACTER_PHONE_DEFAULT_WALLPAPER,
@@ -66,6 +66,7 @@ import type {
   CharacterPhoneGalleryItem,
   CharacterPhoneImageSaveInput,
   CharacterPhoneNote,
+  CharacterPhonePost,
   CharacterPhoneRecord,
   CharacterPhoneScheduleItem,
   CharacterPhoneTodo,
@@ -121,6 +122,9 @@ interface AppCharacterPhoneProps {
   resolvedTheme?: ResolvedTheme;
   onSendMessage?: (message: Message) => void;
   onSaveImageToCharacterPhone?: (input: CharacterPhoneImageSaveInput) => void | Promise<void>;
+  /** Mirrors role-phone posts into the owner's main Moments feed. */
+  onSyncCharacterPhonePost?: (input: { post: CharacterPhonePost; character: Character; ownerIdentityId: string }) => void;
+  onDeleteCharacterPhonePost?: (input: { post: CharacterPhonePost; character: Character; ownerIdentityId: string }) => void;
   onOpenChat?: (characterId: string, relationId: string | null) => void;
   onClose: () => void;
 }
@@ -476,6 +480,8 @@ export default function AppCharacterPhone({
   resolvedTheme = "light",
   onSendMessage,
   onSaveImageToCharacterPhone,
+  onSyncCharacterPhonePost,
+  onDeleteCharacterPhonePost,
   onOpenChat,
   onClose,
 }: AppCharacterPhoneProps) {
@@ -547,6 +553,8 @@ export default function AppCharacterPhone({
   const [selectedContactId, setSelectedContactId] = useState("");
   const [draft, setDraft] = useState("");
   const [postDraft, setPostDraft] = useState("");
+  const [postVisibility, setPostVisibility] = useState<MomentVisibility>("public");
+  const [postVisibilityTargetIds, setPostVisibilityTargetIds] = useState<string[]>([]);
   const [phoneMomentComposerOpen, setPhoneMomentComposerOpen] = useState(false);
   const [selectedDiaryId, setSelectedDiaryId] = useState<string | null>(null);
   const [diaryEditing, setDiaryEditing] = useState(false);
@@ -578,6 +586,7 @@ export default function AppCharacterPhone({
   const generationRequestRef = useRef(0);
   const mountedRef = useRef(true);
   const phoneScopeRef = useRef({ ownerIdentityId: userIdentityId, characterId: selectedCharacterId });
+  const syncedPhonePostsRef = useRef<Record<string, string>>({});
   phoneScopeRef.current = { ownerIdentityId: userIdentityId, characterId: selectedCharacterId };
   useEffect(() => {
     // React StrictMode mounts effects twice in development. Reset this flag
@@ -642,6 +651,30 @@ export default function AppCharacterPhone({
         : null,
     [phone, selectedCharacter, userIdentityId],
   );
+  const syncCharacterPhonePost = (post: CharacterPhonePost) => {
+    if (!selectedCharacter || !onSyncCharacterPhonePost || post.source !== "generated" || post.authorId !== selectedCharacter.id) return;
+    const marker = JSON.stringify({
+      content: post.content,
+      timestamp: post.timestamp,
+      likes: post.likes,
+      comments: post.comments,
+      visibility: post.visibility || "public",
+      visibilityTargetIds: post.visibilityTargetIds,
+      sourceMomentId: post.sourceMomentId,
+    });
+    if (syncedPhonePostsRef.current[post.id] === marker) return;
+    syncedPhonePostsRef.current[post.id] = marker;
+    onSyncCharacterPhonePost({ post, character: selectedCharacter, ownerIdentityId: userIdentityId });
+  };
+  useEffect(() => {
+    if (!currentPhone || !selectedCharacter) return;
+    const missingPosts = currentPhone.posts
+      .filter((post) => post.source === "generated" && post.authorId === selectedCharacter.id)
+      .filter((post) => !moments.some((moment) => moment.sourceCharacterPhonePostId === post.id));
+    // A legacy phone may contain many generated posts. Bring over only the
+    // newest one on open so the main feed is not suddenly flooded.
+    missingPosts.sort((left, right) => right.timestamp - left.timestamp).slice(0, 1).forEach(syncCharacterPhonePost);
+  }, [currentPhone, selectedCharacter, moments, onSyncCharacterPhonePost, userIdentityId]);
   const currentUserAvatar = activeIdentity?.avatar || settings?.avatar;
   const phoneCharacterLocation = useMemo(
     () => {
@@ -738,6 +771,18 @@ export default function AppCharacterPhone({
       return false;
     }
     setPhone(next);
+    if (selectedCharacter && onSyncCharacterPhonePost) {
+      const previousPosts = currentPhone?.posts ?? [];
+      const changedPosts = next.posts.filter((post) => {
+        const previous = previousPosts.find((candidate) => candidate.id === post.id);
+        return !previous || JSON.stringify(previous) !== JSON.stringify(post);
+      });
+      changedPosts
+        .filter((post) => post.source === "generated" && post.authorId === selectedCharacter.id)
+        .sort((left, right) => right.timestamp - left.timestamp)
+        .slice(0, 1)
+        .forEach((post) => syncCharacterPhonePost(post));
+    }
     return true;
   };
   const clearCurrentCharacterPhoneData = async () => {
@@ -751,6 +796,11 @@ export default function AppCharacterPhone({
         .map((item) => item.imageAssetId)
         .filter((id): id is string => Boolean(id)),
     )];
+    if (selectedCharacter && onDeleteCharacterPhonePost) {
+      currentPhone.posts
+        .filter((post) => post.source === "generated" && post.authorId === selectedCharacter.id)
+        .forEach((post) => onDeleteCharacterPhonePost({ post, character: selectedCharacter, ownerIdentityId: userIdentityId }));
+    }
     const clearedPhone = clearCharacterPhoneData(currentPhone);
     if (!persistPhone(clearedPhone)) return;
     setSelectedGalleryId(null);
@@ -767,6 +817,8 @@ export default function AppCharacterPhone({
     setInput("");
     setDraft("");
     setPostDraft("");
+    setPostVisibility("public");
+    setPostVisibilityTargetIds([]);
     setSelectedDiaryId(null);
     setDiaryEditing(false);
     setShowHiddenDiary(false);
@@ -931,6 +983,8 @@ export default function AppCharacterPhone({
           likes: 0,
           comments: [],
           source: "generated" as const,
+          visibility: postVisibility,
+          ...(postVisibility === "specific" ? { visibilityTargetIds: postVisibilityTargetIds } : {}),
         },
       ],
       activities: [
@@ -952,7 +1006,10 @@ export default function AppCharacterPhone({
     }, now);
     saveCharacterPhone(next);
     setPhone(next);
+    syncCharacterPhonePost(next.posts[next.posts.length - 1]);
     setPostDraft("");
+    setPostVisibility("public");
+    setPostVisibilityTargetIds([]);
   };
 
   const selectCharacter = (characterId: string) => {
@@ -975,6 +1032,8 @@ export default function AppCharacterPhone({
     setPhoneSocialTab("chats");
     setMusicView("home");
     setMusicIsPlaying(false);
+    setPostVisibility("public");
+    setPostVisibilityTargetIds([]);
     setInput("");
     setShowHiddenDiary(false);
     setShowAllDiary(false);
@@ -1045,6 +1104,14 @@ export default function AppCharacterPhone({
         return;
       }
       setPhone(discoveredPhone);
+      const newGeneratedPosts = discoveredPhone.posts.filter(
+        (post) => post.source === "generated"
+          && post.authorId === selectedCharacter.id
+          && !basePhone.posts.some((existing) => existing.id === post.id),
+      );
+      // Keep one generation from flooding the main phone's feed. The newest
+      // generated post is enough to establish the shared social trace.
+      newGeneratedPosts.sort((left, right) => right.timestamp - left.timestamp).slice(0, 1).forEach(syncCharacterPhonePost);
       setPhoneNotice(advancedResult.status === "generated"
         ? "角色手机已生成新的生活痕迹"
         : characterPhoneGenerationNoChangeNotice(advancedResult.reason));
@@ -1468,6 +1535,10 @@ export default function AppCharacterPhone({
   };
   const deletePhonePost = (postId: string) => {
     if (!currentPhone) return;
+    const removed = currentPhone.posts.find((post) => post.id === postId);
+    if (removed && removed.source === "generated" && removed.authorId === selectedCharacter?.id && selectedCharacter && onDeleteCharacterPhonePost) {
+      onDeleteCharacterPhonePost({ post: removed, character: selectedCharacter, ownerIdentityId: userIdentityId });
+    }
     updatePhone({
       posts: currentPhone.posts.filter((post) => post.id !== postId),
     });
@@ -1738,6 +1809,36 @@ export default function AppCharacterPhone({
       ))}
     </div>
   );
+  const roleAudienceContacts = visiblePhoneContacts.filter((contact) => Boolean(contact.linkedCharacterId));
+  const postVisibilitySelectValue = postVisibility === "specific"
+    ? `character:${postVisibilityTargetIds[0] || ""}`
+    : postVisibility;
+  const renderPostVisibilitySelect = () => (
+    <label className="mt-2 flex items-center justify-between gap-2 text-[11px] text-[var(--text-secondary)]">
+      <span>谁可以看</span>
+      <select
+        value={postVisibilitySelectValue}
+        onChange={(event) => {
+          const value = event.target.value;
+          if (value.startsWith("character:")) {
+            setPostVisibility("specific");
+            setPostVisibilityTargetIds([value.slice("character:".length)]);
+          } else {
+            setPostVisibility(value as MomentVisibility);
+            setPostVisibilityTargetIds(value === "user" ? ["user"] : []);
+          }
+        }}
+        className="rounded-lg bg-[var(--surface-muted)] px-2 py-1 text-[11px] outline-none"
+      >
+        <option value="public">所有人可见</option>
+        <option value="user">只给{activeIdentity?.name || "我"}看</option>
+        {roleAudienceContacts.map((contact) => (
+          <option key={contact.id} value={`character:${contact.linkedCharacterId}`}>只给{contact.remark || contact.name}看</option>
+        ))}
+        <option value="private">仅我可见</option>
+      </select>
+    </label>
+  );
   const phoneMomentsView = (
     <div data-theme-page="moments" className="flex min-h-0 flex-1 flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
       <div className="relative h-64 shrink-0 bg-slate-200">
@@ -1760,18 +1861,18 @@ export default function AppCharacterPhone({
           <img src={selectedCharacter.avatar} alt="" className="h-16 w-16 rounded-xl border-2 border-white bg-white object-cover shadow-md" referrerPolicy="no-referrer" />
         </div>
       </div>
-      <div className="h-10 shrink-0 bg-[var(--app-bg)]" />
-      <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] pb-4">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] pb-4 pt-2">
         {phoneMomentComposerOpen && (
           <div className="mx-4 my-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
             <div className="flex items-center justify-between"><span className="text-xs font-bold">分享新鲜事…</span><button type="button" onClick={() => setPhoneMomentComposerOpen(false)} className="text-xs text-[var(--text-tertiary)]">收起</button></div>
             <textarea value={postDraft} onChange={(event) => setPostDraft(event.target.value)} placeholder="写下角色会发布的内容…" className="mt-2 min-h-20 w-full resize-none rounded-xl bg-[var(--surface-muted)] p-2 text-xs outline-none" />
+            {renderPostVisibilitySelect()}
             <button type="button" onClick={() => { publishPost(); setPhoneMomentComposerOpen(false); }} className="mt-2 rounded-xl bg-neutral-950 px-3 py-2 text-xs font-bold text-white">发布动态</button>
           </div>
         )}
         <div className="max-w-md mx-auto px-4 divide-y divide-slate-100">
         {(currentPhone.posts ?? []).slice().sort((a, b) => b.timestamp - a.timestamp).map((post) => (
-            <article key={post.id} className="flex gap-3 py-5">
+            <article key={post.id} className="flex gap-3 py-5 first:pt-2">
               <img src={(post.source === "user" ? currentUserAvatar : undefined) || post.authorAvatar || selectedCharacter.avatar} alt="" className="h-10 w-10 shrink-0 rounded-md border border-slate-100 bg-slate-50 object-cover" referrerPolicy="no-referrer" />
               <div className="min-w-0 flex-1">
               <h4 className="truncate text-xs font-bold text-[#576b95]">{post.author || selectedCharacter.name}</h4>
@@ -2305,6 +2406,7 @@ export default function AppCharacterPhone({
             placeholder="写下角色会发布的内容…"
             className="mt-2 min-h-20 w-full rounded-xl bg-black/5 p-2 text-xs outline-none"
           />
+          {renderPostVisibilitySelect()}
           <button
             type="button"
             onClick={publishPost}
