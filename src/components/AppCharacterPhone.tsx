@@ -518,6 +518,7 @@ export default function AppCharacterPhone({
   }, [selectedCharacterId, userIdentityId]);
   const [unlocked, setUnlocked] = useState(false);
   const [activeApp, setActiveApp] = useState<CharacterPhoneView>("home");
+  const [desktopPage, setDesktopPage] = useState<0 | 1>(0);
   const [clockNow, setClockNow] = useState(() => new Date());
   const [galleryMode, setGalleryMode] = useState<GalleryMode>("main");
   const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(
@@ -555,6 +556,7 @@ export default function AppCharacterPhone({
   const hidingTapTimeoutRef = useRef<number | null>(null);
   const diaryScrollTopRef = useRef(0);
   const gallerySwipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const desktopSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const [isDiaryFabVisible, setIsDiaryFabVisible] = useState(true);
   const [characterNotesTab, setCharacterNotesTab] = useState<"notes" | "todo">("notes");
   const [characterNoteQuery, setCharacterNoteQuery] = useState("");
@@ -606,6 +608,7 @@ export default function AppCharacterPhone({
     setHiddenGalleryInput("");
     setHiddenGalleryNotice("");
     setActiveApp("home");
+    setDesktopPage(0);
     setPhoneDialerTab("all");
     setPhoneNumber("");
     setScheduleTodaySignal(0);
@@ -910,6 +913,7 @@ export default function AppCharacterPhone({
     setHiddenGalleryInput("");
     setHiddenGalleryNotice("");
     setActiveApp("home");
+    setDesktopPage(0);
     setPhoneDialerTab("all");
     setPhoneNumber("");
     setScheduleTodaySignal(0);
@@ -3275,89 +3279,120 @@ export default function AppCharacterPhone({
               </p>
             )}
 
-            <main className="min-h-0 flex-1 overflow-y-auto px-1 pb-3 pt-2">
-              <section
-                aria-label="双时间小组件"
-                className="rounded-[26px] border border-black/5 bg-white/88 px-4 py-5 shadow-[0_4px_14px_rgba(15,23,42,0.06)] backdrop-blur-xl"
-              >
-                <div className="grid grid-cols-2 divide-x divide-neutral-400/45">
-                  {[phoneCharacterLocation, phoneUserLocation].map((location, index) => (
-                    <div key={`${location.label}-${location.timeZone}`} className={`${index === 0 ? "pr-3" : "pl-3"}`}>
-                      <p className="text-center text-[2.15rem] font-light leading-none tracking-[-0.08em] text-neutral-950">
-                        {formatCharacterPhoneTime(clockNow, location.timeZone)}
-                      </p>
-                      <p className="mt-2 text-center text-xs font-bold text-neutral-800">
-                        {formatCharacterPhoneDate(clockNow, location.timeZone)}
-                      </p>
-                      <p className="mt-2 flex items-center justify-center gap-1 truncate text-[11px] text-neutral-700">
-                        {index === 0 ? <MapPin className="h-3.5 w-3.5 shrink-0" /> : <Home className="h-3.5 w-3.5 shrink-0" />}
-                        <span className="truncate">{location.label}</span>
-                      </p>
+            <main
+              className={`min-h-0 flex-1 px-1 pb-3 pt-2 touch-pan-y ${desktopPage === 1 ? "overflow-hidden" : "overflow-y-auto"}`}
+              onPointerDown={(event) => {
+                desktopSwipeStartRef.current = { x: event.clientX, y: event.clientY };
+              }}
+              onPointerUp={(event) => {
+                const start = desktopSwipeStartRef.current;
+                desktopSwipeStartRef.current = null;
+                if (!start) return;
+                const deltaX = event.clientX - start.x;
+                const deltaY = event.clientY - start.y;
+                if (Math.abs(deltaX) < 48 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+                setDesktopPage(deltaX < 0 ? 1 : 0);
+              }}
+              onPointerCancel={() => { desktopSwipeStartRef.current = null; }}
+            >
+              {desktopPage === 0 ? (
+                <>
+                  <section
+                    aria-label="双时间小组件"
+                    className="rounded-[26px] border border-black/5 bg-white/88 px-4 py-5 shadow-[0_4px_14px_rgba(15,23,42,0.06)] backdrop-blur-xl"
+                  >
+                    <div className="grid grid-cols-2 divide-x divide-neutral-400/45">
+                      {[phoneCharacterLocation, phoneUserLocation].map((location, index) => (
+                        <div key={`${location.label}-${location.timeZone}`} className={`${index === 0 ? "pr-3" : "pl-3"}`}>
+                          <p className="text-center text-[2.15rem] font-light leading-none tracking-[-0.08em] text-neutral-950">
+                            {formatCharacterPhoneTime(clockNow, location.timeZone)}
+                          </p>
+                          <p className="mt-2 text-center text-xs font-bold text-neutral-800">
+                            {formatCharacterPhoneDate(clockNow, location.timeZone)}
+                          </p>
+                          <p className="mt-2 flex items-center justify-center gap-1 truncate text-[11px] text-neutral-700">
+                            {index === 0 ? <MapPin className="h-3.5 w-3.5 shrink-0" /> : <Home className="h-3.5 w-3.5 shrink-0" />}
+                            <span className="truncate">{location.label}</span>
+                          </p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </section>
+                  </section>
 
-              <section
-                aria-label="最近生活轨迹"
-                className="mt-4 rounded-[26px] border border-black/5 bg-white/78 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)] backdrop-blur-xl"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-neutral-400">Life trace</p>
-                    <h2 className="mt-1 text-sm font-bold text-neutral-900">最近生活轨迹</h2>
-                  </div>
-                  <span className="text-[10px] text-neutral-400">{currentPhone.lifeEvents?.length ?? 0} 个事件</span>
-                </div>
-                {(currentPhone.lifeEvents ?? []).length > 0 ? (
-                  <div className="mt-3 space-y-2">
-                    {(currentPhone.lifeEvents ?? []).slice().sort((left, right) => right.generatedAt - left.generatedAt).slice(0, 3).map((event) => (
-                      <div key={event.id} className="rounded-2xl bg-neutral-50 px-3 py-2.5">
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="min-w-0 flex-1 text-xs font-semibold leading-5 text-neutral-800">{event.summary}</p>
-                          <span className="shrink-0 text-[10px] text-neutral-400">{formatTime(event.generatedAt)}</span>
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {event.artifactRefs.map((artifact) => (
-                            <button key={`${event.id}-${artifact.app}-${artifact.id}`} type="button" onClick={() => openApp(artifact.app === "phone" || artifact.app === "camera" ? artifact.app : artifact.app)} className="rounded-full bg-white px-2 py-1 text-[9px] font-semibold text-neutral-500 shadow-sm hover:text-neutral-900">
-                              {APP_META[artifact.app].label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                  <div className="mt-8 grid grid-cols-4 gap-x-2 gap-y-7">
+                    {PHONE_DESKTOP_APPS.map((appId) => (
+                      <button
+                        key={appId}
+                        type="button"
+                        onClick={() => openApp(appId)}
+                        className="group flex min-w-0 flex-col items-center gap-1.5 text-neutral-700"
+                        aria-label={`打开${APP_META[appId].label}`}
+                      >
+                        <span className={`relative flex h-[58px] w-[58px] items-center justify-center rounded-[18px] border border-black/5 shadow-[0_4px_10px_rgba(15,23,42,0.08)] transition-transform group-active:scale-90 ${PHONE_APP_TILE_CLASSES[appId]}`}>
+                          {renderCharacterPhoneIcon(appId, "h-8 w-8")}
+                          {appId === "chat" && unreadCount > 0 && (
+                            <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm">
+                              {unreadCount}
+                            </span>
+                          )}
+                        </span>
+                        <span className="max-w-[72px] truncate text-[11px] font-medium">{APP_META[appId].label}</span>
+                      </button>
                     ))}
                   </div>
-                ) : (
-                  <p className="mt-3 rounded-2xl border border-dashed border-neutral-200 px-3 py-3 text-center text-[11px] leading-5 text-neutral-400">生成后，这里会把同一件生活事件在聊天、浏览器、日记等应用里的痕迹串起来。</p>
-                )}
-              </section>
-
-              <div className="mt-8 grid grid-cols-4 gap-x-2 gap-y-7">
-                {PHONE_DESKTOP_APPS.map((appId) => (
-                  <button
-                    key={appId}
-                    type="button"
-                    onClick={() => openApp(appId)}
-                    className="group flex min-w-0 flex-col items-center gap-1.5 text-neutral-700"
-                    aria-label={`打开${APP_META[appId].label}`}
-                  >
-                    <span className={`relative flex h-[58px] w-[58px] items-center justify-center rounded-[18px] border border-black/5 shadow-[0_4px_10px_rgba(15,23,42,0.08)] transition-transform group-active:scale-90 ${PHONE_APP_TILE_CLASSES[appId]}`}>
-                      {renderCharacterPhoneIcon(appId, "h-8 w-8")}
-                      {appId === "chat" && unreadCount > 0 && (
-                        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm">
-                          {unreadCount}
-                        </span>
-                      )}
-                    </span>
-                    <span className="max-w-[72px] truncate text-[11px] font-medium">{APP_META[appId].label}</span>
-                  </button>
-                ))}
-              </div>
+                </>
+              ) : (
+                <section
+                  aria-label="最近生活轨迹"
+                  className="flex h-full min-h-0 flex-col rounded-[26px] border border-black/5 bg-white/78 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)] backdrop-blur-xl"
+                >
+                  <div className="flex shrink-0 items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-neutral-400">Life trace</p>
+                      <h2 className="mt-1 text-sm font-bold text-neutral-900">最近生活轨迹</h2>
+                    </div>
+                    <span className="text-[10px] text-neutral-400">{currentPhone.lifeEvents?.length ?? 0} 个事件</span>
+                  </div>
+                  {(currentPhone.lifeEvents ?? []).length > 0 ? (
+                    <div className="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+                      <div className="space-y-2">
+                        {(currentPhone.lifeEvents ?? []).slice().sort((left, right) => right.generatedAt - left.generatedAt).map((event) => (
+                          <div key={event.id} className="rounded-2xl bg-neutral-50 px-3 py-2.5">
+                            <div className="flex items-start justify-between gap-3">
+                              <p className="min-w-0 flex-1 text-xs font-semibold leading-5 text-neutral-800">{event.summary}</p>
+                              <span className="shrink-0 text-[10px] text-neutral-400">{formatTime(event.generatedAt)}</span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {event.artifactRefs.map((artifact) => (
+                                <button key={`${event.id}-${artifact.app}-${artifact.id}`} type="button" onClick={() => openApp(artifact.app === "phone" || artifact.app === "camera" ? artifact.app : artifact.app)} className="rounded-full bg-white px-2 py-1 text-[9px] font-semibold text-neutral-500 shadow-sm hover:text-neutral-900">
+                                  {APP_META[artifact.app].label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 flex min-h-0 flex-1 items-center justify-center">
+                      <p className="w-full rounded-2xl border border-dashed border-neutral-200 px-3 py-3 text-center text-[11px] leading-5 text-neutral-400">生成后，这里会把同一件生活事件在聊天、浏览器、日记等应用里的痕迹串起来。</p>
+                    </div>
+                  )}
+                </section>
+              )}
             </main>
 
             <div className="flex shrink-0 items-center justify-center gap-2 pb-2 pt-1" aria-label="桌面页码">
-              <span className="h-1.5 w-1.5 rounded-full bg-white shadow-sm" />
-              <span className="h-1.5 w-1.5 rounded-full bg-white/45" />
+              {[0, 1].map((page) => (
+                <button
+                  key={page}
+                  type="button"
+                  onClick={() => setDesktopPage(page as 0 | 1)}
+                  className={`h-1.5 w-1.5 rounded-full shadow-sm transition-colors ${desktopPage === page ? "bg-white" : "bg-white/45"}`}
+                  aria-label={`第${page + 1}页桌面`}
+                  aria-current={desktopPage === page ? "page" : undefined}
+                />
+              ))}
             </div>
 
             <nav className="grid shrink-0 grid-cols-4 items-center justify-items-center gap-3 rounded-[26px] border border-black/5 bg-white/65 px-3 py-3 shadow-[0_4px_14px_rgba(15,23,42,0.06)] backdrop-blur-xl" aria-label="Dock">
