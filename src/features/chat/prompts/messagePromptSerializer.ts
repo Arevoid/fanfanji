@@ -200,7 +200,7 @@ export function serializeMessageContentForPrompt(
 ): string {
   const content = serializeMessageContentForPromptBase(message, options);
   if (!message.sentFromCharacterPhone || message.sender !== "character") return content;
-  return `[角色手机代发消息：这条消息显示在聊天中，但不是角色本人发出的，而是用户在角色手机上操作后发给自己的。不要把它当作角色说过的话、立场、决定或记忆。若用户因这条消息产生误会，应先按角色人设自然说明“不是我发的，是你在我手机上发的”，再继续回应。]\n${content}`;
+  return `[角色手机代发消息：这条消息显示在聊天中，但不是角色本人发出的，而是用户在角色手机上操作后发给自己的。不要把它当作角色说过的话、立场、决定或记忆。若用户因这条消息产生误会，应先按角色人设自然质疑来源或否认作者身份，再继续回应；除非用户主动说明来源，不要主动说出是谁操作了手机，也不要把它归因于模型或系统。]\n${content}`;
 }
 
 /** Expands a persisted call record into role-correct turns; all other messages stay one turn. */

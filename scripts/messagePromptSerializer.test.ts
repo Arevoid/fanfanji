@@ -27,7 +27,7 @@ const characterPhoneProxy = serializeMessageContentForPrompt(message("分手！"
 }), { characterName: "沈宴", userName: "我" });
 assert.match(characterPhoneProxy, /角色手机代发消息/);
 assert.match(characterPhoneProxy, /不是角色本人发出的/);
-assert.match(characterPhoneProxy, /不是我发的/);
+assert.match(characterPhoneProxy, /质疑来源或否认作者身份/);
 const characterPhoneTurns = serializeMessageToPromptTurns(message("分手！", {
   sender: "character",
   sentFromCharacterPhone: true,
