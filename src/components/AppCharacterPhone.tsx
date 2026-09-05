@@ -3408,7 +3408,7 @@ export default function AppCharacterPhone({
                 <button
                   type="button"
                   onClick={() => setScheduleTodaySignal((signal) => signal + 1)}
-                  className="h-8 min-w-8 px-1 text-xs font-medium uppercase tracking-[0.14em] text-neutral-400"
+                  className="h-8 min-w-8 px-1 text-[11px] font-medium normal-case tracking-[0.08em] text-neutral-400"
                 >
                   Today
                 </button>
