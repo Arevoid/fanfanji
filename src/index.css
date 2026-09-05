@@ -244,6 +244,13 @@ button, input, textarea, select {
   padding-top: 0 !important;
 }
 
+/* The schedule page already starts its calendar at the top of the app body;
+   neutralize the phone-wide px-5 reset so the navigation does not gain an
+   extra visual 16px of height before the calendar content begins. */
+.phone-screen-container .character-phone-schedule-main.px-5 {
+  padding-top: 0 !important;
+}
+
 /* Hide default scrollbars globally */
 * {
   /* For Firefox */

@@ -3371,10 +3371,10 @@ export default function AppCharacterPhone({
             {appContent}
           </div>
         ) : (
-          <div className={`relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden ${activeApp === "phone" || activeApp === "browser" ? "bg-white" : activeApp === "chat" || activeApp === "gallery" || activeApp === "schedule" ? "bg-[#fcfbfb]" : "bg-white/70 backdrop-blur-xl"}`}>
+          <div className={`relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden ${activeApp === "phone" || activeApp === "browser" || activeApp === "schedule" ? "bg-white" : activeApp === "chat" || activeApp === "gallery" ? "bg-[#fcfbfb]" : "bg-white/70 backdrop-blur-xl"}`}>
             {!isBrowserDetail && !isGalleryDetail && <div className={isBrowserHome
               ? "relative z-20 box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between border-b-0 bg-transparent px-4 py-1.5 text-neutral-900"
-              : `relative box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between px-4 py-1.5 text-neutral-900 ${activeApp === "schedule" || activeApp === "phone" || activeApp === "browser" || activeApp === "chat" || activeApp === "gallery" ? "bg-transparent border-b-0" : "border-b border-black/5"}`}
+              : `relative box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between px-4 py-1.5 text-neutral-900 ${activeApp === "schedule" ? "bg-white border-b-0" : activeApp === "phone" || activeApp === "browser" || activeApp === "chat" || activeApp === "gallery" ? "bg-transparent border-b-0" : "border-b border-black/5"}`}
             >
               <button
                 type="button"
@@ -3408,7 +3408,7 @@ export default function AppCharacterPhone({
                 <button
                   type="button"
                   onClick={() => setScheduleTodaySignal((signal) => signal + 1)}
-                  className="h-8 min-w-8 px-1 text-[11px] font-medium normal-case tracking-[0.08em] text-neutral-400"
+                  className="h-8 min-w-8 px-1 text-xs font-medium normal-case tracking-[0.08em] text-neutral-400"
                 >
                   Today
                 </button>
@@ -3429,7 +3429,7 @@ export default function AppCharacterPhone({
                 <span className="h-8 w-8" aria-hidden="true" />
               )}
             </div>}
-            <main className={`min-h-0 flex-1 ${isGalleryDetail ? "px-0" : "px-5"} ${activeApp === "diary" || activeApp === "notes" || activeApp === "camera" ? "pb-0" : "pb-6"} text-neutral-900 ${isBrowserDetail ? "character-phone-browser-detail-main overflow-y-auto pt-0" : activeApp === "schedule" || activeApp === "phone" || activeApp === "chat" || activeApp === "gallery" || activeApp === "camera" ? "flex flex-col overflow-hidden pt-0" : activeApp === "diary" || activeApp === "notes" ? "relative flex min-h-0 flex-col overflow-hidden pt-0" : activeApp === "music" && musicView === "player" ? "flex min-h-0 flex-col overflow-hidden pt-4" : "overflow-y-auto pt-4"}`}>
+            <main className={`min-h-0 flex-1 ${isGalleryDetail ? "px-0" : "px-5"} ${activeApp === "schedule" ? "character-phone-schedule-main" : ""} ${activeApp === "diary" || activeApp === "notes" || activeApp === "camera" ? "pb-0" : "pb-6"} text-neutral-900 ${isBrowserDetail ? "character-phone-browser-detail-main overflow-y-auto pt-0" : activeApp === "schedule" || activeApp === "phone" || activeApp === "chat" || activeApp === "gallery" || activeApp === "camera" ? "flex flex-col overflow-hidden pt-0" : activeApp === "diary" || activeApp === "notes" ? "relative flex min-h-0 flex-col overflow-hidden pt-0" : activeApp === "music" && musicView === "player" ? "flex min-h-0 flex-col overflow-hidden pt-4" : "overflow-y-auto pt-4"}`}>
               {appContent}
             </main>
             {activeApp === "music" && (
