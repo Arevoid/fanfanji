@@ -129,6 +129,30 @@ class StickerDB {
     });
   }
 
+  async listStickerImages(ids?: readonly string[]): Promise<Array<{ id: string; blob: Blob }>> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeImages, "readonly");
+      const store = transaction.objectStore(this.storeImages);
+      const requested = ids ? new Set(ids) : null;
+      const result: Array<{ id: string; blob: Blob }> = [];
+      const request = store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve(result);
+          return;
+        }
+        const id = String(cursor.key);
+        if ((!requested || requested.has(id)) && cursor.value instanceof Blob) {
+          result.push({ id, blob: cursor.value });
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
   async clearAll(): Promise<void> {
     const db = await this.init();
     return new Promise((resolve, reject) => {

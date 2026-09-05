@@ -35,6 +35,29 @@ class ImageAssetDB {
   async saveImage(id: string, image: Blob): Promise<void> { await this.run("readwrite", (store) => store.put(image, id)); }
   async getImage(id: string): Promise<Blob | null> { return (await this.run("readonly", (store) => store.get(id))) || null; }
   async deleteImage(id: string): Promise<void> { await this.run("readwrite", (store) => store.delete(id)); }
+  async listImages(ids?: readonly string[]): Promise<Array<{ id: string; blob: Blob }>> {
+    const db = await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, "readonly");
+      const store = transaction.objectStore(this.storeName);
+      const requested = ids ? new Set(ids) : null;
+      const result: Array<{ id: string; blob: Blob }> = [];
+      const request = store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve(result);
+          return;
+        }
+        const id = String(cursor.key);
+        if ((!requested || requested.has(id)) && cursor.value instanceof Blob) {
+          result.push({ id, blob: cursor.value });
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
   async clearAll(): Promise<void> { await this.run("readwrite", (store) => store.clear()); }
 }
 

@@ -10,12 +10,19 @@ import {
   type StorageCacheTarget,
   type StorageCacheScope,
 } from "../../../core/storage/rebuildableCache";
+import {
+  compressImageAssets,
+  compressMediaAssets,
+  compressStickerAssets,
+  formatMediaCompressionResult,
+} from "../../../core/storage/mediaCompression";
 import { formatStorageBytes } from "../../../core/storage/storageDiagnostics";
 
 interface StorageCachePanelProps {
   mode: StorageCacheScope;
   characterId?: string;
   characterName?: string;
+  galleryAssetIds?: readonly string[];
 }
 
 function optionsFor(mode: StorageCacheScope): readonly StorageCacheOption[] {
@@ -28,13 +35,14 @@ function confirmationText(mode: StorageCacheScope, option: StorageCacheOption | 
   return `确定${targetLabel}吗？只会清理${owner}临时缓存，不会删除聊天、朋友圈、相册、日记、备忘录或其他正式数据。`;
 }
 
-export function StorageCachePanel({ mode, characterId, characterName }: StorageCachePanelProps) {
+export function StorageCachePanel({ mode, characterId, characterName, galleryAssetIds }: StorageCachePanelProps) {
   const options = optionsFor(mode);
   const targets = useMemo<readonly StorageCacheTarget[]>(() => [...options.map((option) => option.id), "all"], [options]);
   const [usage, setUsage] = useState(() => getRebuildableCacheUsage({ scope: mode, scopeId: characterId, targets }));
   const [busyTarget, setBusyTarget] = useState<StorageCacheTarget | null>(null);
   const [notice, setNotice] = useState("");
   const [browserStorage, setBrowserStorage] = useState<{ usage?: number; quota?: number }>({});
+  const [compressionBusy, setCompressionBusy] = useState<"all" | "images" | "stickers" | null>(null);
 
   const refreshUsage = useCallback(() => {
     setUsage(getRebuildableCacheUsage({ scope: mode, scopeId: characterId, targets }));
@@ -77,6 +85,27 @@ export function StorageCachePanel({ mode, characterId, characterName }: StorageC
       setNotice(`清理失败，正式数据未被改动：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
       setBusyTarget(null);
+    }
+  };
+
+  const handleCompress = async (kind: "all" | "images" | "stickers") => {
+    if (busyTarget || compressionBusy) return;
+    const label = kind === "all" ? "图片和表情包" : kind === "images" ? "相册图片" : "表情包";
+    if (!window.confirm(`确定压缩${label}吗？图片尺寸和正常展示会保持不变，正式记录不会被删除。`)) return;
+    setCompressionBusy(kind);
+    setNotice("");
+    try {
+      const result = kind === "all"
+        ? await compressMediaAssets()
+        : kind === "images"
+          ? await compressImageAssets(mode === "characterPhone" ? (galleryAssetIds || []) : undefined)
+          : await compressStickerAssets();
+      setNotice(formatMediaCompressionResult(result));
+      void refreshBrowserStorage();
+    } catch (error) {
+      setNotice(`压缩失败，正式数据未被改动：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setCompressionBusy(null);
     }
   };
 
@@ -135,6 +164,39 @@ export function StorageCachePanel({ mode, characterId, characterName }: StorageC
         {busyTarget === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
         清理全部可重建缓存
       </button>
+
+      {mode === "characterPhone" ? (
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => void handleCompress("images")}
+            disabled={Boolean(busyTarget || compressionBusy)}
+            className="flex items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-[10px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+          >
+            {compressionBusy === "images" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            压缩相册图片
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleCompress("stickers")}
+            disabled={Boolean(busyTarget || compressionBusy)}
+            className="flex items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-[10px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+          >
+            {compressionBusy === "stickers" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            压缩表情包
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void handleCompress("all")}
+          disabled={Boolean(busyTarget || compressionBusy)}
+          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[11px] font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+        >
+          {compressionBusy === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          压缩图片和表情包
+        </button>
+      )}
 
       <div className="mt-3 flex items-start gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-[10px] leading-4 text-emerald-700">
         <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />

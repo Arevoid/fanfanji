@@ -3601,6 +3601,9 @@ export default function AppCharacterPhone({
           mode="characterPhone"
           characterId={selectedCharacter.id}
           characterName={selectedCharacter.name}
+          galleryAssetIds={currentPhone.galleryItems
+            .map((item) => item.imageAssetId)
+            .filter((id): id is string => Boolean(id))}
         />
       </div>
     ) : activeApp === "camera" ? (
