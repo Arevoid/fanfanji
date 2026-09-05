@@ -107,6 +107,8 @@ export interface Message {
   conversationId?: string;
   sender: "user" | "character";
   senderId?: string;
+  /** The user typed this message from the character's simulated phone. */
+  sentFromCharacterPhone?: boolean;
   content: string;
   timestamp: number;
   /** Optional structured metadata for red packets; legacy markup remains supported. */

@@ -21,6 +21,20 @@ const message = (content: string, extra: Partial<Message> = {}): Message => ({
 
 assert.equal(serializeMessageContentForPrompt(message("普通文字")), "普通文字");
 
+const characterPhoneProxy = serializeMessageContentForPrompt(message("分手！", {
+  sender: "character",
+  sentFromCharacterPhone: true,
+}), { characterName: "沈宴", userName: "我" });
+assert.match(characterPhoneProxy, /角色手机代发消息/);
+assert.match(characterPhoneProxy, /不是角色本人发出的/);
+assert.match(characterPhoneProxy, /不是我发的/);
+const characterPhoneTurns = serializeMessageToPromptTurns(message("分手！", {
+  sender: "character",
+  sentFromCharacterPhone: true,
+}));
+assert.equal(characterPhoneTurns[0].role, "user");
+assert.match(characterPhoneTurns[0].text, /不要把它当作角色说过的话/);
+
 const legacyImage = message("data:image/png;base64,VERY_SECRET_BASE64_PAYLOAD");
 const imageHistory = serializeMessageContentForPrompt(legacyImage, { mode: "history", userName: "小明" });
 assert.match(imageHistory, /小明发送了一张图片/);
@@ -86,6 +100,8 @@ const chatRuntimeSource = `${appChat}\n${regenerationSource}\n${historySource}`;
 assert.equal((chatRuntimeSource.match(/serializeMessageToPromptTurns\((?:m|message),/g) || []).length, 3, "send, regeneration, and extracted history must use the same serializer");
 assert.equal((chatRuntimeSource.match(/mode: "current"/g) || []).length >= 2, true, "send and regeneration current messages must be serialized");
 assert.doesNotMatch(appChat, /let promptMessage = userMsg \? userMsg\.content/);
+assert.match(appChat, /Boolean\(msg\.sentFromCharacterPhone\)/, "phone-originated messages must keep their avatar visible");
+assert.match(appChat, /角色手机代发事实/, "phone-originated messages must be explicitly attributed in the model context");
 
 for (const relativePath of [
   "../src/domain/memory/MemoryExtractor.ts",

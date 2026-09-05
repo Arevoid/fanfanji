@@ -836,6 +836,7 @@ export default function AppCharacterPhone({
         conversationId: relation.conversationId,
         content: draft.trim().slice(0, 1000),
         timestamp: now,
+        sentFromCharacterPhone: true,
       }));
     } else {
       setPhoneNotice(selectedContact.kind === "group" ? "消息已发到群聊，群成员会在下一次生活生成中回应" : "消息已发出，联系人会在下一次生活生成中回应");

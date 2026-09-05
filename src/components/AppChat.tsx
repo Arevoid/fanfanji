@@ -1805,6 +1805,19 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：短期聊天记录已按用户限制截断；需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
+      const characterPhoneProxyMessages = sourceMsgs.filter((message) =>
+        message.sender === "character" && message.sentFromCharacterPhone,
+      );
+      if (characterPhoneProxyMessages.length > 0) {
+        const latestProxyMessages = characterPhoneProxyMessages.slice(-3).map((message) =>
+          `- “${serializeMessageContentForPrompt(message, {
+            mode: "history",
+            userName: settings.name,
+            characterName: activeCharacter.name,
+          })}”`,
+        ).join("\n");
+        characterContextText += `\n【角色手机代发事实（高优先级）】\n以下消息虽然在用户手机聊天界面显示为角色发出，但实际是用户刚才在你的手机上操作后发给自己的：\n${latestProxyMessages}\n你没有亲自发送这些内容，不得把它们当成你的台词、观点、决定或记忆。若用户追问、质问或因这些消息产生误会，先按你的人设自然澄清“不是我发的，是你在我手机上发的”，不要改口说成“我刚刚只是开玩笑”或替这条代发消息辩解，再继续回应当前话题。`;
+      }
       if (crossDayHistoricalReference) characterContextText += `\n${crossDayHistoricalReference}`;
 
       const currentMessageContextText = userMsg
@@ -6434,9 +6447,11 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
               const nextMsg = idx + 1 < visibleChatMessages.length ? visibleChatMessages[idx + 1] : null;
               const sameMessageGroup = (candidate: Message | null) => Boolean(
                 !msg.isNarration
+                && !msg.sentFromCharacterPhone
                 &&
                 candidate
                 && !candidate.isNarration
+                && !candidate.sentFromCharacterPhone
                 && candidate.sender === msg.sender
                 && (
                   msg.sender === "user"
@@ -6459,7 +6474,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}`;
               // one collapsed story paragraph.
               const shouldCollapse = settings.collapseConsecutiveAvatars !== false && !isOfflineStoryActiveFor(activeChatCharId);
               const isConsecutivePrev = hasPreviousInGroup;
-              const showAvatar = !isConsecutivePrev || !shouldCollapse;
+              const showAvatar = Boolean(msg.sentFromCharacterPhone) || !isConsecutivePrev || !shouldCollapse;
               
               const groupSenderChar = !isSelf && activeCharacter.isGroupChat && msg.senderId
                 ? (characters.find(c => c.id === msg.senderId) || characters.find(c => c.name === msg.senderId))

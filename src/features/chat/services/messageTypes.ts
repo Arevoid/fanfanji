@@ -24,6 +24,7 @@ export interface CharacterMessageInput {
   translation?: string;
   timestamp: number;
   senderId?: string;
+  sentFromCharacterPhone?: boolean;
   isOffline?: boolean;
   isNarration?: boolean;
   redPacket?: RedPacketPayload;

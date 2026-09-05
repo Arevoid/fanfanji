@@ -52,6 +52,8 @@ assert.match(component, /角色已经知道有人尝试进入/);
 assert.match(component, /awarenessLevel/);
 assert.match(component, /phone-awareness/);
 assert.match(component, /onSendMessage/);
+assert.match(component, /sentFromCharacterPhone: true/);
+assert.match(component, /消息已发出，联系人会在下一次生活生成中回应/);
 assert.match(component, /messages|browserHistory|diaryEntries/);
 assert.match(repository, /storageKeys\.characterPhones/);
 assert.match(repository, /phone\.ownerIdentityId === ownerIdentityId[\s\S]*phone\.characterId === characterId/);
