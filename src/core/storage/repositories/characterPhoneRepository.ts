@@ -164,6 +164,49 @@ export function saveCharacterPhone(phone: CharacterPhoneRecord) {
   ]);
 }
 
+/**
+ * Remove all generated and user-created records from one role phone while
+ * preserving its identity, passcode, wallpaper, app icons, and app order.
+ * Binary gallery assets are returned by the caller from the pre-clear record
+ * so they can be removed from IndexedDB as well.
+ */
+export function clearCharacterPhoneData(
+  phone: CharacterPhoneRecord,
+  now = Date.now(),
+): CharacterPhoneRecord {
+  return normalizeCharacterPhoneRecord({
+    ...phone,
+    failedAttempts: 0,
+    lockedUntil: undefined,
+    updatedAt: now,
+    lastOpenedAt: undefined,
+    lastGeneratedAt: undefined,
+    contentSeededAt: undefined,
+    lastSyncedMessageId: undefined,
+    lastSyncedMomentId: undefined,
+    messages: [],
+    contacts: [],
+    threadMessages: [],
+    posts: [],
+    browserHistory: [],
+    diaryEntries: [],
+    notes: [],
+    todos: [],
+    scheduleItems: [],
+    phoneCalls: [],
+    galleryItems: [],
+    musicTracks: [],
+    listeningHistory: [],
+    musicPlaylists: [],
+    actionLog: [],
+    lifeEvents: [],
+    activities: [],
+    awarenessLevel: undefined,
+    awarenessUpdatedAt: undefined,
+    phoneOpenCount: 0,
+  });
+}
+
 export function removeCharacterPhonesByCharacterIds(characterIds: Iterable<string>): {
   result: StorageWriteResult;
   imageAssetIds: string[];

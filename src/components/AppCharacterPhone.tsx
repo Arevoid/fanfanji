@@ -57,6 +57,7 @@ import {
   getCharacterPhone,
   normalizeCharacterPhonePasscode,
   saveCharacterPhone,
+  clearCharacterPhoneData,
 } from "../core/storage/repositories/characterPhoneRepository";
 import type {
   CharacterPhoneAppId,
@@ -93,6 +94,7 @@ import { TimeWidget } from "./HomeScreenWidgets";
 import { resolveDesktopBackground } from "../features/theme/desktopBackground";
 import type { ResolvedTheme } from "../features/theme/theme";
 import { StoredCharacterPhoneImage } from "../features/characterPhone/components/StoredCharacterPhoneImage";
+import { imageAssetDb } from "../utils/imageAssetDb";
 import { normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
 import { buildCharacterPhoneBrowserDetail } from "../features/characterPhone/characterPhoneBrowserDetails";
 import { CharacterPhoneCallApp, type CharacterPhoneDialerTab } from "../features/characterPhone/components/CharacterPhoneCallApp";
@@ -571,6 +573,7 @@ export default function AppCharacterPhone({
   const [likedPostIds, setLikedPostIds] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [phoneNotice, setPhoneNotice] = useState("");
+  const [phoneDataNotice, setPhoneDataNotice] = useState("");
   const [isAdvancing, setIsAdvancing] = useState(false);
   const generationRequestRef = useRef(0);
   const mountedRef = useRef(true);
@@ -630,6 +633,7 @@ export default function AppCharacterPhone({
     setCharacterTodoText("");
     setNotice("");
     setPhoneNotice("");
+    setPhoneDataNotice("");
   }, [characters, userIdentityId]);
   const currentPhone = useMemo(
     () =>
@@ -735,6 +739,56 @@ export default function AppCharacterPhone({
     }
     setPhone(next);
     return true;
+  };
+  const clearCurrentCharacterPhoneData = async () => {
+    if (!currentPhone || !selectedCharacter) return;
+    const confirmed = window.confirm(
+      `确定清空${selectedCharacter.name}的角色手机数据吗？\n聊天、联系人、朋友圈、浏览记录、日记、备忘录、日程、照片、音乐、生活轨迹和操作记录都会删除；密码、壁纸和应用设置会保留。`,
+    );
+    if (!confirmed) return;
+    const imageAssetIds: string[] = [...new Set<string>(
+      (currentPhone.galleryItems ?? [])
+        .map((item) => item.imageAssetId)
+        .filter((id): id is string => Boolean(id)),
+    )];
+    const clearedPhone = clearCharacterPhoneData(currentPhone);
+    if (!persistPhone(clearedPhone)) return;
+    setSelectedGalleryId(null);
+    setGalleryMode("main");
+    setHiddenGalleryUnlocked(false);
+    setHiddenGalleryInput("");
+    setHiddenGalleryNotice("");
+    setSelectedBrowserEntryId(null);
+    setPhoneChatMode("inbox");
+    setSelectedContactId("");
+    setContactMenuOpen(false);
+    setContactRemarkEditing(false);
+    setContactRemarkDraft("");
+    setInput("");
+    setDraft("");
+    setPostDraft("");
+    setSelectedDiaryId(null);
+    setDiaryEditing(false);
+    setShowHiddenDiary(false);
+    setShowAllDiary(false);
+    setCharacterNoteEditing(false);
+    setSelectedCharacterNoteId(null);
+    setCharacterNoteDraft({ title: "", content: "" });
+    setCharacterTodoText("");
+    setIsAddingCharacterTodo(false);
+    setMusicView("home");
+    setMusicTrackIndex(0);
+    setMusicIsPlaying(false);
+    setMusicProgress(0.42);
+    setDesktopPage(0);
+    if (imageAssetIds.length > 0) {
+      const results = await Promise.allSettled(imageAssetIds.map((id) => imageAssetDb.deleteImage(id)));
+      if (results.some((result) => result.status === "rejected")) {
+        setPhoneDataNotice("已清空角色手机记录，但部分图片缓存未能删除，请稍后重试");
+        return;
+      }
+    }
+    setPhoneDataNotice("已清空当前角色手机的全部记录和生成内容");
   };
   const closeCharacterPhone = () => {
     generationRequestRef.current += 1;
@@ -934,6 +988,7 @@ export default function AppCharacterPhone({
     setCharacterTodoText("");
     setNotice("");
     setPhoneNotice("");
+    setPhoneDataNotice("");
   };
 
   const generateCharacterPhoneContent = async () => {
@@ -3139,6 +3194,33 @@ export default function AppCharacterPhone({
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        <section aria-label="数据管理" className="rounded-3xl border border-rose-100 bg-white/85 p-4 shadow-[0_4px_14px_rgba(15,23,42,0.06)]">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-rose-400">Data Management</p>
+            <h2 className="mt-1 text-base font-bold text-neutral-900">数据管理</h2>
+            <p className="mt-1 text-[11px] leading-5 text-neutral-400">清空当前角色手机里的全部记录和生成内容，不会影响密码、壁纸、应用图标与排序。</p>
+          </div>
+          <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50/55 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-bold text-neutral-800">{selectedCharacter?.name || "当前角色"}</p>
+                <p className="mt-1 text-[10px] leading-4 text-neutral-400">聊天、朋友圈、浏览、日记、照片、音乐和生活轨迹</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void clearCurrentCharacterPhoneData()}
+                disabled={!currentPhone}
+                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-rose-500 px-3 py-2 text-[11px] font-bold text-white shadow-sm transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="清空当前角色手机数据"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                清空数据
+              </button>
+            </div>
+            {phoneDataNotice && <p role="status" className="mt-2 rounded-xl bg-white/80 px-2.5 py-2 text-[10px] leading-4 text-rose-600">{phoneDataNotice}</p>}
           </div>
         </section>
       </div>
