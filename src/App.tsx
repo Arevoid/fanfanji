@@ -16,6 +16,7 @@ import { sanitizeMomentPublishText } from "./features/moments/services/momentCon
 import { cleanAndExtractMoment } from "./features/moments/services/chatMomentUtils";
 import { generateRelationshipNetworkNpcMoment } from "./features/moments/services/relationshipNetworkNpcMomentService";
 import { upsertMomentPreservingOrder } from "./features/moments/services/momentState";
+import { limitMomentCommentsPerActor } from "./features/moments/services/momentCommentLimit";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
 import { loadOfflineStories, mergeOfflineStoryCollections } from "./core/storage/repositories/offlineRepository";
@@ -536,6 +537,11 @@ const DEFAULT_SETTINGS: UserSettings = {
 
 const DEFAULT_MESSAGES: Message[] = [];
 
+const normalizeLoadedMoments = (loadedMoments: Moment[]): Moment[] => loadedMoments.map((moment) => ({
+  ...moment,
+  comments: limitMomentCommentsPerActor(moment.comments),
+}));
+
 export default function App() {
   useRuntimeErrorMonitoring();
   const { resolvedTheme } = useTheme();
@@ -591,7 +597,14 @@ export default function App() {
       if (active && result.valid) {
         momentsPersistenceReady.current = true;
         skipNextMomentsPersistenceRef.current = true;
-        setMoments(result.value);
+        const normalizedMoments = normalizeLoadedMoments(result.value);
+        const commentsWereTrimmed = normalizedMoments.some((moment, index) =>
+          moment.comments.length !== result.value[index]?.comments.length,
+        );
+        // Persist a one-time cleanup for legacy feeds that already contain an
+        // unbounded NPC comment/reply chain.
+        if (commentsWereTrimmed) skipNextMomentsPersistenceRef.current = false;
+        setMoments(normalizedMoments);
       }
     });
     return () => { active = false; };
@@ -641,7 +654,7 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
-  const [moments, setMoments] = useState<Moment[]>(() => loadMoments([]).value);
+  const [moments, setMoments] = useState<Moment[]>(() => normalizeLoadedMoments(loadMoments([]).value));
 
   const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets([]).value);
 
@@ -2685,6 +2698,7 @@ export default function App() {
         comments.push({
           id: commentId,
           characterId: detail?.authorId,
+          sourceNpcId: detail?.sourceNpcId,
           relationId: detail?.relationId || (detail?.authorId === character.id ? relation?.id : undefined),
           authorName,
           authorAvatar: detail?.authorAvatar || (detail?.authorId === character.id ? character.avatar : undefined) || "",
@@ -2777,9 +2791,14 @@ export default function App() {
     setMoments((prev) =>
       prev.map((mom) => {
         if (mom.id === momentId) {
+          const nextComment = { ...comment, content };
           return {
             ...mom,
-            comments: [...mom.comments, { ...comment, content }],
+            // This is the final state boundary for every Moments writer
+            // (manual comments, automatic replies, and relationship-network
+            // NPC interactions), so concurrent generation cannot exceed the
+            // per-actor cap.
+            comments: limitMomentCommentsPerActor([...mom.comments, nextComment]),
           };
         }
         return mom;

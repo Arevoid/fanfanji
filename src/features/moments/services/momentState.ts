@@ -1,4 +1,5 @@
 import type { Moment } from "../../../types";
+import { limitMomentCommentsPerActor } from "./momentCommentLimit";
 
 /**
  * Inserts a new Moment at the top, but keeps an existing Moment at its
@@ -6,7 +7,7 @@ import type { Moment } from "../../../types";
  */
 export function upsertMomentPreservingOrder(moments: readonly Moment[], normalized: Moment): Moment[] {
   const existing = moments.find((moment) => moment.id === normalized.id);
-  if (!existing) return [normalized, ...moments];
+  if (!existing) return [{ ...normalized, comments: limitMomentCommentsPerActor(normalized.comments) }, ...moments];
 
   const comments = [...existing.comments];
   for (const comment of normalized.comments) {
@@ -20,7 +21,7 @@ export function upsertMomentPreservingOrder(moments: readonly Moment[], normaliz
         ...existing,
         ...normalized,
         likes: [...new Set([...existing.likes, ...normalized.likes])],
-        comments,
+        comments: limitMomentCommentsPerActor(comments),
       }
     : moment);
 }

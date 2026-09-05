@@ -84,6 +84,8 @@ export interface CharacterPhonePostComment {
   authorId?: string;
   authorAvatar?: string;
   relationId?: string;
+  /** Preserves the originating relationship-network NPC when mirrored to a phone. */
+  sourceNpcId?: string;
 }
 
 export interface CharacterPhoneBrowserResult {

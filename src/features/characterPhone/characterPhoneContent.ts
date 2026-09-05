@@ -475,6 +475,7 @@ function syncMoments(
       authorId: comment.characterId,
       authorAvatar: comment.authorAvatar,
       relationId: comment.relationId,
+      sourceNpcId: comment.sourceNpcId,
     })),
     source: moment.characterId === character.id ? "generated" as const : !moment.characterId ? "user" as const : "npc" as const,
     sourceMomentId: moment.id,

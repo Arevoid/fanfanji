@@ -197,6 +197,10 @@ import {
 import { generateAutomaticMomentReply } from "../features/moments/services/automaticMomentReplyPipeline";
 import { isMomentVisibleToUser, isMomentPublic } from "../features/moments/services/momentVisibility";
 import {
+  MAX_MOMENT_COMMENTS_PER_ACTOR,
+  hasReachedMomentCommentLimit,
+} from "../features/moments/services/momentCommentLimit";
+import {
   appendRelationshipNetworkInteractionRecord,
   listRelationshipNetworkInteractionRecordsForIdentity,
   upsertRelationshipNetworkInteractionRecord,
@@ -363,7 +367,7 @@ interface AppChatProps {
 }
 
 const PRESEED_MOMENTS: Moment[] = [];
-const MAX_RELATIONSHIP_NETWORK_MOMENT_CONVERSATION_COMMENTS = 8;
+const MAX_RELATIONSHIP_NETWORK_MOMENT_CONVERSATION_COMMENTS = MAX_MOMENT_COMMENTS_PER_ACTOR;
 
 /**
  * LLMs can still over-index on the emotional meaning of a phone-proxy line
@@ -3478,12 +3482,24 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       rejectRelationshipNetworkInteraction(pending, "目标朋友圈或评论已不存在");
       return;
     }
+    const npcActor = {
+      sourceNpcId: pending.sourceNpcId,
+      characterId: pending.sourceCharacterId,
+      relationId: pending.sourceRelationId,
+      authorName: pending.authorName,
+    };
+    if (hasReachedMomentCommentLimit(getMomentComments(targetMoment), npcActor)) {
+      showToast(`该 NPC 在这条朋友圈下已达到 ${MAX_MOMENT_COMMENTS_PER_ACTOR} 条互动上限`);
+      rejectRelationshipNetworkInteraction(pending, `该 NPC 在这条朋友圈下已达到 ${MAX_MOMENT_COMMENTS_PER_ACTOR} 条互动上限`);
+      return;
+    }
     const comment: MomentComment = {
       id: `${pending.id}:published`,
       authorName: pending.authorName,
       authorAvatar: pending.authorAvatar,
       content: pending.content,
       characterId: pending.sourceCharacterId,
+      sourceNpcId: pending.sourceNpcId,
       ...(pending.sourceRelationId ? { relationId: pending.sourceRelationId } : {}),
       ...(pending.replyToCommentId ? { replyToCommentId: pending.replyToCommentId } : {}),
       timestamp: Date.now(),
@@ -3640,13 +3656,21 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       resolveCanonicalCharacterId(relation.characterId, characters) === friend.id,
     );
     if (!relationship) return;
+    const friendActor = {
+      characterId: friend.id,
+      relationId: relationship.id,
+      authorName: friend.remark || friend.name,
+    };
+    if (hasReachedMomentCommentLimit(getMomentComments(targetMoment), friendActor)) return;
     const delay = Math.random() * 5000 + 3000; // 3 to 8 seconds delay
     
     setTimeout(async () => {
       try {
+        const latestTargetMoment = latestMomentsRef.current.find((moment) => moment.id === momentId);
+        if (!latestTargetMoment || hasReachedMomentCommentLimit(getMomentComments(latestTargetMoment), friendActor)) return;
         const reply = await generateAutomaticMomentReply({
-          targetMoment,
-          targetDescription: getMomentTargetDescription(targetMoment),
+          targetMoment: latestTargetMoment,
+          targetDescription: getMomentTargetDescription(latestTargetMoment),
           userCommentText,
           replyingToContent: replyingTo?.content,
           character: friend,
@@ -3702,6 +3726,12 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     if (npcComment.replyToCommentId && (!parentComment || !parentComment.characterId
       || resolveCanonicalCharacterId(parentComment.characterId, characters)
         !== resolveCanonicalCharacterId(candidate.targetCharacter.id, characters))) return;
+    const characterActor = {
+      characterId: candidate.targetCharacter.id,
+      relationId: candidate.targetRelationship.id,
+      authorName: candidate.targetCharacter.remark || candidate.targetCharacter.name,
+    };
+    if (hasReachedMomentCommentLimit(comments, characterActor)) return;
     if (getMomentThreadComments(targetMoment, npcComment.id).length >= MAX_RELATIONSHIP_NETWORK_MOMENT_CONVERSATION_COMMENTS) return;
 
     const requestKey = `${targetMoment.id}:character-reply:${candidate.targetCharacter.id}:${npcComment.id}`;
@@ -3760,6 +3790,12 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       relationships,
     });
     for (const candidate of candidates) {
+      const characterActor = {
+        characterId: candidate.targetCharacter.id,
+        relationId: candidate.targetRelationship.id,
+        authorName: candidate.targetCharacter.remark || candidate.targetCharacter.name,
+      };
+      if (hasReachedMomentCommentLimit(getMomentComments(newMo), characterActor)) continue;
       const requestKey = `${newMo.id}:character-comment:${candidate.targetCharacter.id}`;
       if (relationshipNetworkCharacterInteractionInFlightRef.current.has(requestKey)) continue;
       relationshipNetworkCharacterInteractionInFlightRef.current.add(requestKey);
@@ -3825,6 +3861,13 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     }
 
     for (const candidate of candidates) {
+      const npcActor = {
+        sourceNpcId: candidate.npc.id,
+        characterId: candidate.sourceCharacter.id,
+        relationId: candidate.sourceRelationship.id,
+        authorName: candidate.npc.name,
+      };
+      if (hasReachedMomentCommentLimit(getMomentComments(newMo), npcActor)) continue;
       const requestKey = `${newMo.id}:${candidate.socialLink.id}`;
       if (relationshipNetworkCommentInFlightRef.current.has(requestKey)) continue;
       relationshipNetworkCommentInFlightRef.current.add(requestKey);
@@ -3874,6 +3917,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
               authorName: candidate.npc.name,
               authorAvatar: candidate.npc.avatar || candidate.sourceCharacter.avatar,
               characterId: candidate.sourceCharacter.id,
+              sourceNpcId: candidate.npc.id,
               relationId: candidate.sourceRelationship.id,
             };
             onAddCommentToMoment(newMo.id, npcComment);
@@ -4002,6 +4046,13 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     for (const candidate of candidates) {
       const replyingTo = candidate.replyingTo;
       if (!replyingTo) continue;
+      const npcActor = {
+        sourceNpcId: candidate.npc.id,
+        characterId: candidate.sourceCharacter.id,
+        relationId: candidate.sourceRelationship.id,
+        authorName: candidate.npc.name,
+      };
+      if (hasReachedMomentCommentLimit(getMomentComments(newMo), npcActor)) continue;
       const requestKey = `${newMo.id}:${candidate.socialLink.id}:reply:${replyingTo.id}`;
       if (relationshipNetworkCommentInFlightRef.current.has(requestKey)) continue;
       relationshipNetworkCommentInFlightRef.current.add(requestKey);
@@ -4050,6 +4101,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
               authorName: candidate.npc.name,
               authorAvatar: candidate.npc.avatar || candidate.sourceCharacter.avatar,
               characterId: candidate.sourceCharacter.id,
+              sourceNpcId: candidate.npc.id,
               relationId: candidate.sourceRelationship.id,
               replyToCommentId: replyingTo.id,
             };

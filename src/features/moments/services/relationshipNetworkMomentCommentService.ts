@@ -13,6 +13,7 @@ import { listRelationshipNetworkChatLinksForIdentity } from "../../../core/stora
 import { listRelationshipNetworkNpcsForIdentity } from "../../../core/storage/repositories/relationshipNetworkRepository";
 import { listRelationshipNetworkSocialLinksForIdentity } from "../../../core/storage/repositories/relationshipNetworkSocialLinkRepository";
 import { getMomentComments } from "./momentContent";
+import { hasReachedMomentCommentLimit } from "./momentCommentLimit";
 import { generateAutomaticMomentComment } from "./automaticMomentCommentPipeline";
 import { generateAutomaticMomentReply } from "./automaticMomentReplyPipeline";
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
@@ -285,6 +286,13 @@ export function listRelationshipNetworkMomentCommentCandidates(input: {
             === resolveCanonicalCharacterId(targetCharacter.id, input.characters));
       if (isNpcOwnMoment && !isReplyToLinkedCharacter) return null;
       if (!sourceRelationship || seenSourceCharacterIds.has(sourceCharacter.id)) return null;
+      if (input.currentMoment && (action === "comment" || action === "reply")
+        && hasReachedMomentCommentLimit(getMomentComments(input.currentMoment), {
+          sourceNpcId: npc.id,
+          characterId: sourceCharacter.id,
+          relationId: sourceRelationship.id,
+          authorName: npc.name,
+        })) return null;
       if (input.currentMoment && (action === "comment"
         ? hasSourceCommented(input.currentMoment, sourceCharacter.id, sourceRelationship.id)
         : action === "like"
