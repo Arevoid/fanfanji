@@ -15,6 +15,7 @@ import type {
   CharacterPhoneContact,
   CharacterPhoneMessage,
   CharacterPhonePost,
+  CharacterPhonePostComment,
   CharacterPhoneRecord,
   CharacterPhoneMusicPlaylist,
   CharacterPhoneMusicTrack,
@@ -419,6 +420,27 @@ function syncMoments(
   const relatedCharacterIds = new Set(
     characters.filter((candidate) => contactNames.has(candidate.name)).map((candidate) => candidate.id),
   );
+  const linkedCommentCharacterIds = new Set([
+    character.id,
+    ...relatedCharacterIds,
+    ...networkCharacterIds,
+  ]);
+  const linkedCommentNames = new Set([
+    character.name,
+    ...contacts.filter((contact) => contact.isNpc).map((contact) => contact.name),
+  ]);
+  const isVisibleComment = (comment: Moment["comments"][number]) => {
+    if (comment.characterId) return linkedCommentCharacterIds.has(comment.characterId);
+    // User comments belong to the active owner's social circle. If a legacy
+    // comment has no character id but uses a known unlinked character name,
+    // keep it out of the role phone as well.
+    const knownUnlinkedCharacter = characters.some((candidate) =>
+      candidate.id !== character.id
+      && candidate.name === comment.authorName
+      && !linkedCommentCharacterIds.has(candidate.id),
+    );
+    return !knownUnlinkedCharacter || linkedCommentNames.has(comment.authorName);
+  };
   const relevant = moments.filter((moment) => {
     const belongsToOwner = (moment.ownerIdentityId || "identity-1") === phone.ownerIdentityId;
     if (!belongsToOwner) return false;
@@ -444,7 +466,16 @@ function syncMoments(
     content: moment.content,
     timestamp: moment.timestamp,
     likes: moment.likes.length,
-    comments: moment.comments.map((comment) => comment.content),
+    comments: moment.comments.filter(isVisibleComment).map((comment) => comment.content),
+    commentDetails: moment.comments.filter(isVisibleComment).map((comment): CharacterPhonePostComment => ({
+      id: comment.id,
+      authorName: comment.authorName,
+      content: comment.content,
+      timestamp: comment.timestamp,
+      authorId: comment.characterId,
+      authorAvatar: comment.authorAvatar,
+      relationId: comment.relationId,
+    })),
     source: moment.characterId === character.id ? "generated" as const : !moment.characterId ? "user" as const : "npc" as const,
     sourceMomentId: moment.id,
     visibility: moment.visibility || "public",
@@ -474,6 +505,7 @@ function syncMoments(
       timestamp: sourcePost.timestamp,
       likes: sourcePost.likes,
       comments: sourcePost.comments,
+      commentDetails: sourcePost.commentDetails,
       visibility: sourcePost.visibility,
       visibilityTargetIds: sourcePost.visibilityTargetIds,
     };

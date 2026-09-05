@@ -50,7 +50,10 @@ const messages: Message[] = [
   { id: "message-other-relation", characterId: characterA.id, relationId: "relation-other", sender: "user", content: "其他身份的关系消息", timestamp: 13 },
 ];
 const moments: Moment[] = [
-  { id: "moment-a", ownerIdentityId: identity.id, characterId: characterA.id, authorName: characterA.name, authorAvatar: characterA.avatar, content: "海边的风很大。", timestamp: 20, likes: [], comments: [] },
+  { id: "moment-a", ownerIdentityId: identity.id, characterId: characterA.id, authorName: characterA.name, authorAvatar: characterA.avatar, content: "海边的风很大。", timestamp: 20, likes: [], comments: [
+    { id: "comment-user", authorName: identity.name, authorAvatar: identity.avatar, content: "记得带外套。", timestamp: 21 },
+    { id: "comment-unlinked", characterId: characterB.id, authorName: characterB.name, authorAvatar: characterB.avatar, content: "不该出现在这里。", timestamp: 22 },
+  ] },
   { id: "moment-b", ownerIdentityId: identity.id, characterId: characterB.id, authorName: characterB.name, authorAvatar: characterB.avatar, content: "不属于阿宁的内容。", timestamp: 21, likes: [], comments: [] },
   { id: "moment-user", ownerIdentityId: identity.id, authorName: identity.name, authorAvatar: identity.avatar, content: "用户公开发布的内容。", timestamp: 22, likes: [], comments: [] },
   { id: "moment-other-owner", ownerIdentityId: "identity-other", characterId: characterA.id, authorName: characterA.name, authorAvatar: characterA.avatar, content: "其他身份下的角色动态。", timestamp: 23, likes: [], comments: [] },
@@ -111,6 +114,9 @@ assert.ok(!phoneA.threadMessages.some((message) => message.content.includes("另
 assert.ok(!phoneA.threadMessages.some((message) => message.content.includes("没有归属")));
 assert.ok(!phoneA.threadMessages.some((message) => message.content.includes("其他身份")));
 assert.ok(phoneA.posts.some((post) => post.sourceMomentId === "moment-a"));
+const phoneAMoment = phoneA.posts.find((post) => post.sourceMomentId === "moment-a");
+assert.deepEqual(phoneAMoment?.comments, ["记得带外套。"], "role phone only sees owner comments and comments from linked contacts");
+assert.equal(phoneAMoment?.commentDetails?.[0]?.authorName, identity.name, "role phone preserves comment author names");
 assert.ok(phoneA.posts.some((post) => post.sourceMomentId === "moment-user"));
 assert.ok(!phoneA.posts.some((post) => post.sourceMomentId === "moment-b"));
 assert.ok(!phoneA.posts.some((post) => post.sourceMomentId === "moment-other-owner"));

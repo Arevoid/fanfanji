@@ -67,6 +67,7 @@ import type {
   CharacterPhoneImageSaveInput,
   CharacterPhoneNote,
   CharacterPhonePost,
+  CharacterPhonePostComment,
   CharacterPhoneRecord,
   CharacterPhoneScheduleItem,
   CharacterPhoneTodo,
@@ -819,6 +820,7 @@ export default function AppCharacterPhone({
       timestamp: post.timestamp,
       likes: post.likes,
       comments: post.comments,
+      commentDetails: post.commentDetails,
       visibility: post.visibility || "public",
       visibilityTargetIds: post.visibilityTargetIds,
       sourceMomentId: post.sourceMomentId,
@@ -837,6 +839,17 @@ export default function AppCharacterPhone({
     missingPosts.sort((left, right) => right.timestamp - left.timestamp).slice(0, 1).forEach(syncCharacterPhonePost);
   }, [currentPhone, selectedCharacter, moments, onSyncCharacterPhonePost, userIdentityId]);
   const currentUserAvatar = activeIdentity?.avatar || settings?.avatar;
+  const getPhonePostComment = (post: CharacterPhonePost, index: number): CharacterPhonePostComment => {
+    const detail = post.commentDetails?.[index];
+    if (detail) return detail;
+    return {
+      id: `${post.id}-comment-${index}`,
+      authorName: post.author || selectedCharacter?.name || "评论者",
+      content: post.comments[index],
+      timestamp: post.timestamp + index,
+      authorAvatar: post.authorAvatar,
+    };
+  };
   const phoneCharacterLocation = useMemo(
     () => {
       const characterId = selectedCharacter?.id || "";
@@ -1699,9 +1712,21 @@ export default function AppCharacterPhone({
   const addPhonePostComment = (postId: string) => {
     const content = (postCommentDrafts[postId] || "").trim();
     if (!content) return;
+    const now = Date.now();
+    const commentDetail: CharacterPhonePostComment = {
+      id: `phone-comment-${postId}-${now}`,
+      authorName: activeIdentity?.name?.trim() || "我",
+      content,
+      timestamp: now,
+      authorAvatar: currentUserAvatar,
+      relationId: relationships.find(
+        (relationship) => relationship.userIdentityId === userIdentityId && relationship.characterId === selectedCharacter?.id,
+      )?.id,
+    };
     updatePhonePost(postId, (post) => ({
       ...post,
       comments: [...post.comments, content],
+      commentDetails: [...(post.commentDetails || []), commentDetail],
     }));
     setPostCommentDrafts((drafts) => ({ ...drafts, [postId]: "" }));
   };
@@ -1719,6 +1744,9 @@ export default function AppCharacterPhone({
     updatePhonePost(postId, (post) => ({
       ...post,
       comments: post.comments.filter(
+        (_, commentIndex) => commentIndex !== index,
+      ),
+      commentDetails: post.commentDetails?.filter(
         (_, commentIndex) => commentIndex !== index,
       ),
     }));
@@ -2013,7 +2041,8 @@ export default function AppCharacterPhone({
   );
   const phoneMomentsView = (
     <div data-theme-page="moments" className="flex min-h-0 flex-1 flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
-      <div className="relative h-64 shrink-0 bg-slate-200">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[var(--surface)]">
+        <div className="relative h-64 shrink-0 bg-slate-200">
         {selectedCharacter.momentsCover ? (
           <img src={selectedCharacter.momentsCover} alt="朋友圈背景" className="h-full w-full object-cover" />
         ) : (
@@ -2032,8 +2061,8 @@ export default function AppCharacterPhone({
           <span className="pb-8 text-sm font-bold tracking-tight text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">{selectedCharacter.remark || selectedCharacter.name}</span>
           <img src={selectedCharacter.avatar} alt="" className="h-16 w-16 rounded-xl border-2 border-white bg-white object-cover shadow-md" referrerPolicy="no-referrer" />
         </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] pb-4 pt-2">
+        </div>
+        <div className="bg-[var(--surface)] pb-4 pt-2">
         {phoneMomentComposerOpen && (
           <div className="mx-4 my-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
             <div className="flex items-center justify-between"><span className="text-xs font-bold">分享新鲜事…</span><button type="button" onClick={() => setPhoneMomentComposerOpen(false)} className="text-xs text-[var(--text-tertiary)]">收起</button></div>
@@ -2066,7 +2095,15 @@ export default function AppCharacterPhone({
                   )}
                   {post.comments.length > 0 && (
                     <div className="space-y-1 py-0.5">
-                      {post.comments.map((comment, index) => <div key={`${post.id}-${index}`} className="py-1.5 leading-relaxed text-slate-800">{comment}</div>)}
+                      {post.comments.map((_, index) => {
+                        const comment = getPhonePostComment(post, index);
+                        return (
+                          <div key={`${post.id}-${comment.id}`} className="py-1.5 leading-relaxed text-slate-800">
+                            <span className="font-semibold text-[#576b95]">{comment.authorName}</span>
+                            <span>：{comment.content}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -2079,6 +2116,7 @@ export default function AppCharacterPhone({
         ))}
         {(currentPhone.posts ?? []).length === 0 && <p className="px-4 py-16 text-center text-xs text-[var(--text-tertiary)]">暂无动态，点击右上角相机发布第一条朋友圈吧！</p>}
         </div>
+      </div>
       </div>
       {phoneSocialNav}
     </div>
@@ -2545,21 +2583,24 @@ export default function AppCharacterPhone({
                   评论 {post.comments.length || ""}
                 </button>
               </div>
-              {post.comments.map((comment, index) => (
-                <div
-                  key={comment}
-                  className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-black/5 px-3 py-2 text-xs"
-                >
-                  <span>{comment}</span>
-                  <button
-                    type="button"
-                    onClick={() => deletePhonePostComment(post.id, index)}
-                    className="text-[10px] text-rose-500"
+              {post.comments.map((_, index) => {
+                const comment = getPhonePostComment(post, index);
+                return (
+                  <div
+                    key={`${post.id}-${comment.id}`}
+                    className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-black/5 px-3 py-2 text-xs"
                   >
-                    删除
-                  </button>
-                </div>
-              ))}
+                    <span><strong className="text-[#576b95]">{comment.authorName}</strong>：{comment.content}</span>
+                    <button
+                      type="button"
+                      onClick={() => deletePhonePostComment(post.id, index)}
+                      className="text-[10px] text-rose-500"
+                    >
+                      删除
+                    </button>
+                  </div>
+                );
+              })}
               <div className="mt-3 flex gap-2">
                 <input
                   value={postCommentDrafts[post.id] || ""}

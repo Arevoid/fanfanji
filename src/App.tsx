@@ -79,7 +79,7 @@ import { messageMatchesMutationScope, type MessageMutationScope } from "./featur
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, removePaymentStatusesForMessages, type RedPacketStatusMap } from "./features/chat/services/paymentScope";
 import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
 import type { CharacterPhoneImageSaveInput } from "./domain/characterPhone/types";
-import type { CharacterPhonePost } from "./domain/characterPhone/types";
+import type { CharacterPhonePost, CharacterPhonePostComment } from "./domain/characterPhone/types";
 import { 
   AlbumWidget, 
   CalendarAlbumWidget,
@@ -2678,15 +2678,18 @@ export default function App() {
     );
     const comments = existing?.comments ? [...existing.comments] : [];
     for (const [index, content] of post.comments.entries()) {
-      if (!comments.some((comment) => comment.content === content)) {
+      const detail: CharacterPhonePostComment | undefined = post.commentDetails?.[index];
+      const authorName = detail?.authorName || character.remark || character.name;
+      const commentId = detail?.id || `character-phone-comment-${post.id}-${index}`;
+      if (!comments.some((comment) => comment.id === commentId || (comment.authorName === authorName && comment.content === content))) {
         comments.push({
-          id: `character-phone-comment-${post.id}-${index}`,
-          characterId: character.id,
-          relationId: relation?.id,
-          authorName: character.remark || character.name,
-          authorAvatar: character.avatar,
-          content,
-          timestamp: post.timestamp + index,
+          id: commentId,
+          characterId: detail?.authorId,
+          relationId: detail?.relationId || (detail?.authorId === character.id ? relation?.id : undefined),
+          authorName,
+          authorAvatar: detail?.authorAvatar || (detail?.authorId === character.id ? character.avatar : undefined) || "",
+          content: detail?.content || content,
+          timestamp: detail?.timestamp || post.timestamp + index,
         });
       }
     }

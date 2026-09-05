@@ -63,6 +63,8 @@ export interface CharacterPhonePost {
   timestamp: number;
   likes: number;
   comments: string[];
+  /** Structured comment metadata used to render authors and preserve visibility. */
+  commentDetails?: CharacterPhonePostComment[];
   source: "generated" | "user" | "npc";
   authorId?: string;
   authorAvatar?: string;
@@ -72,6 +74,16 @@ export interface CharacterPhonePost {
   visibility?: MomentVisibility;
   /** Character/identity ids selected for a specific audience. */
   visibilityTargetIds?: string[];
+}
+
+export interface CharacterPhonePostComment {
+  id: string;
+  authorName: string;
+  content: string;
+  timestamp: number;
+  authorId?: string;
+  authorAvatar?: string;
+  relationId?: string;
 }
 
 export interface CharacterPhoneBrowserResult {
