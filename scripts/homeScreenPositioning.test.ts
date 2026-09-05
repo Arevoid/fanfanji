@@ -267,9 +267,11 @@ assert.match(appSource, /onDragStartCapture=\{\(event\) => event\.preventDefault
 assert.match(appSource, /gridTemplateColumns:\s*`repeat\(\$\{HOME_GRID_COLUMNS\}, minmax\(0, 1fr\)\)`/);
 assert.match(appSource, /justifyContent:\s*"stretch"/);
 assert.match(appSource, /gridTemplateRows:\s*`repeat\(\$\{homeGridRows\}/);
-assert.match(appSource, /const HOME_APP_ICON_SIZE = 64/);
+assert.match(appSource, /const HOME_APP_ICON_SIZE = 60/);
 assert.match(appSource, /width: `\$\{HOME_APP_ICON_SIZE\}px`/);
 assert.match(appSource, /const HOME_APP_ICON_GLYPH_CLASS = "h-9 w-9"/);
+assert.match(appSource, /const HOME_APP_ROW_GAP = 28/);
+assert.match(appSource, /HOME_APP_ICON_SIZE \+ HOME_APP_LABEL_GAP \+ HOME_APP_LABEL_HEIGHT/);
 assert.match(appSource, /useState\(\(\) =>\s*typeof window === "undefined" \? 343 : Math\.max\(0, window\.innerWidth - 32\)/);
 assert.match(appSource, /useLayoutEffect\(\(\) => \{[\s\S]*pageViewportRef\.current/);
 assert.match(appSource, /if \(viewport && viewport !== grid\) observer\.observe\(viewport\)/);

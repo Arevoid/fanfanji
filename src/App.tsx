@@ -336,10 +336,16 @@ const AppIcons = {
   wallet: (className = "w-6 h-6") => <WalletCards className={className} strokeWidth={1.8} />,
 };
 
-// Keep the user's desktop and Dock tiles visually aligned with the role
-// phone: the role phone uses a 64px tile with a 36px glyph.
-const HOME_APP_ICON_SIZE = 64;
+// Keep the user's desktop and Dock tiles compact while preserving the role
+// phone's spacing rhythm between the tile, label, and next row.
+const HOME_APP_ICON_SIZE = 60;
 const HOME_APP_ICON_GLYPH_CLASS = "h-9 w-9";
+// The role-phone launcher gives each app a 6px icon-to-label gap and a
+// 16px label line, with 28px between rows. Keep the user's launcher on the
+// same rhythm so labels never spill into the next row at narrow widths.
+const HOME_APP_LABEL_GAP = 6;
+const HOME_APP_LABEL_HEIGHT = 16;
+const HOME_APP_ROW_GAP = 28;
 
 const hexToRgba = (hex: string, opacityPercent: number) => {
   if (!hex || !hex.startsWith("#")) {
@@ -1628,12 +1634,15 @@ export default function App() {
   const homeGridInnerWidth = homeGridWidth - homeGridPadding * 2;
   const homeGridGap = 16;
   const homeGridColumnGap = homeGridGap;
-  const homeGridRowGap = homeGridGap;
+  const homeGridRowGap = HOME_APP_ROW_GAP;
   const homeGridTrackWidth = Math.max(
     homeGridIconWidth,
     (homeGridInnerWidth - homeGridColumnGap * (HOME_GRID_COLUMNS - 1)) / HOME_GRID_COLUMNS,
   );
-  const homeGridRowHeight = homeGridTrackWidth;
+  const homeGridAppContentHeight = settings.hideAppNames
+    ? HOME_APP_ICON_SIZE
+    : HOME_APP_ICON_SIZE + HOME_APP_LABEL_GAP + HOME_APP_LABEL_HEIGHT;
+  const homeGridRowHeight = Math.max(homeGridTrackWidth, homeGridAppContentHeight);
   const homeGridRows = getResponsiveHomeGridRowCount({
     containerHeight: homeGridHeight,
     paddingTop: 14,
@@ -4218,7 +4227,7 @@ export default function App() {
                                             )}
                                           </div>
                                           {!isHiddenNames && (
-                                            <span className="desktop-app-label text-[10px] font-extrabold mt-1 truncate max-w-[72px] w-[calc(100%+20px)] block select-none tracking-tight font-sans text-center">
+                                            <span className="desktop-app-label text-[10px] leading-4 font-extrabold mt-1.5 truncate max-w-[72px] w-[calc(100%+20px)] block select-none tracking-tight font-sans text-center">
                                               {app.name}
                                             </span>
                                           )}
