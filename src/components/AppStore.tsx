@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Download, Star, ChevronLeft, Search, TrendingUp, ShieldAlert, BadgeInfo, Trash2 } from "lucide-react";
+import { Download, Star, ChevronLeft, Search, TrendingUp, Trash2 } from "lucide-react";
 
 interface AppItem {
   id: string;
@@ -14,6 +14,17 @@ interface AppItem {
 }
 
 const APPS_LIST: AppItem[] = [
+  {
+    id: "character-phone",
+    name: "手机",
+    category: "角色沉浸与私人空间",
+    icon: "📱",
+    iconBg: "bg-slate-700",
+    rating: 4.9,
+    reviews: "全新",
+    size: "18.6 MB",
+    description: "进入角色专属的手机空间，查看与角色相关的聊天、联系人、朋友圈、相册、日记、备忘录、日程和音乐；每个角色的内容彼此独立。"
+  },
   {
     id: "chat",
     name: "聊天",
@@ -81,6 +92,61 @@ const APPS_LIST: AppItem[] = [
     description: "清爽纯净的本地记事与日程待办工具，支持多栏笔记管理及每日待办，与桌面代办小组件完全同步，助您轻松打理生活与灵感。"
   },
   {
+    id: "schedule",
+    name: "日程",
+    category: "线下约定与时间安排",
+    icon: "📅",
+    iconBg: "bg-sky-500",
+    rating: 4.9,
+    reviews: "全新",
+    size: "3.2 MB",
+    description: "集中查看与好友确认的线下见面安排。首个版本仅展示线下约定，普通待办与经期记录将在后续版本逐步开放。"
+  },
+  {
+    id: "reading",
+    name: "阅读",
+    category: "本地阅读与 AI 好友共读",
+    icon: "📚",
+    iconBg: "bg-stone-700",
+    rating: 5.0,
+    reviews: "全新",
+    size: "4.1 MB",
+    description: "将 TXT 或 Markdown 小说保存在本地，后续可邀请一位 AI 好友共读、评论和讨论，并开启独立记忆的穿书故事。"
+  },
+  {
+    id: "cinema",
+    name: "影视",
+    category: "本地观影与 AI 好友共看",
+    icon: "🎬",
+    iconBg: "bg-slate-800",
+    rating: 5.0,
+    reviews: "全新",
+    size: "5.8 MB",
+    description: "上传本地视频，与指定 AI 好友在同一页面边看边讨论；支持 SRT/VTT 字幕、低频主动反应和手动保存观影记忆。"
+  },
+  {
+    id: "relationship-network",
+    name: "关系网",
+    category: "人物关系与世界设定",
+    icon: "🕸️",
+    iconBg: "bg-violet-500",
+    rating: 5.0,
+    reviews: "全新",
+    size: "4.6 MB",
+    description: "用画布整理人物、NPC 与自己的关系。支持头像节点、单向或双向箭头、关系描述和自由拖拽布局；关系网内容默认只供整理，不会自动进入聊天。"
+  },
+  {
+    id: "diary",
+    name: "日记",
+    category: "生活记录与私密书写",
+    icon: "📖",
+    iconBg: "bg-stone-600",
+    rating: 4.9,
+    reviews: "1.2万",
+    size: "7.6 MB",
+    description: "记录自己的心情，也可以查看角色基于专属聊天写下的私密日记；所有内容都按身份和关系隔离保存。"
+  },
+  {
     id: "offline",
     name: "线下模式",
     category: "剧本创作与演练",
@@ -111,28 +177,19 @@ export default function AppStore({
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
-  const [toast, setToast] = useState<string | null>(null);
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => {
-      setToast(null);
-    }, 2000);
-  };
 
   const startDownload = (id: string) => {
-    if (id === "forum") {
-      showToast("施工中");
-      return;
-    }
     setDownloadingId(id);
     setProgress(0);
+    const finishDownload = () => {
+      onInstallApp(id);
+      setDownloadingId(null);
+    };
     const interval = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 100) {
           clearInterval(interval);
-          onInstallApp(id);
-          setDownloadingId(null);
+          window.setTimeout(finishDownload, 0);
           return 100;
         }
         // Smoothly increment by an organic step every 45ms (approx. 2 seconds total)
@@ -140,8 +197,7 @@ export default function AppStore({
         const next = prev + randIncrement;
         if (next >= 100) {
           clearInterval(interval);
-          onInstallApp(id);
-          setDownloadingId(null);
+          window.setTimeout(finishDownload, 0);
           return 100;
         }
         return next;
@@ -156,12 +212,12 @@ export default function AppStore({
   );
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 text-slate-800 font-sans">
+    <div data-theme-page="store" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
           onClick={onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
         </button>
@@ -282,12 +338,6 @@ export default function AppStore({
           </div>
         </div>
       </div>
-
-      {toast && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-slate-900/95 text-white px-4 py-2 rounded-xl text-xs font-medium shadow-md transition-all z-[9999] animate-fade-in flex items-center gap-1.5">
-          <span>🛠️</span> {toast}
-        </div>
-      )}
     </div>
   );
 }

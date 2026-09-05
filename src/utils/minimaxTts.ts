@@ -1,18 +1,5 @@
 import { audioDb } from "./audioDb";
-
-export const MINIMAX_DEFAULT_VOICES = [
-  { id: "female-shaonv", name: "甜美少女 (女)", gender: "female" },
-  { id: "female-qn-jiaochen", name: "娇嗔可人 (女)", gender: "female" },
-  { id: "female-qn-yujie", name: "高冷御姐 (女)", gender: "female" },
-  { id: "female-qn-shuangkuai", name: "爽快大姐 (女)", gender: "female" },
-  { id: "female-qn-ruomei", name: "柔美温婉 (女)", gender: "female" },
-  { id: "male-qn-qingse", name: "青涩青年 (男)", gender: "male" },
-  { id: "male-qn-shaonian", name: "阳光少年 (男)", gender: "male" },
-  { id: "male-qn-chaoku", name: "潮酷青年 (男)", gender: "male" },
-  { id: "male-qn-badao", name: "霸道总裁 (男)", gender: "male" },
-  { id: "presenter_female", name: "播音女声 (女)", gender: "female" },
-  { id: "presenter_male", name: "播音男声 (男)", gender: "male" },
-];
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./fetchWithTimeout";
 
 /**
  * Filter out dialogue actions in brackets / parentheticals or asterisks.
@@ -83,7 +70,9 @@ export function splitTextIntoChunks(text: string, maxLen: number = 150): string[
   return finalChunks.filter(c => c.length > 0);
 }
 
-export interface MiniMaxTtsOptions {
+export interface TtsOptions {
+  provider?: "minimax" | "mossland";
+  apiEndpoint?: string;
   apiKey?: string;
   groupId?: string;
   model?: string;
@@ -98,17 +87,46 @@ export interface MiniMaxTtsOptions {
 /**
  * Perform a single segment TTS synthesis
  */
-async function fetchSingleTtsSegment(
+export async function fetchSingleTtsSegment(
   text: string,
-  options: MiniMaxTtsOptions
+  options: TtsOptions
 ): Promise<Blob> {
+  if (options.provider === "mossland") {
+    const apiEndpoint = options.apiEndpoint?.trim() || "https://api.mosi.cn/v1/audio/speech";
+    const apiKey = options.apiKey?.trim();
+    const voiceId = options.voiceId?.trim();
+    if (!apiKey) throw new Error("请先填写 Mossland API Key");
+    if (!voiceId) throw new Error("请先为角色填写 Mossland Voice ID");
+
+    const response = await fetchWithTimeout("/api/mossland-tts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        apiEndpoint,
+        apiKey,
+        model: options.model || "moss-tts",
+        text,
+        voiceId,
+      }),
+    }, API_REQUEST_TIMEOUTS.speechSynthesis);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Mossland 合成失败 (${response.status}): ${errorText}`);
+    }
+    return response.blob();
+  }
+
   const voiceId = options.voiceId || "female-shaonv";
   const speed = options.speed !== undefined ? options.speed : 1.0;
   const vol = options.vol !== undefined ? options.vol : 1.0;
   const pitch = options.pitch !== undefined ? options.pitch : 0;
   const model = options.model || "speech-2.8-hd";
 
-  const isDirectCall = !!(options.forceDirectTts || (options.apiKey && options.groupId));
+  // Prefer the app proxy so browser CORS policy does not decide whether TTS
+  // works. Direct provider access remains available only as an explicit opt-in.
+  const isDirectCall = options.forceDirectTts === true;
   
   let url = "/api/minimax-tts";
   const headers: Record<string, string> = {
@@ -158,11 +176,11 @@ async function fetchSingleTtsSegment(
     };
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
-  });
+  }, API_REQUEST_TIMEOUTS.speechSynthesis);
 
   if (!response.ok) {
     const textErr = await response.text();
@@ -232,7 +250,7 @@ async function mergeAudioBlobs(blobs: Blob[]): Promise<Blob> {
  */
 export async function getSpeechForText(
   text: string,
-  options: MiniMaxTtsOptions,
+  options: TtsOptions,
   onProgress?: (msg: string) => void
 ): Promise<Blob> {
   const cleanedText = cleanBracketActions(text);
@@ -247,15 +265,17 @@ export async function getSpeechForText(
   const model = options.model || "speech-2.8-hd";
 
   // Check cache first in audioDb
-  const cacheKey = `minimax_tts_v3:${voiceId}:${speed}:${pitch}:${vol}:${cleanedText}`;
+  const provider = options.provider || "minimax";
+  const endpoint = options.apiEndpoint || "default";
+  const cacheKey = `tts_v4:${provider}:${endpoint}:${model}:${voiceId}:${speed}:${pitch}:${vol}:${cleanedText}`;
   try {
     const cachedBlob = await audioDb.getTrackFile(cacheKey);
     if (cachedBlob) {
-      console.log("[MiniMax TTS] Play cached speech for key:", cacheKey.substring(0, 80));
+      console.log("[TTS] Play cached speech for key:", cacheKey.substring(0, 80));
       return cachedBlob;
     }
   } catch (err) {
-    console.warn("[MiniMax TTS] Failed to read IndexedDB cache:", err);
+    console.warn("[TTS] Failed to read IndexedDB cache:", err);
   }
 
   onProgress?.("正在合成语音...");
@@ -266,7 +286,7 @@ export async function getSpeechForText(
     throw new Error("无有效分段合成台词");
   }
 
-  console.log(`[MiniMax TTS] Synthesizing text in ${chunks.length} segments`);
+  console.log(`[TTS] Synthesizing text in ${chunks.length} segments`);
 
   const blobs: Blob[] = [];
   for (let i = 0; i < chunks.length; i++) {
@@ -283,39 +303,8 @@ export async function getSpeechForText(
   try {
     await audioDb.saveTrackFile(cacheKey, mergedBlob);
   } catch (err) {
-    console.warn("[MiniMax TTS] Failed to save to IndexedDB cache:", err);
+    console.warn("[TTS] Failed to save to IndexedDB cache:", err);
   }
 
   return mergedBlob;
-}
-
-/**
- * Request audio playback permission on mobile browsers
- */
-export function initAudioContextPermission(): Promise<boolean> {
-  return new Promise((resolve) => {
-    // Standard AudioContext unlocking sequence
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) {
-      resolve(false);
-      return;
-    }
-    const ctx = new AudioContextClass();
-    if (ctx.state === "suspended") {
-      const unlock = () => {
-        ctx.resume().then(() => {
-          cleanUp();
-          resolve(true);
-        });
-      };
-      const cleanUp = () => {
-        document.removeEventListener("click", unlock);
-        document.removeEventListener("touchstart", unlock);
-      };
-      document.addEventListener("click", unlock);
-      document.addEventListener("touchstart", unlock);
-    } else {
-      resolve(true);
-    }
-  });
 }

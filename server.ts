@@ -1,184 +1,244 @@
 import express from "express";
+import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import path from "path";
 import { createServer as createViteServer } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
+import { callTextProvider, normalizeTextApiError } from "./src/server/textProtocolAdapters";
+import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
+import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
+import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslandTts";
+import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./src/utils/fetchWithTimeout";
+import { CONTENT_SECURITY_POLICY } from "./src/core/security/contentSecurityPolicy";
+import { assertImageGenerationTrigger } from "./src/features/chat/services/imageGenerationIntent";
+import { createNeteaseMusicAdapter, NeteaseMusicApiError } from "./src/server/neteaseMusicAdapter";
+import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "./src/server/neteaseMusicSession";
 
 dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || 3000);
+  const responseContentSecurityPolicy = process.env.NODE_ENV === "production"
+    ? CONTENT_SECURITY_POLICY
+    : CONTENT_SECURITY_POLICY.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'");
 
   // Use JSON parsing with size limits for custom base64 wallpapers or customized avatars
   app.use(express.json({ limit: "15mb" }));
+  app.use((req, res, next) => {
+    const requestId = req.header("x-request-id")?.trim() || randomUUID();
+    res.setHeader("x-request-id", requestId);
+    res.setHeader("Content-Security-Policy", responseContentSecurityPolicy);
+    res.locals.requestId = requestId;
+    next();
+  });
+  app.get("/healthz", (_req, res) => {
+    res.json({ status: "ok", service: "fanfanji", version: process.env.npm_package_version || "0.0.0" });
+  });
+
+  const neteaseSecureCookies = process.env.NODE_ENV === "production" || process.env.COOKIE_SECURE === "true";
+  const getNeteaseAdapter = (req: express.Request) => {
+    const baseUrl = process.env.NETEASE_API_BASE_URL?.trim();
+    if (!baseUrl) return null;
+    return createNeteaseMusicAdapter({ baseUrl, cookie: getNeteaseUpstreamCookie(req.headers.cookie) });
+  };
+  const neteaseError = (res: express.Response, error: unknown, fallback = "网易云服务暂时不可用。") => {
+    const typed = error instanceof NeteaseMusicApiError ? error : null;
+    const status = typed?.status && typed.status >= 400 && typed.status < 600 ? typed.status : 502;
+    return res.status(status).json({ success: false, code: typed?.code || "netease-provider", error: error instanceof Error ? error.message : fallback });
+  };
+  const requireNeteaseAdapter = (req: express.Request, res: express.Response) => {
+    const adapter = getNeteaseAdapter(req);
+    if (!adapter) {
+      res.status(503).json({ success: false, code: "netease_provider_not_configured", error: "网易云连接服务尚未配置。管理员需要设置 NETEASE_API_BASE_URL（网易云兼容 API 地址）后才能扫码登录和读取云端内容。" });
+      return null;
+    }
+    if (!getNeteaseUpstreamCookie(req.headers.cookie)) {
+      res.status(401).json({ success: false, code: "netease_not_authenticated", error: "请先连接网易云账号。" });
+      return null;
+    }
+    return adapter;
+  };
+
+  app.post("/api/music/netease/qr/create", async (_req, res) => {
+    try {
+      const baseUrl = process.env.NETEASE_API_BASE_URL?.trim();
+      if (!baseUrl) return res.status(503).json({ success: false, code: "netease_provider_not_configured", error: "网易云连接服务尚未配置。管理员需要设置 NETEASE_API_BASE_URL（网易云兼容 API 地址）后才能扫码登录和读取云端内容。" });
+      const session = await createNeteaseMusicAdapter({ baseUrl }).createQrSession();
+      return res.json({ success: true, key: session.key, qrUrl: session.qrUrl, qrImage: session.qrImage, status: session.status });
+    } catch (error) { return neteaseError(res, error, "网易云二维码创建失败。"); }
+  });
+
+  app.post("/api/music/netease/qr/check", async (req, res) => {
+    try {
+      const baseUrl = process.env.NETEASE_API_BASE_URL?.trim();
+      const key = typeof req.body?.key === "string" ? req.body.key.trim() : "";
+      if (!baseUrl) return res.status(503).json({ success: false, code: "netease_provider_not_configured", error: "网易云连接服务尚未配置。管理员需要设置 NETEASE_API_BASE_URL（网易云兼容 API 地址）后才能扫码登录和读取云端内容。" });
+      if (!key) return res.status(400).json({ success: false, code: "invalid_qr_key", error: "二维码 key 不能为空。" });
+      const session = await createNeteaseMusicAdapter({ baseUrl }).checkQrSession(key);
+      if (session.status === "authorized" && session.sessionCookie) {
+        const cookie = buildNeteaseSessionCookie(session.sessionCookie, neteaseSecureCookies);
+        if (cookie) res.setHeader("Set-Cookie", cookie);
+      }
+      return res.json({ success: true, key: session.key, status: session.status });
+    } catch (error) { return neteaseError(res, error, "网易云二维码状态查询失败。"); }
+  });
+
+  app.post("/api/music/netease/logout", (_req, res) => {
+    res.setHeader("Set-Cookie", clearNeteaseSessionCookie(neteaseSecureCookies));
+    return res.json({ success: true });
+  });
+
+  app.get("/api/music/netease/account", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      return res.json({ success: true, account: await adapter.getAccount() });
+    } catch (error) { return neteaseError(res, error, "网易云账号信息读取失败。"); }
+  });
+
+  app.get("/api/music/netease/playlists", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      const account = await adapter.getAccount();
+      return res.json({ success: true, account, playlists: await adapter.getPlaylists(account.userId) });
+    } catch (error) { return neteaseError(res, error, "网易云歌单读取失败。"); }
+  });
+
+  app.get("/api/music/netease/playlists/:playlistId/tracks", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      return res.json({ success: true, tracks: await adapter.getPlaylistTracks(req.params.playlistId) });
+    } catch (error) { return neteaseError(res, error, "网易云歌单歌曲读取失败。"); }
+  });
+
+  app.get("/api/music/netease/search", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      const keywords = typeof req.query.keywords === "string" ? req.query.keywords.trim() : "";
+      if (!keywords) return res.status(400).json({ success: false, code: "invalid_keywords", error: "搜索关键词不能为空。" });
+      return res.json({ success: true, tracks: await adapter.searchTracks(keywords) });
+    } catch (error) { return neteaseError(res, error, "网易云搜索失败。"); }
+  });
+
+  app.get("/api/music/netease/recommendations/daily", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      return res.json({ success: true, tracks: await adapter.getDailyRecommendations() });
+    } catch (error) { return neteaseError(res, error, "网易云每日推荐读取失败。"); }
+  });
+
+  app.post("/api/music/netease/tracks/:trackId/url", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      const level = req.body?.level === "higher" || req.body?.level === "exhigh" ? req.body.level : "standard";
+      return res.json({ success: true, track: await adapter.getPlayableUrl(req.params.trackId, level) });
+    } catch (error) { return neteaseError(res, error, "网易云歌曲播放地址获取失败。"); }
+  });
+
+  app.get("/api/music/netease/tracks/:trackId/stream", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      const level = req.query.level === "higher" || req.query.level === "exhigh" ? req.query.level : "standard";
+      const playable = await adapter.getPlayableUrl(req.params.trackId, level);
+      const upstream = await fetch(playable.url, {
+        headers: {
+          Referer: "https://music.163.com/",
+          "User-Agent": "Mozilla/5.0",
+          ...(typeof req.headers.range === "string" ? { Range: req.headers.range } : {}),
+        },
+      });
+      if (!upstream.ok && upstream.status !== 206) {
+        return res.status(502).json({ success: false, code: "netease_stream_failed", error: `网易云音频流请求失败（${upstream.status}）。` });
+      }
+      res.status(upstream.status);
+      for (const header of ["content-type", "content-length", "content-range", "accept-ranges", "cache-control"]) {
+        const value = upstream.headers.get(header);
+        if (value) res.setHeader(header, value);
+      }
+      if (!res.getHeader("content-type")) res.setHeader("content-type", "audio/mpeg");
+      if (!upstream.body) return res.end();
+      return Readable.fromWeb(upstream.body as never).pipe(res);
+    } catch (error) { return neteaseError(res, error, "网易云音频流读取失败。"); }
+  });
+
+  app.get("/api/music/netease/tracks/:trackId/lyrics", async (req, res) => {
+    try {
+      const adapter = requireNeteaseAdapter(req, res);
+      if (!adapter) return;
+      return res.json({ success: true, lyrics: await adapter.getLyrics(req.params.trackId) });
+    } catch (error) { return neteaseError(res, error, "网易云歌词读取失败。"); }
+  });
+
+  const explicitImageRequest = (text: string) => {
+    const image = "(?:照片|图片|图像|相片|自拍(?:照)?)";
+    const request = new RegExp(`(?:给我|给咱|发我|来|拍|生成).{0,18}${image}|(?:发|拍|生成).{0,10}${image}.{0,12}(?:给我|给咱|发我|看看)|${image}.{0,12}(?:给我|给咱|发我|看看|来一张|生成)`, "i");
+    const blocked = new RegExp(`(?:不要|别|无需|不用|禁止|不想|别再|没让你|我没让你|并非|不是).{0,18}(?:发|拍|生成)?.{0,12}${image}|(?:“|"|《).{0,40}(?:发.{0,8}${image}|生成.{0,8}${image})`, "i");
+    return Boolean(text?.trim()) && !blocked.test(text) && request.test(text);
+  };
+  // Image settings dispatch by the selected protocol. These endpoints never
+  // fall back to text chat and the test endpoint never creates an image.
+  app.post("/api/image/models", async (req, res) => {
+    try {
+      return res.json({ success: true, models: await fetchImageModels(req.body) });
+    } catch (error: any) {
+      return res.status(error instanceof ImageApiError && error.status ? error.status : 400).json({ success: false, code: error instanceof ImageApiError ? error.code : "model-list", error: error.message || "无法访问图片模型列表。" });
+    }
+  });
+
+  app.post("/api/image/test", async (req, res) => {
+    try {
+      const result = await testImageConnectionWithProtocol({ ...req.body, model: req.body?.selectedModel });
+      return res.json({ success: result.success, kind: result.kind, message: result.message });
+    } catch (error: any) {
+      return res.status(error instanceof ImageApiError && error.status ? error.status : 400).json({ success: false, code: error instanceof ImageApiError ? error.code : "test", error: error.message || "图片 API 测试失败。" });
+    }
+  });
+
+  app.post("/api/image/generate", async (req, res) => {
+    try {
+      const { trigger, userText } = req.body || {};
+      try {
+        assertImageGenerationTrigger(trigger, String(userText || ""));
+      } catch (error: any) {
+        return res.status(403).json({ error: error.message || "图片生成已拦截：不是明确的用户图片请求。" });
+      }
+      return res.json({ dataUrl: await generateImageWithProtocol(req.body) });
+    } catch (error: any) {
+      return res.status(error instanceof ImageApiError && error.status ? error.status : 400).json({ code: error instanceof ImageApiError ? error.code : "generation", error: error.message || "图片代理服务异常。" });
+    }
+  });
 
   // API Route: Role-play chat with Character (supports custom Endpoint, Temperature, etc.)
   app.post("/api/chat", async (req, res) => {
     try {
-      const {
-        message,
-        history,
-        systemInstruction,
-        apiKey,
-        model,
-        apiEndpoint,
-        apiTemperature,
-        streamCompatible
-      } = req.body;
-
-      const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
-      if (!apiKeyValue) {
-        return res.status(400).json({
-          error: "未检测到 API Key。请在手机“设置” -> “API设置”中填写您的 API Key，或由管理员配置后台默认 Key。",
-        });
-      }
-
-      // 1. Custom OpenAI-compatible endpoint route
-      if (apiEndpoint && apiEndpoint.trim()) {
-        let endpointUrl = apiEndpoint.trim();
-        if (!endpointUrl.endsWith("/chat/completions")) {
-          endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
-        }
-
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKeyValue}`
-        };
-
-        const messagesPayload = [];
-        if (systemInstruction) {
-          messagesPayload.push({ role: "system", content: systemInstruction });
-        }
-        if (history && Array.isArray(history)) {
-          for (const h of history) {
-            messagesPayload.push({
-              role: h.role === "user" ? "user" : "assistant",
-              content: h.text || h.content || ""
-            });
-          }
-        }
-        messagesPayload.push({ role: "user", content: message });
-
-        const bodyPayload = {
-          model: model || "deepseek-v4-flash",
-          messages: messagesPayload,
-          temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
-          stream: streamCompatible || false
-        };
-
-        const responseFetch = await fetch(endpointUrl, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(bodyPayload)
-        });
-
-        if (!responseFetch.ok) {
-          const errorText = await responseFetch.text();
-          return res.status(responseFetch.status).json({
-            error: `自定义接口请求失败 (${responseFetch.status}): ${errorText || "中转服务器未响应"}`
-          });
-        }
-
-        const responseText = await responseFetch.text();
-        let aiText = "";
-        const trimmedText = responseText.trim();
-        if (trimmedText.startsWith("data:") || trimmedText.includes("\ndata:")) {
-          // It is a Server-Sent Events (SSE) stream
-          const lines = trimmedText.split("\n");
-          for (let line of lines) {
-            line = line.trim();
-            if (line.startsWith("data:")) {
-              const dataStr = line.substring(5).trim();
-              if (dataStr === "[DONE]") {
-                continue;
-              }
-              try {
-                const parsedChunk = JSON.parse(dataStr);
-                const content = parsedChunk.choices?.[0]?.delta?.content || 
-                                parsedChunk.choices?.[0]?.message?.content || 
-                                parsedChunk.choices?.[0]?.text || "";
-                aiText += content;
-              } catch (e) {
-                // Ignore individual chunk parsing failures
-              }
-            }
-          }
-        } else {
-          try {
-            const dataFetch = JSON.parse(trimmedText);
-            aiText = dataFetch.choices?.[0]?.message?.content || 
-                     dataFetch.choices?.[0]?.text || "";
-          } catch (jsonErr) {
-            aiText = trimmedText;
-          }
-        }
-        return res.json({ text: aiText });
-      }
-
-      // 2. Default Gemini endpoint route via @google/genai
-      const ai = new GoogleGenAI({
-        apiKey: apiKeyValue,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          },
-        },
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const text = await callTextProvider({
+        message: String(body.message || ""),
+        history: Array.isArray(body.history) ? body.history : [],
+        systemInstruction: typeof body.systemInstruction === "string" ? body.systemInstruction : undefined,
+        apiKey: String(body.apiKey || process.env.GEMINI_API_KEY || ""),
+        model: String(body.model || ""),
+        apiEndpoint: typeof body.apiEndpoint === "string" ? body.apiEndpoint : undefined,
+        temperature: typeof body.apiTemperature === "number" ? body.apiTemperature : 0.7,
+        streamCompatible: body.streamCompatible === true,
+        imageDataUrl: typeof body.imageDataUrl === "string" && body.imageDataUrl.startsWith("data:image/") ? body.imageDataUrl : undefined,
       });
-
-      // Format message history for Gemini:
-      const contents = [];
-      if (history && Array.isArray(history)) {
-        for (const h of history) {
-          const role = h.role === "user" ? "user" : "model";
-          const text = (h.text || h.content || "").trim();
-          if (!text) continue; // Skip empty content to prevent API validation errors
-          
-          if (contents.length > 0 && contents[contents.length - 1].role === role) {
-            // Merge consecutive messages with the same role
-            contents[contents.length - 1].parts[0].text += "\n" + text;
-          } else {
-            contents.push({
-              role,
-              parts: [{ text }],
-            });
-          }
-        }
-      }
-
-      // Add current message
-      const cleanMsg = (message || "").trim();
-      if (cleanMsg) {
-        if (contents.length > 0 && contents[contents.length - 1].role === "user") {
-          contents[contents.length - 1].parts[0].text += "\n" + cleanMsg;
-        } else {
-          contents.push({
-            role: "user",
-            parts: [{ text: cleanMsg }],
-          });
-        }
-      }
-
-      if (contents.length === 0) {
-        contents.push({
-          role: "user",
-          parts: [{ text: " " }],
-        });
-      }
-
-      const response = await ai.models.generateContent({
-        model: model || "gemini-3.5-flash",
-        contents,
-        config: {
-          systemInstruction,
-          temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
-        },
-      });
-
-      res.json({ text: response.text });
+      return res.json({ text });
     } catch (error: any) {
-      console.error("Chat API Error:", error);
-      res.status(500).json({ error: error.message || "角色智能体离线或回复出错，请检查配置和 Key 后重试。" });
+      const normalized = normalizeTextApiError(error, "聊天 API 请求失败。");
+      console.error("Chat API Error:", { code: normalized.code, status: normalized.status, reason: normalized.reason, message: normalized.message });
+      return res.status(normalized.status).json({ success: false, code: normalized.code, reason: normalized.reason, error: normalized.message });
     }
   });
 
@@ -219,12 +279,9 @@ ${referencesText}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
+        const targetModel = model || "deepseek-v4-flash";
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -238,7 +295,7 @@ ${referencesText}
             ],
             temperature: 0.6
           })
-        });
+        }, API_REQUEST_TIMEOUTS.memoryTask);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -315,12 +372,9 @@ ${historyText}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
+        const targetModel = model || "deepseek-v4-flash";
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -334,7 +388,7 @@ ${historyText}
             ],
             temperature: 0.5
           })
-        });
+        }, API_REQUEST_TIMEOUTS.memoryTask);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -376,7 +430,7 @@ ${historyText}
   // API Route: Extract individual memories
   app.post("/api/extract-memories", async (req, res) => {
     try {
-      const { history, characterName, apiKey, model, apiEndpoint } = req.body;
+      const { history, characterName, characterProfile, apiKey, model, apiEndpoint, templateType, scenario } = req.body;
       const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
       if (!apiKeyValue) {
         return res.status(400).json({
@@ -384,95 +438,64 @@ ${historyText}
         });
       }
 
-      const historyText = (history || [])
-        .map((h: any) => `${h.role === "user" ? "用户" : characterName}: ${h.text || h.content}`)
-        .join("\n");
+      const safeHistory: KnowledgeExtractionHistoryItem[] = Array.isArray(history)
+        ? history.filter((item: unknown): item is KnowledgeExtractionHistoryItem => {
+          if (!item || typeof item !== "object") return false;
+          const record = item as Record<string, unknown>;
+          return typeof record.id === "string"
+            && record.id.trim().length > 0
+            && (record.role === "user" || record.role === "model")
+            && typeof record.text === "string";
+        })
+        : [];
+      const prompt = buildKnowledgeExtractionPrompt({
+        characterName,
+        characterProfile: typeof characterProfile === "string" ? characterProfile : undefined,
+        history: safeHistory,
+        templateType: templateType === "delicate" ? "delicate" : "refined",
+        scenario,
+      });
 
-      const prompt = `你是一个高超的记忆提取和整理助手。你的任务是从角色“${characterName}”与用户的对话历史中，提取出值得长期记住的事情。
-请阅读下面的对话记录，并将其拆解提取为多条【独立、简短、核心】的记忆条目。
-
-【对话记录】：
-${historyText}
-
-【提取与整理要求】：
-1. 提取出双方透露的核心事实、兴趣爱好、重要约定、对彼此的态度或关系进展。
-2. 每一条记忆必须是独立的、简短的一句话，不要包含口头禅或修饰词，语言精炼，概括性强。
-3. 保持第三人称客观描述。例如：
-   * 用户喜欢喝热美式，${characterName}承诺下次做设计图时会帮其带咖啡。
-   * 两人约定周末一起散步。
-   * ${characterName}发现用户最近工作压力很大，表示很担心。
-4. 丢弃一切无意义的闲聊、问候和没有长远价值的信息。
-5. 每次提取最多生成 5 条最核心的记忆，最少生成 1 条（如果没有核心信息则不用生成任何条目）。
-6. 请直接输出每一条记忆，每行一条，以星号 * 开头。不要有任何多余的寒暄、解释或 markdown 格式，也不要加标题。`;
-
-      let aiText = "";
-
-      // 1. Custom endpoint
-      if (apiEndpoint && apiEndpoint.trim()) {
-        let endpointUrl = apiEndpoint.trim();
-        if (!endpointUrl.endsWith("/chat/completions")) {
-          endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
+      const generateExtractionText = async (promptText: string, temperature: number): Promise<string> => {
+        if (apiEndpoint && apiEndpoint.trim()) {
+          let endpointUrl = apiEndpoint.trim();
+          if (!endpointUrl.endsWith("/chat/completions")) endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
+          const responseFetch = await fetchWithTimeout(endpointUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKeyValue}` },
+            body: JSON.stringify({
+              model: model || "deepseek-v4-flash",
+              messages: [
+                { role: "system", content: "你是结构化长期知识提取器。只输出可验证的 JSONL，不要解释。" },
+                { role: "user", content: promptText },
+              ],
+              temperature,
+            }),
+          }, API_REQUEST_TIMEOUTS.memoryTask);
+          if (!responseFetch.ok) {
+            const errorText = await responseFetch.text();
+            throw new Error(`中转接口提取失败 (${responseFetch.status}): ${errorText || "服务器未响应"}`);
+          }
+          const dataFetch = await responseFetch.json();
+          return dataFetch.choices?.[0]?.message?.content || "";
         }
-
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
-
-        const responseFetch = await fetch(endpointUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKeyValue}`
-          },
-          body: JSON.stringify({
-            model: targetModel,
-            messages: [
-              { role: "system", content: "你是一个记忆提炼和提取专家，直接按要求输出提取后的多条记忆条目列表，不带任何废话和解释。" },
-              { role: "user", content: prompt }
-            ],
-            temperature: 0.5
-          })
-        });
-
-        if (!responseFetch.ok) {
-          const errorText = await responseFetch.text();
-          return res.status(responseFetch.status).json({
-            error: `中转接口提取失败 (${responseFetch.status}): ${errorText || "服务器未响应"}`
-          });
-        }
-
-        const dataFetch = await responseFetch.json();
-        aiText = dataFetch.choices?.[0]?.message?.content || "";
-      } else {
-        // 2. Default Gemini API
-        const ai = new GoogleGenAI({
-          apiKey: apiKeyValue,
-          httpOptions: {
-            headers: {
-              "User-Agent": "aistudio-build",
-            },
-          },
-        });
-
+        const ai = new GoogleGenAI({ apiKey: apiKeyValue, httpOptions: { headers: { "User-Agent": "aistudio-build" } } });
         const response = await ai.models.generateContent({
           model: model || "gemini-3.5-flash",
-          contents: prompt,
-          config: {
-            temperature: 0.5,
-          },
+          contents: promptText,
+          config: { temperature },
         });
+        return response.text || "";
+      };
 
-        aiText = response.text || "";
-      }
-
-      // Parse bullet points
-      const lines = aiText.split(/\n/).map(line => line.trim());
-      const items = lines
-        .map(line => line.replace(/^[\s*\-•+]+/, "").trim())
-        .filter(line => line.length > 0 && !line.startsWith("【") && !line.includes("以下是") && !line.includes("暂无"));
-
-      res.json({ text: aiText, items });
+      const aiText = await generateExtractionText(prompt, 0.5);
+      const repaired = await parseOrRepairKnowledgeExtractionOutput({
+        rawText: aiText,
+        allowedMessageIds: new Set(safeHistory.map((item) => item.id)),
+        originalPrompt: prompt,
+        repair: (repairPrompt) => generateExtractionText(repairPrompt, 0.2),
+      });
+      res.json({ text: repaired.text, items: repaired.candidates, candidates: repaired.candidates, repaired: repaired.repaired });
     } catch (error: any) {
       console.error("Extract Memories Error:", error);
       res.status(500).json({ error: error.message || "提取记忆发生异常，请稍后再试。" });
@@ -482,7 +505,7 @@ ${historyText}
   // API Route: Translate text to Chinese (if non-Chinese)
   app.post("/api/translate", async (req, res) => {
     try {
-      const { text, apiKey, model, apiEndpoint } = req.body;
+      const { text, apiKey, model, apiEndpoint, targetLanguage } = req.body;
       const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
       if (!apiKeyValue) {
         return res.status(400).json({
@@ -490,7 +513,10 @@ ${historyText}
         });
       }
 
-      const prompt = `你是一个专业的翻译官。请将下面这段文本翻译成简体中文。
+      const requestedLanguage = typeof targetLanguage === "string" && targetLanguage.trim()
+        ? targetLanguage.trim()
+        : "简体中文";
+      const prompt = `你是一个专业的翻译官。请将下面这段文本忠实翻译成${requestedLanguage}。
       
 【待翻译文本】：
 ${text}
@@ -498,7 +524,8 @@ ${text}
 【翻译要求】：
 1. 如果该文本本身已经是简体中文或繁体中文，直接原样返回该文本，不做任何修改。
 2. 尽量保留原文的语气、标点符号、动作语态（如括号内的动作或描摹描述）和行文风格。
-3. 请直接输出翻译结果，不要包含任何多余的说明、解释或 markdown 格式包装。`;
+3. 如果输入包含 [FORUM_TITLE] 或 [FORUM_BODY] 标记，必须原样保留标记，仅翻译标记后的公开文本。
+4. 请直接输出翻译结果，不要包含任何多余的说明、解释或 markdown 格式包装。`;
 
       // 1. Custom endpoint
       if (apiEndpoint && apiEndpoint.trim()) {
@@ -507,12 +534,9 @@ ${text}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        let targetModel = model;
-        if (!targetModel || targetModel === "default-chat-model" || targetModel.startsWith("gemini-")) {
-          targetModel = "deepseek-v4-flash";
-        }
+        const targetModel = model || "deepseek-v4-flash";
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -521,12 +545,12 @@ ${text}
           body: JSON.stringify({
             model: targetModel,
             messages: [
-              { role: "system", content: "你是一个翻译助手，直接输出目标简体中文，不要带任何废话和解释。" },
+              { role: "system", content: `你是一个翻译助手，直接输出目标${requestedLanguage}，不要带任何废话和解释。` },
               { role: "user", content: prompt }
             ],
             temperature: 0.3
           })
-        });
+        }, API_REQUEST_TIMEOUTS.textGeneration);
 
         if (!responseFetch.ok) {
           const errorText = await responseFetch.text();
@@ -581,7 +605,7 @@ ${text}
           endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
         }
 
-        const responseFetch = await fetch(endpointUrl, {
+        const responseFetch = await fetchWithTimeout(endpointUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -593,7 +617,7 @@ ${text}
             temperature: 0.1,
             max_tokens: 5
           })
-        });
+        }, API_REQUEST_TIMEOUTS.connectionTest);
 
         if (responseFetch.ok) {
           const dataFetch = await responseFetch.json();
@@ -670,12 +694,12 @@ ${text}
         baseUrl = baseUrl.replace(/\/chat\/completions$/, "");
         const modelsUrl = baseUrl.endsWith("/models") ? baseUrl : (baseUrl + "/models");
 
-        const responseFetch = await fetch(modelsUrl, {
+        const responseFetch = await fetchWithTimeout(modelsUrl, {
           method: "GET",
           headers: {
             "Authorization": `Bearer ${apiKeyValue}`
           }
-        });
+        }, API_REQUEST_TIMEOUTS.modelList);
         if (responseFetch.ok) {
           const data = await responseFetch.json();
           const parsed = parseModels(data);
@@ -686,7 +710,7 @@ ${text}
       } else if (apiKeyValue) {
         // Dynamically query Gemini models list if we have a key
         const modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKeyValue}`;
-        const responseFetch = await fetch(modelsUrl);
+        const responseFetch = await fetchWithTimeout(modelsUrl, undefined, API_REQUEST_TIMEOUTS.modelList);
         if (responseFetch.ok) {
           const data = await responseFetch.json();
           const parsed = parseModels(data);
@@ -696,32 +720,9 @@ ${text}
         }
       }
 
-      // Default models fallback
-      res.json({
-        success: true,
-        models: [
-          "gemini-2.5-flash",
-          "gemini-2.5-pro",
-          "gemini-1.5-flash",
-          "gemini-1.5-pro",
-          "deepseek-chat",
-          "deepseek-reasoner",
-          "deepseek-v3"
-        ]
-      });
+      res.status(502).json({ success: false, error: "接口没有返回可用的模型列表。" });
     } catch (err: any) {
-      res.json({
-        success: true,
-        models: [
-          "gemini-2.5-flash",
-          "gemini-2.5-pro",
-          "gemini-1.5-flash",
-          "gemini-1.5-pro",
-          "deepseek-chat",
-          "deepseek-reasoner",
-          "deepseek-v3"
-        ]
-      });
+      res.status(502).json({ success: false, error: err?.message || "模型列表获取失败。" });
     }
   });
 
@@ -771,11 +772,11 @@ ${text}
         },
       };
 
-      const responseFetch = await fetch(url, {
+      const responseFetch = await fetchWithTimeout(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-      });
+      }, API_REQUEST_TIMEOUTS.speechSynthesis);
 
       if (!responseFetch.ok) {
         const errText = await responseFetch.text();
@@ -811,9 +812,30 @@ ${text}
     }
   });
 
+  // API Route: Mossland TTS proxy. The provider blocks browser CORS preflights.
+  app.post("/api/mossland-tts", async (req, res) => {
+    try {
+      const result = await synthesizeMosslandSpeech(req.body);
+      res.setHeader("Content-Type", result.contentType);
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(Buffer.from(result.audio));
+    } catch (error) {
+      const status = error instanceof MosslandTtsError ? error.status : 500;
+      const message = error instanceof Error ? error.message : "Mossland 语音代理服务异常";
+      return res.status(status).json({ error: message });
+    }
+  });
+
   // Vite dev or production static file serving
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
+      root: process.cwd(),
+      configFile: false,
+      plugins: [react(), tailwindcss()],
+      optimizeDeps: {
+        noDiscovery: true,
+        include: ["react", "react-dom", "react-dom/client", "framer-motion", "lucide-react"],
+      },
       server: { middlewareMode: true },
       appType: "spa",
     });
@@ -826,9 +848,20 @@ ${text}
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`[小手机] Server running on http://0.0.0.0:${PORT}`);
   });
+  const shutdown = (signal: string) => {
+    console.log(`[小手机] ${signal} received; closing server gracefully.`);
+    server.close((error) => {
+      if (error) {
+        console.error("[小手机] Graceful shutdown failed:", error);
+        process.exitCode = 1;
+      }
+    });
+  };
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 }
 
 startServer();

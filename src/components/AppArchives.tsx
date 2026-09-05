@@ -1,15 +1,20 @@
 import React, { useState } from "react";
-import { Character, WorldBookEntry } from "../types";
+import { Character, UserSettings, WorldBookEntry } from "../types";
 import { apiSummarizePersonality } from "../utils/apiHelper";
-import { Plus, Trash2, Edit2, User, ChevronLeft, Save, AlertCircle, X, Camera, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2 } from "lucide-react";
+import { Plus, Trash2, User, ChevronLeft, AlertCircle, X, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2, Download } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
-import { MINIMAX_DEFAULT_VOICES, getSpeechForText } from "../utils/minimaxTts";
+import { getSpeechForText } from "../utils/minimaxTts";
+import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile, createCharacterFromRawDocument } from "../features/archives/characterExport";
+import { buildCharacterTtsOptions, type TtsProvider } from "../features/voice/ttsConfig";
+import { readString } from "../core/storage/storageAdapter";
 
 interface AppArchivesProps {
   characters: Character[];
-  onSaveCharacter: (character: Character) => void;
+  onSaveCharacter: (character: Character) => void | boolean | Promise<boolean>;
   onDeleteCharacter: (id: string, skipConfirm?: boolean) => void;
   onClose: () => void;
+  onOpenCharacterPhone?: (characterId: string) => void;
+  worldBookEntries?: WorldBookEntry[];
   onSaveWorldBookEntries?: (entries: WorldBookEntry[]) => void;
 }
 
@@ -26,6 +31,8 @@ export default function AppArchives({
   onSaveCharacter,
   onDeleteCharacter,
   onClose,
+  onOpenCharacterPhone,
+  worldBookEntries = [],
   onSaveWorldBookEntries,
 }: AppArchivesProps) {
   const visibleCharacters = characters.filter((c) => !c.isGroupChat && !c.isContactInstance);
@@ -34,6 +41,9 @@ export default function AppArchives({
   const [isCreating, setIsCreating] = useState(false);
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportCharacterId, setExportCharacterId] = useState<string>("");
+  const [includeBoundWorldBook, setIncludeBoundWorldBook] = useState(true);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [newRefTitle, setNewRefTitle] = useState("");
   const [newRefContent, setNewRefContent] = useState("");
@@ -77,54 +87,72 @@ export default function AppArchives({
     });
   };
 
+  const downloadCharacterExport = () => {
+    const character = visibleCharacters.find((item) => item.id === exportCharacterId);
+    if (!character) return;
+    const payload = buildCharacterExport(character, worldBookEntries, includeBoundWorldBook);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = characterExportFilename(character.name);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setShowExportDialog(false);
+    showAlert("导出成功", includeBoundWorldBook
+      ? `已导出「${character.name}」角色卡及其专属世界书。`
+      : `已导出「${character.name}」角色卡。`);
+  };
+
   // Form State
   const [name, setName] = useState("");
-  const [age, setAge] = useState<number | "">("");
+  const [age, setAge] = useState<number | "" | "∞">("");
   const [gender, setGender] = useState("");
   const [mbti, setMbti] = useState("");
   const [avatar, setAvatar] = useState("");
   const [personality, setPersonality] = useState("");
-  const [backstory, setBackstory] = useState("");
+  const [replyLanguage, setReplyLanguage] = useState("");
+  const [, setBackstory] = useState("");
   const [greeting, setGreeting] = useState("");
   const [initialChatMode, setInitialChatMode] = useState<"greeting" | "context">("greeting");
   const [album, setAlbum] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
   const [minimaxVoiceId, setMinimaxVoiceId] = useState("");
+  const [mosslandVoiceId, setMosslandVoiceId] = useState("");
   const [isAuditioning, setIsAuditioning] = useState(false);
+  const [auditionProvider, setAuditionProvider] = useState<TtsProvider | null>(null);
   const [auditionAudio, setAuditionAudio] = useState<HTMLAudioElement | null>(null);
 
-  const handleAudition = async () => {
+  const handleAudition = async (provider: TtsProvider) => {
     if (isAuditioning) {
+      const shouldSwitchProvider = auditionProvider !== provider;
       if (auditionAudio) {
         auditionAudio.pause();
         setAuditionAudio(null);
       }
       setIsAuditioning(false);
-      return;
+      setAuditionProvider(null);
+      if (!shouldSwitchProvider) return;
     }
 
     try {
       setIsAuditioning(true);
+      setAuditionProvider(provider);
       setErrorMsg("");
 
       let settings: any = {};
       try {
-        const saved = localStorage.getItem("phone_settings");
+        const saved = readString("phone_settings").value;
         if (saved) settings = JSON.parse(saved);
       } catch (e) {
         console.error(e);
       }
 
-      const ttsOptions = {
-        apiKey: settings.minimaxApiKey || undefined,
-        groupId: settings.minimaxGroupId || undefined,
-        model: settings.minimaxModel || "speech-2.8-hd",
-        speed: settings.minimaxSpeed !== undefined ? settings.minimaxSpeed : 1.0,
-        pitch: settings.minimaxPitch !== undefined ? settings.minimaxPitch : 0,
-        vol: settings.minimaxVol !== undefined ? settings.minimaxVol : 1.0,
-        voiceId: minimaxVoiceId || "female-shaonv",
-        proxyUrl: settings.minimaxProxyUrl || undefined,
-      };
+      const ttsOptions = buildCharacterTtsOptions(settings as UserSettings, {
+        minimaxVoiceId,
+        mosslandVoiceId,
+      }, provider);
 
       const auditionText = "您好！我已经成功绑定了此项语音。请问您喜欢我的这个声音吗？";
       const blob = await getSpeechForText(auditionText, ttsOptions);
@@ -133,19 +161,22 @@ export default function AppArchives({
       setAuditionAudio(audio);
       audio.onended = () => {
         setIsAuditioning(false);
+        setAuditionProvider(null);
         setAuditionAudio(null);
       };
       audio.onerror = (e) => {
         console.error("Audition playback failed:", e);
-        setErrorMsg("试听音频播放失败，请检查 MiniMax 配置");
+        setErrorMsg(`试听音频播放失败，请检查 ${provider === "mossland" ? "Mossland" : "MiniMax"} 配置`);
         setIsAuditioning(false);
+        setAuditionProvider(null);
         setAuditionAudio(null);
       };
       audio.play();
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || "试听合成失败，请确认 MiniMax 语音设置中已填写有效的 Key 与 Group ID！");
+      setErrorMsg(err.message || `试听合成失败，请确认 ${provider === "mossland" ? "Mossland" : "MiniMax"} 语音配置有效！`);
       setIsAuditioning(false);
+      setAuditionProvider(null);
     }
   };
 
@@ -156,16 +187,19 @@ export default function AppArchives({
     setMbti("");
     setAvatar("");
     setPersonality("");
+    setReplyLanguage("");
     setBackstory("");
     setGreeting("");
     setAlbum([]);
     setErrorMsg("");
     setMinimaxVoiceId("");
+    setMosslandVoiceId("");
     if (auditionAudio) {
       auditionAudio.pause();
       setAuditionAudio(null);
     }
     setIsAuditioning(false);
+    setAuditionProvider(null);
     setEditingId(null);
     setIsCreating(false);
   };
@@ -178,6 +212,7 @@ export default function AppArchives({
     setMbti(char.mbti);
     setAvatar(char.avatar);
     setMinimaxVoiceId(char.minimaxVoiceId || "");
+    setMosslandVoiceId(char.mosslandVoiceId || "");
     
     // Combine existing backstory if populated and valid
     let combined = char.personality;
@@ -185,6 +220,7 @@ export default function AppArchives({
       combined += "\n\n【背景故事】\n" + char.backstory;
     }
     setPersonality(combined);
+    setReplyLanguage(char.replyLanguage || "");
     setBackstory("");
     setGreeting(char.initialChatContext || char.greeting || "");
     setInitialChatMode(char.initialChatMode || (char.initialChatContext ? "context" : "greeting"));
@@ -239,13 +275,6 @@ export default function AppArchives({
           });
         }
         importedChar = mapSillyTavernToCharacter(parsedJson, imgDataUrl);
-        const innerData = parsedJson.data || parsedJson;
-        const mwb = innerData.mountedWorldbooks || innerData.mounted_worldbooks || innerData.mounted_world_books || parsedJson.mountedWorldbooks || parsedJson.mounted_worldbooks || parsedJson.mounted_world_books;
-        if (mwb && Array.isArray(mwb)) {
-          characterBook = { entries: mwb };
-        } else {
-          characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
-        }
       } else if (isJson) {
         const text = await new Promise<string>((resolve, reject) => {
           const r = new FileReader();
@@ -254,8 +283,11 @@ export default function AppArchives({
           r.readAsText(file);
         });
         const parsedJson = JSON.parse(text);
-        importedChar = mapSillyTavernToCharacter(parsedJson, "");
         const innerData = parsedJson.data || parsedJson;
+        const embeddedCharacter = innerData?.extensions?.fanfanji?.character;
+        importedChar = embeddedCharacter && typeof embeddedCharacter === "object"
+          ? createCharacterFromImportedProfile(embeddedCharacter, "char-import-" + Date.now())
+          : mapSillyTavernToCharacter(parsedJson, "");
         const mwb = innerData.mountedWorldbooks || innerData.mounted_worldbooks || innerData.mounted_world_books || parsedJson.mountedWorldbooks || parsedJson.mounted_worldbooks || parsedJson.mounted_world_books;
         if (mwb && Array.isArray(mwb)) {
           characterBook = { entries: mwb };
@@ -269,17 +301,7 @@ export default function AppArchives({
           r.onerror = () => reject(new Error("读取 TXT 配置文件失败"));
           r.readAsText(file);
         });
-        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-        importedChar = {
-          id: "char-import-" + Date.now(),
-          name: nameWithoutExt,
-          avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
-          personality: text.trim(),
-          backstory: "",
-          greeting: "",
-          album: [],
-          references: [],
-        };
+        importedChar = createCharacterFromRawDocument(text, file.name, "char-import-" + Date.now());
       } else if (isDocx) {
         const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
           const r = new FileReader();
@@ -288,26 +310,26 @@ export default function AppArchives({
           r.readAsArrayBuffer(file);
         });
         const text = await safeParseDocx(arrayBuffer);
-        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-        importedChar = {
-          id: "char-import-" + Date.now(),
-          name: nameWithoutExt,
-          avatar: "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg",
-          personality: text.trim(),
-          backstory: "",
-          greeting: "",
-          album: [],
-          references: [],
-        };
+        importedChar = createCharacterFromRawDocument(text, file.name, "char-import-" + Date.now());
       } else {
         throw new Error("请上传 .png 角色卡、.json 配置文件、.txt 或 .docx 文档文件！");
       }
 
-      const finishImport = (importEntries: boolean) => {
+      // All supported formats pass through the same persona-only boundary.
+      // This also protects imports made by older Fanfanji builds that embedded
+      // the entire Character object, including chat and relationship settings.
+      importedChar = createCharacterFromImportedProfile(importedChar, importedChar.id);
+
+      const finishImport = async (importEntries: boolean) => {
         try {
           let importedEntriesCount = 0;
-          if (importEntries && characterBook && Array.isArray(characterBook.entries) && characterBook.entries.length > 0) {
-            const mappedEntries = characterBook.entries
+          const rawEntries = Array.isArray(characterBook?.entries)
+            ? characterBook.entries
+            : characterBook?.entries && typeof characterBook.entries === "object"
+              ? Object.values(characterBook.entries)
+              : [];
+          if (importEntries && rawEntries.length > 0) {
+            const mappedEntries = rawEntries
               .map((entry: any) => {
                 try {
                   const mapped = mapSillyTavernEntry(entry, importedChar.id);
@@ -328,7 +350,8 @@ export default function AppArchives({
             }
           }
 
-          onSaveCharacter(importedChar);
+          const saved = await onSaveCharacter(importedChar);
+          if (saved === false) throw new Error("角色档案保存失败，请检查浏览器存储权限或剩余空间");
 
           let successMsg = `成功导入角色「${importedChar.name}」！`;
           if (importedEntriesCount > 0) {
@@ -341,10 +364,15 @@ export default function AppArchives({
         }
       };
 
-      if (characterBook && Array.isArray(characterBook.entries) && characterBook.entries.length > 0) {
+      const importedWorldBookCount = Array.isArray(characterBook?.entries)
+        ? characterBook.entries.length
+        : characterBook?.entries && typeof characterBook.entries === "object"
+          ? Object.keys(characterBook.entries).length
+          : 0;
+      if (importedWorldBookCount > 0) {
         showConfirm(
           "导入关联世界书词条",
-          `检测到该角色设定中包含 ${characterBook.entries.length} 条世界书关联词条，是否同时导入并关联至世界书？`,
+          `检测到该角色设定中包含 ${importedWorldBookCount} 条世界书关联词条，是否同时导入并关联至世界书？`,
           () => finishImport(true),
           () => finishImport(false)
         );
@@ -367,7 +395,7 @@ export default function AppArchives({
       setErrorMsg("请输入姓名！");
       return;
     }
-    if (age !== "" && isNaN(Number(age))) {
+    if (age !== "" && age !== "∞" && (!Number.isInteger(age) || age < 0)) {
       setErrorMsg("请输入正确的年龄！");
       return;
     }
@@ -377,14 +405,19 @@ export default function AppArchives({
     const finalPersonality = personality.trim();
 
     const savedChar: Character = {
+      // Archive editing changes the profile form only. Keep chat/runtime
+      // preferences and future character fields intact instead of replacing
+      // the record with a partial profile object.
+      ...(originalChar || {}),
       id: editingId || Date.now().toString(),
       name: name.trim(),
-      age: age === "" ? "" : Number(age),
+      age,
       gender,
       mbti,
       avatar: finalAvatar,
       personality: finalPersonality,
       backstory: "",
+      replyLanguage: replyLanguage.trim() || undefined,
       greeting: initialChatMode === "greeting" ? greeting.trim() : undefined,
       initialChatContext: initialChatMode === "context" ? greeting.trim() : undefined,
       initialChatMode,
@@ -394,6 +427,7 @@ export default function AppArchives({
       chatBg: originalChar ? originalChar.chatBg : undefined,
       references: originalChar ? originalChar.references : [],
       minimaxVoiceId: minimaxVoiceId,
+      mosslandVoiceId: mosslandVoiceId,
     };
 
     onSaveCharacter(savedChar);
@@ -418,17 +452,6 @@ export default function AppArchives({
     }
   };
 
-  const handleRandomizeCover = (char: Character) => {
-    const album = char.album || [];
-    if (album.length === 0) return;
-    const randomIndex = Math.floor(Math.random() * album.length);
-    const selectedCover = album[randomIndex];
-    const updatedChar = {
-      ...char,
-      momentsCover: selectedCover,
-    };
-    onSaveCharacter(updatedChar);
-  };
 
   const handleDeleteAlbumImage = (char: Character, indexToDelete: number) => {
     const currentAlbum = char.album || [];
@@ -456,7 +479,7 @@ export default function AppArchives({
     
     setIsSummarizing(true);
     try {
-      const rawSettings = localStorage.getItem("phone_settings");
+    const rawSettings = readString("phone_settings").value;
       let apiKey = "";
       let model = "";
       let apiEndpoint = "";
@@ -506,13 +529,13 @@ export default function AppArchives({
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 text-slate-800 font-sans">
+    <div data-theme-page="archives" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans">
       {/* App Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
           type="button"
           onClick={isCreating ? resetForm : onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           id="archives_back_btn"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -538,7 +561,7 @@ export default function AppArchives({
                     }
                   );
                 }}
-                className="w-8 h-8 rounded-xl bg-rose-50 flex items-center justify-center hover:bg-rose-100 border border-rose-100 transition-colors"
+                className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors"
                 title="删除角色"
               >
                 <Trash2 className="w-4 h-4 text-rose-600" />
@@ -549,7 +572,7 @@ export default function AppArchives({
               <button
                 type="button"
                 onClick={() => setShowAddMenu(!showAddMenu)}
-                className="w-8 h-8 bg-neutral-950 hover:bg-neutral-900 text-white rounded-full transition-colors shadow flex items-center justify-center"
+                className="app-nav-icon-button w-8 h-8 text-slate-800 transition-colors flex items-center justify-center"
                 id="archives_add_btn"
               >
                 <Plus className="w-4.5 h-4.5" />
@@ -583,6 +606,20 @@ export default function AppArchives({
                         className="hidden"
                       />
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddMenu(false);
+                        setExportCharacterId(visibleCharacters[0]?.id || "");
+                        setIncludeBoundWorldBook(true);
+                        setShowExportDialog(true);
+                      }}
+                      disabled={visibleCharacters.length === 0}
+                      className="flex items-center gap-2 px-3.5 py-2.5 text-xs font-bold text-stone-700 hover:bg-stone-100 rounded-[16px] transition-colors text-left w-full disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Download className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                      <span>导出角色</span>
+                    </button>
                   </div>
                 </>
               )}
@@ -592,9 +629,9 @@ export default function AppArchives({
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 pb-20">
+      <div className="flex-1 overflow-y-auto p-4 pb-6">
         {isCreating ? (
-          <form onSubmit={handleSubmit} className="space-y-4 max-w-md mx-auto bg-white p-5 rounded-2xl shadow-sm border border-slate-100 animate-slide-up">
+          <form onSubmit={handleSubmit} className="settings-panel-card space-y-4 max-w-md mx-auto p-5 animate-slide-up">
             
             {/* Error Message Alert */}
             {errorMsg && (
@@ -652,13 +689,21 @@ export default function AppArchives({
                 <label className="block text-xs font-semibold text-slate-500 mb-1">
                   年龄
                 </label>
+                <div className="flex gap-2">
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   value={age}
-                  onChange={(e) => setAge(e.target.value === "" ? "" : parseInt(e.target.value))}
+                  onChange={(e) => {
+                    const value = e.target.value.trim();
+                    if (value === "" || value === "∞") setAge(value as "" | "∞");
+                    else if (/^\d{1,3}$/.test(value)) setAge(Number(value));
+                  }}
                   placeholder="请输入年龄"
-                  className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
+                  className="min-w-0 flex-1 px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
                 />
+                <button type="button" onClick={() => setAge(age === "∞" ? "" : "∞")} className={`w-11 rounded-[8px] border text-lg font-semibold ${age === "∞" ? "border-neutral-950 bg-neutral-950 text-white" : "border-slate-200 bg-slate-50 text-slate-600"}`} aria-label="设置年龄为无限">∞</button>
+                </div>
               </div>
             </div>
 
@@ -699,6 +744,17 @@ export default function AppArchives({
             </div>
 
             {/* Detailed Personality and Backstory */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">角色回复语言（选填）</label>
+              <input
+                type="text"
+                value={replyLanguage}
+                onChange={(e) => setReplyLanguage(e.target.value)}
+                placeholder="例如：日语、English；留空则从人设/国籍自动识别"
+                className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
+              />
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1">
                 详细人设与背景 (选填)
@@ -750,48 +806,55 @@ export default function AppArchives({
               />
             </div>
 
-            {/* MiniMax Voice ID Binding */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-500">
-                绑定 MiniMax 专属音色 ID (选填)
+            {/* Voice ID bindings */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">
+                绑定专属音色 ID (选填)
               </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={minimaxVoiceId}
-                  onChange={(e) => setMinimaxVoiceId(e.target.value)}
-                  placeholder="请输入 MiniMax Voice ID"
-                  className="flex-1 px-3 py-2 rounded-[8px] bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
-                />
-                <button
-                  type="button"
-                  disabled={!minimaxVoiceId}
-                  onClick={handleAudition}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 shrink-0 ${
-                    !minimaxVoiceId
-                      ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
-                      : isAuditioning
-                      ? "bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100"
-                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-                  }`}
-                  title="试听绑定音色"
-                >
-                  <Volume2 className={`w-3.5 h-3.5 ${isAuditioning ? "animate-pulse text-rose-500" : ""}`} />
-                  <span>{isAuditioning ? "停止" : "试听"}</span>
-                </button>
+              <div className="space-y-2">
+                {([
+                  { provider: "mossland" as const, label: "Mossland", value: mosslandVoiceId, setValue: setMosslandVoiceId },
+                  { provider: "minimax" as const, label: "MiniMax", value: minimaxVoiceId, setValue: setMinimaxVoiceId },
+                ]).map(({ provider, label, value, setValue }) => (
+                  <div key={provider} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={value}
+                      onChange={(event) => setValue(event.target.value)}
+                      placeholder={`${label} Voice ID`}
+                      aria-label={`${label} Voice ID`}
+                      className="flex-1 min-w-0 px-5 py-3 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold"
+                    />
+                    <button
+                      type="button"
+                      disabled={!value}
+                      onClick={() => handleAudition(provider)}
+                      className={`px-4 py-2 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 shrink-0 ${
+                        !value
+                          ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                          : isAuditioning && auditionProvider === provider
+                          ? "bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100"
+                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                      title={`试听 ${label} 音色`}
+                    >
+                      <Volume2 className={`w-3.5 h-3.5 ${isAuditioning && auditionProvider === provider ? "animate-pulse text-rose-500" : ""}`} />
+                      <span>{isAuditioning && auditionProvider === provider ? "停止" : "试听"}</span>
+                    </button>
+                  </div>
+                ))}
               </div>
-              <p className="text-[10px] text-slate-400 font-medium">
-                绑定专属音色后，该角色发送消息时会调用此音色。请确保在手机“设置” → “MiniMax 语音”中已配置相应参数。
+              <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400 font-medium">
+                两个平台的 ID 分开保存；实际聊天使用“设置” → “语音设置”中当前选择的平台。
               </p>
             </div>
 
             {/* Save Button Only */}
-            <div className="pt-2">
+            <div className="settings-wide-action-group pt-2">
               <button
                 type="submit"
-                className="w-full py-3 rounded-[32px] bg-neutral-950 hover:bg-neutral-900 text-white font-bold text-sm transition-colors flex items-center justify-center space-x-1.5 shadow-sm"
+                className="settings-wide-action settings-wide-action-primary"
               >
-                <Save className="w-4 h-4" />
                 <span>保存人设</span>
               </button>
             </div>
@@ -804,7 +867,7 @@ export default function AppArchives({
               return null;
             }
             return (
-              <div className="space-y-4 max-w-md mx-auto animate-slide-up pb-10">
+              <div className="space-y-4 max-w-md mx-auto animate-slide-up pb-4">
                 {/* Profile Header Card */}
                 <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center text-center relative overflow-hidden">
                   <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-r from-neutral-800 to-neutral-950 opacity-10" />
@@ -820,13 +883,13 @@ export default function AppArchives({
                   
                   <h2 className="text-xl font-bold text-slate-800 mt-3">{char.name}</h2>
                   <p className="text-xs text-slate-400 mt-1 flex items-center justify-center gap-1.5 font-semibold">
-                    <span className="px-2 py-0.5 bg-neutral-950 text-white rounded-md text-[10px] tracking-wide font-black">
+                    <span className="px-2 py-0.5 bg-[var(--badge-bg)] text-[var(--badge-text)] rounded-md text-[10px] tracking-wide font-black">
                       {char.mbti}
                     </span>
                     <span className="w-1 h-1 rounded-full bg-slate-300" />
                     <span>{char.gender}</span>
                     <span className="w-1 h-1 rounded-full bg-slate-300" />
-                    <span>{char.age}岁</span>
+                    <span>{char.age === "∞" ? "∞" : char.age ? `${char.age}岁` : "年龄未设置"}</span>
                   </p>
                 </div>
 
@@ -1070,7 +1133,7 @@ export default function AppArchives({
                 <button
                   type="button"
                   onClick={() => setIsCreating(true)}
-                  className="mt-4 px-4 py-2 bg-neutral-950 hover:bg-neutral-900 text-white rounded-xl text-xs font-semibold transition-all shadow-sm"
+                  className="empty-state-action mt-4"
                 >
                   现在去创建
                 </button>
@@ -1085,11 +1148,11 @@ export default function AppArchives({
                   >
                     {/* Character Tag */}
                     <div className="absolute top-3 right-3 flex items-center space-x-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
-                      <span className="px-1.5 py-0.5 bg-neutral-950 text-white text-[10px] font-bold rounded-md">
+                      <span className="px-1.5 py-0.5 bg-[var(--badge-bg)] text-[var(--badge-text)] text-[10px] font-bold rounded-md">
                         {char.mbti}
                       </span>
-                      <span className="px-1.5 py-0.5 bg-slate-50 text-slate-600 text-[10px] font-bold rounded-md">
-                        {char.age}岁
+                      <span className="px-1.5 py-0.5 bg-[var(--badge-muted-bg)] text-[var(--badge-muted-text)] text-[10px] font-bold rounded-md">
+                        {char.age === "∞" ? "∞" : char.age ? `${char.age}岁` : "年龄未设置"}
                       </span>
                     </div>
 
@@ -1113,6 +1176,18 @@ export default function AppArchives({
                         {char.personality}
                       </p>
                     </div>
+                    {onOpenCharacterPhone && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenCharacterPhone(char.id);
+                        }}
+                        className="absolute bottom-3 right-3 rounded-full bg-neutral-900 px-2.5 py-1 text-[10px] font-bold text-white"
+                      >
+                        角色手机测试
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1120,6 +1195,34 @@ export default function AppArchives({
           </div>
         )}
       </div>
+
+      {showExportDialog && (
+        <div className="fixed inset-0 z-[9999] bg-black/45 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 animate-fade-in" onClick={() => setShowExportDialog(false)}>
+          <div className="w-full max-w-sm rounded-[28px] bg-white p-5 shadow-2xl space-y-4 animate-slide-up" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">导出角色</h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-400">导出为 JSON 角色卡，可选择附带该角色专属世界书。</p>
+              </div>
+              <button type="button" onClick={() => setShowExportDialog(false)} className="p-1.5 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+            </div>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-bold text-slate-600">选择角色</span>
+              <select value={exportCharacterId} onChange={(event) => setExportCharacterId(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-slate-400">
+                {visibleCharacters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
+              </select>
+            </label>
+            <label className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-3.5 cursor-pointer">
+              <input type="checkbox" checked={includeBoundWorldBook} onChange={(event) => setIncludeBoundWorldBook(event.target.checked)} className="mt-0.5 h-4 w-4 accent-neutral-950" />
+              <span className="space-y-0.5"><span className="block text-xs font-bold text-slate-700">同时导出专属世界书</span><span className="block text-[11px] leading-relaxed text-slate-400">仅包含绑定到所选角色的世界书词条；不勾选则只导出角色卡。</span></span>
+            </label>
+            <div className="flex gap-2.5 pt-1">
+              <button type="button" onClick={() => setShowExportDialog(false)} className="flex-1 rounded-full bg-slate-100 py-2.5 text-xs font-bold text-slate-600">取消</button>
+              <button type="button" onClick={downloadCharacterExport} disabled={!exportCharacterId} className="flex-1 rounded-full bg-neutral-950 py-2.5 text-xs font-bold text-white disabled:opacity-40">导出 JSON</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Custom Dialogs */}
       {confirmDialog && (

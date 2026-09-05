@@ -1,11 +1,11 @@
-const CACHE_NAME = "fanfan-phone-v1";
+const CACHE_NAME = "fanfan-phone-0.0.0-4d4882d0582a";
 const ASSETS_TO_CACHE = [
   "/",
   "/index.html",
-  "/manifest.json",
-  "/icon.svg",
-  "/icon-192.png",
-  "/icon-512.png"
+  "/manifest.json?v=20260818",
+  "/icon-180.png?v=20260818",
+  "/icon-192.png?v=20260818",
+  "/icon-512.png?v=20260818"
 ];
 
 // Install Event - cache core static shell
@@ -38,6 +38,12 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
+  // Do not cache Vite development modules. Stale module versions can make a
+  // lazy-loaded app, especially Chat, fail as a blank screen.
+  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+    return;
+  }
+
   // Bypass API requests to ensure real-time response from backend
   if (url.pathname.startsWith("/api/")) {
     return; // Let browser handle it normally with network-only
@@ -45,6 +51,25 @@ self.addEventListener("fetch", (event) => {
 
   // Bypass hot-reload or non-http protocols (like chrome-extension)
   if (event.request.method !== "GET" || !event.request.url.startsWith("http")) {
+    return;
+  }
+
+  // The HTML entry point must reflect the latest deployment immediately.  A
+  // stale index.html keeps referencing the previous hashed CSS/JS bundle, so
+  // visual updates such as bundled fonts and widget colours never reach an
+  // already-installed phone app.
+  if (event.request.mode === "navigate" || event.request.headers.get("accept")?.includes("text/html")) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match(event.request).then((response) => response || caches.match("/")))
+    );
     return;
   }
 

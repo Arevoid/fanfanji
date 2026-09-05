@@ -23,18 +23,18 @@ export function describeHistoricalRelativeTime(content: string, sentAt: number, 
   const sentDate = new Date(sentAt);
   const resolved: string[] = [];
 
-  if (content.includes("明天")) {
+  if (/(明天|明日|내일|\btomorrow\b)/iu.test(content)) {
     const target = new Date(sentDate.getFullYear(), sentDate.getMonth(), sentDate.getDate() + 1);
-    resolved.push(`“明天”指${formatDate(target)}，${describeRelativeDate(target, now)}`);
+    resolved.push(`“明天／明日／내일／tomorrow”指${formatDate(target)}，${describeRelativeDate(target, now)}`);
   }
-  if (content.includes("今晚")) {
+  if (/(今晚|今夜|오늘\s*밤|\btonight\b)/iu.test(content)) {
     const target = startOfLocalDay(sentDate);
-    resolved.push(`“今晚”指${formatDate(target)}当晚，${describeRelativeDate(target, now)}`);
+    resolved.push(`“今晚／今夜／오늘 밤／tonight”指${formatDate(target)}当晚，${describeRelativeDate(target, now)}`);
   }
-  if (content.includes("下周")) {
+  if (/(下周|下週|来週|다음\s*주|\bnext\s+week\b)/iu.test(content)) {
     const daysUntilNextMonday = ((8 - sentDate.getDay()) % 7) || 7;
     const target = new Date(sentDate.getFullYear(), sentDate.getMonth(), sentDate.getDate() + daysUntilNextMonday);
-    resolved.push(`“下周”从该消息日期起指${formatDate(target)}所在周，${describeRelativeDate(target, now)}`);
+    resolved.push(`“下周／来週／다음 주／next week”从该消息日期起指${formatDate(target)}所在周，${describeRelativeDate(target, now)}`);
   }
 
   return resolved.length > 0 ? `；相对时间解释：${resolved.join("；")}` : "";

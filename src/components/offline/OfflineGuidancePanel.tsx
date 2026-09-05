@@ -30,7 +30,7 @@ export function OfflineGuidancePanel({ onClose, onSave, initialOneTime = "", ini
         <span>长期指导 <em>持续参考</em></span>
         <Textarea defaultValue={initialOngoing} placeholder={"剧情规则：\n- 感情发展慢一点\n- 保持现实感\n- 不突然出现陌生人物"} onChange={(event) => { ongoing = event.target.value; }} />
       </label>
-      <p className="offline-guidance-note">本版本仅提供场外指导界面与本次页面草稿，不改变当前 AI 生成规则。</p>
+      <p className="offline-guidance-note">保存后会参与下一次剧情生成；临时指导只生效一次，长期指导会持续参考。</p>
     </Modal>
   );
 }

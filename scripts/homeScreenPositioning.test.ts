@@ -1,0 +1,315 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import type { HomeScreenItem } from "../src/types";
+import {
+  HOME_GRID_COLUMNS,
+  HOME_GRID_ROWS,
+  MAX_HOME_GRID_ROWS,
+  MAX_HOME_PAGES,
+  buildOccupancy,
+  canPlaceAt,
+  findFirstAvailablePosition,
+  getHighestOccupiedPage,
+  getHomeGridPositionFromPoint,
+  getItemSpan,
+  getResponsiveHomeGridRowCount,
+  getVisibleHomePageCount,
+  migrateLegacyHomeScreenLayout,
+  normalizeHomeScreenLayout,
+  placeItemAt,
+  placeItemWithDisplacement,
+  swapOneByOneItems,
+} from "../src/features/home/homeGrid";
+import { sanitizeSystemBackupValue } from "../src/features/settings/systemBackupSanitizer";
+
+const item = (
+  id: string,
+  size: HomeScreenItem["size"],
+  page = 0,
+  row?: number,
+  column?: number,
+): HomeScreenItem => ({
+  id,
+  type: size === "1x1" ? "app" : "widget",
+  size,
+  page,
+  ...(row === undefined || column === undefined
+    ? {}
+    : { position: { page, row, column } }),
+});
+
+assert.equal(HOME_GRID_COLUMNS, 4);
+assert.equal(HOME_GRID_ROWS, 4);
+assert.equal(MAX_HOME_GRID_ROWS, 12);
+assert.deepEqual(getItemSpan("1x1"), { width: 1, height: 1 });
+assert.deepEqual(getItemSpan("2x2"), { width: 2, height: 2 });
+assert.deepEqual(getItemSpan("1x4"), { width: 4, height: 1 });
+assert.deepEqual(getItemSpan("2x4"), { width: 4, height: 2 });
+assert.deepEqual(getItemSpan("2x3"), { width: 3, height: 2 });
+
+const fixed = [
+  item("app-a", "1x1", 0, 0, 0),
+  item("widget-a", "2x2", 0, 1, 1),
+];
+assert.equal(canPlaceAt(fixed, item("probe", "1x1"), { page: 0, row: 0, column: 3 }), true);
+assert.equal(canPlaceAt(fixed, item("probe", "1x1"), { page: 0, row: 1, column: 1 }), false);
+assert.equal(canPlaceAt([], item("wide", "2x3"), { page: 0, row: 0, column: 1 }), true);
+assert.equal(canPlaceAt(fixed, item("wide", "2x3"), { page: 0, row: 0, column: 2 }), false);
+assert.equal(canPlaceAt(fixed, item("bad", "1x1"), { page: 0, row: -1, column: 0 }), false);
+assert.equal(canPlaceAt(fixed, item("bad", "1x1"), { page: Number.NaN, row: 0, column: 0 }), false);
+
+const moved = placeItemAt(fixed, "app-a", { page: 0, row: 3, column: 3 });
+assert.deepEqual(moved.find((entry) => entry.id === "app-a")?.position, { page: 0, row: 3, column: 3 });
+assert.deepEqual(moved.find((entry) => entry.id === "widget-a")?.position, fixed[1].position);
+const afterDelete = moved.filter((entry) => entry.id !== "widget-a");
+assert.deepEqual(afterDelete[0].position, { page: 0, row: 3, column: 3 });
+assert.deepEqual(
+  placeItemAt(fixed, "app-a", { page: 0, row: 1, column: 1 }),
+  fixed,
+  "a colliding multi-cell target must be rejected without moving anything",
+);
+const crossPage = placeItemAt(fixed, "app-a", { page: 3, row: 2, column: 3 });
+assert.deepEqual(crossPage.find((entry) => entry.id === "app-a")?.position, {
+  page: 3,
+  row: 2,
+  column: 3,
+});
+assert.equal(crossPage.find((entry) => entry.id === "app-a")?.page, 3);
+assert.deepEqual(fixed[0].position, { page: 0, row: 0, column: 0 }, "an uncommitted/cancelled drag leaves source data untouched");
+
+const pair = [item("one", "1x1", 0, 0, 0), item("two", "1x1", 1, 3, 3)];
+const swapped = swapOneByOneItems(pair, "one", "two");
+assert.deepEqual(swapped[0].position, { page: 1, row: 3, column: 3 });
+assert.equal(swapped[0].page, 1);
+assert.deepEqual(swapped[1].position, { page: 0, row: 0, column: 0 });
+assert.deepEqual(
+  swapOneByOneItems([item("big", "2x2", 0, 0, 0), item("small", "1x1", 0, 3, 3)], "big", "small"),
+  [item("big", "2x2", 0, 0, 0), item("small", "1x1", 0, 3, 3)],
+);
+
+const displacedLayout = placeItemWithDisplacement([
+  item("dragged-widget", "2x2", 0, 0, 0),
+  item("occupied-widget", "2x2", 0, 2, 0),
+  item("untouched-app", "1x1", 0, 0, 3),
+], "dragged-widget", { page: 0, row: 2, column: 0 }, 8);
+assert.deepEqual(
+  displacedLayout.find((entry) => entry.id === "dragged-widget")?.position,
+  { page: 0, row: 2, column: 0 },
+);
+assert.deepEqual(
+  displacedLayout.find((entry) => entry.id === "occupied-widget")?.position,
+  { page: 0, row: 0, column: 0 },
+  "the covered widget should first avoid into the dragged item's vacated position",
+);
+assert.deepEqual(
+  displacedLayout.find((entry) => entry.id === "untouched-app")?.position,
+  { page: 0, row: 0, column: 3 },
+  "unrelated desktop items must not be compacted",
+);
+const multiCollisionLayout = placeItemWithDisplacement([
+  item("wide-dragged", "2x4", 0, 4, 0),
+  item("left-app", "1x1", 0, 0, 0),
+  item("right-widget", "2x2", 0, 0, 1),
+], "wide-dragged", { page: 0, row: 0, column: 0 }, 8);
+assert.deepEqual(
+  multiCollisionLayout.find((entry) => entry.id === "wide-dragged")?.position,
+  { page: 0, row: 0, column: 0 },
+);
+assert.notDeepEqual(
+  multiCollisionLayout.find((entry) => entry.id === "left-app")?.position,
+  { page: 0, row: 0, column: 0 },
+);
+assert.notDeepEqual(
+  multiCollisionLayout.find((entry) => entry.id === "right-widget")?.position,
+  { page: 0, row: 0, column: 1 },
+);
+
+const occupancy = buildOccupancy(fixed, 0);
+assert.equal(occupancy[0][0], "app-a");
+assert.equal(occupancy[1][1], "widget-a");
+assert.equal(occupancy[2][2], "widget-a");
+
+const responsiveRows = getResponsiveHomeGridRowCount({
+  containerHeight: 652,
+  paddingTop: 14,
+  paddingBottom: 14,
+  rowHeight: 64,
+  rowGap: 16,
+});
+assert.equal(responsiveRows, 8, "the usable full-screen height must expose rows below the legacy 4x4 area");
+assert.equal(getResponsiveHomeGridRowCount({
+  containerHeight: 320,
+  paddingTop: 14,
+  paddingBottom: 14,
+  rowHeight: 64,
+  rowGap: 16,
+}), HOME_GRID_ROWS, "short screens keep the safe four-row minimum");
+assert.equal(
+  canPlaceAt([], item("lower-screen-item", "1x1"), { page: 0, row: 7, column: 3 }, responsiveRows),
+  true,
+);
+assert.equal(
+  canPlaceAt([], item("lower-screen-item", "1x1"), { page: 0, row: 7, column: 3 }, 5),
+  false,
+);
+const repairedForShortScreen = normalizeHomeScreenLayout([
+  item("still-valid", "1x1", 0, 3, 2),
+  item("needs-repair", "1x1", 0, 7, 3),
+], 5);
+assert.deepEqual(
+  repairedForShortScreen.find((entry) => entry.id === "still-valid")?.position,
+  { page: 0, row: 3, column: 2 },
+  "responsive repair must not compact positions that still fit",
+);
+assert.deepEqual(
+  normalizeHomeScreenLayout(repairedForShortScreen, 5),
+  repairedForShortScreen,
+  "responsive out-of-bounds repair must be idempotent",
+);
+
+const fullPage = Array.from({ length: responsiveRows * HOME_GRID_COLUMNS }, (_, index) =>
+  item(`full-${index}`, "1x1", 0, Math.floor(index / 4), index % 4));
+assert.deepEqual(
+  findFirstAvailablePosition(fullPage, "1x1", 0, responsiveRows),
+  { page: 1, row: 0, column: 0 },
+);
+const cellsPerResponsivePage = responsiveRows * HOME_GRID_COLUMNS;
+const allPagesFull = Array.from({ length: MAX_HOME_PAGES * cellsPerResponsivePage }, (_, index) => {
+  const page = Math.floor(index / cellsPerResponsivePage);
+  const cell = index % cellsPerResponsivePage;
+  return item(`limit-${index}`, "1x1", page, Math.floor(cell / 4), cell % 4);
+});
+assert.equal(findFirstAvailablePosition(allPagesFull, "1x1", 0, responsiveRows), undefined);
+
+const legacy = [
+  item("legacy-wide", "2x3"),
+  item("legacy-one", "1x1"),
+  item("legacy-two", "1x1"),
+  item("legacy-full", "2x4"),
+];
+const migrated = migrateLegacyHomeScreenLayout(legacy);
+assert.deepEqual(migrated.map((entry) => entry.position), [
+  { page: 0, row: 0, column: 0 },
+  { page: 0, row: 0, column: 3 },
+  { page: 0, row: 1, column: 3 },
+  { page: 0, row: 2, column: 0 },
+]);
+assert.deepEqual(normalizeHomeScreenLayout(migrated), migrated, "migration must be idempotent");
+assert.deepEqual(normalizeHomeScreenLayout([]), [], "an explicit empty layout stays empty");
+
+const positionedAndBroken = normalizeHomeScreenLayout([
+  item("keep", "1x1", 2, 2, 2),
+  item("collision", "1x1", 2, 2, 2),
+  { ...item("overflow", "2x3", 2), position: { page: 2, row: 3, column: 3 } },
+  item("duplicate", "1x1", 0, 0, 0),
+  item("duplicate", "1x1", 0, 0, 1),
+]);
+assert.deepEqual(positionedAndBroken.find((entry) => entry.id === "keep")?.position, { page: 2, row: 2, column: 2 });
+assert.equal(positionedAndBroken.filter((entry) => entry.id === "duplicate").length, 1);
+assert.ok(positionedAndBroken.every((entry) => entry.page === entry.position?.page));
+assert.deepEqual(normalizeHomeScreenLayout(positionedAndBroken), positionedAndBroken);
+
+assert.equal(getHighestOccupiedPage([item("later", "1x1", 5, 0, 0)]), 5);
+assert.equal(getVisibleHomePageCount([item("later", "1x1", 5, 0, 0)], false), 6);
+assert.equal(getVisibleHomePageCount([item("later", "1x1", 5, 0, 0)], true), 7);
+assert.equal(getVisibleHomePageCount(allPagesFull, true), MAX_HOME_PAGES);
+const beforeTailDrop = [item("first-page", "1x1", 0, 0, 0)];
+assert.equal(getVisibleHomePageCount(beforeTailDrop, false), 1);
+assert.equal(getVisibleHomePageCount(beforeTailDrop, true), 2, "editing exposes one temporary tail page");
+const afterTailDrop = placeItemAt(beforeTailDrop, "first-page", { page: 1, row: 0, column: 0 });
+assert.equal(getVisibleHomePageCount(afterTailDrop, false), 2, "placing an item makes the tail page formal");
+assert.equal(getVisibleHomePageCount(afterTailDrop, true), 3, "a fresh temporary tail follows the new formal page");
+assert.equal(getVisibleHomePageCount([], false), 1, "removing the final tail item safely trims trailing pages");
+assert.equal(
+  getHighestOccupiedPage([item("middle-page", "1x1", 2, 0, 0)]),
+  2,
+  "an empty middle page is not compacted",
+);
+
+const positionAtWidth = (containerWidth: number, column: number, row: number) => {
+  const padding = 12;
+  const gap = 16;
+  const trackWidth = (containerWidth - padding * 2 - gap * 3) / 4;
+  const rowHeight = 64;
+  return getHomeGridPositionFromPoint({
+    page: 0,
+    pointerX: padding + column * (trackWidth + gap) + 5,
+    pointerY: 14 + row * (rowHeight + gap) + 5,
+    grabOffsetX: 5,
+    grabOffsetY: 5,
+    containerLeft: 0,
+    containerTop: 0,
+    containerWidth,
+    paddingLeft: padding,
+    paddingRight: padding,
+    paddingTop: 14,
+    columnGap: gap,
+    rowGap: gap,
+    rowHeight,
+    rowCount: responsiveRows,
+    size: "1x1",
+  });
+};
+assert.deepEqual(positionAtWidth(319, 3, 3), { page: 0, row: 3, column: 3 });
+assert.deepEqual(positionAtWidth(420, 3, 3), { page: 0, row: 3, column: 3 });
+assert.deepEqual(positionAtWidth(420, 3, 7), { page: 0, row: 7, column: 3 });
+
+const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+assert.match(appSource, /gridColumnStart:\s*itemPosition\.column \+ 1/);
+assert.match(appSource, /gridRowStart:\s*itemPosition\.row \+ 1/);
+assert.match(appSource, /setTimeout\(\(\) => \{[\s\S]*setCurrentPage\(targetPage\)[\s\S]*\}, 600\)/);
+assert.match(appSource, /handleGlobalPointerCancel[\s\S]*finishDrag\(true\)/);
+assert.match(appSource, /data-home-delete/);
+assert.match(appSource, /onClickCapture=\{\(event\) => \{[\s\S]*isEditingHomeScreen/);
+assert.match(appSource, /className="home-screen-drag-surface/);
+assert.match(appSource, /onContextMenu=\{\(event\) => event\.preventDefault\(\)\}/);
+assert.match(appSource, /onDragStartCapture=\{\(event\) => event\.preventDefault\(\)\}/);
+assert.match(appSource, /gridTemplateColumns:\s*`repeat\(\$\{HOME_GRID_COLUMNS\}, minmax\(0, 1fr\)\)`/);
+assert.match(appSource, /justifyContent:\s*"stretch"/);
+assert.match(appSource, /gridTemplateRows:\s*`repeat\(\$\{homeGridRows\}/);
+assert.match(appSource, /const HOME_APP_ICON_SIZE = 60/);
+assert.match(appSource, /width: `\$\{HOME_APP_ICON_SIZE\}px`/);
+assert.match(appSource, /const HOME_APP_ICON_GLYPH_CLASS = "h-9 w-9"/);
+assert.match(appSource, /const homeGridRowGap = homeGridGap/);
+assert.match(appSource, /const homeGridRowHeight = homeGridTrackWidth/);
+assert.match(appSource, /desktop-app-label text-\[10px\] leading-3[\s\S]*mt-0\.5/);
+assert.match(appSource, /useState\(\(\) =>\s*typeof window === "undefined" \? 343 : Math\.max\(0, window\.innerWidth - 32\)/);
+assert.match(appSource, /useLayoutEffect\(\(\) => \{[\s\S]*pageViewportRef\.current/);
+assert.match(appSource, /if \(viewport && viewport !== grid\) observer\.observe\(viewport\)/);
+assert.match(appSource, /setPointerCapture\(pending\.pointerId\)/);
+assert.match(appSource, /placeItemWithDisplacement/);
+assert.match(appSource, /distance > 24/);
+assert.match(appSource, /DEFAULT_HOME_SCREEN_ITEMS/);
+assert.match(appSource, /id: HOME_WELCOME_WIDGET_ID, type: "widget", widgetType: "welcome", size: "1x4"/);
+assert.match(appSource, /style=\{\{ opacity: homeWidgetOpacity \}\}/);
+assert.match(appSource, /id:\s*"album_widget_1"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*1,\s*column:\s*0\s*\}/);
+assert.match(appSource, /id:\s*"music_widget_1"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*3,\s*column:\s*2\s*\}/);
+assert.match(appSource, /id:\s*"notes"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*5,\s*column:\s*0\s*\}/);
+assert.match(appSource, /let parsed: string\[\] = \["chat", "archives", "worldbook", "music", "notes", "offline", "store", "settings"\]/);
+assert.match(appSource, /setInstalledAppIds|installedAppIds\.includes\("chat"\)/);
+assert.match(appSource, /const raw = readString\("phone_homescreen_items"\)\.value/);
+assert.match(appSource, /if \(raw !== null\)[\s\S]*Array\.isArray\(parsed\) \? parsed : \[\]/);
+assert.doesNotMatch(
+  appSource,
+  /normalizeHomeScreenLayout\(current,\s*homeGridRows\)/,
+  "saved desktop positions must not be re-normalized during responsive height measurement",
+);
+
+const restoredSystemLayout = JSON.parse(sanitizeSystemBackupValue(
+  "phone_homescreen_items",
+  JSON.stringify([
+    item("system-backup-a", "1x1"),
+    item("system-backup-b", "2x2"),
+  ]),
+) || "[]") as HomeScreenItem[];
+assert.deepEqual(restoredSystemLayout.map((entry) => entry.position), [
+  { page: 0, row: 0, column: 0 },
+  { page: 0, row: 0, column: 1 },
+]);
+assert.deepEqual(
+  JSON.parse(sanitizeSystemBackupValue("phone_homescreen_items", "[]") || "null"),
+  [],
+  "restoring an explicitly empty system backup must not seed defaults",
+);
+
+console.log("PASS full-height responsive home positions, migration, vacancies, swaps, limits, and native-drag suppression");

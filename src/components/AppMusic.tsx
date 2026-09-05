@@ -1,29 +1,33 @@
-import React, { useState, useRef, useEffect } from "react";
-import { MusicTrack, MusicPlaylist } from "../types";
+import React, { useState, useEffect } from "react";
+import { MusicTrack, MusicPlaylist, MusicPlaybackHistoryItem } from "../types";
 import { audioDb } from "../utils/audioDb";
+import MusicLibraryPanel from "./music/MusicLibraryPanel";
 import {
   Play,
   Pause,
   SkipForward,
   SkipBack,
-  Volume2,
   Plus,
   Trash2,
   ChevronLeft,
+  Disc3,
   Music,
   ListMusic,
-  FolderPlus,
-  Radio,
   FileAudio,
-  Disc,
   X,
   Upload,
   Link,
   Repeat,
   Repeat1,
   Shuffle,
-  Sparkles
+  Sparkles,
+  FileText,
+  Loader2,
 } from "lucide-react";
+import { getNeteaseLyrics } from "../features/music/services/neteaseMusicApi";
+import { isNeteaseMusicTrack } from "../features/music/services/musicTrackModel";
+import type { NeteaseLyrics } from "../features/music/neteaseTypes";
+import type { NeteaseMusicQuality } from "../features/music/neteaseTypes";
 
 interface AppMusicProps {
   tracks: MusicTrack[];
@@ -34,6 +38,11 @@ interface AppMusicProps {
   onDeletePlaylist: (id: string) => void;
   onClose: () => void;
   currentTrack: MusicTrack | null;
+  queueTracks?: MusicTrack[];
+  playbackHistory?: MusicPlaybackHistoryItem[];
+  activeIdentityId: string;
+  neteaseQuality: NeteaseMusicQuality;
+  setNeteaseQuality: (quality: NeteaseMusicQuality) => void;
   setCurrentTrack: (track: MusicTrack | null) => void;
   isPlaying: boolean;
   setIsPlaying: (playing: boolean) => void;
@@ -42,6 +51,7 @@ interface AppMusicProps {
   setPlayMode: React.Dispatch<React.SetStateAction<"single" | "list" | "random">>;
   volume: number;
   setVolume: React.Dispatch<React.SetStateAction<number>>;
+  onPlayTrack: (track: MusicTrack) => void;
 }
 
 const PRESEED_TRACKS: MusicTrack[] = [];
@@ -52,34 +62,50 @@ const WAVE_BARS = [
   14, 12, 10, 14, 18, 24, 22, 16, 12, 10, 8, 8, 6, 6, 4, 4, 4, 4, 4, 4, 4, 4
 ];
 
+interface LyricLine {
+  time: number;
+  text: string;
+}
+
+const parseLyrics = (value: string): LyricLine[] => {
+  const lines: LyricLine[] = [];
+  value.split(/\r?\n/).forEach((line) => {
+    const matches = [...line.matchAll(/\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g)];
+    const text = line.replace(/\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g, "").trim();
+    if (!text) return;
+    matches.forEach((match) => {
+      const fraction = match[3] ? Number("0." + match[3]) : 0;
+      lines.push({ time: Number(match[1]) * 60 + Number(match[2]) + fraction, text });
+    });
+  });
+  return lines.sort((a, b) => a.time - b.time);
+};
+
 export default function AppMusic({
   tracks,
-  playlists,
   onAddTrack,
   onDeleteTrack,
-  onAddPlaylist,
-  onDeletePlaylist,
   onClose,
   currentTrack,
+  queueTracks = [],
+  playbackHistory = [],
+  activeIdentityId,
+  neteaseQuality,
+  setNeteaseQuality,
   setCurrentTrack,
   isPlaying,
-  setIsPlaying,
   audioRef,
   playMode,
   setPlayMode,
   volume,
-  setVolume,
+  onPlayTrack,
 }: AppMusicProps) {
-  const [activeTab, setActiveTab] = useState<"library" | "playlists">("library");
-  
-  // Custom Playlist Creator State
-  const [playlistName, setPlaylistName] = useState("");
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
-
   // New track form state
   const [newTitle, setNewTitle] = useState("");
   const [newArtist, setNewArtist] = useState("");
   const [newUrl, setNewUrl] = useState("");
+  const [newCoverUrl, setNewCoverUrl] = useState("");
+  const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
   const [importMethod, setImportMethod] = useState<"upload" | "link">("upload");
   const [isShowingImportModal, setIsShowingImportModal] = useState(false);
 
@@ -87,8 +113,13 @@ export default function AppMusic({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [showPlaylist, setShowPlaylist] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(true);
+  const [lyrics, setLyrics] = useState<NeteaseLyrics | null>(null);
+  const [lyricsLoading, setLyricsLoading] = useState(false);
+  const [lyricsError, setLyricsError] = useState<string | null>(null);
+  const lyricLineRefs = React.useRef<Array<HTMLParagraphElement | null>>([]);
 
-  const allTracks = [...PRESEED_TRACKS, ...tracks];
+  const allTracks = [...PRESEED_TRACKS, ...tracks, ...queueTracks.filter((track) => !tracks.some((item) => item.id === track.id))];
 
   useEffect(() => {
     if (allTracks.length > 0 && !currentTrack) {
@@ -132,34 +163,77 @@ export default function AppMusic({
     }
   }, [volume]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setLyrics(null);
+    setLyricsError(null);
+    lyricLineRefs.current = [];
+    if (!currentTrack || !isNeteaseMusicTrack(currentTrack) || !currentTrack.providerTrackId) return;
+
+    setLyricsLoading(true);
+    void getNeteaseLyrics(currentTrack.providerTrackId)
+      .then((result) => {
+        if (!cancelled) setLyrics(result);
+      })
+      .catch((error) => {
+        if (!cancelled) setLyricsError(error instanceof Error ? error.message : "歌词读取失败");
+      })
+      .finally(() => {
+        if (!cancelled) setLyricsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [currentTrack?.id, currentTrack?.providerTrackId]);
+
+  const handleLoadLyrics = async () => {
+    if (!currentTrack || !isNeteaseMusicTrack(currentTrack) || !currentTrack.providerTrackId) return;
+    setLyricsLoading(true);
+    setLyricsError(null);
+    try {
+      setLyrics(await getNeteaseLyrics(currentTrack.providerTrackId));
+    } catch (error) {
+      setLyricsError(error instanceof Error ? error.message : "歌词读取失败。");
+    } finally {
+      setLyricsLoading(false);
+    }
+  };
+
+  const lyricText = lyrics?.lyric || lyrics?.translatedLyric || "";
+  const lyricLines = parseLyrics(lyricText);
+  const activeLyricIndex = lyricLines.reduce((activeIndex, line, index) => (
+    line.time <= currentTime ? index : activeIndex
+  ), -1);
+
+  useEffect(() => {
+    if (activeLyricIndex < 0) return;
+    lyricLineRefs.current[activeLyricIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeLyricIndex, currentTrack?.id]);
+
   const handlePlayPause = () => {
-    setIsPlaying(!isPlaying);
+    if (currentTrack) onPlayTrack(currentTrack);
   };
 
   const handleNext = () => {
     if (allTracks.length === 0) return;
     if (playMode === "random") {
       const randomIndex = Math.floor(Math.random() * allTracks.length);
-      setCurrentTrack(allTracks[randomIndex]);
+      onPlayTrack(allTracks[randomIndex]);
     } else {
       const currentIndex = allTracks.findIndex((t) => t.id === currentTrack?.id);
       const nextIndex = (currentIndex + 1) % allTracks.length;
-      setCurrentTrack(allTracks[nextIndex]);
+      onPlayTrack(allTracks[nextIndex]);
     }
-    setIsPlaying(true);
   };
 
   const handlePrev = () => {
     if (allTracks.length === 0) return;
     if (playMode === "random") {
       const randomIndex = Math.floor(Math.random() * allTracks.length);
-      setCurrentTrack(allTracks[randomIndex]);
+      onPlayTrack(allTracks[randomIndex]);
     } else {
       const currentIndex = allTracks.findIndex((t) => t.id === currentTrack?.id);
       const prevIndex = currentIndex <= 0 ? allTracks.length - 1 : currentIndex - 1;
-      setCurrentTrack(allTracks[prevIndex]);
+      onPlayTrack(allTracks[prevIndex]);
     }
-    setIsPlaying(true);
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -183,6 +257,8 @@ export default function AppMusic({
       const trackId = `local-track-${Date.now()}`;
       try {
         await audioDb.saveTrackFile(trackId, file);
+        const coverAssetId = pendingCoverFile ? `track-cover-${trackId}` : undefined;
+        if (coverAssetId && pendingCoverFile) await audioDb.saveTrackCover(coverAssetId, pendingCoverFile);
         const fileUrl = URL.createObjectURL(file);
         const newTrack: MusicTrack = {
           id: trackId,
@@ -190,28 +266,19 @@ export default function AppMusic({
           artist: "本地上传",
           url: fileUrl,
           isLocal: true,
+          source: "local",
+          audioAssetId: trackId,
+          audioMimeType: file.type || undefined,
+          coverAssetId,
+          coverMimeType: pendingCoverFile?.type,
         };
         onAddTrack(newTrack);
-        setCurrentTrack(newTrack);
-        setIsPlaying(true);
+        onPlayTrack(newTrack);
+        setPendingCoverFile(null);
         setIsShowingImportModal(false);
-        setActiveTab("library");
       } catch (err) {
         console.error("Failed to save local track to IndexedDB:", err);
-        // Fallback: add anyway
-        const fileUrl = URL.createObjectURL(file);
-        const newTrack: MusicTrack = {
-          id: `local-track-${Date.now()}`,
-          title: file.name.replace(/\.[^/.]+$/, ""),
-          artist: "本地上传",
-          url: fileUrl,
-          isLocal: true,
-        };
-        onAddTrack(newTrack);
-        setCurrentTrack(newTrack);
-        setIsPlaying(true);
-        setIsShowingImportModal(false);
-        setActiveTab("library");
+        alert("本地音频保存失败，未加入音乐库。请检查浏览器存储空间后重试。");
       }
     }
   };
@@ -226,62 +293,31 @@ export default function AppMusic({
       artist: newArtist.trim() || "网络直链",
       url: newUrl.trim(),
       isLocal: false,
+      source: "network-link",
+      coverUrl: newCoverUrl.trim() || undefined,
     };
     onAddTrack(newTrack);
     setNewTitle("");
     setNewArtist("");
     setNewUrl("");
-    setCurrentTrack(newTrack);
-    setIsPlaying(true);
+    setNewCoverUrl("");
+    onPlayTrack(newTrack);
     setIsShowingImportModal(false);
-    setActiveTab("library");
   };
 
-  const handleCreatePlaylist = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!playlistName.trim()) return;
 
-    const newPl: MusicPlaylist = {
-      id: Date.now().toString(),
-      name: playlistName.trim(),
-      tracks: []
-    };
-    onAddPlaylist(newPl);
-    setPlaylistName("");
-  };
-
-  const toggleTrackInPlaylist = (playlistId: string, trackId: string) => {
-    const pl = playlists.find((p) => p.id === playlistId);
-    if (!pl) return;
-    
-    let updatedTracks = [...pl.tracks];
-    if (updatedTracks.includes(trackId)) {
-      updatedTracks = updatedTracks.filter((tid) => tid !== trackId);
-    } else {
-      updatedTracks.push(trackId);
-    }
-
-    onAddPlaylist({
-      ...pl,
-      tracks: updatedTracks
-    });
-  };
-
-  const activePlaylist = playlists.find((p) => p.id === selectedPlaylistId);
-  const playlistTracks = activePlaylist
-    ? allTracks.filter((t) => activePlaylist.tracks.includes(t.id))
-    : [];
 
   const progressPercent = duration > 0 ? currentTime / duration : 0;
+  const useReferencePlayerLayout = true;
 
   return (
-    <div className="flex flex-col h-full bg-stone-50 text-stone-850 font-sans overflow-hidden relative">
+    <div data-theme-page="music" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans overflow-hidden relative">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
+      <div className={`flex items-center justify-between px-4 py-1.5 z-10 shrink-0 relative ${showLibrary ? "bg-transparent" : "bg-sky-50/70"}`}>
         <button
-          onClick={onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
-          title="返回"
+          onClick={() => showLibrary ? onClose() : setShowLibrary(true)}
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
+          title={showLibrary ? "返回桌面" : "返回音乐首页"}
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
         </button>
@@ -291,18 +327,55 @@ export default function AppMusic({
         </h1>
 
         <div className="w-8 h-8 flex items-center justify-end z-10">
-          <button
+          {!showLibrary && <button
             onClick={() => setIsShowingImportModal(true)}
-            className="w-8 h-8 rounded-full bg-neutral-950 hover:bg-neutral-900 text-white transition-all flex items-center justify-center shadow-sm"
+            className="app-nav-icon-button w-8 h-8 text-slate-800 transition-all flex items-center justify-center"
             title="导入音乐"
           >
             <Plus className="w-4.5 h-4.5" />
-          </button>
+          </button>}
         </div>
       </div>
 
-      {/* Central Content Area (Visualizer + Metadata + Scrubbing) */}
-      <div className="flex-1 flex flex-col items-center justify-center px-5 py-6 overflow-y-auto pb-10 relative bg-gradient-to-b from-stone-100/50 to-transparent">
+      {showLibrary && (
+        <div className="absolute inset-0 z-40 bg-[var(--app-bg)]">
+          <MusicLibraryPanel
+            tracks={allTracks}
+            currentTrack={currentTrack}
+            isPlaying={isPlaying}
+            onPlayTrack={onPlayTrack}
+            onOpenPlayer={() => setShowLibrary(false)}
+            onOpenImport={() => setIsShowingImportModal(true)}
+            onClose={onClose}
+            playbackHistory={playbackHistory}
+            activeIdentityId={activeIdentityId}
+          />
+        </div>
+      )}
+
+      {useReferencePlayerLayout && <main className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-sky-50/70 px-7 pb-5 pt-4">
+        {currentTrack ? <>
+          <div className="mx-auto aspect-square w-full max-w-[304px] overflow-hidden rounded-[24px] bg-[var(--surface-muted)] shadow-sm">
+            {currentTrack.coverUrl ? <img src={currentTrack.coverUrl} alt={`${currentTrack.title} 专辑封面`} className="h-full w-full object-cover" /> : <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--text-secondary)]"><Disc3 className="h-20 w-20" /><span className="text-xs">暂无专辑封面</span></div>}
+          </div>
+          <div className="mt-5 text-center"><h2 className="truncate text-xl font-extrabold text-slate-800">{currentTrack.title}</h2><p className="mt-1 truncate text-sm text-slate-600">{currentTrack.artist || "未知艺术家"}</p></div>
+          <div className="mt-14 flex min-h-[76px] flex-1 items-center justify-center text-center">
+            {lyricText ? <div className="max-h-28 w-full overflow-y-auto px-2 text-center text-[12px] leading-7 text-slate-600">{lyricLines.length > 0 ? lyricLines.map((line, index) => <p key={line.time + "-" + index} ref={(node) => { lyricLineRefs.current[index] = node; }} className={index === activeLyricIndex ? "scale-105 font-bold text-sky-800 transition-all duration-300" : "opacity-60 transition-all duration-300"}>{line.text}</p>) : <p className="whitespace-pre-wrap">{lyricText}</p>}</div> : <div><p className="text-xs text-slate-500">{lyricsLoading ? "正在加载歌词…" : "找不到歌词"}</p>{isNeteaseMusicTrack(currentTrack) && <button type="button" onClick={() => void handleLoadLyrics()} className="mt-3 inline-flex items-center gap-1 rounded-full bg-white/80 px-3 py-1.5 text-[10px] font-bold text-slate-600 shadow-sm">{lyricsLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />} 重新加载歌词</button>}</div>}
+          </div>
+          {lyricsError && <p className="mt-2 text-center text-[10px] text-red-500">{lyricsError}</p>}
+          <div className="mt-5"><input type="range" min="0" max={duration || 100} value={currentTime} onChange={handleSeek} className="h-1.5 w-full cursor-pointer accent-sky-700" /><div className="mt-2 flex justify-between text-[10px] font-medium text-slate-500"><span>{formatTime(currentTime)}</span><span>{formatTime(duration)}</span></div></div>
+          <div className="mt-5 flex items-center justify-between px-1 pb-1 text-slate-600">
+            <button type="button" onClick={() => setPlayMode((prev) => prev === "list" ? "single" : prev === "single" ? "random" : "list")} className="p-2" title="播放模式">{playMode === "single" ? <Repeat1 className="h-5 w-5" /> : playMode === "random" ? <Shuffle className="h-5 w-5" /> : <Repeat className="h-5 w-5" />}</button>
+            <button type="button" onClick={handlePrev} className="p-2" title="上一首"><SkipBack className="h-5 w-5 fill-current" /></button>
+            <button type="button" onClick={handlePlayPause} className="flex h-14 w-14 items-center justify-center rounded-full bg-black text-white shadow-md" title={isPlaying ? "暂停" : "播放"}>{isPlaying ? <Pause className="h-6 w-6 fill-current" /> : <Play className="ml-0.5 h-6 w-6 fill-current" />}</button>
+            <button type="button" onClick={handleNext} className="p-2" title="下一首"><SkipForward className="h-5 w-5 fill-current" /></button>
+            <button type="button" onClick={() => setShowPlaylist(!showPlaylist)} className={`p-2 ${showPlaylist ? "text-slate-900" : ""}`} title="播放列表"><ListMusic className="h-5 w-5" /></button>
+          </div>
+        </> : <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-slate-500"><Music className="h-10 w-10" /><span className="text-xs">当前播放队列为空，请导入音乐</span></div>}
+      </main>}
+
+      {/* Legacy visualizer kept as a fallback for older layouts. */}
+      {!useReferencePlayerLayout && <div className="flex-1 flex flex-col items-center justify-center px-5 py-6 overflow-y-auto pb-10 relative bg-gradient-to-b from-stone-100/50 to-transparent">
         {currentTrack ? (
           <>
             {/* Wave Equalizer Animation (Absolute top and responsive) */}
@@ -366,7 +439,20 @@ export default function AppMusic({
                 <Sparkles className="w-3 h-3 text-neutral-950" />
                 <span>{currentTrack.artist}</span>
               </p>
+              {isNeteaseMusicTrack(currentTrack) && (
+                <div className="mt-3 flex items-center justify-center gap-2"><button type="button" onClick={() => void handleLoadLyrics()} className="flex items-center gap-1 rounded-full bg-stone-200 px-3 py-1.5 text-[10px] font-bold text-stone-700 hover:bg-stone-300">
+                  {lyricsLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />} {lyrics ? "刷新歌词" : "查看歌词"}
+                </button><select value={neteaseQuality} onChange={(event) => setNeteaseQuality(event.target.value as NeteaseMusicQuality)} className="rounded-full bg-stone-200 px-2 py-1.5 text-[10px] font-bold text-stone-700 outline-none"><option value="standard">标准</option><option value="higher">较高</option><option value="exhigh">极高</option></select></div>
+              )}
+              {lyricsError && <p className="mt-2 text-[10px] text-red-500">{lyricsError}</p>}
             </div>
+
+            {lyrics && (
+              <div className="mt-4 max-h-32 w-full max-w-xs overflow-y-auto rounded-2xl border border-stone-200 bg-white/70 px-4 py-3 text-center text-[11px] leading-6 text-stone-600">
+                <p className="whitespace-pre-wrap">{lyrics.lyric || lyrics.translatedLyric}</p>
+                {lyrics.lyric && lyrics.translatedLyric && <p className="mt-3 border-t border-stone-200 pt-3 whitespace-pre-wrap text-stone-400">{lyrics.translatedLyric}</p>}
+              </div>
+            )}
 
             {/* Waveform-based Scrubbing Slider */}
             <div className="w-full max-w-xs mt-8 relative select-none">
@@ -412,42 +498,42 @@ export default function AppMusic({
             <span>当前播放队列为空，请导入音乐</span>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* 置顶悬浮播放列表面板 */}
       {/* 宽度：页面宽度左右保留约 16px 边距 (left-4 right-4)，高度：约为屏幕高度的 35%–45% (h-[40vh]) */}
       <div
-        className={`absolute left-4 right-4 z-40 h-[40vh] bg-white rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] border border-stone-200/80 flex flex-col overflow-hidden transition-all duration-300 ease-out origin-bottom-right ${
+        className={`absolute left-4 right-4 z-40 h-[40vh] bg-[var(--surface)] text-[var(--text-primary)] rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] border border-[var(--border)] flex flex-col overflow-hidden transition-all duration-300 ease-out origin-bottom-right ${
           showPlaylist
             ? "bottom-[88px] opacity-100 translate-y-0 scale-100 pointer-events-auto"
             : "bottom-[50px] opacity-0 translate-y-4 scale-95 pointer-events-none"
         }`}
       >
-        <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3 bg-stone-50/80 backdrop-blur-sm shrink-0">
-          <h3 className="text-xs font-bold text-stone-600 flex items-center gap-1.5 uppercase tracking-wider">
-            <ListMusic className="w-3.5 h-3.5 text-neutral-950" />
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 bg-[var(--surface-muted)] backdrop-blur-sm shrink-0">
+          <h3 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5 uppercase tracking-wider">
+            <ListMusic className="w-3.5 h-3.5" />
             <span>当前播放列表 ({(allTracks || []).length}首)</span>
           </h3>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsShowingImportModal(true)}
-              className="text-[10px] text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-lg transition-colors"
+              className="text-[10px] text-[var(--button-secondary-text)] hover:bg-[var(--surface-raised)] font-bold flex items-center gap-1 bg-[var(--button-secondary-bg)] border border-[var(--button-secondary-border)] px-2 py-1 rounded-lg transition-colors disabled:bg-[var(--button-disabled-bg)] disabled:text-[var(--button-disabled-text)]"
             >
               <Plus className="w-3 h-3" />
               <span>添加歌曲</span>
             </button>
             <button
               onClick={() => setShowPlaylist(false)}
-              className="p-1 rounded-full hover:bg-stone-200 text-stone-500 transition-colors"
+              className="p-1 rounded-full hover:bg-[var(--surface-raised)] text-[var(--text-secondary)] transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 bg-white">
+        <div className="flex-1 overflow-y-auto p-4 bg-[var(--surface)]">
           {(allTracks || []).length === 0 ? (
-            <div className="text-center py-12 text-stone-400 text-xs">
+            <div className="text-center py-12 text-[var(--text-tertiary)] text-xs">
               播放队列中暂无音乐。点击右上角“添加歌曲”导入音乐。
             </div>
           ) : (
@@ -459,21 +545,20 @@ export default function AppMusic({
                     key={track.id}
                     className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
                       isActive
-                        ? "bg-neutral-950 border-neutral-950 text-white shadow"
-                        : "bg-white border-stone-200/60 text-stone-800 hover:bg-stone-100"
+                        ? "bg-[var(--surface-selected)] border-[var(--accent)] text-[var(--text-primary)] shadow"
+                        : "bg-[var(--surface-raised)] border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--surface-muted)]"
                     }`}
                   >
                     <div
                       className="flex-1 min-w-0 cursor-pointer flex items-center gap-2.5"
                       onClick={() => {
-                        setCurrentTrack(track);
-                        setIsPlaying(true);
+                        onPlayTrack(track);
                       }}
                     >
                       <span className="text-[10px] font-mono opacity-50 w-4">{(idx + 1).toString().padStart(2, "0")}</span>
                       <div className="min-w-0">
                         <p className="text-xs font-bold truncate leading-snug">{track.title}</p>
-                        <p className={`text-[10px] truncate mt-0.5 ${isActive ? "text-stone-300" : "text-stone-500"}`}>
+                        <p className="text-[10px] truncate mt-0.5 text-[var(--text-secondary)]">
                           {track.artist}
                         </p>
                       </div>
@@ -492,7 +577,7 @@ export default function AppMusic({
                         <button
                           onClick={() => onDeleteTrack(track.id)}
                           className={`p-1.5 transition-colors rounded-lg ${
-                            isActive ? "text-stone-300 hover:text-white" : "text-stone-400 hover:text-rose-500"
+                            isActive ? "text-[var(--text-secondary)] hover:text-[var(--danger)]" : "text-[var(--text-tertiary)] hover:text-[var(--danger)]"
                           }`}
                           title="从列表删除"
                         >
@@ -508,8 +593,8 @@ export default function AppMusic({
         </div>
       </div>
 
-      {/* 底部一排播放控制按钮固定常驻页面最下方 */}
-      <div className="shrink-0 h-20 bg-white border-t border-stone-200 flex items-center justify-center px-6 z-30 shadow-[0_-4px_12px_rgba(0,0,0,0.03)]">
+      {/* Legacy fixed controls are only used by the fallback player layout. */}
+      {!useReferencePlayerLayout && <div className="shrink-0 h-20 bg-white border-t border-stone-200 flex items-center justify-center px-6 z-30 shadow-[0_-4px_12px_rgba(0,0,0,0.03)]">
         <div className="flex items-center justify-between w-full max-w-xs">
           {/* Play Mode Button */}
           <button
@@ -563,7 +648,7 @@ export default function AppMusic({
             <ListMusic className="w-5 h-5" />
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* Import / Add Music Overlay Modal */}
       {isShowingImportModal && (
@@ -589,7 +674,7 @@ export default function AppMusic({
               <button
                 onClick={() => setImportMethod("upload")}
                 className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 ${
-                  importMethod === "upload" ? "bg-neutral-950 text-white" : "text-stone-500"
+                    importMethod === "upload" ? "bg-[var(--tab-active-bg)] text-[var(--tab-active-text)]" : "text-[var(--tab-inactive-text)]"
                 }`}
               >
                 <Upload className="w-3.5 h-3.5" />
@@ -598,7 +683,7 @@ export default function AppMusic({
               <button
                 onClick={() => setImportMethod("link")}
                 className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 ${
-                  importMethod === "link" ? "bg-neutral-950 text-white" : "text-stone-500"
+                    importMethod === "link" ? "bg-[var(--tab-active-bg)] text-[var(--tab-active-text)]" : "text-[var(--tab-inactive-text)]"
                 }`}
               >
                 <Link className="w-3.5 h-3.5" />
@@ -610,6 +695,11 @@ export default function AppMusic({
             <div className="flex-1 overflow-y-auto pb-4 pr-1">
               {importMethod === "upload" ? (
                 <div className="space-y-4 text-center">
+                  <label className="block cursor-pointer rounded-2xl border border-stone-200 bg-stone-50 p-3 text-left">
+                    <span className="block text-[10px] font-bold text-stone-500">歌曲封面（可选）</span>
+                    <span className="mt-1 block truncate text-xs text-stone-700">{pendingCoverFile?.name || "选择本地图片"}</span>
+                    <input type="file" accept="image/*" className="hidden" onChange={(event) => setPendingCoverFile(event.target.files?.[0] || null)} />
+                  </label>
                   <label className="cursor-pointer block border-2 border-dashed border-stone-300 hover:border-neutral-950 bg-stone-50 p-6 rounded-2xl transition-all">
                     <div className="flex flex-col items-center">
                       <div className="w-12 h-12 bg-neutral-950 text-white rounded-full flex items-center justify-center mb-2 border border-stone-200">
@@ -661,6 +751,17 @@ export default function AppMusic({
                       value={newUrl}
                       onChange={(e) => setNewUrl(e.target.value)}
                       placeholder="https://example.com/audio.mp3"
+                      className="w-full bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 rounded-[8px] px-3 py-2 text-xs text-stone-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] text-stone-500 mb-1 font-bold">封面图片网址（可选）</label>
+                    <input
+                      type="url"
+                      value={newCoverUrl}
+                      onChange={(event) => setNewCoverUrl(event.target.value)}
+                      placeholder="https://example.com/cover.jpg"
                       className="w-full bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 rounded-[8px] px-3 py-2 text-xs text-stone-800"
                     />
                   </div>

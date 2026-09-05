@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { Wifi, Battery, Signal } from "lucide-react";
+import type { ResolvedTheme } from "../features/theme/theme";
 
 interface StatusBarProps {
   wallpaper?: string;
+  hasUserWallpaper?: boolean;
+  fallbackTheme: ResolvedTheme;
+  hideStatusBar?: boolean;
 }
 
-export default function StatusBar({ wallpaper }: StatusBarProps) {
+export default function StatusBar({ wallpaper, hasUserWallpaper = false, fallbackTheme, hideStatusBar = false }: StatusBarProps) {
   const [time, setTime] = useState("");
   const [isDark, setIsDark] = useState(false);
 
@@ -22,8 +26,8 @@ export default function StatusBar({ wallpaper }: StatusBarProps) {
   }, []);
 
   useEffect(() => {
-    if (!wallpaper) {
-      setIsDark(false);
+    if (!wallpaper || !hasUserWallpaper) {
+      setIsDark(fallbackTheme === "dark");
       return;
     }
 
@@ -78,7 +82,9 @@ export default function StatusBar({ wallpaper }: StatusBarProps) {
       const lower = wallpaper.toLowerCase();
       setIsDark(lower.includes("dark") || lower.includes("night") || lower.includes("black") || lower.includes("charcoal"));
     };
-  }, [wallpaper]);
+  }, [fallbackTheme, hasUserWallpaper, wallpaper]);
+
+  if (hideStatusBar) return null;
 
   return (
     <div 
@@ -86,7 +92,8 @@ export default function StatusBar({ wallpaper }: StatusBarProps) {
         isDark ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" : "text-gray-800"
       }`}
       style={{
-        paddingTop: "calc(env(safe-area-inset-top, 0px) + 11px)"
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 11px)",
+        backgroundColor: hasUserWallpaper ? "transparent" : "var(--status-bar-bg)",
       }}
     >
       <div className="flex items-center space-x-1.5 pointer-events-auto">

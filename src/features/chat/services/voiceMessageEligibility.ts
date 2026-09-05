@@ -1,4 +1,5 @@
 import type { Character, Message } from "../../../types";
+import type { DirectInteractionScope } from "../context/directInteractionScope";
 
 /** Parenthesized actions, narration, and stage directions are never spoken voice bubbles. */
 export const isBracketWrappedNarration = (text: string): boolean =>
@@ -14,9 +15,22 @@ export const isExplicitVoiceRequest = (text?: string): boolean =>
 export const hasExplicitVoicePreference = (character: Character): boolean =>
   character.voiceFrequency === "high" || VOICE_PREFERENCE_PATTERN.test(`${character.personality || ""}\n${character.backstory || ""}`);
 
-const isCharacterVoiceMarkup = (message: Message, characterId: string): boolean =>
+export type AutomaticVoiceScope = DirectInteractionScope;
+
+/**
+ * Direct-message records do not duplicate userIdentityId. The relationship ID
+ * is the identity boundary; conversationId is an additional consistency guard.
+ * Legacy unscoped records must not influence a modern relationship's cooldown.
+ */
+const belongsToAutomaticVoiceScope = (message: Message, scope: AutomaticVoiceScope): boolean => {
+  if (message.relationId !== scope.relationId) return false;
+  if (message.characterId !== scope.characterId) return false;
+  return !message.conversationId || message.conversationId === scope.conversationId;
+};
+
+const isCharacterVoiceMarkup = (message: Message, scope: AutomaticVoiceScope): boolean =>
   message.sender === "character"
-  && message.characterId === characterId
+  && belongsToAutomaticVoiceScope(message, scope)
   && (message.isVoiceMessage === true || message.content.startsWith("[语音"));
 
 export interface AutomaticVoiceConversionInput {
@@ -25,20 +39,25 @@ export interface AutomaticVoiceConversionInput {
   recentMessages: readonly Message[];
   bubbleIndex: number;
   bubbleText: string;
+  scope: AutomaticVoiceScope;
   random?: () => number;
 }
 
 /** Keeps generated chat text as text by default; explicit model markup is unchanged. */
 export function shouldAutomaticallyConvertTextToVoice(input: AutomaticVoiceConversionInput): boolean {
-  const { character, lastUserMessage, recentMessages, bubbleIndex, bubbleText } = input;
+  const { character, lastUserMessage, recentMessages, bubbleIndex, bubbleText, scope } = input;
+  if (!scope.characterId || !scope.relationId || !scope.userIdentityId) return false;
   if (character.voiceFrequency === "none" || bubbleIndex !== 0 || !bubbleText || isBracketWrappedNarration(bubbleText)) return false;
   if (/^\[(?:语音|表情|红包|转账|系统|位置|音乐|文件|视频通话|语音通话)/.test(bubbleText) || bubbleText.startsWith("data:image/")) return false;
 
-  if (isExplicitVoiceRequest(lastUserMessage?.content)) return true;
-  if (recentMessages.some((message) => isCharacterVoiceMarkup(message, character.id))) return false;
+  const scopedLastUserMessage = lastUserMessage?.sender === "user" && belongsToAutomaticVoiceScope(lastUserMessage, scope)
+    ? lastUserMessage
+    : null;
+  if (isExplicitVoiceRequest(scopedLastUserMessage?.content)) return true;
+  if (recentMessages.some((message) => isCharacterVoiceMarkup(message, scope))) return false;
 
   const hasPreference = hasExplicitVoicePreference(character);
-  const needsVoiceForContext = VOICE_CONTEXT_PATTERN.test(`${lastUserMessage?.content || ""}\n${bubbleText}`);
+  const needsVoiceForContext = VOICE_CONTEXT_PATTERN.test(`${scopedLastUserMessage?.content || ""}\n${bubbleText}`);
   if (!hasPreference && !needsVoiceForContext) return false;
 
   return (input.random || Math.random)() < (hasPreference ? 0.18 : 0.08);

@@ -1,5 +1,5 @@
 {
-  "name": "饭饭机",
+  "name": "米饭机",
   "description": "一个采用 iOS 风格、扁平简约现代化的 PWA 架构“小手机”虚拟系统。包含智能应用聊天、角色档案馆、世界书、音乐、日程、论坛、应用商店及高度可自定义的外观设置。",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

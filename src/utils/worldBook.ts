@@ -1,5 +1,7 @@
 import { WorldBookEntry } from "../types";
 import { loadWorldBookEntries } from "../core/storage/repositories/worldBookRepository";
+import { isWorldBookEntryVisible, type WorldBookReadContext } from "../domain/worldbook/worldBookVisibility";
+import { isWorldBookEntryForCharacter } from "../domain/worldbook/worldBookVisibility";
 
 export function getLatestWorldBookEntries(propEntries: WorldBookEntry[]): WorldBookEntry[] {
   try {
@@ -22,16 +24,42 @@ export interface WorldBookSystemBlocks {
   before_char_def: string[];
   after_char_def: string[];
   before_chat_history: string[];
+  at_depth: WorldBookDepthInjection[];
   allTriggered: WorldBookEntry[];
   formattedAll: string;
+}
+
+export interface WorldBookDepthInjection {
+  id: string;
+  sourceId: string;
+  depth: number;
+  content: string;
+}
+
+/**
+ * Returns every entry visible to one request scope without applying keyword
+ * triggers. This is intended for small metadata projections (for example,
+ * detecting a character's configured language), not for injecting the whole
+ * World Book into the generated prompt.
+ */
+export function getVisibleWorldBookEntries(
+  propEntries: WorldBookEntry[],
+  characterId: string,
+  readContext?: WorldBookReadContext,
+): WorldBookEntry[] {
+  return getLatestWorldBookEntries(propEntries).filter((entry) => {
+    if (readContext ? !isWorldBookEntryVisible(entry, readContext) : entry.isActive === false) return false;
+    return isWorldBookEntryForCharacter(entry, characterId);
+  });
 }
 
 export function buildWorldBookSystemBlocks(
   propEntries: WorldBookEntry[],
   characterId: string,
-  scanText: string
+  scanText: string,
+  readContext?: WorldBookReadContext,
 ): WorldBookSystemBlocks {
-  const latestWorldBookEntries = getLatestWorldBookEntries(propEntries);
+  const visibleWorldBookEntries = getVisibleWorldBookEntries(propEntries, characterId, readContext);
   const scanTextLower = scanText.toLowerCase();
 
   const triggeredEntries: {
@@ -39,18 +67,14 @@ export function buildWorldBookSystemBlocks(
     text: string;
   }[] = [];
 
-  for (const entry of latestWorldBookEntries) {
-    // Skip inactive entries
-    if (entry.isActive === false) continue;
-
-    // Check if bound to global or specific character
-    const isGlobal = !entry.characterId || entry.characterId === "global";
-    if (!isGlobal && entry.characterId !== characterId) {
-      continue;
-    }
-
+  for (const entry of visibleWorldBookEntries) {
     let isTriggered = false;
-    if (entry.triggerType === "constant") {
+    // Persona rules describe a character's stable voice and behavior. They are
+    // always present for their matching scope; keyword misses must never make a
+    // character temporarily lose their own speech habits.
+    if (entry.purpose === "persona_rule") {
+      isTriggered = true;
+    } else if (entry.triggerType === "constant") {
       isTriggered = true;
     } else if (entry.triggerType === "vector") {
       // Smart simulated vector term-overlap matching
@@ -72,16 +96,16 @@ export function buildWorldBookSystemBlocks(
       }
     }
 
-    if (isTriggered) {
-      triggeredEntries.push({
-        entry,
-        text: `【设定 - ${entry.title}】\n${entry.content}`
-      });
-    }
+    const candidate = {
+      entry,
+      text: `【设定 - ${entry.title}】\n${entry.content}`
+    };
+    if (isTriggered) triggeredEntries.push(candidate);
   }
 
   // Sort entries by depth ascending (smaller depth is closer / higher priority)
-  const sortedTriggered = [...triggeredEntries].sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5));
+  const sortedTriggered = triggeredEntries
+    .sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5));
 
   const entriesByPos = {
     after_main_prompt: [] as string[],
@@ -89,9 +113,19 @@ export function buildWorldBookSystemBlocks(
     after_char_def: [] as string[],
     before_chat_history: [] as string[]
   };
+  const atDepth: WorldBookDepthInjection[] = [];
 
   sortedTriggered.forEach(({ entry, text }) => {
     const pos = entry.position || "after_char_def";
+    if (pos === "at_depth") {
+      atDepth.push({
+        id: `world-book-at-depth:${entry.id}`,
+        sourceId: `world-book:${entry.id}`,
+        depth: Math.max(1, Math.min(15, entry.depth || 5)),
+        content: text,
+      });
+      return;
+    }
     if (pos in entriesByPos) {
       entriesByPos[pos as keyof typeof entriesByPos].push(text);
     } else {
@@ -99,13 +133,19 @@ export function buildWorldBookSystemBlocks(
     }
   });
 
-  const formattedAll = sortedTriggered.map(t => t.text).join("\n\n");
+  // at_depth entries are injected into the chronological history by
+  // PromptComposer. Excluding them here prevents a second system-level copy.
+  const formattedAll = sortedTriggered
+    .filter(({ entry }) => entry.position !== "at_depth")
+    .map(({ text }) => text)
+    .join("\n\n");
 
   return {
     after_main_prompt: entriesByPos.after_main_prompt,
     before_char_def: entriesByPos.before_char_def,
     after_char_def: entriesByPos.after_char_def,
     before_chat_history: entriesByPos.before_chat_history,
+    at_depth: atDepth,
     allTriggered: sortedTriggered.map(t => t.entry),
     formattedAll
   };

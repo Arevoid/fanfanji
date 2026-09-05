@@ -1,10 +1,12 @@
+import type { CharacterRoutine } from "./domain/characterLife/characterRoutine/characterRoutineTypes";
+
 export interface CharacterReference {
   id: string;
   title: string;
   content: string;
 }
 
-export const CHAT_ICON_KEYS = ["image", "voice", "sticker", "redPacket", "transfer", "file", "location", "call", "plus", "send"] as const;
+export const CHAT_ICON_KEYS = ["image", "textImage", "voice", "sticker", "redPacket", "transfer", "location", "call", "plus", "send", "sendOnly", "sendReply", "stop"] as const;
 export type ChatIconKey = typeof CHAT_ICON_KEYS[number];
 export type ChatIconOverrides = Partial<Record<ChatIconKey, string>>;
 
@@ -22,22 +24,29 @@ export function sanitizeChatIcons(value: unknown): ChatIconOverrides {
 export interface Character {
   id: string;
   name: string;
-  age?: number | "";
+  /** Original import filename kept as source metadata, never as a display name. */
+  sourceFileName?: string;
+  age?: number | "" | "∞";
   avatar: string; // URL, emoji, or base64
   gender?: string;
   mbti?: string;
   personality: string;
   backstory: string;
+  /** Explicit visible reply language. When absent, it is inferred from the complete persona, nationality, and visible World Book metadata. */
+  replyLanguage?: string;
   remark?: string; // Edit remark in chat menu
   isPinned?: boolean; // Pin chat to top
   chatBg?: string; // Custom chat background image
   momentsCover?: string; // Personal moments background cover
   album?: string[]; // Personal photo gallery / album
   references?: CharacterReference[];
+  /** Legacy persisted field; automatic summary is now always enabled. */
   enableAutoSummary?: boolean;
   enableAutoTranslate?: boolean;
-  summaryTriggerRound?: number;
+  summaryTriggerRound?: number; // 10~100, default 50 rounds
   compressedMemory?: string;
+  /** Optional character-level routine configuration; it is a prompt hint only. */
+  routine?: CharacterRoutine;
   enableProactiveChat?: boolean;
   /** Whether this contact may occasionally start an incoming voice call. */
   enableProactiveCall?: boolean;
@@ -59,12 +68,12 @@ export interface Character {
   initialChatMode?: "greeting" | "context";
   lastImmediateSummaryMsgId?: string;
   disableBracketActions?: boolean;
+  /** Number of chat messages processed per automatic/manual archive batch. */
   historyMemoryLimit?: number;
-  contextMemoryLimit?: number; // 10~50, default 20
-  retrievalHistoryLimit?: number; // 10~200, default 100
+  contextMemoryLimit?: number; // 10~300 messages, default 150
+  /** Long-term memory items retrieved and injected per chat turn. */
+  retrievalHistoryLimit?: number; // 10~100, default 50
   archiveTemplateType?: "refined" | "delicate"; // "refined" (event log) | "delicate" (first person diary)
-  autoArchiveInterval?: number; // 10~100, default 50 rounds
-  enableAutoArchive?: boolean;
   enableTimeAwareness?: boolean;
   isGroupChat?: boolean;
   memberIds?: string[];
@@ -73,18 +82,39 @@ export interface Character {
   /** Contact copies are hidden from the archive and keep a link to their source profile. */
   isContactInstance?: boolean;
   profileSourceId?: string;
+  /** Identifies a chat profile created from a Relationship Network NPC. */
+  relationshipNetworkNpcId?: string;
   minimaxVoiceId?: string;
+  mosslandVoiceId?: string;
   minimaxSpeed?: number;
   voiceFrequency?: "low" | "medium" | "high" | "none";
+  /** Canonical appearance data only. It is intentionally never relation-scoped. */
+  enableImageGeneration?: boolean;
+  imageAppearancePrompt?: string;
+  imageNegativePrompt?: string;
+  /** A single reference image blob is stored in IndexedDB; this is metadata only. */
+  imageReferenceAssetId?: string;
+  imageReferenceMimeType?: string;
+  imageReferenceUpdatedAt?: number;
 }
 
 export interface Message {
   id: string;
   characterId: string;
+  /** Direct-chat relationship. Undefined keeps legacy and group records compatible. */
+  relationId?: string;
+  /** Stable direct-chat thread ID. Group records retain their existing container ID semantics. */
+  conversationId?: string;
   sender: "user" | "character";
   senderId?: string;
+  /** The user typed this message from the character's simulated phone. */
+  sentFromCharacterPhone?: boolean;
   content: string;
   timestamp: number;
+  /** Optional structured metadata for red packets; legacy markup remains supported. */
+  redPacket?: RedPacketPayload;
+  /** Group-turn decision, persisted only as harmless metadata on generated replies. */
+  redPacketAction?: "claim_and_reply" | "claim_silent" | "decline_and_reply" | "silent";
   isBookmarked?: boolean;
   isOffline?: boolean;
   /** Snapshot-only online context. It informs a story but is never rendered as story text. */
@@ -94,19 +124,184 @@ export interface Message {
   audioUrl?: string;
   audioDuration?: number;
   isVoiceMessage?: boolean;
+  /** Image data lives in IndexedDB. Legacy uploaded images remain in content as data URLs. */
+  imageAssetId?: string;
+  imageMimeType?: string;
+  imageSource?: "uploaded" | "generated";
+  /** Resolves a frozen, public-only forum snapshot from the ForumShare repository. */
+  forumShareId?: string;
+  /** Resolves a frozen diary snapshot shared explicitly with this direct relation. */
+  diaryShareId?: string;
+}
+
+export type DiaryAuthorType = "user" | "character";
+export type DiarySource = "manual" | "ai-auto" | "ai-manual";
+
+/** A private local diary entry. Character entries are scoped to one relation. */
+export interface DiaryEntry {
+  id: string;
+  ownerIdentityId: string;
+  authorType: DiaryAuthorType;
+  characterId?: string;
+  relationId?: string;
+  conversationId?: string;
+  authorNameSnapshot: string;
+  authorAvatarSnapshot?: string;
+  title?: string;
+  body: string;
+  emotionalState?: string;
+  weather?: string;
+  location?: string;
+  tags: string[];
+  occurredAt: number;
+  createdAt: number;
+  updatedAt: number;
+  source: DiarySource;
+  isFavorite: boolean;
+}
+
+/** A frozen, explicit diary disclosure for exactly one direct conversation. */
+export interface DiaryShareSnapshot {
+  authorType: DiaryAuthorType;
+  authorName: string;
+  title?: string;
+  body: string;
+  emotionalState?: string;
+  occurredAt: number;
+}
+
+export interface DiaryShare {
+  id: string;
+  diaryEntryId: string;
+  ownerIdentityId: string;
+  targetRelationId: string;
+  conversationId: string;
+  messageId: string;
+  snapshot: DiaryShareSnapshot;
+  createdAt: number;
+}
+
+export interface DiaryGenerationTask {
+  id: string;
+  ownerIdentityId: string;
+  relationId: string;
+  taskKey: string;
+  trigger: "lazy" | "manual";
+  status: "running" | "completed" | "failed";
+  startedAt: number;
+  updatedAt: number;
+}
+
+export interface DiaryTranslation {
+  id: string;
+  ownerIdentityId: string;
+  diaryEntryId: string;
+  sourceContentHash: string;
+  targetLanguage: string;
+  translatedTitle?: string;
+  translatedBody: string;
+  translatedEmotionalState?: string;
+  createdAt: number;
+  lastAccessedAt: number;
+}
+
+export interface DiaryDraft {
+  id: string;
+  ownerIdentityId: string;
+  entryId?: string;
+  title?: string;
+  body: string;
+  emotionalState?: string;
+  weather?: string;
+  location?: string;
+  tags: string[];
+  occurredAt: number;
+  updatedAt: number;
+}
+
+export type ImageApiProtocol = "openai-images" | "gemini-native-image" | "imagen-text";
+export type GeminiImageAuthMode = "x-goog-api-key" | "bearer";
+export type ImageAspectRatio = "1:1" | "3:4" | "4:3" | "16:9" | "9:16";
+
+export interface ImageApiPreset {
+  id: string;
+  name: string;
+  /** Missing on old records means OpenAI Images compatible. */
+  protocol?: ImageApiProtocol;
+  apiEndpoint: string;
+  apiKey: string;
+  selectedModel: string;
+  /** Preferred output ratio. Legacy presets default to 1:1 at request time. */
+  aspectRatio?: ImageAspectRatio;
+  /** Gemini middleboxes differ; user selects the authentication header they support. */
+  geminiAuthMode?: GeminiImageAuthMode;
+  /** Must be enabled only when the selected Gemini middlebox/model explicitly accepts image input. */
+  referenceImageSupported?: boolean;
+}
+
+export interface ImageGenerationRecord {
+  id: string;
+  messageId: string;
+  /** Always the canonical Character ID, including a group sender. */
+  characterId: string;
+  /** Direct chats require this relation boundary. */
+  relationId?: string;
+  /** Direct and group conversations both retain their own container ID. */
+  conversationId: string;
+  /** Group records retain group semantics instead of using a direct relation. */
+  groupId?: string;
+  imageAssetId: string;
+  trigger: "manual" | "explicit-user-text";
+  createdAt: number;
+}
+
+/** A private, generated reflection for one character message. This is never part of chat or memory data. */
+export interface InnerVoiceRecord {
+  id: string;
+  /** Always the archive/canonical Character ID, never a contact instance ID. */
+  characterId: string;
+  /** Direct-chat boundary. Present for every direct-chat Inner Voice record. */
+  relationId?: string;
+  /** Group-chat boundary. Present for every group-chat Inner Voice record. */
+  groupId?: string;
+  messageId: string;
+  conversationId: string;
+  triggerMessageSummary: string;
+  /** A complete, character-specific emotional sentence for the current moment. */
+  emotionalState?: string;
+  /** @deprecated Legacy one-word state, retained only for rendering existing records. */
+  state: string;
+  content: string;
+  /** Translation is kept alongside the reflection instead of modifying Message. */
+  translation?: string;
+  createdAt: number;
 }
 
 export interface MomentComment {
   id: string;
+  /** Stable actor identity prevents comments from different relationships being mixed by display name. */
+  characterId?: string;
+  relationId?: string;
+  /** Stable relationship-network NPC identity, when the comment was generated by an NPC. */
+  sourceNpcId?: string;
   authorName: string;
   authorAvatar: string;
   content: string;
   timestamp: number;
+  /** Stable parent comment id for public reply threads. */
+  replyToCommentId?: string;
 }
+
+/** Audience for a character's social post. Legacy moments without this field are public. */
+export type MomentVisibility = "public" | "private" | "user" | "specific";
 
 export interface Moment {
   id: string;
   characterId?: string; // If posted by a character, otherwise user
+  /** Direct-chat relationship that owns an automatically generated character Moment. */
+  relationId?: string;
+  /** Optional stable source when a relationship-network NPC publishes the post. */
+  relationshipNetworkNpcId?: string;
   authorName: string;
   authorAvatar: string;
   content: string;
@@ -116,20 +311,326 @@ export interface Moment {
   /** Legacy comments parsed from older post content that the user has removed. */
   deletedCommentIds?: string[];
   image?: string; // base64 or URL
+  /** Generated/uploaded image blobs can live in IndexedDB instead of metadata. */
+  imageAssetId?: string;
+  /** Original aspect metadata retained so uploaded photos are never forced into a square tile. */
+  imageWidth?: number;
+  imageHeight?: number;
   /** A placeholder image rendered from text until image generation is available. */
   imageType?: "photo" | "text";
   imageDescription?: string;
   /** The user identity whose social circle this post belongs to. */
   ownerIdentityId?: string;
+  /** Who can see this post. `private` stays on the character phone; `user` is visible to the owner only. */
+  visibility?: MomentVisibility;
+  /** Character or identity ids selected for `specific` visibility. */
+  visibilityTargetIds?: string[];
+  /** Stable link back to the originating character-phone post. */
+  sourceCharacterPhonePostId?: string;
 }
+
+export interface ForumPublicAuthor {
+  displayName: string;
+  avatar?: string;
+  kind: "user" | "anonymous-user" | "ai-character" | "anonymous-ai" | "virtual";
+  isAnonymous: boolean;
+}
+
+export interface ForumVirtualProfile {
+  id: string;
+  displayName: string;
+  avatarSeed: string;
+  publicStyle: string;
+}
+
+/**
+ * A user-created, forum-only community identity.  It is intentionally not a
+ * Character and must never be linked to chat, relationships, or Memory.
+ */
+export interface ForumCommunityNpc {
+  id: string;
+  ownerIdentityId: string;
+  displayName: string;
+  avatar?: string;
+  personaSummary: string;
+  publicStyle: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Internal forum actor identity. Never copy this into a public forum DTO. */
+export type ForumActorRef =
+  | { kind: "relationship"; relationId: string; characterId: string }
+  | { kind: "virtual"; virtualProfileId: string };
+
+export interface ForumActorState {
+  ownerIdentityId: string;
+  threadId: string;
+  actorKey: string;
+  actor: ForumActorRef;
+  lastReplyAt?: number;
+  recentReplyIds: string[];
+  recentTopicFingerprints: string[];
+  hourlyReplyTimestamps: number[];
+  cooldownUntil?: number;
+  updatedAt: number;
+}
+
+export interface ForumThread {
+  id: string;
+  ownerIdentityId: string;
+  /** Stable link to the current local Forum profile for non-anonymous user posts. */
+  authorUserId?: string;
+  publicAuthor: ForumPublicAuthor;
+  /** Private author mapping is never copied into a public snapshot or Message. */
+  privateAuthorRelationId?: string;
+  privateAuthorCharacterId?: string;
+  title: string;
+  body: string;
+  source: "user" | "user-anonymous" | "ai-character" | "ai-character-anonymous" | "ai-virtual" | "virtual";
+  occurredAt: number;
+  baseLikeCount: number;
+  likedByIdentityIds: string[];
+  replyCount: number;
+  createdAt: number;
+  updatedAt: number;
+  /** Public thread activity time. Likes and views must not advance this value. */
+  lastActivityAt?: number;
+  /** Public-only continuity metadata for eligible AI/NPC story threads. */
+  storyArc?: import("./domain/forum/forumStoryArc").ForumStoryArc;
+}
+
+export interface ForumReply {
+  id: string;
+  threadId: string;
+  ownerIdentityId: string;
+  /** Stable link to the current local Forum profile for non-anonymous user replies. */
+  authorUserId?: string;
+  /** Main post is floor 1. Reply floors are allocated once and never renumbered. */
+  floor: number;
+  /** Missing on phase-one records means a normal reply. */
+  kind?: "reply" | "author-update";
+  publicAuthor: ForumPublicAuthor;
+  body: string;
+  replyToReplyId?: string;
+  replyToFloor?: number;
+  replyToAuthorName?: string;
+  quotedText?: string;
+  source: "user" | "user-anonymous" | "ai-character" | "ai-character-anonymous" | "ai-virtual";
+  occurredAt: number;
+  baseLikeCount: number;
+  likedByIdentityIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  /** Deleted replies remain as tombstones so floors and quote targets stay stable. */
+  isDeleted?: boolean;
+  deletedAt?: number;
+  /** Local scheduling metadata. It is intentionally omitted from shares and backups. */
+  privateActor?: ForumActorRef;
+}
+
+export interface ForumActivityActorSlot {
+  slotId: string;
+  publicAuthor: ForumPublicAuthor;
+  actor: ForumActorRef;
+  safePublicStyle: string;
+}
+
+export interface ForumPendingActivityEvent {
+  id: string;
+  ownerIdentityId: string;
+  threadId: string;
+  batchId: string;
+  localId: string;
+  actorSlotSnapshot: ForumActivityActorSlot;
+  privateActor?: ForumActorRef;
+  kind: "reply" | "author-update";
+  body: string;
+  replyTarget: { type: "thread" } | { type: "floor"; floor: number } | { type: "batch"; localId: string };
+  scheduledAt: number;
+  status: "pending" | "released" | "skipped";
+  resolvedReplyId?: string;
+  resolvedFloor?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ForumActivityTask {
+  id: string;
+  ownerIdentityId: string;
+  threadId: string;
+  trigger: "automatic" | "manual-thread-refresh" | "initial-replies" | "like-engagement" | "user-interaction";
+  status: "running" | "succeeded" | "failed" | "blocked";
+  startedAt: number;
+  completedAt?: number;
+  retryAfter?: number;
+  pendingEvents: ForumPendingActivityEvent[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ForumMutationEvent {
+  type: "reply-created" | "thread-updated";
+  ownerIdentityId: string;
+  threadId: string;
+  replyId?: string;
+  publicAuthor?: ForumPublicAuthor;
+  occurredAt: number;
+}
+
+export interface ForumUserProfile {
+  ownerIdentityId: string;
+  displayName: string;
+  avatar?: string;
+  avatarAssetId?: string;
+  bio?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ForumVisitHistory {
+  id: string;
+  ownerIdentityId: string;
+  threadId: string;
+  lastVisitedAt: number;
+  visitCount: number;
+  publicSnapshot: ForumThreadPublicSnapshot;
+}
+
+export interface ForumReplyPublicSnapshot {
+  id: string;
+  floor: number;
+  body: string;
+  publicAuthor: ForumPublicAuthor;
+  occurredAt: number;
+  isDeleted?: boolean;
+}
+
+export interface ForumLikeHistoryRecord {
+  id: string;
+  ownerIdentityId: string;
+  targetType: "thread" | "reply";
+  threadId: string;
+  replyId?: string;
+  likedAt: number;
+  publicSnapshot: {
+    thread: ForumThreadPublicSnapshot;
+    reply?: ForumReplyPublicSnapshot;
+  };
+}
+
+export interface ForumNotification {
+  id: string;
+  eventKey: string;
+  ownerIdentityId: string;
+  type: "thread-reply" | "reply-reply";
+  actorPublicSnapshot: ForumPublicAuthor;
+  threadId: string;
+  replyId: string;
+  targetReplyId?: string;
+  preview: string;
+  occurredAt: number;
+  readAt?: number;
+}
+
+export type ForumGenerationTrigger =
+  | "refresh"
+  | "initial-replies"
+  | "lazy"
+  | "like-engagement"
+  | "manual-thread-refresh";
+export type ForumGenerationTaskStatus = "running" | "succeeded" | "failed" | "stale";
+
+export interface ForumGenerationTask {
+  id: string;
+  taskKey: string;
+  ownerIdentityId: string;
+  relationId?: string;
+  characterId?: string;
+  threadId?: string;
+  trigger: ForumGenerationTrigger;
+  status: ForumGenerationTaskStatus;
+  startedAt: number;
+  completedAt?: number;
+  retryAfter?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ForumThreadPublicSnapshot {
+  threadId: string;
+  title: string;
+  body: string;
+  publicAuthor: ForumPublicAuthor;
+  occurredAt: number;
+  replyCount: number;
+  replies: Array<{
+    id: string;
+    floor: number;
+    kind?: "reply" | "author-update";
+    body: string;
+    publicAuthor: ForumPublicAuthor;
+    replyToFloor?: number;
+    replyToAuthorName?: string;
+    quotedText?: string;
+    occurredAt: number;
+  }>;
+}
+
+export interface ForumShare {
+  id: string;
+  ownerIdentityId: string;
+  threadId: string;
+  targetRelationId: string;
+  conversationId: string;
+  sourceMessageId: string;
+  publicSnapshot: ForumThreadPublicSnapshot;
+  createdAt: number;
+}
+
+/**
+ * A disposable, public-text-only translation cache entry. Forum source text is
+ * never replaced by this value.
+ */
+export interface ForumTranslation {
+  id: string;
+  ownerIdentityId: string;
+  contentType: "thread" | "reply";
+  contentId: string;
+  sourceContentHash: string;
+  targetLanguage: string;
+  translatedTitle?: string;
+  translatedBody: string;
+  createdAt: number;
+  lastAccessedAt: number;
+}
+
+export type MusicTrackSource = "local" | "network-link" | "netease";
 
 export interface MusicTrack {
   id: string;
   title: string;
   artist: string;
-  url: string; // File ObjectURL or raw internet URL
+  /** Runtime ObjectURL for a local file, or the persisted URL for a network track. */
+  url: string;
   isLocal: boolean;
+  /** Explicit provider identity; missing values are inferred for legacy tracks. */
+  source?: MusicTrackSource;
+  /** Provider-native ID for remote tracks; never used as a local IndexedDB key. */
+  providerTrackId?: string;
+  /** Account scope for remote provider records, when a provider account is involved. */
+  providerAccountId?: string;
+  /** Runtime-only expiry hint for a provider playback URL. */
+  remoteUrlExpiresAt?: number;
   duration?: string;
+  /** Local audio blobs live in MusicAppDB. Old tracks use id as the asset key. */
+  audioAssetId?: string;
+  audioMimeType?: string;
+  /** Local cover blobs live in MusicAppDB; remote covers may use coverUrl. */
+  coverAssetId?: string;
+  coverMimeType?: string;
+  coverUrl?: string;
 }
 
 export interface MusicPlaylist {
@@ -138,13 +639,16 @@ export interface MusicPlaylist {
   tracks: string[]; // Track IDs
 }
 
-export interface CalendarEvent {
-  id: string;
-  date: string; // YYYY-MM-DD
-  title: string;
-  description?: string;
-  isDone: boolean;
-}
+export type WorldBookScope =
+  | { kind: "global" }
+  | { kind: "character"; characterId: string }
+  | { kind: "characters"; characterIds: string[] }
+  | { kind: "identity"; userIdentityId: string }
+  | { kind: "relationship"; relationId: string; characterId: string; userIdentityId: string };
+
+export type WorldBookVisibility = "public" | "private";
+export type WorldBookPurpose = "world_canon" | "persona_rule" | "relationship_context" | "generation_rule";
+export type WorldBookPosition = "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history" | "at_depth";
 
 export interface WorldBookEntry {
   id: string;
@@ -153,10 +657,17 @@ export interface WorldBookEntry {
   content: string;
   timestamp: number;
   characterId?: string; // "global" or a specific character's ID
+  /** Multiple canonical characters that may use this entry. */
+  characterIds?: string[];
+  /** New explicit scope; missing scope keeps legacy character/global reads compatible. */
+  scope?: WorldBookScope;
+  /** Public entries must opt in explicitly; missing visibility is legacy/private. */
+  visibility?: WorldBookVisibility;
+  purpose?: WorldBookPurpose;
   triggerType?: "keys" | "constant" | "vector";
   keywords?: string;
   isActive?: boolean;
-  position?: "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history";
+  position?: WorldBookPosition;
   depth?: number;
 }
 
@@ -166,6 +677,8 @@ export interface UserIdentity {
   avatar: string;
   signature: string;
   bio: string;
+  /** Alias identities belong to the contacts identity switcher, not the main profile/settings surfaces. */
+  kind?: "primary" | "alias";
 }
 
 export interface UserSettings {
@@ -176,7 +689,11 @@ export interface UserSettings {
   apiKey: string;
   selectedModel: string;
   wallpaper: string; // Wallpaper URL or base64
+  /** Distinguishes an explicit user/preset wallpaper from legacy placeholder defaults. */
+  wallpaperSource?: "user" | "preset" | "legacy-default";
   customIcons: Record<string, string>; // appKey -> image base64/URL or empty
+  /** Four applications that remain pinned in the bottom Dock. */
+  dockApps?: string[];
   bubbleCss: string; // Custom bubble CSS
   globalCss: string; // Custom global CSS
   /** CSS scoped to active chat conversation screens only. */
@@ -184,6 +701,27 @@ export interface UserSettings {
   /** Globally configured chat function icon resources. */
   chatIcons?: ChatIconOverrides;
   globalChatStylePreset?: "default" | "floating-cute" | "liquid-glass";
+  /** Prevents the first-use liquid-glass defaults from overwriting later user colour choices. */
+  liquidGlassTextDefaultsApplied?: boolean;
+  /** Marks the complete liquid-glass bubble/background defaults as initialized. */
+  liquidGlassVisualDefaultsApplied?: boolean;
+  /** One-time migration marker for legacy unreadable liquid-glass palettes. */
+  liquidGlassPaletteMigrationVersion?: number;
+  liquidGlassOtherBubbleBg?: string;
+  liquidGlassOtherBubbleColor?: string;
+  liquidGlassOtherBubbleOpacity?: number;
+  liquidGlassOtherBubbleRadius?: number;
+  liquidGlassSelfBubbleBg?: string;
+  liquidGlassSelfBubbleColor?: string;
+  liquidGlassSelfBubbleOpacity?: number;
+  liquidGlassSelfBubbleRadius?: number;
+  liquidGlassBubbleTailEnabled?: boolean;
+  liquidGlassBubbleTailVertical?: "top" | "center" | "bottom";
+  liquidGlassBubblePosition?: "side" | "above" | "below";
+  liquidGlassBubbleBorderEnabled?: boolean;
+  liquidGlassBubbleBorderWidth?: number;
+  liquidGlassOtherBubbleBorderColor?: string;
+  liquidGlassSelfBubbleBorderColor?: string;
   activePreset: string; // Preset name
   momentsCover?: string; // Moments cover image URL or base64
   apiEndpoint?: string;
@@ -192,16 +730,28 @@ export interface UserSettings {
   apiPresets?: ApiPreset[];
   activeApiPresetId?: string;
   showHomeButton?: boolean;
+  /** Hide the simulated phone status bar when enabled. */
+  hideStatusBar?: boolean;
   dockColor?: string;
   dockOpacity?: number;
   widgetOpacity?: number;
   customFontName?: string;
   customFontData?: string;
+  /** Global application typography. Uploaded font binaries live in IndexedDB. */
+  globalFontSource?: "default" | "upload" | "url";
+  globalFontName?: string;
+  globalFontUrl?: string;
+  globalFontAssetId?: string;
+  globalFontSize?: number;
   iconBorderRadius?: number;
   iconBgOpacity?: number;
   iconBorderWidth?: number;
   iconBorderOpacity?: number;
   hideAppNames?: boolean;
+  /** Color used for desktop application names. */
+  desktopAppTextColor?: string;
+  /** Built-in icon treatment; light keeps default glyphs legible on dark wallpapers. */
+  desktopIconMode?: "light" | "dark";
   enableTimeAwareness?: boolean;
   homeButtonPosition?: { x: number; y: number };
   identities?: UserIdentity[];
@@ -209,6 +759,8 @@ export interface UserSettings {
   avatarBorderRadius?: number;
   otherBubbleBg?: string;
   otherBubbleColor?: string;
+  /** One-time repair version for unreadable legacy classic bubble palettes. */
+  classicBubblePaletteMigrationVersion?: number;
   otherBubbleRadius?: number;
   otherBubbleOpacity?: number;
   selfBubbleBg?: string;
@@ -223,6 +775,8 @@ export interface UserSettings {
   bubbleTailEnabled?: boolean;
   bubbleTailVertical?: "top" | "center" | "bottom";
   bubblePosition?: "side" | "above" | "below";
+  /** Base vertical gap between rendered chat message rows, in pixels. */
+  bubbleSpacing?: number;
   hideNicknames?: boolean;
   bubbleBorderEnabled?: boolean;
   bubbleBorderWidth?: number;
@@ -232,8 +786,9 @@ export interface UserSettings {
   avatarBorderWidth?: number;
   avatarBorderColor?: string;
 
-  // MiniMax TTS Settings
+  // Voice synthesis settings. The legacy enableMiniMaxTts key remains the global switch.
   enableMiniMaxTts?: boolean;
+  ttsProvider?: "minimax" | "mossland";
   minimaxApiKey?: string;
   minimaxGroupId?: string;
   minimaxModel?: string;
@@ -241,7 +796,18 @@ export interface UserSettings {
   minimaxPitch?: number;
   minimaxVol?: number;
   minimaxProxyUrl?: string;
+  mosslandApiEndpoint?: string;
+  mosslandApiKey?: string;
+  mosslandModel?: string;
+
+  // OpenAI Images compatible settings. Disabled by default so no image request
+  // can occur until both this and the canonical Character setting are enabled.
+  enableImageGeneration?: boolean;
+  imageApiPresets?: ImageApiPreset[];
+  activeImageApiPresetId?: string;
 }
+
+export type UserSettingsUpdate = UserSettings | ((previous: UserSettings) => UserSettings);
 
 export interface ApiPreset {
   id: string;
@@ -265,18 +831,113 @@ export interface StylePreset {
 export interface HomeScreenItem {
   id: string;
   type: "app" | "widget";
-  widgetType?: "album" | "music" | "anniversary" | "todo";
-  size: "1x1" | "2x2" | "1x4" | "2x4";
+  widgetType?: "album" | "calendar-album" | "time" | "music" | "dual-music" | "anniversary" | "todo" | "reading" | "chat-stats" | "welcome";
+  size: "1x1" | "2x2" | "1x4" | "2x3" | "2x4";
+  /** Legacy mirror kept during migration. position.page is authoritative. */
   page: number;
+  position?: HomeScreenPosition;
+}
+
+export interface HomeScreenPosition {
+  page: number;
+  row: number;
+  column: number;
+}
+
+export interface DualMusicWidgetConfig {
+  widgetId: string;
+  ownerIdentityId: string;
+  relationId?: string;
+  /** Canonical profile reference only; relationId remains the ownership boundary. */
+  characterId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface IdentityMusicState {
+  ownerIdentityId: string;
+  currentTrackId?: string;
+  recentTrackIds: string[];
+  updatedAt: number;
+}
+
+export interface RelationshipMusicState {
+  relationId: string;
+  conversationId: string;
+  /** Canonical profile reference only. */
+  characterId: string;
+  currentTrackId?: string;
+  recentTrackIds: string[];
+  selectedAt?: number;
+  nextRefreshAt?: number;
+  selectionReason?: string;
+  selectionSource?: "ai" | "local";
+  updatedAt: number;
 }
 
 export interface MemoryItem {
   id: string;
   characterId: string;
+  /** The direct relationship that owns this remembered interaction. */
+  relationId?: string;
+  /** Optional scope metadata for records created by newer memory writers. */
+  userIdentityId?: string;
+  conversationId?: string;
+  /** The Moment that created this automatic memory, when applicable. */
+  sourceMomentId?: string;
+  /** The cinema media that created this compatibility memory, when applicable. */
+  sourceCinemaId?: string;
+  /** Authoritative Truth Layer records represented by this compatibility view. */
+  sourceKnowledgeClaimIds?: string[];
+  /** Temporarily excludes this record from recall without deleting its content. */
+  recallDisabled?: boolean;
   content: string;
   timestamp: number;
   importance?: number; // 1-10, default 5
   isManual?: boolean;
+  /** A confirmed reading interaction may mirror into this exact relationship only. */
+  sourceReadingRoomId?: string;
+  sourceReadingCommentId?: string;
+  sourceReadingEvidence?: {
+    bookId: string;
+    chapterId?: string;
+    paragraphAnchorId?: string;
+  };
+}
+
+export interface MusicPlaybackHistoryItem {
+  id: string;
+  ownerIdentityId: string;
+  trackId: string;
+  title: string;
+  artist: string;
+  source?: MusicTrackSource;
+  providerTrackId?: string;
+  providerAccountId?: string;
+  playedAt: number;
+}
+
+export interface MusicRemoteLibraryItem {
+  id: string;
+  ownerIdentityId: string;
+  provider: "netease";
+  providerAccountId: string;
+  providerTrackId: string;
+  title: string;
+  artist: string;
+  coverUrl?: string;
+  savedAt: number;
+}
+
+export type RedPacketMode = "lucky" | "exclusive";
+
+export interface RedPacketPayload {
+  mode: RedPacketMode;
+  totalAmount: number;
+  count: number;
+  greeting: string;
+  recipientId?: string;
+  recipientName?: string;
 }
 
 export interface MemoryVaultSettings {
@@ -286,29 +947,60 @@ export interface MemoryVaultSettings {
   extractInterval: number;
 }
 
+export interface MemoryArchiveStats {
+  sourceMessageCount: number;
+  acceptedTruthCount: number;
+  summaryCount: number;
+  ruleCount: number;
+  compatibilityCount: number;
+  rejectedCandidateCount: number;
+}
+
 export interface ImmediateSummaryTask {
   characterId: string;
+  relationId?: string;
+  conversationId?: string;
   status: "idle" | "summarizing" | "completed" | "error";
   rounds: number;
   extractedCount: number;
+  archiveStats?: MemoryArchiveStats;
   error?: string;
 }
 
 export interface OfflineStory {
   id: string;
   characterId: string;
+  /** Direct relationship that owns this story. Group stories intentionally leave this unset. */
+  relationId?: string;
+  conversationId?: string;
   characterIds?: string[];
+  /** Frozen display data for multiplayer story cards; live characters remain authoritative for prompts. */
+  participantSnapshots?: Array<{
+    id: string;
+    name: string;
+    avatar?: string;
+  }>;
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** One-time director guidance, consumed after the next successful generation. */
+  oneTimeGuidance?: string;
+  /** Ongoing director guidance, applied to every future generation. */
+  ongoingGuidance?: string;
   mode: "director" | "continue" | "if";
   ifPrompt?: string;
   sourceChatId?: string; // Optional reference source
   sourceChatMsgCount?: number;
+  /** Confirmed appointment that explicitly opened this continuation. */
+  sourceAppointmentId?: string;
+  /** One-shot request for the inviting character to open the first scene. */
+  autoStartFirstAct?: boolean;
   messages: Message[];
   wordLimit?: number;
   partnerPerspective?: string;
   userPerspective?: string;
+  /** Defaults to true for legacy stories. When false, AI cannot speak or decide for the user. */
+  allowCharacterToSpeakForUser?: boolean;
   stylePresetId?: string;
   stylePromptName?: string;
   stylePromptContent?: string;
@@ -316,10 +1008,20 @@ export interface OfflineStory {
   customCss?: string;
   /** Continue-mode stories inherit this from the source chat; other modes choose it at creation. */
   enableTimeAwareness?: boolean;
+  /** Structured WorldBook snapshot captured at story creation and activated per turn. */
+  worldBookSnapshot?: WorldBookEntry[];
+  /** Confirmed Truth/manual-memory snapshot captured for this isolated story. */
+  knowledgeSnapshot?: string[];
+  /** Per-participant memory snapshot for multi-character stories. */
+  memberKnowledgeSnapshots?: Record<string, string[]>;
   /** Frozen at the moment an online chat is explicitly imported into this story. */
   importedContext?: {
     messages: Message[];
     memories: string[];
+    /** Deterministic facts extracted at the online → offline handoff. */
+    handoffFacts?: OfflineHandoffFact[];
+    /** Group imports keep each member's relationship-private memory separate. */
+    memberMemories?: Record<string, string[]>;
     worldBook: string[];
     importedAt: number;
   };
@@ -330,12 +1032,36 @@ export interface OfflineStory {
   memorySyncStatus?: "pending" | "synced" | "failed";
   lastMemorySyncAt?: number;
   syncedSourceMessageIds?: string[];
+  /** Durable one-shot bridge from a completed offline story back to this relationship's online chat. */
+  onlineHandoff?: {
+    status: "pending" | "acknowledged";
+    createdAt: number;
+    startedAt: number;
+    endedAt: number;
+    sourceMessageIds: string[];
+    /** Successful online replies that received this hidden bridge. */
+    deliveredReplyCount?: number;
+    acknowledgedAt?: number;
+  };
 }
 
 export interface Sticker {
   id: string;
   name: string;
   url: string; // Dynamic ObjectURL or base64/url
+  /** Cached multimodal understanding. Chat prompts use this instead of an inaccessible blob/url. */
+  semanticDescription?: string;
+}
+
+export interface OfflineHandoffFact {
+  id: string;
+  sourceMessageIds: string[];
+  speaker: "user" | "character";
+  kind: "schedule" | "plan" | "preference" | "context";
+  content: string;
+  /** Human-readable absolute local time resolved from relative words such as 明天/明晚. */
+  normalizedTime?: string;
+  sourceTimestamp: number;
 }
 
 export interface StickerGroup {

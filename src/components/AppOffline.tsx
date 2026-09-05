@@ -1,33 +1,75 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { 
-  ArrowLeft, Plus, Trash2, Send, Sparkles, BookOpen, 
-  Link2, Calendar, MessageSquare, ChevronRight, HelpCircle, 
-  Settings, RefreshCw, Layers, Cpu, MoreHorizontal
+  ArrowLeft, Plus, Trash2, Pencil, Send, Sparkles, BookOpen,
+  Link2, Calendar, MessageSquare, ChevronRight, UserRound, Users,
+  RefreshCw, Layers
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, Message, OfflineStory, MemoryItem, MemoryVaultSettings, UserSettings, WorldBookEntry } from "../types";
-import { apiChat, apiExtractMemories } from "../utils/apiHelper";
-import { splitTextToOfflineSegments } from "../utils/pngParser";
-import { formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
-import { collectOfflineHandoffContent, createOfflineStoryHandoffMemory, filterOfflineExtractedFacts, getOfflineMemorySourceMessages, getOfflineStorySyncMarker, hasUnsyncedOfflineMemoryProgress, shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
-import { getLatestWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
+import { apiChat, apiExtractMemoriesWithModelFallback } from "../utils/apiHelper";
+import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
+import { formatDelicateMemoryDiary, formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
+import { shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
+import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
+import { getLatestWorldBookEntries } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 import "./offline/offlineStory.css";
 import { OfflineGuidancePanel } from "./offline/OfflineGuidancePanel";
 import { OfflineReadingPreferences, OfflineReadingSettings } from "./offline/OfflineReadingSettings";
+import { OfflineWorkspaceHeader } from "../features/offline/components/OfflineWorkspaceHeader";
+import { useOfflineStorySettings } from "../features/offline/hooks/useOfflineStorySettings";
+import { useOfflineToast } from "../features/offline/hooks/useOfflineToast";
 import { OfflineStoryCard } from "./offline/OfflineStoryCard";
+import { OFFLINE_CSS_EXAMPLE_TEMPLATE, scopeOfflineCustomCss } from "./offline/offlineCustomCss";
+import { MessageList } from "../features/chat/components/MessageList";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
-import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
-import { AppHeader, ConfirmDialog, IconButton, Input, PopoverMenu } from "./ui";
+import { resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
+import { findRelationshipForCanonicalCharacter, getConversationId, getOfflineGroupModeStorageKey, getOfflineGroupStoryStorageKey, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { applyConfirmedOfflineRelationshipTransition } from "../domain/relationship/offlineRelationshipTransition";
+import type { KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
+import { countOfflineStoriesForRelation } from "../domain/relationship/offlineStoryScope";
+import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offlineChatNavigation";
+import { captureOfflineStoryCompletedEvent } from "../features/characterLife/services/offlineStoryEventCaptureService";
+import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../domain/prompt/offlineIdentityBinding";
+import { Button, ConfirmDialog, IconButton } from "./ui";
+import { PromptComposer } from "../domain/prompt/PromptComposer";
+import { collectOfflineWorldBookContext, formatOfflineWorldBookEntries } from "../features/offline/prompts/offlineWorldBookContext";
+import { applyOfflineStoryRegeneration, prepareOfflineStoryRegeneration } from "../domain/offlineStory/offlineStoryRegeneration";
+import { createOfflineGroupParticipantMemories } from "../features/offline/services/offlineGroupMemorySync";
+import { useOfflineWorkspaceScope } from "../features/offline/hooks/useOfflineWorkspaceScope";
+import { useOfflineStoryCreationState } from "../features/offline/hooks/useOfflineStoryCreationState";
+import { useOfflineStoryCreationActions } from "../features/offline/hooks/useOfflineStoryCreationActions";
+import { useOfflineStoryMemorySyncActions } from "../features/offline/hooks/useOfflineStoryMemorySyncActions";
+import { useOfflineStoryGenerationActions } from "../features/offline/hooks/useOfflineStoryGenerationActions";
+import { useOfflineReadingState } from "../features/offline/hooks/useOfflineReadingState";
+import { useOfflineStoryRuntimeState } from "../features/offline/hooks/useOfflineStoryRuntimeState";
+import { useOfflineStoryPersistence } from "../features/offline/hooks/useOfflineStoryPersistence";
+import { useOfflineMessageEditorState } from "../features/offline/hooks/useOfflineMessageEditorState";
+import { useOfflineMessageEditorActions } from "../features/offline/hooks/useOfflineMessageEditorActions";
+import { useOfflineStoryManagementActions } from "../features/offline/hooks/useOfflineStoryManagementActions";
+import { useOfflineMessageActions } from "../features/offline/hooks/useOfflineMessageActions";
+import { useOfflineRegenerationActions } from "../features/offline/hooks/useOfflineRegenerationActions";
+import { useOfflineWorkspaceExitActions } from "../features/offline/hooks/useOfflineWorkspaceExitActions";
+import { useOfflineStoryExitFinalization } from "../features/offline/hooks/useOfflineStoryExitFinalization";
+import { useOfflineStoryAutoStart } from "../features/offline/hooks/useOfflineStoryAutoStart";
+import { getOfflineStoryMemoryRepairNeeds } from "../features/offline/services/offlineStoryMemoryRepairPolicy";
+import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
+import { writeString } from "../core/storage/storageAdapter";
+import { createId } from "../core/id/createId";
+import type { Appointment } from "../domain/schedule/scheduleTypes";
+import { isWorldBookEntryForAnyCharacter, isWorldBookEntryForCharacter } from "../domain/worldbook/worldBookVisibility";
+import { buildOfflineHandoffFacts, formatOfflineHandoffFactsForPrompt, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../domain/offlineStory/offlineHandoffContext";
 
 interface AppOfflineProps {
   characters: Character[];
+  relationships: CharacterRelationship[];
   settings: UserSettings;
   offlineStories: OfflineStory[];
-  onSaveOfflineStory: (story: OfflineStory) => void;
+  onSaveOfflineStory: (story: OfflineStory) => boolean | Promise<boolean>;
+  onSaveRelationships: (relationships: CharacterRelationship[]) => void;
   onDeleteOfflineStory: (storyId: string) => void;
   onClose: () => void;
-  onNavigateToChat?: (charId: string) => void;
+  onNavigateToChat?: (charId: string, relationId?: string, conversationId?: string) => void;
   memories: MemoryItem[];
   onSaveMemories: (mems: MemoryItem[]) => void;
   /** Resolves only after the offline handoff memories are durably persisted. */
@@ -35,14 +77,22 @@ interface AppOfflineProps {
   recallSettings: MemoryVaultSettings;
   messages?: Message[];
   activeChatCharId?: string | null;
+  activeChatRelationId?: string | null;
   worldBookEntries?: WorldBookEntry[];
+  appointments?: Appointment[];
+  onSaveAppointment?: (appointment: Appointment) => boolean;
+  /** Story requested by the previous chat screen; consumed by the story opener. */
+  openStoryId?: string | null;
+  onOpenOfflineStoryHandled?: (storyId: string) => void;
 }
 
 export default function AppOffline({
   characters = [],
+  relationships = [],
   settings,
   offlineStories = [],
   onSaveOfflineStory,
+  onSaveRelationships,
   onDeleteOfflineStory,
   onClose,
   onNavigateToChat,
@@ -52,238 +102,200 @@ export default function AppOffline({
   recallSettings,
   messages = [],
   activeChatCharId = null,
-  worldBookEntries = []
+  activeChatRelationId = null,
+  worldBookEntries = [],
+  appointments = [],
+  onSaveAppointment,
+  openStoryId = null,
+  onOpenOfflineStoryHandled,
 }: AppOfflineProps) {
-  const selectableCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
-  const selectableCharacterIds = getAvailableCanonicalCharacterIds(selectableCharacters);
+  const activeIdentityId = settings.activeIdentityId || "identity-1";
   const resolveCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
-  const [selectedCharId, setSelectedCharId] = useState<string>(() => {
-    const canonicalActiveChatId = activeChatCharId ? resolveCharacterId(activeChatCharId) : null;
-    if (canonicalActiveChatId && selectableCharacters.some(c => c.id === canonicalActiveChatId)) {
-      return canonicalActiveChatId;
-    }
-    return selectableCharacters[0]?.id || "";
+  const { toast, showToast } = useOfflineToast();
+  const {
+    selectableCharacters,
+    selectableCharacterIds,
+    selectedCharId,
+    setSelectedCharId,
+    selectedRelationId,
+    setSelectedRelationId,
+    relationChoices,
+    activeStory,
+    setActiveStory,
+    activeStoryRef,
+    clearActiveStorySnapshot,
+    canAccessStoryFromCurrentRelation,
+    isGroupOfflineStory,
+    handleOpenStory,
+    clearOfflineSession,
+  } = useOfflineWorkspaceScope({
+    characters,
+    relationships,
+    activeIdentityId,
+    activeChatCharId,
+    activeChatRelationId,
+    offlineStories,
+    openStoryId,
+    onOpenOfflineStoryHandled,
+    showToast,
   });
-  const [activeStory, setActiveStory] = useState<OfflineStory | null>(null);
-  const activeStoryRef = useRef<OfflineStory | null>(null);
-  const [lastLoadedCharId, setLastLoadedCharId] = useState<string | null>(null);
+  const creationCharacters = selectableCharacters.filter((character) => !character.isGroupChat);
+  const creationGroups = selectableCharacters.filter((character) => character.isGroupChat);
+  const [creationScope, setCreationScope] = useState<"single" | "multi">(
+    selectableCharacters.find((character) => character.id === selectedCharId)?.isGroupChat ? "multi" : "single",
+  );
   
-  // Creation modal state
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [selectedCharIds, setSelectedCharIds] = useState<string[]>([]);
-  const [newTitle, setNewTitle] = useState("");
-
-  useEffect(() => {
-    if (showCreateModal) {
-      setSelectedCharIds([selectedCharId]);
-    }
-  }, [showCreateModal, selectedCharId]);
-  const [newMode, setNewMode] = useState<"director" | "continue" | "if">("director");
-  const [newIfPrompt, setNewIfPrompt] = useState("");
-  const [newStartFromChat, setNewStartFromChat] = useState<boolean>(false);
-  const [newTimeAwareness, setNewTimeAwareness] = useState<boolean>(false);
+  const {
+    showCreateModal, setShowCreateModal,
+    editingStory, setEditingStory,
+    editingStoryTitle, setEditingStoryTitle,
+    editingStoryIfPrompt, setEditingStoryIfPrompt,
+    selectedCharIds, setSelectedCharIds,
+    newTitle, setNewTitle,
+    newMode, setNewMode,
+    newIfPrompt, setNewIfPrompt,
+    newStartFromChat, setNewStartFromChat,
+    newTimeAwareness, setNewTimeAwareness,
+  } = useOfflineStoryCreationState({ selectableCharacters, selectedCharId, characters });
 
   // Story composer input state
-  const [inputText, setInputText] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  const memorySyncInFlightRef = useRef(new Set<string>());
+  const {
+    inputText, setInputText,
+    isGenerating, setIsGenerating,
+    errorMsg, setErrorMsg,
+    memorySyncInFlightRef,
+    memorySyncingStoryId, setMemorySyncingStoryId,
+    storyPersistenceRef,
+    workspaceScrollRef,
+    workspaceEndRef,
+  } = useOfflineStoryRuntimeState();
 
-  const saveActiveStorySnapshot = (story: OfflineStory) => {
-    activeStoryRef.current = story;
-    onSaveOfflineStory(story);
-    setActiveStory(story);
-    return story;
-  };
+  const { saveActiveStorySnapshot } = useOfflineStoryPersistence({
+    activeStoryRef,
+    setActiveStory,
+    storyPersistenceRef,
+    onSaveOfflineStory,
+    showToast,
+  });
+  const { handleCreateStory } = useOfflineStoryCreationActions({
+    characters,
+    relationships,
+    messages,
+    memories,
+    worldBookEntries: worldBookEntries || [],
+    activeIdentityId,
+    selectedCharId,
+    selectedCharIds,
+    selectedRelationId,
+    relationChoices,
+    isMultiMode: creationScope === "multi",
+    newTitle,
+    newMode,
+    newIfPrompt,
+    newStartFromChat,
+    newTimeAwareness,
+    onSaveStorySnapshot: saveActiveStorySnapshot,
+    setShowCreateModal,
+    setNewTitle,
+    setNewMode,
+    setNewIfPrompt,
+    setNewStartFromChat,
+    setNewTimeAwareness,
+    showToast,
+  });
 
-  const clearActiveStorySnapshot = () => {
-    activeStoryRef.current = null;
-    setActiveStory(null);
-  };
+  const { editingMessageId, setEditingMessageId, editingText, setEditingText } = useOfflineMessageEditorState();
 
-  // A deleted archive profile may leave historical story records behind. Keep
-  // those records intact, but do not leave the deleted character selectable or
-  // an orphaned story open as an active workspace.
-  useEffect(() => {
-    if (selectedCharId && !selectableCharacterIds.has(selectedCharId)) {
-      setSelectedCharId(selectableCharacters[0]?.id || "");
-    }
-    if (activeStoryRef.current && !selectableCharacterIds.has(resolveOfflineStoryCharacterId(activeStoryRef.current, characters))) {
-      clearActiveStorySnapshot();
-    }
-  }, [characters, selectedCharId, activeStory?.id]);
-  
-  // Toast notifications
-  const [toast, setToast] = useState("");
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 3000);
-  };
+  const { handleStartEdit, handleSaveEdit, handleCancelEdit } = useOfflineMessageEditorActions({
+    activeStory,
+    editingText,
+    saveActiveStorySnapshot,
+    setEditingMessageId,
+    setEditingText,
+    showToast,
+  });
 
-  // Editing Message Content state
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState("");
+  const {
+    isReadingSettingsOpen, setIsReadingSettingsOpen,
+    readingPreferences, setReadingPreferences,
+    activeNodeMenuId, setActiveNodeMenuId,
+    pendingDeleteMessageId, setPendingDeleteMessageId,
+    isGuidancePanelOpen, setIsGuidancePanelOpen,
+    guidanceDraft, setGuidanceDraft,
+  } = useOfflineReadingState(activeStory);
+  const offlineStorySettings = useOfflineStorySettings({
+    activeStory,
+    characters,
+    worldBookEntries: worldBookEntries || [],
+    saveStory: saveActiveStorySnapshot,
+    showToast,
+  });
+  const {
+    isSettingsOpen, setIsSettingsOpen, customPresets, defaultStylePresets,
+    settingsWordLimit, setSettingsWordLimit, settingsPartnerP, setSettingsPartnerP,
+    settingsUserP, setSettingsUserP, settingsAllowCharacterToSpeakForUser, setSettingsAllowCharacterToSpeakForUser,
+    settingsStylePresetId, setSettingsStylePresetId, settingsStylePromptName, setSettingsStylePromptName,
+    settingsStylePromptContent, setSettingsStylePromptContent, settingsCustomCss, setSettingsCustomCss,
+    hasSelectedCustomPreset, handleSaveSettings, handleRefreshWorldBookSnapshot, handleCreateCustomPreset, handleDeleteCustomPreset,
+  } = offlineStorySettings;
+  const [offlineCssTemplateCopied, setOfflineCssTemplateCopied] = useState(false);
 
-  const handleStartEdit = (msgId: string, currentContent: string) => {
-    setEditingMessageId(msgId);
-    setEditingText(currentContent);
-  };
-
-  const handleSaveEdit = (msgId: string) => {
-    if (!activeStory) return;
-    const updatedMessages = activeStory.messages.map(m => {
-      if (m.id === msgId) {
-        return { ...m, content: editingText };
+  const copyOfflineCssTemplate = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(OFFLINE_CSS_EXAMPLE_TEMPLATE);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = OFFLINE_CSS_EXAMPLE_TEMPLATE;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
       }
-      return m;
-    });
-    const updatedStory = {
-      ...activeStory,
-      messages: updatedMessages,
-      updatedAt: Date.now()
-    };
-    saveActiveStorySnapshot(updatedStory);
-    setEditingMessageId(null);
-    setEditingText("");
-    showToast("修改内容已保存");
-  };
-
-  const handleCancelEdit = () => {
-    setEditingMessageId(null);
-    setEditingText("");
-  };
-
-  // Default Style Presets
-  const DEFAULT_STYLE_PRESETS = [
-    { id: "none", name: "默认风格", description: "无附加文风限制，由大模型自行生成合适笔触。" },
-    { id: "delicate", name: "细腻言情", description: "文笔细腻温柔，富有画面感，注重心理细节、细微神态描写与人物微表情，情感温和而饱满。" },
-    { id: "classic_chinese", name: "古典风雅", description: "词藻典雅凝练，带有浓郁的古风或武侠韵味，常运用四字成语、古雅景物描摹以及文质彬彬的对答。" },
-    { id: "light_novel", name: "轻小说动漫", description: "语言活泼欢快，多有内心独白或俏皮吐槽，画面感强烈，具有鲜明的轻小说和二次元戏剧色彩。" },
-    { id: "realist", name: "硬核写实", description: "笔触洗练干脆、直白有力，绝不娇揉造作，注重尘世烟火、生活细节与真实客观的场景反应。" },
-    { id: "philosophical", name: "文艺内敛", description: "富含哲学思考，语调略带沉郁或文艺，善于运用象征、留白与深沉隽永的内心活动描写。" }
-  ];
-
-  // Custom style presets state loaded from localStorage
-  const [customPresets, setCustomPresets] = useState<any[]>(() => {
-    const raw = localStorage.getItem("offline_custom_style_presets");
-    return raw ? JSON.parse(raw) : [];
-  });
-
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isReadingSettingsOpen, setIsReadingSettingsOpen] = useState(false);
-  const [readingPreferences, setReadingPreferences] = useState<OfflineReadingPreferences>({
-    fontSize: 15,
-    letterSpacing: 0,
-    lineHeight: 1.5,
-    paragraphSpacing: 18,
-    textColor: "#1D1D1F",
-    cardBackground: "#FFFFFF",
-  });
-  const [activeNodeMenuId, setActiveNodeMenuId] = useState<string | null>(null);
-  const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<string | null>(null);
-  const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
-  const workspaceMenuTriggerRef = useRef<HTMLButtonElement>(null);
-  const [isGuidancePanelOpen, setIsGuidancePanelOpen] = useState(false);
-  const [guidanceDraft, setGuidanceDraft] = useState({ oneTime: "", ongoing: "" });
-  const [settingsWordLimit, setSettingsWordLimit] = useState("");
-  const [settingsPartnerP, setSettingsPartnerP] = useState("third");
-  const [settingsUserP, setSettingsUserP] = useState("first");
-  const [settingsStylePresetId, setSettingsStylePresetId] = useState("none");
-  const [settingsStylePromptName, setSettingsStylePromptName] = useState("");
-  const [settingsStylePromptContent, setSettingsStylePromptContent] = useState("");
-  const [settingsShowAvatars, setSettingsShowAvatars] = useState(true);
-  const [settingsCustomCss, setSettingsCustomCss] = useState("");
-
-  const [newPresetName, setNewPresetName] = useState("");
-  const [newPresetContent, setNewPresetContent] = useState("");
-
-  useEffect(() => {
-    if (activeStory && isSettingsOpen) {
-      setSettingsWordLimit(activeStory.wordLimit ? String(activeStory.wordLimit) : "");
-      setSettingsPartnerP(activeStory.partnerPerspective || "third");
-      setSettingsUserP(activeStory.userPerspective || "first");
-      setSettingsStylePresetId(activeStory.stylePresetId || "none");
-      setSettingsStylePromptName(activeStory.stylePromptName || "");
-      setSettingsStylePromptContent(activeStory.stylePromptContent || "");
-      setSettingsShowAvatars(activeStory.showAvatars !== false); // default to true
-      setSettingsCustomCss(activeStory.customCss || "");
+      setOfflineCssTemplateCopied(true);
+      window.setTimeout(() => setOfflineCssTemplateCopied(false), 1500);
+    } catch {
+      alert("复制失败，请手动复制输入框中的模板。");
     }
-  }, [activeStory, isSettingsOpen]);
-
-  const handleSaveSettings = () => {
-    if (!activeStory) return;
-
-    const limit = parseInt(settingsWordLimit.trim(), 10);
-    const parsedLimit = isNaN(limit) || limit <= 0 ? undefined : limit;
-
-    const updatedStory = {
-      ...activeStory,
-      wordLimit: parsedLimit,
-      partnerPerspective: settingsPartnerP,
-      userPerspective: settingsUserP,
-      stylePresetId: settingsStylePresetId,
-      stylePromptName: settingsStylePromptName,
-      stylePromptContent: settingsStylePromptContent,
-      showAvatars: settingsShowAvatars,
-      customCss: settingsCustomCss,
-      updatedAt: Date.now()
-    };
-
-    saveActiveStorySnapshot(updatedStory);
-    setIsSettingsOpen(false);
-    showToast("剧本配置已保存！");
   };
-
-  const handleCreateCustomPreset = () => {
-    if (!settingsStylePromptName.trim() || !settingsStylePromptContent.trim()) {
-      showToast("文风名称和描述不能为空！");
-      return;
-    }
-    const newPreset = {
-      id: `custom_${Date.now()}`,
-      name: settingsStylePromptName.trim(),
-      description: settingsStylePromptContent.trim()
-    };
-    const updated = [...customPresets, newPreset];
-    setCustomPresets(updated);
-    localStorage.setItem("offline_custom_style_presets", JSON.stringify(updated));
-    
-    // Select the new preset
-    setSettingsStylePresetId(newPreset.id);
-    showToast("文风保存为预设成功！");
-  };
-
   const selectedChar = selectableCharacters.find(c => c.id === selectedCharId) || selectableCharacters[0];
-  const charStories = offlineStories.filter(s => 
-    resolveOfflineStoryCharacterId(s, characters) === selectedCharId
-      || resolveOfflineStoryCharacterIds(s, characters).includes(selectedCharId)
+  const charStories = offlineStories.filter((story) =>
+    canAccessStoryFromCurrentRelation(story)
+    && (resolveOfflineStoryCharacterId(story, characters) === selectedCharId
+      || resolveOfflineStoryCharacterIds(story, characters).includes(selectedCharId))
   );
 
-  const storyChars = activeStory 
-    ? (activeStory.characterIds && activeStory.characterIds.length > 0 
+  // Keep an empty-state-safe actor projection for story views. This is also a
+  // compatibility guard for stories created before characterIds was added.
+  const storyChars: Character[] = activeStory
+    ? (activeStory.characterIds && activeStory.characterIds.length > 0
         ? selectableCharacters.filter(c => resolveOfflineStoryCharacterIds(activeStory, characters).includes(c.id))
-        : [selectedChar])
-    : [selectedChar];
-
-  const storyCharNamesLabel = storyChars.map(c => c.remark || c.name).join("、");
-  const firstActorLabel = storyChars.length > 1 ? "角色们" : (selectedChar.remark || selectedChar.name);
+        : selectedChar ? [selectedChar] : [])
+    : selectedChar ? [selectedChar] : [];
+  void storyChars;
 
   // Online messages are an invisible handoff context, never part of the offline
   // manuscript. The id check also hides snapshots created before this flag existed.
-  const visibleStoryMessages = activeStory?.messages.filter((message) =>
+  const visibleStoryMessages = (Array.isArray(activeStory?.messages) ? activeStory.messages : []).filter((message) =>
     !message.isImportedContext && !message.id.startsWith("offline-import-")
-  ) || [];
-  const editingMessage = activeStory?.messages.find((message) => message.id === editingMessageId) || null;
+  );
+  const editingMessage = (Array.isArray(activeStory?.messages) ? activeStory.messages : []).find((message) => message.id === editingMessageId) || null;
   const readingStyle = {
-    "--offline-reading-font-size": `${readingPreferences.fontSize}px`,
+    "--offline-reading-font-size": `calc(${readingPreferences.fontSize}px * var(--app-font-scale, 1))`,
     "--offline-reading-letter-spacing": `${readingPreferences.letterSpacing}em`,
     "--offline-reading-line-height": String(readingPreferences.lineHeight),
     "--offline-reading-paragraph-gap": `${readingPreferences.paragraphSpacing}px`,
-    "--offline-reading-text": readingPreferences.textColor,
-    "--offline-reading-card": readingPreferences.cardBackground,
+    "--offline-reading-text": readingPreferences.textColor.toUpperCase() === "#1D1D1F" ? "var(--text-primary)" : readingPreferences.textColor,
+    "--offline-reading-card": readingPreferences.cardBackground.toUpperCase() === "#FFFFFF" ? "var(--surface)" : readingPreferences.cardBackground,
   } as React.CSSProperties;
-
-  const workspaceEndRef = useRef<HTMLDivElement | null>(null);
+  const linkedChatTarget = activeStory
+    ? resolveOfflineChatNavigationTarget({
+        story: activeStory,
+        relationships,
+        characters,
+        ownerIdentityId: activeIdentityId,
+      })
+    : null;
 
   useEffect(() => {
     if (workspaceEndRef.current) {
@@ -291,529 +303,122 @@ export default function AppOffline({
     }
   }, [activeStory?.messages, isGenerating]);
 
-  // Load selected character's saved story on select or mount
-  useEffect(() => {
-    if (selectedCharId && selectedCharId !== lastLoadedCharId) {
-      setLastLoadedCharId(selectedCharId);
-      const savedStoryId = localStorage.getItem(`offline_story_id_${selectedCharId}`);
-      if (savedStoryId) {
-        const story = offlineStories.find(s => s.id === savedStoryId);
-        if (story) {
-          activeStoryRef.current = story;
-          setActiveStory(story);
-          return;
-        }
-      }
-      clearActiveStorySnapshot();
-    }
-  }, [selectedCharId, offlineStories, lastLoadedCharId]);
+  const getMemoryRepairNeeds = (story: OfflineStory) => getOfflineStoryMemoryRepairNeeds(story, memories);
+  const needsLegacyHandoffRepair = (story: OfflineStory) => getMemoryRepairNeeds(story).legacyHandoff;
+  const needsMissingSummaryRepair = (story: OfflineStory) => getMemoryRepairNeeds(story).missingSummary;
+  const needsUninformativeSummaryRepair = (story: OfflineStory) => getMemoryRepairNeeds(story).uninformativeSummary;
 
-  // Handle opening a story
-  const handleOpenStory = (story: OfflineStory) => {
-    activeStoryRef.current = story;
-    setActiveStory(story);
-    const canonicalCharacterId = resolveOfflineStoryCharacterId(story, characters);
-    localStorage.setItem(`offline_mode_active_${canonicalCharacterId}`, "true");
-    localStorage.setItem(`offline_story_id_${canonicalCharacterId}`, story.id);
-  };
+  const { handleSyncMemoryToBrain } = useOfflineStoryMemorySyncActions({
+    characters,
+    relationships,
+    settings,
+    memories,
+    recallSettings,
+    activeIdentityId,
+    activeStoryRef,
+    memorySyncInFlightRef,
+    setMemorySyncingStoryId,
+    onSaveOfflineStory,
+    onSaveMemories,
+    onPersistMemories,
+    onSaveRelationships,
+    saveActiveStorySnapshot,
+    showToast,
+    needsLegacyHandoffRepair,
+    needsMissingSummaryRepair,
+    needsUninformativeSummaryRepair,
+  });
 
-  const clearOfflineSession = (story: OfflineStory) => {
-    localStorage.removeItem(`offline_story_id_${story.characterId}`);
-    localStorage.setItem(`offline_mode_active_${story.characterId}`, "false");
-  };
+  const shouldSyncStoryMemory = (story: OfflineStory) =>
+    story.mode === "continue"
+    && (shouldAutoSyncOnlineContinuation(story)
+      || needsLegacyHandoffRepair(story)
+      || needsMissingSummaryRepair(story)
+      || needsUninformativeSummaryRepair(story));
 
-  // Exit story workspace back to list
-  const handleExitStoryWorkspace = async () => {
-    // Only an explicitly linked online continuation may write a handoff on
-    // exit. Director and IF stories remain isolated, even when they imported
-    // chat history as writing reference.
-    const latestStory = activeStoryRef.current;
-    let completedStory = latestStory;
-    if (latestStory && shouldAutoSyncOnlineContinuation(latestStory)) {
-      completedStory = await handleSyncMemoryToBrain(latestStory);
-    }
-    if (completedStory) clearOfflineSession(completedStory);
-    clearActiveStorySnapshot();
-    setIsSettingsOpen(false);
-  };
+  const { finalizeStoryBeforeLeaving } = useOfflineStoryExitFinalization({
+    activeStoryRef,
+    appointments,
+    shouldSyncStoryMemory,
+    handleSyncMemoryToBrain,
+    onSaveAppointment,
+    onSaveOfflineStory,
+    saveActiveStorySnapshot,
+    showToast,
+  });
 
-  // Create new offline story
-  const handleCreateStory = () => {
-    if (!selectedCharId) {
-      showToast("请先选择一个角色！");
-      return;
-    }
+  const { handleExitStoryWorkspace, handleReturnToOnlineChat } = useOfflineWorkspaceExitActions({
+    activeStoryRef,
+    storyPersistenceRef,
+    finalizeStoryBeforeLeaving,
+    clearOfflineSession,
+    clearActiveStorySnapshot,
+    setIsSettingsOpen,
+    showToast,
+    onNavigateToChat,
+    resolveChatTarget: (story) => resolveOfflineChatNavigationTarget({
+      story,
+      relationships,
+      characters,
+      ownerIdentityId: activeIdentityId,
+    }),
+  });
 
-    const storyCharsList = characters.filter(c => selectedCharIds.includes(c.id));
-    const charsLabel = storyCharsList.map(c => c.remark || c.name).join("、");
-    const modeLabel = newMode === "director" ? "导演剧本" : newMode === "if" ? "IF假想线" : "续写故事";
-    const titleToUse = newTitle.trim() || `「${charsLabel}」的${modeLabel} - ${new Date().toLocaleDateString()}`;
+  const { handleDeleteStory, handleStartEditStory, handleSaveStoryEdit } = useOfflineStoryManagementActions({
+    offlineStories,
+    activeStoryRef,
+    clearOfflineSession,
+    onDeleteOfflineStory,
+    clearActiveStorySnapshot,
+    onSaveOfflineStory,
+    saveActiveStorySnapshot,
+    showToast,
+    editingStory,
+    editingStoryTitle,
+    editingStoryIfPrompt,
+    setEditingStory,
+    setEditingStoryTitle,
+    setEditingStoryIfPrompt,
+  });
 
-    let importedContext: OfflineStory["importedContext"];
+  const { handleDeleteMessage } = useOfflineMessageActions({
+    activeStory,
+    saveActiveStorySnapshot,
+    showToast,
+  });
 
-    // Reference from current chat history (if requested)
-    if (newStartFromChat) {
-      // Prefer the live app state: it includes the latest message even before a
-      // persistence effect has finished. Local storage remains a fallback.
-      const liveMessages = messages.filter(m => m.characterId === selectedCharId);
-      const storedMessages = liveMessages.length === 0 ? loadMessages([]) : null;
-      if (liveMessages.length > 0 || storedMessages?.found) {
-        try {
-          const parsed = liveMessages.length > 0 ? liveMessages : storedMessages?.value || [];
-          const contextLimit = characters.find(c => c.id === selectedCharId)?.contextMemoryLimit || 20;
-          const relevantMsgs = parsed
-            .filter(m => m.characterId === selectedCharId)
-            .slice(-contextLimit * 2); // preserve the configured number of dialogue rounds
-          
-          const importedMessages = relevantMsgs.map(m => ({
-            ...m,
-            id: `offline-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            isOffline: true
-          }));
-          importedContext = {
-            messages: importedMessages,
-            memories: memories.filter(m => m.characterId === selectedCharId).map(m => m.content),
-            worldBook: getLatestWorldBookEntries(worldBookEntries || [])
-              .filter(entry => !entry.characterId || entry.characterId === selectedCharId)
-              .map(entry => `${entry.title}: ${entry.content}`),
-            importedAt: Date.now()
-          };
-        } catch (e) {
-          console.error("Failed to copy chat history:", e);
-        }
-      }
-    }
+  const { handleSendMessage } = useOfflineStoryGenerationActions({
+    activeStory,
+    activeStoryRef,
+    characters,
+    selectableCharacters,
+    relationships,
+    activeIdentityId,
+    memories,
+    settings,
+    worldBookEntries: worldBookEntries || [],
+    selectedChar,
+    inputText,
+    isGenerating,
+    setInputText,
+    setIsGenerating,
+    setErrorMsg,
+    resolveCharacterId,
+    saveActiveStorySnapshot,
+    showToast,
+    guidanceDraft,
+    setGuidanceDraft,
+  });
 
-    const newStory: OfflineStory = {
-      id: `story-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-      characterId: selectedCharId,
-      characterIds: selectedCharIds.length > 0 ? selectedCharIds : [selectedCharId],
-      title: titleToUse,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      mode: newMode,
-      ifPrompt: newMode === "if" ? newIfPrompt : undefined,
-      sourceChatId: newStartFromChat ? selectedCharId : undefined,
-      sourceChatMsgCount: newStartFromChat ? importedContext?.messages.length : undefined,
-      importedContext,
-      enableTimeAwareness: newStartFromChat
-        ? Boolean(characters.find(c => c.id === selectedCharId)?.enableTimeAwareness)
-        : newTimeAwareness,
-      // Imported chat is context only; newly written plot remains in this independent archive.
-      messages: []
-    };
+  const { handleRegenerateMessage } = useOfflineRegenerationActions({ setActiveNodeMenuId, handleSendMessage });
 
-    saveActiveStorySnapshot(newStory);
-    localStorage.setItem(`offline_mode_active_${selectedCharId}`, "true");
-    localStorage.setItem(`offline_story_id_${selectedCharId}`, newStory.id);
-    setShowCreateModal(false);
-
-    // Reset fields
-    setNewTitle("");
-    setNewMode("director");
-    setNewIfPrompt("");
-    setNewStartFromChat(false);
-    setNewTimeAwareness(false);
-
-    showToast("线下故事创建成功");
-  };
-
-  // Delete a story
-  const handleDeleteStory = (storyId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (confirm("确定要删除这个线下故事记录吗？此操作无法撤销。")) {
-      onDeleteOfflineStory(storyId);
-      if (activeStoryRef.current?.id === storyId) {
-        clearActiveStorySnapshot();
-      }
-      showToast("故事已删除");
-    }
-  };
-
-  // Sync memory manually
-  const handleSyncMemoryToBrain = async (story: OfflineStory): Promise<OfflineStory> => {
-    if (memorySyncInFlightRef.current.has(story.id)) return story;
-    if (!hasUnsyncedOfflineMemoryProgress(story)) return story;
-    const sourceMessages = getOfflineMemorySourceMessages(story);
-
-    const character = characters.find((item) => item.id === story.characterId);
-    if (!character || character.isGroupChat) {
-      showToast("当前线下故事没有可同步的单聊角色记忆");
-      return story;
-    }
-
-    const now = Date.now();
-    const syncMarker = getOfflineStorySyncMarker(story);
-    const markSynced = (memoryIds: string[] = []): OfflineStory => ({
-      ...story,
-      archivedAt: now,
-      archivedMemoryIds: [...(story.archivedMemoryIds || []), ...memoryIds],
-      syncedSourceMessageIds: [...(story.syncedSourceMessageIds || []), ...sourceMessages.map((message) => message.id)],
-      lastSyncedMessageCount: story.messages.length,
-      lastMemorySyncAt: now,
-      memorySyncStatus: "synced",
-      updatedAt: now,
-    });
-
-    memorySyncInFlightRef.current.add(story.id);
-    try {
-      if (sourceMessages.length === 0) {
-        const syncedStory = markSynced();
-        if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
-        else onSaveOfflineStory(syncedStory);
-        showToast("没有可提取的线下新增剧情，已保留故事内容");
-        return syncedStory;
-      }
-
-      const historyLimit = character.retrievalHistoryLimit || 100;
-      const headerLabel = character.archiveTemplateType === "delicate"
-        ? `【线下剧本《${story.title}》心境归档】`
-        : `【线下剧本《${story.title}》关键剧情归档】`;
-      let extractedMemories: MemoryItem[] = [];
-      try {
-        const result = await MemoryService.extractMemories({
-          character,
-          characterId: story.characterId,
-          recentMessages: sourceMessages.slice(-historyLimit),
-          existingMemories: memories,
-          scenario: "offline",
-          apiKey: settings.apiKey,
-          model: !recallSettings.extractModel || recallSettings.extractModel === "default-chat-model"
-            ? (settings.selectedModel || "gemini-3.5-flash")
-            : recallSettings.extractModel,
-          apiEndpoint: settings.apiEndpoint,
-          templateType: character.archiveTemplateType,
-          createId: () => `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          currentTime: () => Date.now(),
-          // Source-derived third-person facts are the authoritative record for
-          // actor/recipient direction; ambiguous extraction text is excluded.
-          formatContent: (items) => `${formatExtractedMemorySummary(headerLabel, filterOfflineExtractedFacts(items))}\n[${syncMarker}]\n【确认事件（主体与客体固定）】\n${collectOfflineHandoffContent(story, character.remark || character.name)}`,
-        }, apiExtractMemories);
-        if (result.apiError) throw new Error(result.apiError);
-        extractedMemories = result.extractedMemories;
-      } catch (error) {
-        console.warn("Offline memory extraction unavailable; saving a local handoff instead:", error);
-      }
-
-      const additions = extractedMemories.length > 0
-        ? extractedMemories
-        : (MemoryService.hasMarker(memories, story.characterId, syncMarker) ? [] : [createOfflineStoryHandoffMemory({
-          story,
-          sourceMessages,
-          characterId: story.characterId,
-          characterName: character.remark || character.name,
-          id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          timestamp: now,
-        })]);
-      if (additions.length > 0) {
-        const mergedMemories = MemoryService.mergeMemories(memories, additions);
-        const persisted = onPersistMemories
-          ? await onPersistMemories(mergedMemories)
-          : (onSaveMemories(mergedMemories), true);
-        if (!persisted) throw new Error("Offline story handoff memory persistence failed");
-      }
-
-      const syncedStory = markSynced(additions.map((memory) => memory.id));
-      if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory);
-      else onSaveOfflineStory(syncedStory);
-      showToast(extractedMemories.length > 0
-        ? "线下剧情记忆已同步到当前角色"
-        : additions.length > 0
-          ? "线下剧情已保存为线上交接记忆"
-          : "线下剧情未提取到新的记忆，已完成去重同步");
-      return syncedStory;
-    } catch (error) {
-      console.error("Failed to sync offline story memories:", error);
-      const failedStory: OfflineStory = { ...story, memorySyncStatus: "failed", updatedAt: Date.now() };
-      if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(failedStory);
-      else onSaveOfflineStory(failedStory);
-      showToast("线下剧情记忆同步失败，故事已保留，可稍后重试");
-      return failedStory;
-    } finally {
-      memorySyncInFlightRef.current.delete(story.id);
-    }
-  };
-
-  // Delete individual plot record
-  const handleDeleteMessage = (msgId: string) => {
-    if (!activeStory) return;
-    const updatedMsgs = activeStory.messages.filter(m => m.id !== msgId);
-    const updatedStory = {
-      ...activeStory,
-      messages: updatedMsgs,
-      updatedAt: Date.now()
-    };
-    saveActiveStorySnapshot(updatedStory);
-    showToast("剧情记录已删除");
-  };
-
-  // Send message inside workspace
-  const handleSendMessage = async (textToSend?: string, forceAIOnly = false) => {
-    const storyAtSend = activeStoryRef.current ?? activeStory;
-    if (!storyAtSend) return;
-    setErrorMsg("");
-
-    const text = textToSend !== undefined ? textToSend : inputText.trim();
-    if (!text && !forceAIOnly) return;
-
-    let updatedStory = { ...storyAtSend };
-    
-    // 1. If we have user text to add
-    if (text && !forceAIOnly) {
-      const userMsg: Message = {
-        id: `offline-msg-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        characterId: storyAtSend.characterId,
-        sender: "user",
-        content: text,
-        timestamp: Date.now(),
-        isOffline: true,
-        isNarration: false
-      };
-      updatedStory = {
-        ...storyAtSend,
-        messages: [...storyAtSend.messages, userMsg],
-        updatedAt: Date.now()
-      };
-      saveActiveStorySnapshot(updatedStory);
-      setInputText("");
-    }
-
-    setIsGenerating(true);
-
-    try {
-      // Assemble history context
-      // If we added a user message in this turn, exclude it from historyContext because it will be passed as the separate 'message' parameter.
-      const msgsForHistory = (text && !forceAIOnly && updatedStory.messages.length > 0 && updatedStory.messages[updatedStory.messages.length - 1].sender === "user")
-        ? updatedStory.messages.slice(0, -1)
-        : updatedStory.messages;
-
-      const historyContext = msgsForHistory.map(m => {
-        if (m.sender === "user") {
-          return {
-            role: "user",
-            text: m.isNarration ? `(客观旁白) ${m.content}` : `我: “${m.content}”`
-          };
-        } else {
-          return {
-            role: "model",
-            text: m.content
-          };
-        }
-      });
-
-      // Assemble World Book context-aware trigger scanning
-      const scanContextParts = [
-        text || "",
-        ...(updatedStory.messages || []).slice(-3).map(m => m.content)
-      ];
-      const scanText = scanContextParts.filter(Boolean).join("\n");
-
-      // We can collect worldbook blocks for all story characters
-      const storyCharsList = updatedStory.characterIds && updatedStory.characterIds.length > 0 
-        ? selectableCharacters.filter(c => resolveOfflineStoryCharacterIds(updatedStory, characters).includes(c.id))
-        : [selectedChar];
-      const sourceChat = characters.find(c => c.id === (updatedStory.sourceChatId ? resolveCharacterId(updatedStory.sourceChatId) : undefined));
-      const isImportedGroupStory = Boolean(sourceChat?.isGroupChat);
-
-      const wbPrompts = updatedStory.importedContext?.worldBook.length
-        ? `【导入时冻结的世界书设定】：\n${updatedStory.importedContext.worldBook.map(item => `- ${item}`).join("\n")}`
-        : "";
-
-      // Base Persona
-      let sysPrompt = `你现在正在与用户进行“线下故事/小说剧本”的联合创作。本场剧本中共有以下 ${storyCharsList.length} 位角色参与：\n\n`;
-      
-      storyCharsList.forEach((char, idx) => {
-        sysPrompt += `[角色 ${idx + 1}: ${char.name}]
-- 姓名：${char.name}
-- 年龄：${char.age || "未知"}
-- 语气/性格特点：${char.personality}
-- 背景设定：${char.backstory}
-- 互通的线上记忆：${char.compressedMemory || "暂无"}
-\n`;
-      });
-
-      if (isImportedGroupStory) {
-        sysPrompt += `\n【群聊关系事实：绝对不可改写】
-这是从群聊导入的续写。以上每位角色档案中的身份、与用户的关系、以及角色彼此的关系，均为已确定的事实，必须逐字按其含义延续。
-严禁因为多人同场，就把用户擅自写成任一角色的恋人、前任、暧昧对象、家属或专属伴侣；除非对应角色档案已明确这样设定。
-用户可能只是朋友、旁观者或 CP 粉。必须保持这种定位，并保持角色之间原有的情侣或其他既定关系，不能自行替换、转移或制造新的恋爱关系。\n`;
-      }
-
-      if (wbPrompts) {
-        sysPrompt += `\n【相关世界书背景设定】：
-${wbPrompts}
-
-🚨 [极其重要：世界书设定绝对最高优先]
-在联合剧本创作中，你必须绝对100%强制遵循上述世界书设定的真实客观逻辑。如果词条要求了任何口癖、前置/后置特殊标志，参与的每一位角色在其说话发言时也必须绝对、无条件带上。
-\n`;
-      }
-
-      sysPrompt += `\n【人设遵循最高优先规则】
-1. 🚨 你扮演这几位角色，在他们参与的每句话、神态动作、心理描写中，必须严密、100%地遵循他们各自的性格特征、说话语气和人设。
-2. 严禁混淆多位角色的口癖、语气或人物关系。
-
-【人称写作视角限制】
-- 对方人物视角（${storyCharsList.map(c => c.name).join("/")}）：【${(activeStory.partnerPerspective || "third") === "first" ? "第一人称" : (activeStory.partnerPerspective || "third") === "second" ? "第二人称" : "第三人称"}】。`;
-      if ((activeStory.partnerPerspective || "third") === "first") {
-        sysPrompt += `你在描写或代替该人物进行心理解说、旁白叙述或发言时，应当站在该角色自身视角，采用第一人称“我”或契合其身份的自称（如“本座”、“本王”、“人家”等）。`;
-      } else if ((activeStory.partnerPerspective || "third") === "second") {
-        sysPrompt += `你在叙事中指向对方自身时采用第二人称“你”（极罕见）。`;
-      } else {
-        sysPrompt += `你在叙事和描述中，应当采用客观的第三人称（如“他”、“她”、“${storyCharsList[0]?.name || "对方"}”）来描述该角色的言行、神态和内心戏。`;
-      }
-      sysPrompt += `\n- 用户（我）的视角：【${(activeStory.userPerspective || "first") === "first" ? "第一人称 (我)" : (activeStory.userPerspective || "first") === "second" ? "第二人称 (你)" : "第三人称 (他/她/具体名字)"}】。`;
-      if ((activeStory.userPerspective || "first") === "first") {
-        sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第一人称“我”指代用户（例如：“你深深凝视着我，缓步走来”）。`;
-      } else if ((activeStory.userPerspective || "first") === "second") {
-        sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第二人称“你”指代用户（例如：“他走到你面前，拉起你的手”）。`;
-      } else {
-        sysPrompt += `你在叙事中描写用户、机主或提及我时，必须使用第三人称“他/她/具体名字 ${settings.name || "主角"}”来指代用户（例如：“他向 ${settings.name || "主角"} 微微颔首”）。`;
-      }
-
-      if (activeStory.wordLimit && activeStory.wordLimit > 0) {
-        sysPrompt += `\n\n🚨 【重要字数限制提示】：你的本次续写回复总字数（包括对话与旁白叙事）必须严格限制在 【${activeStory.wordLimit}】 字以内，请尽量精炼、点到即止，切勿啰嗦冗长！`;
-      }
-
-      if (activeStory.stylePromptContent) {
-        sysPrompt += `\n\n✨ 【写作风格/笔触规范 (当前预设: ${activeStory.stylePromptName || "自定义"})】：\n${activeStory.stylePromptContent}\n请在生成本次续写内容时，全程严格执行并契合上述写作风格规范。`;
-      }
-
-      sysPrompt += `\n\n【线下模式及多角色控制规则】
-1. 用户可以通过文字、指令或旁白，像导播、写小说或主控一样描述故事进展。
-2. 作为一个优秀的内容创作者，你要输出一整段精美的、小说叙事般的回复，内容包括指定人称视角的场景描写、客观动作、旁白叙事，以及这些角色的对话。
-3. 任何发言对话请使用中文引号 “ ” (例如 “你醒了？”) 或 「 」 括起来，以便阅读。任何非发言部分（动作描述、神态、场景描写、内心想法、旁白等）放在引号外面。
-4. 确保在对话中，通过在引号前或文中清晰提及名字（例如：A冷笑了一声：“...” / B有些局促地拍了拍衣角：“...”）来指明是谁在说话，使读者能一眼分辨。
-5. 必须保持极高的人设契合度、动作细节 and 情感氛围描写。不要说任何破戏（OOC）的话，不要说你是AI。
-6. 如果用户给出了导演指令（如：[控制剧情：我们遇到了敌人]），请积极顺应，发挥你强大的故事延展能力，精美自然地推进剧情。
-
-【当前创作模式】：`;
-
-      if (updatedStory.mode === "director") {
-        sysPrompt += `\n【导演模式】：用户是编剧/导演，给你发出控制剧本走向的指令。你要自行把控边界，像写小说一样输出一整段包含角色和用户所有完整对话、动作、旁白的文段。`;
-      } else if (updatedStory.mode === "if") {
-        sysPrompt += `\n【IF平行假想线】：当前故事处于一个脱离原作正统时间线的平行宇宙中！
-假想线宇宙设定：${updatedStory.ifPrompt || "自定义世界观设定"}
-在此假想规则下，让人物发挥其性格，在此全新背景中与用户互动。`;
-      } else {
-        sysPrompt += `\n【续写模式】：以现有的聊天/故事为草稿，根据设定和目前的逻辑走向，续写故事的精彩发展。`;
-      }
-
-      // Only an explicitly imported online story may use its frozen snapshot.
-      // Self-directed and IF stories stay fully isolated from the online vault.
-      const allMemoriesParts: string[] = [];
-      if (updatedStory.importedContext) storyCharsList.forEach(char => {
-        const snapshotMemories = updatedStory.importedContext!.memories.map((content, index) => ({
-          id: `snapshot-memory-${index}`,
-          characterId: char.id,
-          content,
-          timestamp: updatedStory.importedContext!.importedAt,
-          importance: 5
-        }));
-        const relevantMems = MemoryService.retrieveRelevantMemories({
-          characterId: char.id,
-          queryText: text || "续写故事",
-          existingMemories: snapshotMemories,
-          limit: 3,
-          scenario: "offline",
-        });
-        if (relevantMems.length > 0) {
-          const lines = relevantMems.map(m => `  - ${m.content}`).join("\n");
-          allMemoriesParts.push(`* 【${char.remark || char.name}】的线上记忆库事实：\n${lines}`);
-        }
-      });
-      if (allMemoriesParts.length > 0) {
-        sysPrompt += `\n\n【互通的线上记忆库】：以下是各个参与角色的线上对话中发生并提取的核心事实，请将其有机融入作为故事的背景事实支撑：\n${allMemoriesParts.join("\n")}`;
-      }
-
-      // Never fetch live online chat while writing offline. Use the import snapshot only.
-      const chatContextParts: string[] = [];
-      if (updatedStory.importedContext) storyCharsList.forEach(char => {
-        const onlineMsgs = updatedStory.importedContext!.messages
-          // Group messages belong to the group container, while senderId identifies
-          // the actual member. Include the user's group messages for every member.
-          .filter(m => m.characterId === char.id || m.senderId === char.id || (
-            m.sender === "user" && isImportedGroupStory && m.characterId === updatedStory.sourceChatId
-          ))
-          .slice(-15);
-        if (onlineMsgs.length > 0) {
-          const lines = onlineMsgs.map(m => `  - ${m.sender === "user" ? "我" : char.remark || char.name}: ${m.content}`).join("\n");
-          chatContextParts.push(`* 【与 ${char.remark || char.name}】的最新线上聊天：\n${lines}`);
-        }
-      });
-      if (chatContextParts.length > 0) {
-        sysPrompt += `\n\n【互通的线上最新对话记忆（Online Chat Context）】：
-以下是各位参与角色最近在微信（线上聊天）中的最新真实对话。这些是你们当下关系的最新现状与真实记忆。请确保线下小说剧本的走向与其认知保持连贯和融合，避免发生剧情上的冲突：
-${chatContextParts.join("\n")}`;
-      }
-
-      const lastUserMsgText = text || "请继续编织并续写这幕场景。";
-
-      const importedTail = updatedStory.importedContext?.messages.slice(-6) || [];
-      if (updatedStory.importedContext && importedTail.length > 0) {
-        const lastImported = importedTail[importedTail.length - 1];
-        const handoffTime = new Date(lastImported.timestamp);
-        const handoffClock = handoffTime.toLocaleString("zh-CN", {
-          year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
-        });
-        sysPrompt += `\n\n【ONLINE-TO-OFFLINE CONTINUITY — ABSOLUTE RULE】
-This scene begins immediately after the imported online conversation, not as a new unrelated scene.
-The last imported message is the current canonical handoff. Continue its topic, location, activity, promises, and emotional momentum. Do not replace it with a new activity (for example, do not switch from eating to bathing) unless the user explicitly asks for a time jump or transition.
-Imported handoff transcript:\n${importedTail.map(m => `- ${m.sender === "user" ? settings.name : (selectedChar?.name || "Character")}: ${m.content}`).join("\n")}
-Canonical handoff time: ${handoffClock}. The first continuation may advance only naturally by a few minutes unless the user explicitly changes the time or scene.`;
-      }
-
-      if (updatedStory.enableTimeAwareness) {
-        const now = new Date();
-        const currentClock = now.toLocaleString("zh-CN", {
-          year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
-        });
-        sysPrompt += `\n\n【TIME AWARENESS — REQUIRED】
-Current real-world time is ${currentClock}. Use this as the authoritative present time. Do not state a conflicting clock time, and do not casually jump hours. If this is an imported continuation, its handoff time is authoritative for the scene and the present can only move forward naturally from it.`;
-      }
-
-      const response = await apiChat({
-        message: lastUserMsgText,
-        history: historyContext,
-        systemInstruction: sysPrompt,
-        apiKey: settings.apiKey,
-        model: settings.selectedModel || "gemini-3.5-flash",
-        apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature || 0.8,
-        streamCompatible: settings.streamCompatible
-      });
-
-      if (response && response.text) {
-        // A single generation is one editable script entry. Preserve its paragraphs
-        // inside the entry instead of turning every paragraph into a separate message.
-        const newMsgs: Message[] = [{
-          id: `offline-reply-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          characterId: updatedStory.characterId,
-          sender: "character",
-          content: response.text.trim(),
-          timestamp: Date.now(),
-          isOffline: true,
-          isNarration: false
-        }];
-
-        const finalStory = {
-          ...updatedStory,
-          messages: [...updatedStory.messages, ...newMsgs],
-          updatedAt: Date.now()
-        };
-
-        saveActiveStorySnapshot(finalStory);
-      }
-    } catch (err: any) {
-      console.error(err);
-      setErrorMsg("呼叫主脑剧本引擎失败，请检查网络或API Key设定。");
-    } finally {
-      setIsGenerating(false);
-    }
-  };
+  useOfflineStoryAutoStart({ activeStory, activeStoryRef, isGenerating, saveActiveStorySnapshot, handleSendMessage });
 
   return (
     <div
-      className="offline-page w-full h-full flex flex-col relative overflow-hidden font-sans select-none"
+      data-theme-page="offline"
+      className={`offline-page ${activeStory ? "is-workspace" : "is-directory"} ${isSettingsOpen ? "is-settings" : ""} w-full h-full min-h-0 flex flex-col relative overflow-hidden font-sans select-none`}
+      data-offline-view={activeStory ? (isSettingsOpen ? "settings" : "workspace") : "directory"}
       style={readingStyle}
     >
       
@@ -824,7 +429,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-indigo-600/90 backdrop-blur-md text-white text-xs px-4 py-2 rounded-full shadow-lg border border-indigo-400 font-bold"
+            className="absolute top-16 left-1/2 -translate-x-1/2 z-50 max-w-[calc(100%-32px)] whitespace-nowrap rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-medium text-slate-700 shadow-md"
           >
             {toast}
           </motion.div>
@@ -839,54 +444,72 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50"
+            className="offline-story-directory flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50"
           >
             {/* Header */}
-            <div className="px-4 py-3.5 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-2.5">
-                <button 
-                  onClick={onClose}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
-                <div>
-                  <h1 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                    <span>线下剧本模式</span>
-                  </h1>
-                  <p className="text-[10px] text-slate-500">线下独立走向，与线上大脑记忆互通</p>
-                </div>
-              </div>
+            <div className="offline-directory-header relative flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0">
+              <button
+                onClick={onClose}
+                className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-500 transition-colors"
+                aria-label="返回"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <h1 className="absolute left-1/2 -translate-x-1/2 text-base font-bold tracking-tight text-slate-800">
+                线下
+              </h1>
 
               <button 
-                onClick={() => setShowCreateModal(true)}
-                className="w-8 h-8 rounded-full bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center shadow-sm transition-colors"
-                title="新建故事"
+                onClick={() => {
+                  if (!selectedChar) return;
+                  setCreationScope(selectedChar.isGroupChat ? "multi" : "single");
+                  setShowCreateModal(true);
+                }}
+                disabled={!selectedChar}
+                className="app-nav-icon-button w-8 h-8 text-slate-800 flex items-center justify-center transition-colors disabled:text-slate-400"
+                title={selectedChar ? (selectedChar.isGroupChat ? "新建多人故事" : "新建故事") : "请先在档案馆创建角色"}
               >
                 <Plus className="w-4 h-4" />
               </button>
             </div>
 
             {/* Character Selector Grid */}
-            <div className="p-3 bg-white border-b border-slate-100">
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">选择人物剧本空间</p>
-              <div className="flex items-center gap-3 overflow-x-auto pb-1 no-scrollbar">
+            <div className="offline-character-filter px-3 pt-3 pb-2 bg-white border-b border-slate-100">
+              <div className="offline-character-filter-list flex items-start justify-start gap-3 overflow-x-auto pb-1 no-scrollbar">
                 {selectableCharacters.map(char => {
                   const isSel = char.id === selectedCharId;
-                  const charStoriesCount = offlineStories.filter(s => s.characterId === char.id).length;
+                  const charRelation = relationships.find((relation) =>
+                    relation.userIdentityId === activeIdentityId
+                    && resolveCanonicalCharacterId(relation.characterId, characters) === char.id,
+                  );
+                  const charStoriesCount = char.isGroupChat
+                    ? offlineStories.filter((story) =>
+                        canAccessStoryFromCurrentRelation(story)
+                        && resolveOfflineStoryCharacterId(story, characters) === char.id,
+                      ).length
+                    : charRelation
+                    ? countOfflineStoriesForRelation({
+                        stories: offlineStories,
+                        relationId: charRelation.id,
+                        characterId: char.id,
+                        relationships,
+                        characters,
+                      })
+                    : 0;
                   return (
                     <button
                       key={char.id}
                       onClick={() => setSelectedCharId(char.id)}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all shrink-0 ${
-                        isSel 
-                          ? "bg-slate-900 border-slate-900 text-white font-bold shadow-sm" 
-                          : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-slate-300"
+                      className={`offline-character-filter-item ${isSel ? "is-active" : ""} group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 transition-all ${
+                        isSel ? "text-slate-900" : "text-slate-600 hover:bg-slate-50"
                       }`}
                     >
-                      <img src={char.avatar} alt="" className="w-5 h-5 rounded-full object-cover border border-slate-200" />
-                      <span className="text-xs font-bold">{char.remark || char.name}</span>
-                      <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-slate-100 text-slate-500">
+                      <span className={`relative rounded-full p-0.5 transition-all ${isSel ? "bg-rose-300" : "bg-transparent"}`}>
+                        <img src={char.avatar} alt="" className="offline-character-filter-avatar h-8 w-8 rounded-full object-cover border border-slate-200" />
+                        {isSel && <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-rose-400 text-[7px] font-bold text-white">✓</span>}
+                      </span>
+                      <span className="max-w-full truncate text-[9px] font-bold leading-3">{char.remark || char.name}</span>
+                      <span className={`min-w-4 rounded-full px-1 py-0.5 text-center text-[8px] leading-2.5 ${isSel ? "bg-rose-100 text-rose-500" : "bg-slate-100 text-slate-500"}`}>
                         {charStoriesCount}
                       </span>
                     </button>
@@ -896,18 +519,49 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
             </div>
 
             {/* Stories Directory Content */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="offline-story-directory-list flex-1 overflow-y-auto p-4 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                 <h2 className="text-xs font-bold text-slate-500 flex items-center gap-1">
                   <BookOpen className="w-3.5 h-3.5 text-slate-400" />
                   <span>故事列表 ({charStories.length})</span>
                 </h2>
-                {selectedChar && (
-                  <span className="text-[11px] text-slate-500">当前角色: {selectedChar.remark || selectedChar.name}</span>
-                )}
+                <label className="offline-identity-picker flex items-center gap-0.5 text-xs leading-4 text-slate-500">
+                  <span>当前身份:</span>
+                  <select
+                    value={selectedRelationId}
+                    onChange={(event) => setSelectedRelationId(event.target.value)}
+                    disabled={relationChoices.length === 0}
+                    aria-label="选择我的人设"
+                    className="offline-identity-picker__select h-5 w-[76px] max-w-[76px] rounded-md border-0 bg-transparent py-0 pl-0.5 pr-4 text-xs leading-4 text-slate-500 outline-none disabled:text-slate-300"
+                  >
+                    {relationChoices.length === 0 ? (
+                      <option value="">暂无可用人设</option>
+                    ) : relationChoices.map((relation) => {
+                      const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
+                      return <option key={relation.id} value={relation.id}>{identity?.name || relation.userIdentityId}</option>;
+                    })}
+                  </select>
+                </label>
               </div>
 
-              {charStories.length === 0 ? (
+              {!selectedChar ? (
+                <div className="py-16 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                    <BookOpen className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold text-slate-700">还没有可用的角色档案</p>
+                    <p className="text-xs text-slate-500 max-w-xs mx-auto">请先在档案馆创建角色，再回来开启线下故事。</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="empty-state-action"
+                  >
+                    现在去创建
+                  </button>
+                </div>
+              ) : charStories.length === 0 ? (
                 <div className="py-16 text-center space-y-4">
                   <div className="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
                     <BookOpen className="w-8 h-8" />
@@ -928,6 +582,16 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                   {charStories.map(story => {
                     const storyModeLabel = story.mode === "director" ? "导演" : story.mode === "if" ? "IF线" : "续写";
                     const storyModeColor = story.mode === "director" ? "bg-rose-50 text-rose-600 border-rose-200/60" : story.mode === "if" ? "bg-amber-50 text-amber-600 border-amber-200/60" : "bg-teal-50 text-teal-600 border-teal-200/60";
+                    const storyParticipantIds = resolveOfflineStoryCharacterIds(story, characters);
+                    const storyParticipants = storyParticipantIds
+                      .map((participantId) => characters.find((character) => character.id === participantId))
+                      .filter((character): character is Character => Boolean(character));
+                    const participantSnapshots = story.participantSnapshots || storyParticipants.map((character) => ({
+                      id: character.id,
+                      name: character.remark || character.name,
+                      avatar: character.avatar,
+                    }));
+                    const isMultiplayerStory = storyParticipantIds.length > 1;
                     return (
                       <div
                         key={story.id}
@@ -965,16 +629,49 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                             <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
                             <span>共 {story.messages.length} 段剧情记录</span>
                           </div>
+
+                          {isMultiplayerStory && (
+                            <div className="flex items-center gap-2 pt-1" aria-label={`参与角色：${participantSnapshots.map((participant) => participant.name).join("、")}`}>
+                              <div className="flex -space-x-2">
+                                {participantSnapshots.slice(0, 6).map((participant) => (
+                                  <img
+                                    key={participant.id}
+                                    src={participant.avatar || ""}
+                                    alt={participant.name}
+                                    title={participant.name}
+                                    className="h-7 w-7 rounded-full border-2 border-white bg-slate-100 object-cover shadow-sm"
+                                  />
+                                ))}
+                                {participantSnapshots.length > 6 && (
+                                  <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[9px] font-bold text-slate-600">
+                                    +{participantSnapshots.length - 6}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="min-w-0 truncate text-[10px] text-slate-500">
+                                {participantSnapshots.map((participant) => participant.name).join("、")}
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex flex-col items-end justify-between h-full space-y-4">
-                          <button
-                            onClick={(e) => handleDeleteStory(story.id, e)}
-                            className="w-7 h-7 rounded-lg bg-slate-150/70 hover:bg-red-50 text-slate-500 hover:text-red-600 flex items-center justify-center transition-all opacity-100 border border-slate-200"
-                            title="删除"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={(e) => handleStartEditStory(story, e)}
+                              className="w-7 h-7 rounded-lg bg-slate-150/70 hover:bg-slate-100 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-all border border-slate-200"
+                              title="编辑剧本"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => handleDeleteStory(story.id, e)}
+                              className="w-7 h-7 rounded-lg bg-slate-150/70 hover:bg-red-50 text-slate-500 hover:text-red-600 flex items-center justify-center transition-all opacity-100 border border-slate-200"
+                              title="删除"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                           <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-slate-600 transition-colors" />
                         </div>
                       </div>
@@ -991,79 +688,122 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50 offline-workspace-container"
+            className={`offline-story-workspace flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50 ${activeStory ? `is-mode-${activeStory.mode}` : ""}`}
           >
             {isSettingsOpen ? (
               /* ================= STORY SETTINGS PAGE ================= */
-              <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
+              <div className="flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-[#F7F7F9]">
                 {/* Header */}
-                <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm z-10 shrink-0 relative">
+                <div className="relative flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0">
                   <button 
                     onClick={() => setIsSettingsOpen(false)}
-                    className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors shrink-0"
+                    className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-500 transition-colors shrink-0"
                     title="返回剧本空间"
                   >
                     <ArrowLeft className="w-4 h-4 text-slate-700" />
                   </button>
-                  <h3 className="text-xs font-bold text-slate-800 absolute left-1/2 -translate-x-1/2 w-max">
+                  <h3 className="text-base font-bold tracking-tight text-[#111111] absolute left-1/2 -translate-x-1/2 w-max">
                     剧本高级设置
                   </h3>
                   <div className="w-8 h-8" />
                 </div>
 
                 {/* Settings Body */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+                <div className="flex-1 overflow-y-auto px-4 pb-[calc(34px+16px)] pt-4 space-y-5">
                   {/* Sync memory button is now placed at the top of settings as requested */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-2 text-left">
-                    <div className="flex items-center gap-2">
-                      <Cpu className="w-4 h-4 text-indigo-500" />
-                      <span className="text-xs font-bold text-slate-800">同步剧本记忆</span>
-                    </div>
-                    <p className="text-[10px] text-slate-400">将此离线剧本空间的当前进展记忆同步并沉淀到角色的长期记忆库中，让他们在后续对话中感知到这些事件。</p>
-                    <button
-                      type="button"
-                      onClick={() => void handleSyncMemoryToBrain(activeStory)}
-                      className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-[16px] border border-indigo-200/50 transition-all text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">同步设置</h4>
+                    <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-2 text-left">
+                    <span className="text-[15px] font-medium text-[#111111]">同步剧本记忆</span>
+                    <p className="text-xs leading-5 text-[#8E8E93]">
+                      {activeStory.mode === "continue"
+                        ? "续写剧情结束时会自动总结并同步；也可以在此立即同步当前进展。"
+                        : "导演和 IF 模式结束时不会自动同步。只有点击下方按钮手动确认后，剧情才会进入角色长期记忆并同步到线上。"}
+                    </p>
+                    <Button
+                      variant="secondary"
+                      size="lg"
+                      fullWidth
+                      onClick={() => void handleSyncMemoryToBrain(activeStory, { userConfirmed: true, syncIntent: "manual_settings" })}
+                      loading={memorySyncingStoryId === activeStory.id}
+                      loadingLabel="同步中，请稍候…"
+                      className="text-xs"
                     >
-                      <Cpu className="w-3.5 h-3.5" />
-                      <span>同步当前进展记忆至角色大脑</span>
-                    </button>
-                  </div>
+                      同步当前进展记忆至角色大脑
+                    </Button>
+                    </div>
+                  </section>
+
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">世界书快照</h4>
+                    <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-2 text-left">
+                      <span className="text-[15px] font-medium text-[#111111]">当前快照 {activeStory.worldBookSnapshot?.length || 0} 条</span>
+                      <p className="text-xs leading-5 text-[#8E8E93]">
+                        剧情每轮只会从快照中按常驻词条或最近约 10 条剧情关键词激活。刷新后，后续剧情才会使用当前项目中的最新世界书。
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleRefreshWorldBookSnapshot}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#F0F0F0] bg-[#F7F7F9] py-3 text-xs font-semibold text-[#111111] transition-colors hover:bg-[#EFEFF4]"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                        刷新世界书快照
+                      </button>
+                    </div>
+                  </section>
 
                   {/* Word limit */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
-                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">每次生成回复字数限制</label>
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">生成设置</h4>
+                  <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-left">
+                    <label className="text-[15px] font-medium text-[#111111] block">每次生成回复字数限制</label>
                     <div className="flex gap-2">
                       <input
                         type="number"
                         value={settingsWordLimit}
                         onChange={(e) => setSettingsWordLimit(e.target.value)}
                         placeholder="不限制 (或输入数字，如：300)"
-                        className="flex-1 bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                        className="flex-1 rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-3 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                       />
                       {settingsWordLimit && (
                         <button
                           type="button"
                           onClick={() => setSettingsWordLimit("")}
-                          className="px-2.5 py-1 text-[10px] font-bold border border-slate-200 rounded-[16px] text-slate-500 hover:bg-slate-50"
+                          className="px-2.5 py-1 text-xs font-medium border border-[#F0F0F0] rounded-lg text-[#8E8E93] hover:bg-[#F7F7F9]"
                         >
                           清除限制
                         </button>
                       )}
                     </div>
-                    <p className="text-[10px] text-slate-400">设定单次生成的最大字数范围，避免回复过长或过短。</p>
-                  </div>
+                    <p className="text-xs text-[#8E8E93]">设定单次生成的最大字数范围，避免回复过长或过短。</p>
 
-                  {/* Perspectives */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
-                    <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">人称写作视角选择</label>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="border-t border-[#F0F0F0] pt-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[15px] font-medium text-[#111111]">允许对方替我做出回应</div>
+                          <p className="mt-1 text-xs leading-5 text-[#8E8E93]">关闭后，对方不能替你说话、决定或补写新的主动回应。</p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={settingsAllowCharacterToSpeakForUser}
+                          onClick={() => setSettingsAllowCharacterToSpeakForUser((current) => !current)}
+                          className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${settingsAllowCharacterToSpeakForUser ? "bg-[#111111]" : "bg-[#E5E5EA]"}`}
+                        >
+                          <span className={`absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${settingsAllowCharacterToSpeakForUser ? "translate-x-5" : "translate-x-0"}`} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-[#F0F0F0] pt-3">
+                    <label className="text-[15px] font-medium text-[#111111] block">人称写作视角选择</label>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <span className="text-[10px] text-slate-500 block">对方 (角色们) 的人称</span>
+                        <span className="text-xs text-[#8E8E93] block">对方（角色们）的人称</span>
                         <select
                           value={settingsPartnerP}
                           onChange={(e) => setSettingsPartnerP(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                          className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-2.5 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                         >
                           <option value="third">名字</option>
                           <option value="first">我</option>
@@ -1072,11 +812,11 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                       </div>
 
                       <div className="space-y-1">
-                        <span className="text-[10px] text-slate-500 block">我 (主角/用户) 的人称</span>
+                        <span className="text-xs text-[#8E8E93] block">我（主角/用户）的人称</span>
                         <select
                           value={settingsUserP}
                           onChange={(e) => setSettingsUserP(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                          className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-2.5 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                         >
                           <option value="first">我</option>
                           <option value="second">你</option>
@@ -1084,35 +824,62 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                         </select>
                       </div>
                     </div>
+                    </div>
                   </div>
+                  </section>
 
                   {/* Style Presets */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">文风设置</h4>
+                  <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-left">
                     <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">自定义剧本文风设定</label>
                     <div className="space-y-1">
                       <span className="text-[10px] text-slate-400 block font-medium">快捷文风预设</span>
+                      <div className="flex items-center gap-2">
                       <select
                         value={settingsStylePresetId}
                         onChange={(e) => {
                           const selId = e.target.value;
                           setSettingsStylePresetId(selId);
-                          const matched = [...DEFAULT_STYLE_PRESETS.slice(0, 1), ...customPresets].find(p => p.id === selId);
+                          const matched = [...defaultStylePresets.slice(0, 1), ...customPresets].find(p => p.id === selId);
                           if (matched) {
                             setSettingsStylePromptName(matched.name === "默认风格" ? "" : matched.name);
                             setSettingsStylePromptContent(selId === "none" ? "" : matched.description);
                           }
                         }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                        className="min-w-0 flex-1 rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-2.5 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                       >
-                        {[...DEFAULT_STYLE_PRESETS.slice(0, 1), ...customPresets].map(p => (
+                        {[...defaultStylePresets.slice(0, 1), ...customPresets].map(p => (
                           <option key={p.id} value={p.id}>
                             {p.id.startsWith("custom_") ? `⭐ ${p.name} (自定义)` : p.name}
                           </option>
                         ))}
                       </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSettingsStylePresetId("custom_edit");
+                          setSettingsStylePromptName("");
+                          setSettingsStylePromptContent("");
+                        }}
+                        aria-label="新建文风预设"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#F0F0F0] bg-[#F7F7F9] text-[#111111] transition-colors hover:bg-[#EFEFF1]"
+                      >
+                        <Plus size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDeleteCustomPreset}
+                          disabled={!hasSelectedCustomPreset}
+                        aria-label="删除当前文风预设"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-rose-100 bg-rose-50 text-rose-500 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <Trash2 size={17} />
+                      </button>
+                      </div>
                     </div>
 
-                    <div className="space-y-2 pt-1.5 border-t border-slate-100">
+                    <div className="space-y-2 pt-3 border-t border-[#F0F0F0]">
                       <div className="space-y-1">
                         <span className="text-[10px] text-slate-500 block">文风名称</span>
                         <input
@@ -1123,7 +890,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                             setSettingsStylePresetId("custom_edit");
                           }}
                           placeholder="例如: 刀刀见血 / 王家卫风..."
-                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                          className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-3 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                         />
                       </div>
                       
@@ -1137,7 +904,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                           }}
                           placeholder="描述你想要的语言笔触，例：充满电影感、留白极多，使用短句、充满孤寂感。角色说话前会微眯眼睛等..."
                           rows={3}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500 text-xs"
+                          className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-3 py-2 text-sm text-[#111111] outline-none focus:border-slate-400"
                         />
                       </div>
 
@@ -1145,82 +912,45 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                         <button
                           type="button"
                           onClick={handleCreateCustomPreset}
-                          className="w-full py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-[16px] border border-indigo-200/50 transition-all text-[10px]"
+                          className="w-full rounded-xl bg-[#111111] py-3 text-xs font-semibold text-white transition-colors hover:bg-black"
                         >
                           💾 保存当前文风为自定义永久预设
                         </button>
                       )}
                     </div>
                   </div>
-
-                  {/* Show Avatars Toggle */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm flex items-center justify-between text-left">
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 block">是否显示双方头像</span>
-                      <span className="text-[10px] text-slate-400">开启后会在剧本左右侧显示头像与名称标识</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={settingsShowAvatars}
-                      onChange={(e) => setSettingsShowAvatars(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-white cursor-pointer"
-                    />
-                  </div>
+                  </section>
 
                   {/* Custom CSS */}
-                  <div className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm space-y-3 text-left">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">线下卡片美化 (自定义 CSS)</label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSettingsCustomCss(`/* 仿宣纸文艺背景 */
-.offline-workspace-container {
-  background-color: #fdfaf2 !important;
-}
-.offline-message-list {
-  background-color: transparent !important;
-}
-.offline-msg-content {
-  font-size: 15px !important;
-  color: #3f3f46 !important;
-  line-height: 1.8 !important;
-  letter-spacing: 0.05em !important;
-}
-.offline-dialogue-text {
-  color: #c2410c !important; /* 朱红色对话高亮 */
-  font-weight: 600 !important;
-}
-.offline-narrative-text {
-  color: #52525b !important;
-  font-style: italic !important;
-}`);
-                        }}
-                        className="text-[10px] text-indigo-600 font-bold hover:underline"
-                      >
-                        导入文艺宣纸模板
+                  <section className="space-y-2">
+                  <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-left">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <label className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">线下界面样式 CSS</label>
+                      </div>
+                      <button type="button" onClick={() => void copyOfflineCssTemplate()} className="shrink-0 rounded-[8px] bg-slate-100 px-2 py-1 text-[9px] font-medium text-slate-500 transition-colors hover:bg-slate-200">
+                        {offlineCssTemplateCopied ? "已复制" : "复制模板"}
                       </button>
                     </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">用于修改当前线下页面视觉效果，包括背景、导航、剧情卡片、正文和输入区域等。</p>
                     <textarea
                       value={settingsCustomCss}
                       onChange={(e) => setSettingsCustomCss(e.target.value)}
-                      placeholder={`/* 支持代码美化，常用CSS类名： */
-.offline-workspace-container { ... }
-.offline-message-list { ... }
-.offline-msg-content { ... }`}
+                      placeholder={OFFLINE_CSS_EXAMPLE_TEMPLATE}
                       rows={5}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-[8px] px-3 py-2 text-emerald-400 font-mono text-[10px] focus:outline-none focus:border-indigo-500"
+                      className="w-full rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9] px-3 py-2 font-mono text-xs text-[#111111] outline-none focus:border-slate-400"
                     />
-                    <p className="text-[10px] text-slate-400">在这里输入 CSS 样式规则，点击保存后即可在当前剧本空间内实时渲染应用！</p>
+                    <p className="text-[10px] text-slate-400">保存剧本设置后，样式会在当前线下页面中生效。</p>
                   </div>
+                  </section>
                 </div>
 
                 {/* Footer buttons */}
-                <div className="p-4 bg-white border-t border-slate-100 flex gap-3 shrink-0">
+                <div className="p-4 bg-white border-t border-[#F0F0F0] shrink-0 space-y-2">
                   <button
                     type="button"
                     onClick={() => setIsSettingsOpen(false)}
-                    className="flex-1 py-3 rounded-[16px] border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold text-xs transition-colors"
+                    className="w-full rounded-xl border border-[#F0F0F0] bg-white py-3 text-xs font-semibold text-[#111111] transition-colors hover:bg-[#F7F7F9]"
                   >
                     取消
                   </button>
@@ -1230,7 +960,7 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                       handleSaveSettings();
                       setIsSettingsOpen(false);
                     }}
-                    className="flex-1 py-3 rounded-[16px] bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-colors shadow-md"
+                    className="w-full rounded-xl bg-[#111111] py-3 text-xs font-semibold text-white transition-colors hover:bg-black"
                   >
                     保存设置
                   </button>
@@ -1238,84 +968,87 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
               </div>
             ) : (
               <>
-            <header className="offline-workspace-header">
-              <AppHeader
-                title={<>{activeStory.title}<span className="offline-mode-label">{activeStory.mode === "director" ? "导演" : activeStory.mode === "if" ? "IF线" : "续写"}</span></>}
-                subtitle={<>与「{selectedChar.remark || selectedChar.name}」的离线剧本空间</>}
-                left={<IconButton icon={<ArrowLeft size={24} />} variant="surface" onClick={handleExitStoryWorkspace} aria-label="返回线下故事列表" />}
-                right={<>
-                  <IconButton ref={workspaceMenuTriggerRef} icon={<MoreHorizontal size={22} />} variant="surface" onClick={() => setIsWorkspaceMenuOpen((open) => !open)} aria-label="打开线下剧情菜单" />
-                  <PopoverMenu open={isWorkspaceMenuOpen} onClose={() => setIsWorkspaceMenuOpen(false)} anchorRef={workspaceMenuTriggerRef} placement="bottom-end" ariaLabel="线下剧情菜单" className="offline-workspace-menu">
-                    <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsReadingSettingsOpen(true); }}><span className="offline-workspace-menu-icon" aria-hidden="true">Aa</span><span>阅读设置</span></button>
-                    <button type="button" role="menuitem" onClick={() => { setIsWorkspaceMenuOpen(false); setIsSettingsOpen(true); }}><Settings size={16} /><span>剧本设置</span></button>
-                  </PopoverMenu>
-                </>}
-              />
+            <OfflineWorkspaceHeader
+              story={activeStory}
+              characterName={selectedChar.remark || selectedChar.name}
+              onExit={handleExitStoryWorkspace}
+              onOpenReadingSettings={() => setIsReadingSettingsOpen(true)}
+              onOpenStorySettings={() => setIsSettingsOpen(true)}
+            />
 
-              {activeStory.sourceChatId && (
-                <div className="offline-chat-link-card">
-                  <div><Link2 size={16} /><span>已关联线上聊天记录（导入了 {activeStory.sourceChatMsgCount || 0} 条历史对话）</span></div>
-                  {onNavigateToChat && <button onClick={async () => {
-                    const latestStory = activeStoryRef.current;
-                    if (!latestStory) return;
-                    let completedStory = latestStory;
-                    if (shouldAutoSyncOnlineContinuation(latestStory)) completedStory = await handleSyncMemoryToBrain(latestStory);
-                    clearOfflineSession(completedStory);
-                    clearActiveStorySnapshot();
-                    setIsSettingsOpen(false);
-                    onNavigateToChat(completedStory.characterId);
-                  }}>返回线上聊天 ›</button>}
+            {activeStory.sourceChatId && (
+              <section className="offline-chat-link-card" aria-label="线上聊天关联状态">
+                <div className="offline-chat-link-copy">
+                  <Link2 size={16} />
+                  <span>已关联线上聊天记录（导入了 {activeStory.sourceChatMsgCount || 0} 条历史对话）</span>
                 </div>
-              )}
-
-              {activeStory.mode === "if" && activeStory.ifPrompt && <div className="mt-3 text-xs text-amber-700 flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-amber-500" />IF 假想设定：{activeStory.ifPrompt}</div>}
-
-            </header>
-
-            <main className="offline-story-scroll offline-message-list">
-              {activeStory.customCss && <style dangerouslySetInnerHTML={{ __html: activeStory.customCss }} />}
-              <div className="offline-story-list">
-                {visibleStoryMessages.length > 0 && <div className="offline-story-session"><span>{new Date(activeStory.createdAt).toLocaleDateString()} · 剧情记录</span><span>{visibleStoryMessages.length} 段</span></div>}
-                {visibleStoryMessages.length === 0 && (
-                  <div className="offline-empty-state">
-                    <p>剧本空间已经准备好。写下一个动作、一句对白，或让角色为这一幕打开故事。</p>
-                    <button onClick={() => handleSendMessage(undefined, true)}>让 {selectedChar.remark || selectedChar.name} 开启第一幕</button>
-                  </div>
+                {onNavigateToChat && linkedChatTarget && (
+                  <button type="button" className="offline-chat-link-action" onClick={handleReturnToOnlineChat}>
+                    返回线上聊天
+                  </button>
                 )}
-                {visibleStoryMessages.map((msg) => {
-                  let charToUse = selectedChar;
-                  if (msg.sender !== "user" && activeStory.characterIds?.length) {
-                    const matched = characters.filter((character) => activeStory.characterIds?.includes(character.id)).find((character) => msg.content.includes(character.remark || character.name));
-                    if (matched) charToUse = matched;
-                  }
-                  return <OfflineStoryCard
-                    key={msg.id}
-                    message={msg}
-                    character={charToUse}
-                    settings={settings}
-                    showAvatars={activeStory.showAvatars !== false}
-                    menuOpen={activeNodeMenuId === msg.id}
-                    onMenuToggle={() => setActiveNodeMenuId((current) => current === msg.id ? null : msg.id)}
-                    onEdit={() => { setActiveNodeMenuId(null); handleStartEdit(msg.id, msg.content); }}
-                    onDelete={() => { setActiveNodeMenuId(null); setPendingDeleteMessageId(msg.id); }}
-                    onGuidance={() => { setActiveNodeMenuId(null); setIsGuidancePanelOpen(true); }}
-                  />;
-                })}
+              </section>
+            )}
+
+            {activeStory.mode === "if" && activeStory.ifPrompt && (
+              <div className="offline-if-context">
+                <Layers size={14} />
+                <span>IF 假想设定：{activeStory.ifPrompt}</span>
+              </div>
+            )}
+
+            <MessageList
+              messages={visibleStoryMessages}
+              scrollRef={workspaceScrollRef}
+              className="offline-story-scroll"
+              style={{}}
+              contentClassName="offline-story-list"
+              header={(
+                <>
+                  {activeStory.customCss && <style data-offline-custom-css dangerouslySetInnerHTML={{ __html: scopeOfflineCustomCss(activeStory.customCss) }} />}
+                  {visibleStoryMessages.length > 0 && <div className="offline-story-session"><span>{new Date(activeStory.createdAt).toLocaleDateString()} · 剧情记录</span><span>{visibleStoryMessages.length} 段</span></div>}
+                  {visibleStoryMessages.length === 0 && (
+                    <div className="offline-empty-state">
+                      <p>剧本空间已经准备好。写下一个动作、一句对白，或让角色为这一幕打开故事。</p>
+                      <button onClick={() => handleSendMessage(undefined, true)}>让 {selectedChar.remark || selectedChar.name} 开启第一幕</button>
+                    </div>
+                  )}
+                </>
+              )}
+              renderMessage={(msg) => {
+                let charToUse = selectedChar;
+                if (msg.sender !== "user" && activeStory.characterIds?.length) {
+                  const matched = characters.filter((character) => activeStory.characterIds?.includes(character.id)).find((character) => msg.content.includes(character.remark || character.name));
+                  if (matched) charToUse = matched;
+                }
+                return <OfflineStoryCard
+                  message={msg}
+                  character={charToUse}
+                  settings={settings}
+                  showAvatars
+                  menuOpen={activeNodeMenuId === msg.id}
+                  onMenuToggle={() => setActiveNodeMenuId((current) => current === msg.id ? null : msg.id)}
+                  onEdit={() => { setActiveNodeMenuId(null); handleStartEdit(msg.id, msg.content); }}
+                  onDelete={() => { setActiveNodeMenuId(null); setPendingDeleteMessageId(msg.id); }}
+                  onGuidance={() => { setActiveNodeMenuId(null); setIsGuidancePanelOpen(true); }}
+                  onRegenerate={() => handleRegenerateMessage(msg.id)}
+                />;
+              }}
+            >
                 {isGenerating && <div className="offline-story-status"><RefreshCw size={15} className="animate-spin" />{selectedChar.remark || selectedChar.name} 正在续写这一幕…</div>}
                 {errorMsg && <div className="offline-story-error">{errorMsg}</div>}
                 <div ref={workspaceEndRef} />
-              </div>
-            </main>
+            </MessageList>
 
             <div className="offline-composer-wrap">
               <form onSubmit={(event) => { event.preventDefault(); handleSendMessage(undefined, !inputText.trim()); }} className="offline-composer">
-                <Input
-                  type="text"
+                <textarea
                   value={inputText}
                   onChange={(event) => setInputText(event.target.value)}
                   placeholder={activeStory.mode === "director" ? "继续写下去，或留下这一幕的方向…" : "继续写下去…"}
-                  className="offline-composer-input"
-                  inputClassName="offline-composer-input-field"
+                  className="offline-composer-input-field"
+                  rows={1}
+                  disabled={isGenerating}
                 />
                 <IconButton type="submit" disabled={isGenerating} aria-label="发送并继续剧情" icon={<Send size={17} />} className="offline-composer-submit" />
               </form>
@@ -1340,14 +1073,24 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
           initialOngoing={guidanceDraft.ongoing}
           onClose={() => setIsGuidancePanelOpen(false)}
           onSave={(oneTime, ongoing) => {
-            setGuidanceDraft({ oneTime, ongoing });
+            const nextGuidance = { oneTime: oneTime.trim(), ongoing: ongoing.trim() };
+            setGuidanceDraft(nextGuidance);
+            const story = activeStoryRef.current;
+            if (story) {
+              saveActiveStorySnapshot({
+                ...story,
+                oneTimeGuidance: nextGuidance.oneTime || undefined,
+                ongoingGuidance: nextGuidance.ongoing || undefined,
+                updatedAt: Date.now(),
+              });
+            }
             setIsGuidancePanelOpen(false);
-            showToast("场外指导已暂存（当前不会改变 AI 生成规则）");
+            showToast("场外指导已保存，将影响后续剧情生成");
           }}
         />
       )}
 
-      {editingMessage && (
+      {editingMessage && selectedChar && (
         <OfflineStoryEditor
           message={editingMessage}
           character={selectedChar}
@@ -1372,107 +1115,231 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
         }}
       />
 
+      <AnimatePresence>
+        {editingStory && (
+          <div
+            className="app-viewport-overlay offline-story-edit-overlay fixed inset-x-0 top-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+            onClick={() => setEditingStory(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="settings-panel-card offline-story-edit-card w-full max-w-sm space-y-4 p-5 text-slate-800"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h3 className="text-sm font-bold text-slate-800">编辑剧本</h3>
+                <button type="button" onClick={() => setEditingStory(null)} className="text-xs font-bold text-slate-400 hover:text-slate-600">取消</button>
+              </div>
+              <label className="block space-y-1">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">故事名称</span>
+                <input
+                  autoFocus
+                  value={editingStoryTitle}
+                  onChange={(event) => setEditingStoryTitle(event.target.value)}
+                  className="w-full rounded-[8px] border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500"
+                />
+              </label>
+              {editingStory.mode === "if" && (
+                <label className="block space-y-1">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-amber-600">IF 线设定</span>
+                  <textarea
+                    value={editingStoryIfPrompt}
+                    onChange={(event) => setEditingStoryIfPrompt(event.target.value)}
+                    rows={4}
+                    placeholder="填写或修改这条 IF 线的设定…"
+                    className="offline-story-if-prompt w-full resize-none rounded-[8px] border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500"
+                  />
+                </label>
+              )}
+              <div className="settings-wide-action-group">
+                <button type="button" onClick={handleSaveStoryEdit} className="settings-wide-action settings-wide-action-primary">保存修改</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* ================= STORY CREATION DIALOG / MODAL ================= */}
       <AnimatePresence>
-        {showCreateModal && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+        {showCreateModal && selectedChar && (
+          <div className="offline-create-overlay absolute inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-start justify-center p-3">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white border border-slate-150 rounded-2xl w-full max-w-sm p-5 text-slate-800 space-y-4 shadow-2xl"
+              className="settings-panel-card offline-create-card w-full max-w-md overflow-y-auto p-4 text-slate-800"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse" />
+              <div className="offline-create-header">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
                   <span>新建线下剧本故事</span>
                 </h3>
                 <button 
+                  type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+                  className="offline-create-cancel"
                 >
                   取消
                 </button>
               </div>
 
-              <div className="space-y-3.5 text-xs">
-                {/* Title input */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">故事名称 (选填)</label>
-                  <input
-                    type="text"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="例如: 废土末日平行线 / 暴雨中的午后 / 导演控制篇..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
-                  />
+              <div className="offline-create-form text-xs">
+                <div className="offline-create-title-field">
+                  <label className="offline-create-label">故事名称</label>
+                  <div className="offline-create-title-row">
+                    <input
+                      type="text"
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                      placeholder="例如：废土末日平行线 / 暴雨中的午后"
+                      className="offline-create-input min-w-0 flex-1"
+                    />
+                    <div className="offline-create-scope-switch" aria-label="选择单人或多人故事">
+                      <button
+                        type="button"
+                        aria-label="单人线下"
+                        aria-pressed={creationScope === "single"}
+                        onClick={() => {
+                          const next = creationCharacters.find((character) => character.id === selectedCharId) || creationCharacters[0];
+                          setCreationScope("single");
+                          if (next) setSelectedCharId(next.id);
+                        }}
+                        className={creationScope === "single" ? "is-active" : ""}
+                      >
+                        <UserRound size={17} />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="多人线下"
+                        aria-pressed={creationScope === "multi"}
+                        onClick={() => {
+                          const next = creationGroups[0] || creationCharacters[0];
+                          setCreationScope("multi");
+                          if (next && !next.isGroupChat) setSelectedCharIds((current) => current.length > 1 ? current : creationCharacters.slice(0, 2).map((character) => character.id));
+                          if (next) setSelectedCharId(next.id);
+                        }}
+                        className={creationScope === "multi" ? "is-active" : ""}
+                      >
+                        <Users size={17} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
+                {creationScope === "single" ? <div className="offline-create-two-column">
+                  <label className="offline-create-field">
+                    <span className="offline-create-label">选择角色</span>
+                  <select
+                    value={selectedCharId}
+                    onChange={(event) => setSelectedCharId(event.target.value)}
+                    className="offline-create-input"
+                  >
+                    {creationCharacters.map((character) => <option key={character.id} value={character.id}>{character.remark || character.name}</option>)}
+                  </select>
+                  </label>
+                  <label className="offline-create-field">
+                    <span className="offline-create-label">我的身份</span>
+                    <select
+                      value={selectedRelationId}
+                      onChange={(event) => setSelectedRelationId(event.target.value)}
+                      className="offline-create-input"
+                    >
+                      <option value="">选择身份</option>
+                      {relationChoices.map((relation) => {
+                        const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
+                        return <option key={relation.id} value={relation.id}>{identity?.name || relation.userIdentityId}</option>;
+                      })}
+                    </select>
+                  </label>
+                </div> : (
+                  <div className="offline-create-field">
+                    <span className="offline-create-label">参与角色</span>
+                    <div className="offline-create-participants">
+                      {(selectedChar.isGroupChat
+                        ? (selectedChar.memberIds || []).map((memberId) => characters.find((character) => character.id === memberId)).filter(Boolean)
+                        : creationCharacters
+                      ).map((member) => {
+                        if (!member) return null;
+                        const checked = selectedCharIds.includes(member.id);
+                        return <label key={member.id} className="offline-create-participant">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setSelectedCharIds((current) => checked
+                              ? current.filter((id) => id !== member.id)
+                              : [...current, member.id])}
+                            className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+                          />
+                          <img src={member.avatar} alt="" className="h-5 w-5 rounded-full object-cover" />
+                          <span className="font-bold text-slate-700">{member.remark || member.name}</span>
+                        </label>;
+                      })}
+                    </div>
+                    <span className="offline-create-helper">已选择 {selectedCharIds.length} 名，至少需要 2 名</span>
+                  </div>
+                )}
+
                 {/* Mode Selector */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">剧本模式设定</label>
-                  <div className="grid grid-cols-3 gap-2">
+                <div className="offline-create-field">
+                  <label className="offline-create-label">剧本模式设定</label>
+                  <div className="offline-create-mode-grid">
                     {[
-                      { id: "director", label: "导演导演", desc: "指令驱动" },
-                      { id: "continue", label: "续写续写", desc: "顺应逻辑" },
+                      { id: "director", label: "导演模式", desc: "指令驱动" },
+                      { id: "continue", label: "续写模式", desc: "顺应逻辑" },
                       { id: "if", label: "IF线", desc: "设定颠覆" }
                     ].map(m => (
                       <button
                         key={m.id}
                         type="button"
                         onClick={() => setNewMode(m.id as any)}
-                        className={`p-2.5 rounded-xl border flex flex-col items-center text-center transition-all ${
+                        className={`offline-create-mode-button ${
                           newMode === m.id 
-                            ? "bg-indigo-50 border-indigo-500 text-indigo-600 font-bold" 
-                            : "bg-slate-50 border-slate-200 text-slate-500 hover:border-slate-300"
+                            ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] font-bold"
+                            : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                         }`}
                       >
                         <span className="font-bold text-[11px]">{m.label}</span>
-                        <span className="text-[8px] text-slate-400 mt-0.5">{m.desc}</span>
+                        <span className={`text-[8px] mt-0.5 ${newMode === m.id ? "text-[var(--segmented-active-text)]" : "text-[var(--segmented-inactive-text)]"}`}>{m.desc}</span>
                       </button>
                     ))}
                   </div>
                 </div>
 
+                {(newMode === "director" || newMode === "if") && (
+                  <div className="offline-create-notice">
+                    当前模式不主动同步记忆，请在设置中手动同步
+                  </div>
+                )}
+
                 {/* IF premise prompt field */}
                 {newMode === "if" && (
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-amber-600 font-bold uppercase tracking-wider block">假想平行宇宙设定</label>
+                  <div className="offline-create-field">
+                    <label className="offline-create-label text-amber-600">IF 线设定</label>
                     <textarea
                       value={newIfPrompt}
                       onChange={(e) => setNewIfPrompt(e.target.value)}
                       placeholder="例：如果我们在一个赛博朋克霓虹街头第一次相遇，你是一个身负重伤的骇客，而我是一个义体医生..."
                       rows={3}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                      className="offline-create-input offline-create-if-input w-full resize-none"
                     />
                   </div>
                 )}
 
                 {/* Import history switch */}
-                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                  <div>
-                    <span className="text-[11px] font-bold text-slate-700 block">引用线上聊天切入故事</span>
-                    <span className="text-[8px] text-slate-400">自动同步该角色最后的 15 条聊天历史作为上下文</span>
-                  </div>
+                <label className="offline-create-toggle-card">
+                  <span className="text-[11px] font-bold text-slate-700">引用线上聊天切入故事</span>
                   <input
                     type="checkbox"
                     checked={newStartFromChat}
                     onChange={(e) => setNewStartFromChat(e.target.checked)}
                     className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-slate-50 cursor-pointer"
                   />
-                </div>
+                </label>
 
-                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                  <div>
-                    <span className="text-[11px] font-bold text-slate-700 block">时间感知</span>
-                    <span className="text-[8px] text-slate-400">
-                      {newStartFromChat
-                        ? "线上转线下时自动继承该角色线上聊天的时间感知设置"
-                        : "自导自演 / IF 线独立使用当前真实时间"
-                      }
-                    </span>
-                  </div>
+                <label className="offline-create-toggle-card">
+                  <span className="text-[11px] font-bold text-slate-700">时间感知</span>
                   <input
                     type="checkbox"
                     checked={newStartFromChat
@@ -1482,15 +1349,17 @@ Current real-world time is ${currentClock}. Use this as the authoritative presen
                     onChange={(e) => setNewTimeAwareness(e.target.checked)}
                     className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-slate-50 cursor-pointer disabled:opacity-50"
                   />
-                </div>
+                </label>
               </div>
 
-              <button
-                onClick={handleCreateStory}
-                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-colors shadow-md"
-              >
-                开启剧本空间
-              </button>
+              <div className="offline-create-actions">
+                <button
+                  onClick={handleCreateStory}
+                  className="settings-wide-action settings-wide-action-primary"
+                >
+                  开启剧本空间
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
