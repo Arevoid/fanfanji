@@ -8816,7 +8816,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                             return {
                               ...previous,
                               identities: [...identities, identity],
-                              identityDataVersion: Math.max(1, previous.identityDataVersion || 0),
+                              identityDataVersion: Math.max(2, previous.identityDataVersion || 0),
                             };
                           });
                           setShowCreateIdentityModal(false);

@@ -506,7 +506,7 @@ const DEFAULT_SETTINGS: UserSettings = {
     }
   ],
   activeIdentityId: "identity-1",
-  identityDataVersion: 1,
+  identityDataVersion: 2,
   identities: [
     {
       id: "identity-1",

@@ -25,7 +25,7 @@ const settings = {
 
 const normalized = normalizeIdentitySettings(settings);
 assert.equal(normalized.changed, true, "legacy identities need a one-time ownership normalization");
-assert.equal(normalized.settings.identityDataVersion, 1);
+assert.equal(normalized.settings.identityDataVersion, 2);
 assert.equal(normalized.settings.identities?.find((item) => item.id === "identity-primary")?.kind, "primary");
 assert.equal(normalized.settings.identities?.find((item) => item.id === "identity-primary")?.rootIdentityId, "identity-primary");
 assert.equal(normalized.settings.identities?.find((item) => item.id === "identity-alias")?.rootIdentityId, "identity-primary");
@@ -73,5 +73,27 @@ const workspaceRelations = listRelationshipsForIdentityWorkspace(
   normalized.settings.identities,
 );
 assert.deepEqual(workspaceRelations.map((item) => item.id), ["relation-alias", "relation-primary"], "workspace list includes primary and aliases but not another主人设");
+
+const archivedActive = normalizeIdentitySettings({
+  ...normalized.settings,
+  identityDataVersion: 1,
+  activeIdentityId: "identity-alias",
+  name: "老莫",
+  avatar: "alias-avatar",
+  identities: (normalized.settings.identities || []).map((identity) => identity.id === "identity-alias"
+    ? { ...identity, archived: true }
+    : identity),
+});
+assert.equal(archivedActive.settings.activeIdentityId, "identity-primary", "an archived active identity must fall back to a usable identity");
+assert.equal(archivedActive.settings.identities?.find((identity) => identity.id === "identity-alias")?.archived, true, "archive state must be preserved");
+assert.equal(archivedActive.settings.identities?.find((identity) => identity.id === "identity-alias")?.rootIdentityId, "identity-primary", "archive migration must preserve the identity root");
+
+const allArchived = normalizeIdentitySettings({
+  ...normalized.settings,
+  activeIdentityId: "identity-alias",
+  identities: (normalized.settings.identities || []).map((identity) => ({ ...identity, archived: true })),
+});
+assert.equal(allArchived.settings.activeIdentityId, "identity-alias", "when every identity is archived, preserve the imported pointer without mutating archive state");
+assert.ok(allArchived.settings.identities?.every((identity) => identity.archived), "all-archived recovery must not unarchive records");
 
 console.log("identity workspace foundation tests passed");

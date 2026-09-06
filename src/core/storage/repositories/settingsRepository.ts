@@ -35,7 +35,11 @@ function sameIdentity(a: UserSettings["identities"] extends (infer T)[] | undefi
     && a.sortOrder === b.sortOrder;
 }
 
-const IDENTITY_DATA_VERSION = 1;
+// Version 2 makes active-identity recovery archive-aware. It is a
+// non-destructive migration: archived records and all of their IDs remain in
+// place; only the active pointer is moved when it points at an archived record
+// and another usable identity exists.
+const IDENTITY_DATA_VERSION = 2;
 
 /** Repairs legacy identity records without guessing or rewriting user profile text. */
 export function normalizeIdentitySettings(settings: UserSettings): { settings: UserSettings; changed: boolean } {
@@ -102,8 +106,12 @@ export function normalizeIdentitySettings(settings: UserSettings): { settings: U
   });
 
   const requestedActiveId = settings.activeIdentityId || "identity-1";
-  const activeIdentity = normalizedIdentities.find((identity) => identity.id === requestedActiveId)
-    || normalizedIdentities.find((identity) => identity.id === "identity-1")
+  const activeIdentity = normalizedIdentities.find((identity) => identity.id === requestedActiveId && !identity.archived)
+    || normalizedIdentities.find((identity) => identity.id === "identity-1" && !identity.archived)
+    || normalizedIdentities.find((identity) => !identity.archived)
+    // If an imported/legacy backup archived every identity, preserve the
+    // current pointer rather than silently unarchiving or deleting anything.
+    || normalizedIdentities.find((identity) => identity.id === requestedActiveId)
     || normalizedIdentities[0];
   if (activeIdentity.id !== settings.activeIdentityId
     || settings.name !== activeIdentity.name
