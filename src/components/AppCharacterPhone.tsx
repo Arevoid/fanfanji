@@ -661,6 +661,26 @@ export default function AppCharacterPhone({
     window.addEventListener("character-phone-gallery-updated", handleGalleryUpdated);
     return () => window.removeEventListener("character-phone-gallery-updated", handleGalleryUpdated);
   }, [selectedCharacterId, userIdentityId]);
+  useEffect(() => {
+    const handleStorageReady = () => {
+      if (!selectedCharacter) return;
+      const latest = getCharacterPhone(userIdentityId, selectedCharacter.id);
+      if (latest) {
+        setPhone(latest);
+        setPhoneNotice("");
+      }
+    };
+    const handleStorageError = () => {
+      if (!selectedCharacter) return;
+      setPhoneNotice("角色手机内容暂未成功保存；请到设置→数据管理检查存储空间后重试");
+    };
+    window.addEventListener("character-phone-storage-ready", handleStorageReady);
+    window.addEventListener("character-phone-storage-error", handleStorageError);
+    return () => {
+      window.removeEventListener("character-phone-storage-ready", handleStorageReady);
+      window.removeEventListener("character-phone-storage-error", handleStorageError);
+    };
+  }, [selectedCharacter?.id, userIdentityId]);
   const [unlocked, setUnlocked] = useState(false);
   const [activeApp, setActiveApp] = useState<CharacterPhoneView>("home");
   const [desktopPage, setDesktopPage] = useState<0 | 1>(0);
@@ -726,6 +746,17 @@ export default function AppCharacterPhone({
   const phoneScopeRef = useRef({ ownerIdentityId: userIdentityId, characterId: selectedCharacterId });
   const syncedPhonePostsRef = useRef<Record<string, string>>({});
   phoneScopeRef.current = { ownerIdentityId: userIdentityId, characterId: selectedCharacterId };
+  useEffect(() => {
+    if (!phone || !selectedCharacter) return;
+    const persisted = getCharacterPhone(userIdentityId, selectedCharacter.id);
+    const isCurrentVersionPersisted = persisted
+      && persisted.id === phone.id
+      && persisted.updatedAt === phone.updatedAt
+      && persisted.contentSeededAt === phone.contentSeededAt;
+    if (!isCurrentVersionPersisted) {
+      setPhoneNotice("角色手机内容暂未成功保存，本次显示的是临时数据；请到设置→数据管理清理空间后重试");
+    }
+  }, [phone?.id, phone?.updatedAt, phone?.contentSeededAt, selectedCharacter?.id, userIdentityId]);
   useEffect(() => {
     // React StrictMode mounts effects twice in development. Reset this flag
     // in the setup phase so the first probe cleanup cannot permanently mark a
@@ -954,6 +985,9 @@ export default function AppCharacterPhone({
         : "角色手机数据保存失败，原数据已保留");
       return false;
     }
+    // A successful IndexedDB/localStorage write supersedes any stale quota
+    // banner left by an earlier failed session.
+    setPhoneNotice("");
     setPhone(next);
     if (selectedCharacter && onSyncCharacterPhonePost) {
       const previousPosts = currentPhone?.posts ?? [];

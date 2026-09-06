@@ -104,7 +104,9 @@ export function useSystemBackupActions({ backupKeys, fullBackupKeys, lightBackup
       try {
         const parsedBackup = parseSystemBackup(JSON.parse(reader.result as string));
         const entries = Object.entries(parsedBackup.localStorage);
-        if (entries.length === 0 || entries.some(([key, value]) => !backupKeys.has(key) || (value !== null && typeof value !== "string"))) {
+        const isAllowedLocalStorageKey = (key: string) => backupKeys.has(key)
+          || key.startsWith("phone_character_phone_v2_");
+        if (entries.length === 0 || entries.some(([key, value]) => !isAllowedLocalStorageKey(key) || (value !== null && typeof value !== "string"))) {
           throw new Error("非有效的小手机备份文件！");
         }
         const confirmationMessage = parsedBackup.integrityWarning

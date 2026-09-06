@@ -10,6 +10,7 @@ import {
   SystemBackupRestoreError,
 } from "../src/features/settings/systemBackup";
 import { readingAssetDb } from "../src/core/storage/readingAssetDb";
+import { characterPhoneDb } from "../src/core/storage/characterPhoneDb";
 
 const values = new Map<string, string>();
 const storage = {
@@ -25,6 +26,30 @@ const characters = [{ id: "character-a", name: "角色 A" }];
 const moments = [{ id: "moment-a", content: "朋友圈内容" }];
 await readingAssetDb.saveMetadataValue("character-archive-v4", characters);
 await readingAssetDb.saveMetadataValue("moments-v4", moments);
+const backupPhone = {
+  id: "phone-backup-test",
+  ownerIdentityId: "identity-backup-test",
+  characterId: "character-a",
+  passcode: "8952",
+  failedAttempts: 0,
+  createdAt: 1,
+  updatedAt: 1,
+  wallpaper: "white",
+  appOrder: ["chat"],
+  messages: [],
+  contacts: [],
+  threadMessages: [],
+  posts: [],
+  browserHistory: [],
+  diaryEntries: [],
+  notes: [],
+  todos: [],
+  scheduleItems: [],
+  phoneCalls: [],
+  galleryItems: [],
+  activities: [],
+};
+await characterPhoneDb.replaceAll([backupPhone as never]);
 values.set("phone_worldbook_entries", JSON.stringify([{ id: "world-a" }]));
 values.set("phone_characters_v3", JSON.stringify([{ id: "legacy-character" }]));
 values.set("phone_reading_analysis_store_v1", JSON.stringify({ version: 1, tasks: [] }));
@@ -32,6 +57,7 @@ values.set("phone_reading_analysis_store_v1", JSON.stringify({ version: 1, tasks
 const backup = await buildSystemBackup(storage, ["phone_characters_v3", "phone_worldbook_entries"]);
 assert.deepEqual(backup.indexedDb["character-archive-v4"], characters);
 assert.deepEqual(backup.indexedDb["moments-v4"], moments);
+assert.deepEqual(backup.indexedDb["character-phone-v1"], [backupPhone]);
 assert.equal(backup.localStorage.phone_worldbook_entries, JSON.stringify([{ id: "world-a" }]));
 assert.equal(backup.localStorage.phone_characters_v3, JSON.stringify([{ id: "legacy-character" }]), "legacy local data is retained when an IDB export is unavailable");
 assert.equal(backup.localStorage.phone_reading_analysis_store_v1, undefined, "only requested local keys are exported");
@@ -100,6 +126,8 @@ assert.deepEqual(
 
 await restoreSystemBackupIndexedDb({ "character-archive-v4": [{ id: "restored-character" }] });
 assert.deepEqual(await readingAssetDb.loadMetadataValue("character-archive-v4"), [{ id: "restored-character" }]);
+await restoreSystemBackupIndexedDb({ "character-phone-v1": [backupPhone] });
+assert.deepEqual(await characterPhoneDb.loadAll(), [backupPhone]);
 
 const indexedDbSnapshot = await snapshotSystemBackupIndexedDb();
 assert.equal(indexedDbSnapshot["messages-v4"], null);

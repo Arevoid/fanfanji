@@ -58,7 +58,7 @@ import {
   upsertIdentityMusicTrack,
 } from "./core/storage/repositories/musicWidgetRepository";
 import { imageAssetDb } from "./utils/imageAssetDb";
-import { createCharacterPhone, getCharacterPhone, removeCharacterPhonesByCharacterIds, saveCharacterPhone } from "./core/storage/repositories/characterPhoneRepository";
+import { createCharacterPhone, getCharacterPhone, initializeCharacterPhoneRepository, removeCharacterPhonesByCharacterIds, saveCharacterPhone } from "./core/storage/repositories/characterPhoneRepository";
 import { normalizeCharacterPhoneProactiveMessages } from "./features/characterPhone/characterPhoneContent";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
 import { createRelationship, DEFAULT_IDENTITY_ID, findPrimaryIdentityForIdentity, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, normalizeRelationshipIdentityScopes, type CharacterRelationship } from "./domain/relationship/characterRelationship";
@@ -622,6 +622,13 @@ export default function App() {
       }
     });
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    // Role-phone records are formal data. Hydrate their dedicated IndexedDB
+    // store during app startup so a localStorage quota problem cannot make an
+    // otherwise valid phone render as an empty device after refresh.
+    void initializeCharacterPhoneRepository();
   }, []);
 
   useEffect(() => {

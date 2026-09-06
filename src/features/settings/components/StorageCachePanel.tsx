@@ -73,6 +73,17 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
     }
   }, [refreshUsage]);
 
+  useEffect(() => {
+    if (mode !== "characterPhone") return;
+    const refreshAfterPhoneStorageChange = () => refreshUsage();
+    window.addEventListener("character-phone-storage-ready", refreshAfterPhoneStorageChange);
+    window.addEventListener("character-phone-storage-error", refreshAfterPhoneStorageChange);
+    return () => {
+      window.removeEventListener("character-phone-storage-ready", refreshAfterPhoneStorageChange);
+      window.removeEventListener("character-phone-storage-error", refreshAfterPhoneStorageChange);
+    };
+  }, [mode, refreshUsage]);
+
   const refreshBrowserStorage = useCallback(async () => {
     if (typeof navigator === "undefined" || !navigator.storage?.estimate) return;
     try {
@@ -166,6 +177,9 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
           <p className="mt-0.5 text-sky-600/80">
             全部角色手机本地数据：{formatStorageBytes(phoneStorage.totalPhoneBytes)}
             {phoneStorage.legacyBytes > 0 ? "（含待迁移旧存储）" : ""}
+          </p>
+          <p className="mt-0.5 text-sky-600/80">
+            存储方式：{phoneStorage.backend === "indexeddb" ? "独立 IndexedDB（不占本地配置配额）" : "浏览器本地存储"}
           </p>
           <p className="mt-0.5 text-sky-600/80">下面的“可清理”只统计临时缓存，不会统计正式记录。</p>
         </div>

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import * as LZStringModule from "lz-string";
 import { createCharacterPhoneTextImageDataUrl } from "../src/features/characterPhone/characterPhoneTextImage";
 import { clearCharacterPhoneData, getCharacterPhone, getCharacterPhoneStorageUsage, migrateLegacyCharacterPhones, saveCharacterPhone } from "../src/core/storage/repositories/characterPhoneRepository";
 import type { CharacterPhoneRecord } from "../src/domain/characterPhone/types";
+
+const LZString = ((LZStringModule as typeof LZStringModule & { default?: typeof LZStringModule }).default ?? LZStringModule) as typeof import("lz-string");
 
 const values = new Map<string, string>();
 const localStorage: Storage = {
@@ -48,8 +51,10 @@ const phone: CharacterPhoneRecord = {
 
 assert.equal(saveCharacterPhone(phone).success, true);
 const serialized = values.get(`phone_character_phone_v2_${encodeURIComponent(phone.id)}`) || "";
-assert.equal(serialized.includes("data:image/svg+xml"), false, "text SVG data URLs stay out of localStorage");
-assert.match(serialized, /textImageForId/);
+assert.match(serialized, /^lz16:/, "role phone records use the compact wire format");
+const decoded = LZString.decompressFromUTF16(serialized.slice("lz16:".length)) || "";
+assert.equal(decoded.includes("data:image/svg+xml"), false, "text SVG data URLs stay out of localStorage");
+assert.match(decoded, /textImageForId/);
 assert.match(values.get("phone_character_phone_index_v2") || "", /phone-storage-test/);
 assert.equal(values.has("phone_character_phones_v1"), false, "new phones no longer use the aggregate v1 record");
 

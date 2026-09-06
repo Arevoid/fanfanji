@@ -7,6 +7,7 @@ import { readingAssetDb } from "../../core/storage/readingAssetDb";
 import { cinemaAssetDb } from "../../core/storage/cinemaAssetDb";
 import { messageEntryDb } from "../../core/storage/messageEntryDb";
 import { isMessageEntryStoreEnabled } from "../../core/storage/contentStorageFlags";
+import { characterPhoneDb } from "../../core/storage/characterPhoneDb";
 
 type ClearableStorage = Pick<Storage, "clear">;
 type ClearableCacheStorage = Pick<CacheStorage, "keys" | "delete">;
@@ -32,6 +33,7 @@ function getDefaultDependencies(): ClearApplicationDataDependencies {
       () => fontAssetDb.clearAll(),
       () => readingAssetDb.clearAll(),
       () => cinemaAssetDb.clearAll(),
+      () => characterPhoneDb.clearAll(),
     ],
   };
 }

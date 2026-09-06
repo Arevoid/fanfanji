@@ -503,6 +503,7 @@ async function inspectIndexedDbHealth(existingDatabaseNames?: Set<string>): Prom
     "FanfanjiReadingDB",
     "FanfanjiReadingCoverDB",
     "FanfanjiReadingMetadataDB",
+    "FanfanjiCharacterPhoneDB",
   ]);
   const existingNames = existingDatabaseNames
     ? [...existingDatabaseNames].filter((name) => knownNames.has(name))

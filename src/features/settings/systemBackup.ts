@@ -8,6 +8,8 @@ import { flushMessages } from "../../core/storage/repositories/messageRepository
 import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled, enableMessageEntryStore, enableOfflineStoryEntryStore, disableMessageEntryStore, disableOfflineStoryEntryStore } from "../../core/storage/contentStorageFlags";
 import { messageEntryDb } from "../../core/storage/messageEntryDb";
 import { offlineStoryEntryDb } from "../../core/storage/offlineStoryEntryDb";
+import { characterPhoneDb } from "../../core/storage/characterPhoneDb";
+import { flushCharacterPhoneRepository } from "../../core/storage/repositories/characterPhoneRepository";
 
 export const SYSTEM_BACKUP_FORMAT = "fanfanji-system-backup" as const;
 export const SYSTEM_BACKUP_VERSION = 3 as const;
@@ -23,6 +25,7 @@ export const SYSTEM_BACKUP_INDEXED_DB_KEYS = [
   "reading-store",
   "reading-co-reading-store",
   "reading-co-story-store",
+  "character-phone-v1",
 ] as const;
 export const SYSTEM_BACKUP_CONTENT_ENTRY_KEYS = ["message-entry-v1", "offline-story-entry-v1"] as const;
 
@@ -121,6 +124,39 @@ function readLocalStorage(storage: Storage, keys: readonly string[]): SystemBack
   return Object.fromEntries(keys.map((key) => [key, storage.getItem(key)]));
 }
 
+function includeCharacterPhoneLocalStorageKeys(storage: Storage, requestedKeys: readonly string[]): string[] {
+  const keys = new Set(requestedKeys);
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith("phone_character_phone_v2_")) keys.add(key);
+  }
+  return [...keys];
+}
+
+const CHARACTER_PHONE_INDEXED_DB_KEY = "character-phone-v1";
+
+async function loadSystemBackupIndexedDbValue(key: string): Promise<unknown | null> {
+  if (key === CHARACTER_PHONE_INDEXED_DB_KEY) return characterPhoneDb.loadAll();
+  return readingAssetDb.loadMetadataValue<unknown>(key);
+}
+
+async function saveSystemBackupIndexedDbValue(key: string, value: unknown): Promise<void> {
+  if (key === CHARACTER_PHONE_INDEXED_DB_KEY) {
+    if (!Array.isArray(value)) throw new Error("备份中的角色手机数据格式无效");
+    await characterPhoneDb.replaceAll(value as never[]);
+    return;
+  }
+  await readingAssetDb.saveMetadataValue(key, cloneJson(value));
+}
+
+async function deleteSystemBackupIndexedDbValue(key: string): Promise<void> {
+  if (key === CHARACTER_PHONE_INDEXED_DB_KEY) {
+    await characterPhoneDb.clearAll();
+    return;
+  }
+  await readingAssetDb.deleteMetadataValue(key);
+}
+
 /**
  * Reads all backup channels after pending repository writes have settled.
  * This is intentionally async: localStorage alone is no longer the source of
@@ -130,7 +166,8 @@ export async function buildSystemBackup(
   storage: Storage,
   localStorageKeys: readonly string[],
 ): Promise<SystemBackupEnvelope> {
-  const localStorageBeforeFlush = readLocalStorage(storage, localStorageKeys);
+  const backupLocalStorageKeys = includeCharacterPhoneLocalStorageKeys(storage, localStorageKeys);
+  const localStorageBeforeFlush = readLocalStorage(storage, backupLocalStorageKeys);
   await Promise.all([
     flushCharacters(),
     flushMessages(),
@@ -138,18 +175,19 @@ export async function buildSystemBackup(
     flushReadingStore(),
     flushCoReadingStore(),
     flushReadingCoStoryStore(),
+    flushCharacterPhoneRepository(),
   ]);
   const indexedDbEntries = await Promise.all(SYSTEM_BACKUP_INDEXED_DB_KEYS.map(async (key) => [
     key,
-    await readingAssetDb.loadMetadataValue<unknown>(key),
+    await loadSystemBackupIndexedDbValue(key),
   ] as const));
   const contentEntries = await Promise.all([
     isMessageEntryStoreEnabled() ? messageEntryDb.loadAll().then((value) => [SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[0], value] as const) : Promise.resolve([SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[0], null] as const),
     isOfflineStoryEntryStoreEnabled() ? offlineStoryEntryDb.loadAll().then((value) => [SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[1], value] as const) : Promise.resolve([SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[1], null] as const),
   ]);
 
-  const localStorageAfterFlush = readLocalStorage(storage, localStorageKeys);
-  const localStorage = Object.fromEntries(localStorageKeys.map((key) => [
+  const localStorageAfterFlush = readLocalStorage(storage, backupLocalStorageKeys);
+  const localStorage = Object.fromEntries(backupLocalStorageKeys.map((key) => [
     key,
     localStorageAfterFlush[key] ?? localStorageBeforeFlush[key] ?? null,
   ])) as SystemBackupLocalStorage;
@@ -176,7 +214,7 @@ export async function buildSystemBackup(
 export async function snapshotSystemBackupIndexedDb(): Promise<SystemBackupIndexedDb> {
   const metadataEntries = await Promise.all(SYSTEM_BACKUP_INDEXED_DB_KEYS.map(async (key) => [
     key,
-    await readingAssetDb.loadMetadataValue<unknown>(key),
+    await loadSystemBackupIndexedDbValue(key),
   ] as const));
   const contentEntries = await Promise.all([
     isMessageEntryStoreEnabled() ? messageEntryDb.loadAll().then((value) => [SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[0], value] as const) : Promise.resolve([SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[0], null] as const),
@@ -293,16 +331,16 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
   const skippedKeys = Object.keys(indexedDb).filter((key) => !knownKeys.has(key));
   let legacyMessageEntryRestored = false;
   for (const key of keysToRestore) {
-    previousValues.set(key, await readingAssetDb.loadMetadataValue<unknown>(key));
+    previousValues.set(key, await loadSystemBackupIndexedDbValue(key));
   }
 
   try {
     for (const key of keysToRestore) {
       const value = indexedDb[key];
       if (value === null || value === undefined) {
-        await readingAssetDb.deleteMetadataValue(key);
+        await deleteSystemBackupIndexedDbValue(key);
       } else {
-        await readingAssetDb.saveMetadataValue(key, cloneJson(value));
+        await saveSystemBackupIndexedDbValue(key, value);
       }
     }
     // A pre-entry-store backup may contain the retained messages-v4 snapshot
@@ -349,9 +387,9 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
     for (const [key, previousValue] of previousValues) {
       try {
         if (previousValue === null || previousValue === undefined) {
-          await readingAssetDb.deleteMetadataValue(key);
+          await deleteSystemBackupIndexedDbValue(key);
         } else {
-          await readingAssetDb.saveMetadataValue(key, previousValue);
+          await saveSystemBackupIndexedDbValue(key, previousValue);
         }
       } catch (rollbackError) {
         console.error("IndexedDB backup restore rollback failed:", rollbackError);
