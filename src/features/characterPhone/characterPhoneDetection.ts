@@ -17,8 +17,20 @@ export function discoverCharacterPhoneActions(
   const openCount = phone.phoneOpenCount ?? 0;
   const candidate = (phone.actionLog ?? [])
     .filter((action) => !action.discovered && action.detectability !== "none")
-    .filter((action) => now - action.timestamp >= (action.discoveryAfterMs ?? 10 * 60 * 1000)
-      || openCount - (action.phoneOpenCountAtAction ?? 0) >= (action.discoveryAfterOpens ?? 2))
+    .filter((action) => {
+      // Legacy records created by the old UI used zero delays for chat sends.
+      // Keep those records, but never let a newly sent message trigger an
+      // awareness alert in the same turn. Older records can still be noticed
+      // naturally once enough time or phone openings have passed.
+      const delay = action.kind === "chat_sent_as_character"
+        ? Math.max(action.discoveryAfterMs ?? 12 * 60 * 60 * 1000, 12 * 60 * 60 * 1000)
+        : (action.discoveryAfterMs ?? 10 * 60 * 1000);
+      const opens = action.kind === "chat_sent_as_character"
+        ? Math.max(action.discoveryAfterOpens ?? 3, 3)
+        : (action.discoveryAfterOpens ?? 2);
+      return now - action.timestamp >= delay
+        || openCount - (action.phoneOpenCountAtAction ?? 0) >= opens;
+    })
     .sort((left, right) => left.timestamp - right.timestamp)[0];
   if (!candidate) return phone;
   const shouldAsk = candidate.kind === "chat_sent_as_character"

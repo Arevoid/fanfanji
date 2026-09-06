@@ -78,7 +78,7 @@ import type { RelationshipNetworkNpcMomentAutomationTrigger } from "./features/m
 import { captureRelationshipCreatedEvent } from "./features/characterLife/services/characterEventCaptureService";
 import { messageMatchesMutationScope, type MessageMutationScope } from "./features/chat/context/directInteractionScope";
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, removePaymentStatusesForMessages, type RedPacketStatusMap } from "./features/chat/services/paymentScope";
-import { Character, Message, Moment, UserSettings, StylePreset, MusicTrack, MusicPlaylist, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
+import { Character, Message, Moment, UserIdentity, UserSettings, StylePreset, MusicTrack, MusicPlaylist, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
 import type { CharacterPhoneImageSaveInput } from "./domain/characterPhone/types";
 import type { CharacterPhonePost, CharacterPhonePostComment } from "./domain/characterPhone/types";
 import { 
@@ -554,6 +554,21 @@ const DEFAULT_SETTINGS: UserSettings = {
 };
 
 const DEFAULT_MESSAGES: Message[] = [];
+
+/** Character-phone data has one owner: the primary identity workspace. */
+function resolveCharacterPhoneOwnerIdentityId(
+  identityId: string,
+  identities: readonly UserIdentity[] = [],
+): string {
+  const primary = findPrimaryIdentityForIdentity(identityId, identities);
+  if (primary) return primary.id;
+  const identity = identities.find((candidate) => candidate.id === identityId);
+  if (identity?.kind === "alias" && identity.parentIdentityId) {
+    const parent = identities.find((candidate) => candidate.id === identity.parentIdentityId);
+    if (parent?.kind === "primary") return parent.id;
+  }
+  return identityId;
+}
 
 const normalizeLoadedMoments = (loadedMoments: Moment[]): Moment[] => loadedMoments.map((moment) => ({
   ...moment,
@@ -2247,7 +2262,8 @@ export default function App() {
     if (isEditingHomeScreen || suppressNextItemClickRef.current) return;
     if (item.type === "app") {
       preloadApp(item.id);
-      setActiveApp(item.id);
+      if (item.id === "character-phone") openCharacterPhoneApp();
+      else setActiveApp(item.id);
     }
   };
   useEffect(() => {
@@ -2455,7 +2471,13 @@ export default function App() {
     const character = charactersRef.current.find((candidate) => candidate.id === canonicalCharacterId);
     if (!character || character.isGroupChat) return;
 
-    const ownerIdentityId = input.ownerIdentityId;
+    // Chat callbacks may originate while an alias is active. Keep every
+    // character-phone artifact in the primary owner's phone instead of
+    // creating an orphaned alias phone record.
+    const ownerIdentityId = resolveCharacterPhoneOwnerIdentityId(
+      input.ownerIdentityId,
+      settingsRef.current.identities || [],
+    );
     if (!ownerIdentityId) return;
     const phone = getCharacterPhone(ownerIdentityId, canonicalCharacterId)
       || createCharacterPhone(ownerIdentityId, character);
@@ -2656,13 +2678,14 @@ export default function App() {
   };
 
   // Chat message send handler
-  const handleSendMessage = (msg: Message) => {
+  const handleSendMessage = (msg: Message, ownerIdentityIdOverride?: string) => {
     const isGroupMessage = characters.some((character) => character.id === msg.characterId && character.isGroupChat);
     let messageToSave = msg;
     if (!isGroupMessage) {
       const relationship = msg.relationId ? relationships.find((item) => item.id === msg.relationId) : undefined;
+      const ownerIdentityId = ownerIdentityIdOverride || (settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID);
       if (!relationship
-        || relationship.userIdentityId !== (settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID)
+        || relationship.userIdentityId !== ownerIdentityId
         || resolveCanonicalCharacterId(relationship.characterId, characters) !== resolveCanonicalCharacterId(msg.characterId, characters)
         || (msg.conversationId && msg.conversationId !== (relationship.conversationId || getConversationId(relationship.id)))) {
         console.warn("Direct message write rejected because its relationship scope is missing or inconsistent.", msg.id);
@@ -3169,6 +3192,16 @@ export default function App() {
     signature: settings.signature,
     bio: settings.bio,
   };
+  // Character phones belong to the主人设 only.  Alias identities continue to
+  // have their own ordinary chat relationships, but opening the phone always
+  // uses the primary identity's phone scope and profile so aliases cannot
+  // create a second phone contact list or phone history.
+  const characterPhoneOwnerIdentityId = resolveCharacterPhoneOwnerIdentityId(
+    activeIdentityId,
+    settings.identities || [],
+  );
+  const characterPhoneIdentity = settings.identities?.find((identity) => identity.id === characterPhoneOwnerIdentityId)
+    || activeIdentity;
   const relationshipNetworkNpcMomentInFlightRef = useRef<Set<string>>(new Set());
   const [relationshipNetworkPendingMoments, setRelationshipNetworkPendingMoments] = useState<RelationshipNetworkPendingMoment[]>(() =>
     listRelationshipNetworkPendingMomentsForIdentity(activeIdentityId));
@@ -3206,6 +3239,13 @@ export default function App() {
     if (!saved) {
       alert("身份已切换，但当前浏览器存储空间不足，刷新页面后可能无法保留本次切换。请先清理存储空间。");
     }
+  };
+
+  const openCharacterPhoneApp = () => {
+    // Character phones are a主人设-only surface. If a user is currently
+    // The component itself always reads/writes the primary identity scope.
+    // Opening the primary-owned phone must not change the selected chat persona.
+    setActiveApp("character-phone");
   };
 
   const linkRelationshipNetworkNpcToChat = async (npc: RelationshipNetworkNpc): Promise<{ characterId: string; relationId: string } | null> => {
@@ -4455,7 +4495,10 @@ export default function App() {
                         <div key={appId} className="flex items-center justify-center w-full h-full">
                           <button
                             onPointerDown={() => preloadApp(appId)}
-                            onClick={() => setActiveApp(appId)}
+                            onClick={() => {
+                              if (appId === "character-phone") openCharacterPhoneApp();
+                              else setActiveApp(appId);
+                            }}
                             className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
                               isTransparentIcon
                                 ? "transparent-custom-icon"
@@ -4534,6 +4577,7 @@ export default function App() {
                     moments={moments}
                     onSendMessage={handleSendMessage}
                     onSaveImageToCharacterPhone={saveImageToCharacterPhone}
+                    characterPhoneOwnerIdentityId={characterPhoneIdentity.id}
                     onSaveCharacter={handleSaveCharacter}
                     onUpdateCharacter={handleUpdateCharacter}
                     onAddMoment={handleAddMoment}
@@ -4598,7 +4642,7 @@ export default function App() {
                       onClose={() => setActiveApp(null)}
                       onOpenCharacterPhone={
                         typeof window !== "undefined" && new URLSearchParams(window.location.search).get("characterPhoneTest") === "1"
-                          ? () => setActiveApp("character-phone")
+                          ? openCharacterPhoneApp
                           : undefined
                       }
                       onSaveWorldBookEntries={handleSaveWorldBookEntries}
@@ -4739,15 +4783,15 @@ export default function App() {
                 {isAppMounted("character-phone") && (
                   <LazyAppBoundary visible={activeApp === "character-phone"}>
                     <AppCharacterPhone
-                      userIdentityId={activeIdentityId}
-                      activeIdentity={activeIdentity}
+                      userIdentityId={characterPhoneIdentity.id}
+                      activeIdentity={characterPhoneIdentity}
                       characters={characters}
                       relationships={relationships}
                       messages={messages}
                       moments={moments}
                       worldBookEntries={worldBookEntries}
-                      relationshipNetworkNpcs={listRelationshipNetworkNpcsForIdentity(activeIdentityId)}
-                      relationshipNetworkMaps={listRelationshipNetworkMapsForIdentity(activeIdentityId)}
+                      relationshipNetworkNpcs={listRelationshipNetworkNpcsForIdentity(characterPhoneIdentity.id)}
+                      relationshipNetworkMaps={listRelationshipNetworkMapsForIdentity(characterPhoneIdentity.id)}
                       musicTracks={tracks}
                       settings={settings}
                       resolvedTheme={resolvedTheme}
@@ -4756,6 +4800,12 @@ export default function App() {
                       onSyncCharacterPhonePost={handleSyncCharacterPhonePost}
                       onDeleteCharacterPhonePost={handleDeleteCharacterPhonePost}
                       onOpenChat={(characterId, relationId) => {
+                        if (characterPhoneIdentity.id !== activeIdentityId) {
+                          handleSwitchIdentity(characterPhoneIdentity.id, relationId
+                            ? { relationId, characterId }
+                            : undefined);
+                          return;
+                        }
                         openChatForCurrentIdentity(characterId, relationId);
                       }}
                       onClose={() => setActiveApp(null)}

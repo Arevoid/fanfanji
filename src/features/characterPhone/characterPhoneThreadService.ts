@@ -6,9 +6,12 @@ export function appendCharacterPhoneThreadMessage(input: {
   phone: CharacterPhoneRecord;
   contactId: string;
   content: string;
+  sender?: CharacterPhoneThreadMessage["sender"];
   operatedByUser?: boolean;
   sourceMessageId?: string;
   character?: Character;
+  /** Incoming contact replies are generated content, not a user operation. */
+  recordActivity?: boolean;
   now?: number;
 }): CharacterPhoneRecord {
   const now = input.now ?? Date.now();
@@ -16,7 +19,7 @@ export function appendCharacterPhoneThreadMessage(input: {
   const message: CharacterPhoneThreadMessage = {
     id: createId("phone-thread-message"),
     contactId: input.contactId,
-    sender: "character",
+    sender: input.sender ?? "character",
     content: input.content.trim().slice(0, 1000),
     timestamp: now,
     ...(input.operatedByUser ? { operatedByUser: true } : {}),
@@ -28,11 +31,24 @@ export function appendCharacterPhoneThreadMessage(input: {
       ? { ...item, lastMessage: message.content, lastMessageAt: now }
       : item),
     threadMessages: [...(input.phone.threadMessages ?? []), message],
-    activities: [...input.phone.activities, { id: createId("phone-activity"), type: "user_edit", label: `以角色身份向${contact?.kind === "group" ? "群聊" : "联系人"}发送消息${input.operatedByUser ? "（用户操作）" : ""}`, timestamp: now, relatedToUser: Boolean(input.operatedByUser) }],
+    activities: input.recordActivity === false
+      ? input.phone.activities
+      : [
+          ...input.phone.activities,
+          {
+            id: createId("phone-activity"),
+            type: "user_edit",
+            label: `以角色身份向${contact?.kind === "group" ? "群聊" : "联系人"}发送消息${input.operatedByUser ? "（用户操作）" : ""}`,
+            timestamp: now,
+            relatedToUser: Boolean(input.operatedByUser),
+          },
+        ],
     updatedAt: now,
   };
 }
 
 export function listCharacterPhoneThreadMessages(phone: CharacterPhoneRecord, contactId: string) {
-  return (phone.threadMessages ?? []).filter((message) => message.contactId === contactId).sort((a, b) => a.timestamp - b.timestamp);
+  return (phone.threadMessages ?? [])
+    .filter((message) => message.contactId === contactId)
+    .sort((a, b) => a.timestamp - b.timestamp);
 }

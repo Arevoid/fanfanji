@@ -325,6 +325,8 @@ interface AppChatProps {
   moments: Moment[];
   onSendMessage: (msg: Message) => void;
   onSaveImageToCharacterPhone?: (input: CharacterPhoneImageSaveInput) => void | Promise<void>;
+  /** Character phones are owned by the primary persona, even in alias chats. */
+  characterPhoneOwnerIdentityId?: string;
   onSaveCharacter: (char: Character) => void | Promise<boolean>; // Support updating character remark, pinned status, chatBg
   onUpdateCharacter?: (characterId: string, patch: Partial<Character>) => void | Promise<boolean>;
   onAddMoment: (moment: Moment) => void;
@@ -435,6 +437,7 @@ export default function AppChat({
   moments,
   onSendMessage: onSendMessageRaw,
   onSaveImageToCharacterPhone,
+  characterPhoneOwnerIdentityId,
   onSaveCharacter,
   onUpdateCharacter,
   onAddMoment,
@@ -584,6 +587,10 @@ export default function AppChat({
   // leaking into an alias turn.
   const activeIdentityId = settings.activeIdentityId || "identity-1";
   const activeIdentityRecord = settings.identities?.find((identity) => identity.id === activeIdentityId);
+  const resolvedCharacterPhoneOwnerIdentityId = characterPhoneOwnerIdentityId
+    || (activeIdentityRecord?.kind === "alias"
+      ? findPrimaryIdentityForIdentity(activeIdentityId, settings.identities || [])?.id || activeIdentityId
+      : activeIdentityId);
   // The selected identity drives chats and new content. The legacy settings
   // profile fields intentionally remain owned by the active主人设, so an alias
   // can be used without changing the parent persona shown in “我”.
@@ -2297,7 +2304,7 @@ ${aliasEvents.join("\n")}
         }
       }
       const characterPhone = !activeCharacter.isGroupChat
-        ? getCharacterPhone(activeIdentityId, activeCharacter.id)
+        ? getCharacterPhone(resolvedCharacterPhoneOwnerIdentityId, activeCharacter.id)
         : undefined;
       if (characterPhone) {
         assembledInstructions.push(`【角色手机密码事实】

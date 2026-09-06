@@ -87,6 +87,7 @@ import {
   appendCharacterPhoneThreadMessage,
   listCharacterPhoneThreadMessages,
 } from "../features/characterPhone/characterPhoneThreadService";
+import { generateCharacterPhoneContactReply } from "../features/characterPhone/characterPhoneConversation";
 import {
   formatCharacterPhoneDate,
   formatCharacterPhoneTime,
@@ -125,7 +126,7 @@ interface AppCharacterPhoneProps {
   settings?: UserSettings;
   musicTracks?: MusicTrack[];
   resolvedTheme?: ResolvedTheme;
-  onSendMessage?: (message: Message) => void;
+  onSendMessage?: (message: Message, ownerIdentityId?: string) => void;
   onSaveImageToCharacterPhone?: (input: CharacterPhoneImageSaveInput) => void | Promise<void>;
   /** Mirrors role-phone posts into the owner's main Moments feed. */
   onSyncCharacterPhonePost?: (input: { post: CharacterPhonePost; character: Character; ownerIdentityId: string }) => void;
@@ -720,6 +721,7 @@ export default function AppCharacterPhone({
   const [phoneDataNotice, setPhoneDataNotice] = useState("");
   const [isAdvancing, setIsAdvancing] = useState(false);
   const generationRequestRef = useRef(0);
+  const phoneReplyQueuesRef = useRef<Record<string, Promise<void>>>({});
   const mountedRef = useRef(true);
   const phoneScopeRef = useRef({ ownerIdentityId: userIdentityId, characterId: selectedCharacterId });
   const syncedPhonePostsRef = useRef<Record<string, string>>({});
@@ -787,33 +789,15 @@ export default function AppCharacterPhone({
         : null,
     [phone, selectedCharacter, userIdentityId],
   );
-  const discoverAndForwardPhoneActions = (
+  const discoverPhoneActions = (
     candidatePhone: CharacterPhoneRecord,
-    baselinePhone: CharacterPhoneRecord,
     now: number,
   ): CharacterPhoneRecord => {
     if (!selectedCharacter) return candidatePhone;
-    const discoveredPhone = discoverCharacterPhoneActions(candidatePhone, selectedCharacter, now);
-    const awarenessMessages = discoveredPhone.messages.filter(
-      (message) => (message.id.startsWith("phone-awareness-") || message.id.startsWith("phone-discovery-"))
-        && !baselinePhone.messages.some((existing) => existing.id === message.id),
-    );
-    const relation = relationships.find(
-      (item) => item.userIdentityId === userIdentityId && item.characterId === selectedCharacter.id,
-    );
-    if (relation && onSendMessage) {
-      awarenessMessages
-        .filter((message) => !messages.some((item) => item.id === `phone-proactive-${message.id}`))
-        .forEach((message) => onSendMessage(createCharacterTextMessage({
-          id: `phone-proactive-${message.id}`,
-          characterId: selectedCharacter.id,
-          relationId: relation.id,
-          conversationId: relation.conversationId,
-          content: message.body,
-          timestamp: message.timestamp,
-        })));
-    }
-    return discoveredPhone;
+    // A discovery stays inside the role phone. It is an internal observation
+    // that may be considered during a later natural interaction; it is never
+    // pushed into the main chat immediately.
+    return discoverCharacterPhoneActions(candidatePhone, selectedCharacter, now);
   };
   const syncCharacterPhonePost = (post: CharacterPhonePost) => {
     if (!selectedCharacter || !onSyncCharacterPhonePost || post.source !== "generated" || post.authorId !== selectedCharacter.id) return;
@@ -1139,6 +1123,79 @@ export default function AppCharacterPhone({
     setContactMenuOpen(false);
     setContactRemarkEditing(false);
   };
+  const enqueueCharacterPhoneContactReply = (input: {
+    phone: CharacterPhoneRecord;
+    contact: CharacterPhoneContact;
+    character: Character;
+    outgoingMessageId: string;
+  }) => {
+    const queueKey = `${input.phone.id}:${input.contact.id}`;
+    const previous = phoneReplyQueuesRef.current[queueKey] || Promise.resolve();
+    const task = previous.catch(() => undefined).then(async () => {
+      const isCurrentPhone = () => mountedRef.current
+        && phoneScopeRef.current.ownerIdentityId === input.phone.ownerIdentityId
+        && phoneScopeRef.current.characterId === input.phone.characterId;
+      if (!isCurrentPhone()) return;
+      const latestPhone = getCharacterPhone(input.phone.ownerIdentityId, input.phone.characterId) || input.phone;
+      const latestContact = latestPhone.contacts.find((contact) => contact.id === input.contact.id && !contact.removedAt);
+      if (!latestContact) return;
+      if (!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) {
+        setPhoneNotice("消息已发出；联系人会在看到后回复（请先配置 API）");
+        return;
+      }
+      setPhoneNotice(`${latestContact.remark || latestContact.name}正在回复…`);
+      const contactCharacter = latestContact.linkedCharacterId
+        ? characters.find((character) => character.id === latestContact.linkedCharacterId)
+        : characters.find((character) => character.id !== input.character.id && character.name === latestContact.name);
+      const reply = await generateCharacterPhoneContactReply({
+        phone: latestPhone,
+        contact: latestContact,
+        character: input.character,
+        contactCharacter,
+        settings,
+      });
+      if (!isCurrentPhone()) return;
+      if (!reply) {
+        setPhoneNotice("消息已发出，对方现在可能正忙，稍后再看看。");
+        return;
+      }
+      // Leave a small, consistent pause after the provider response so the
+      // contact does not feel like an always-online system bot.
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 700));
+      if (!isCurrentPhone()) return;
+      const savedPhone = getCharacterPhone(input.phone.ownerIdentityId, input.phone.characterId) || latestPhone;
+      const replySourceId = `phone-contact-reply-for-${input.outgoingMessageId}`;
+      if (savedPhone.threadMessages.some((message) => message.sourceMessageId === replySourceId)) return;
+      const repliedPhone = appendCharacterPhoneThreadMessage({
+        phone: savedPhone,
+        contactId: latestContact.id,
+        content: reply,
+        sender: "contact",
+        sourceMessageId: replySourceId,
+        recordActivity: false,
+        now: Date.now(),
+      });
+      const result = saveCharacterPhone(repliedPhone);
+      if (!result.success) {
+        setPhoneNotice("联系人回复生成了，但暂时无法保存聊天记录。");
+        return;
+      }
+      if (isCurrentPhone()) {
+        setPhone(repliedPhone);
+        setPhoneNotice("联系人已回复");
+      }
+    });
+    phoneReplyQueuesRef.current[queueKey] = task;
+    void task.then(
+      () => {
+        if (phoneReplyQueuesRef.current[queueKey] === task) delete phoneReplyQueuesRef.current[queueKey];
+      },
+      () => {
+        if (phoneReplyQueuesRef.current[queueKey] === task) delete phoneReplyQueuesRef.current[queueKey];
+      },
+    );
+  };
+
   const sendAsCharacter = () => {
     if (
       !currentPhone ||
@@ -1168,9 +1225,12 @@ export default function AppCharacterPhone({
       app: "chat",
       targetId: selectedContact.id,
       detail: `向${selectedContact.remark || selectedContact.name}发送消息`,
-      detectability: "likely",
-      discoveryAfterMs: 0,
-      discoveryAfterOpens: 0,
+      // A sent phone message is not proof that the character is watching the
+      // device. Keep discovery delayed and probabilistic instead of exposing
+      // the operator in the same turn.
+      detectability: "possible",
+      discoveryAfterMs: 12 * 60 * 60 * 1000,
+      discoveryAfterOpens: 3,
     }, now);
     persistPhone(loggedNext);
     if (sourceMessageId && relation && onSendMessage) {
@@ -1182,14 +1242,25 @@ export default function AppCharacterPhone({
         content: draft.trim().slice(0, 1000),
         timestamp: now,
         sentFromCharacterPhone: true,
-      }));
+      }), userIdentityId);
     } else {
-      setPhoneNotice(selectedContact.kind === "group" ? "消息已发到群聊，群成员会在下一次生活生成中回应" : "消息已发出，联系人会在下一次生活生成中回应");
+      setPhoneNotice(`${selectedContact.remark || selectedContact.name}正在查看消息…`);
     }
-    const discoveredNext = discoverAndForwardPhoneActions(loggedNext, currentPhone, now);
+    const discoveredNext = discoverPhoneActions(loggedNext, now);
     if (discoveredNext !== loggedNext) {
       persistPhone(discoveredNext);
       setPhone(discoveredNext);
+    }
+    if (!sourceMessageId) {
+      const outgoingMessageId = loggedNext.threadMessages.at(-1)?.id;
+      if (outgoingMessageId) {
+        enqueueCharacterPhoneContactReply({
+          phone: loggedNext,
+          contact: selectedContact,
+          character: selectedCharacter,
+          outgoingMessageId,
+        });
+      }
     }
     setDraft("");
   };
@@ -1322,7 +1393,7 @@ export default function AppCharacterPhone({
         || phoneScopeRef.current.characterId !== requestScope.characterId
         || advancedResult.phone.id !== requestScope.phoneId) return;
       const advancedPhone = advancedResult.phone;
-      const discoveredPhone = discoverAndForwardPhoneActions(advancedPhone, basePhone, now);
+      const discoveredPhone = discoverPhoneActions(advancedPhone, now);
       const saved = await saveCharacterPhoneWithCacheRecovery(discoveredPhone, requestId);
       if (!saved) return;
       setPhone(discoveredPhone);
@@ -1364,7 +1435,7 @@ export default function AppCharacterPhone({
       return;
     }
     if (passcode === normalizeCharacterPhonePasscode(currentPhone.passcode)) {
-      const openedPhone = discoverAndForwardPhoneActions(withPhoneAction({
+      const openedPhone = discoverPhoneActions(withPhoneAction({
         ...currentPhone,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -1381,7 +1452,7 @@ export default function AppCharacterPhone({
         app: "phone",
         detail: `进入${selectedCharacter.name}的角色手机`,
         detectability: "none",
-      }, now), currentPhone, now);
+      }, now), now);
       setPhone(openedPhone);
       saveCharacterPhone(openedPhone);
       setUnlocked(true);
@@ -1425,6 +1496,7 @@ export default function AppCharacterPhone({
           content: awarenessMessage.body,
           timestamp: now,
         }),
+        userIdentityId,
       );
     const next = {
       ...currentPhone,
@@ -2247,6 +2319,11 @@ export default function AppCharacterPhone({
         ))}
         {currentThreadMessages.length === 0 && <p className="py-12 text-center text-xs text-neutral-400">{selectedContact.kind === "group" ? "这个群聊还没有聊天记录" : "还没有和这个人的聊天记录"}</p>}
       </div>
+      {phoneNotice && (
+        <p role="status" className="shrink-0 px-3 pb-1 text-center text-[10px] text-neutral-400">
+          {phoneNotice}
+        </p>
+      )}
       <div className="flex shrink-0 gap-2 border-t border-black/5 bg-white/70 p-3">
         <input
           value={draft}

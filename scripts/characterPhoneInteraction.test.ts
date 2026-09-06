@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { appendCharacterPhoneThreadMessage } from "../src/features/characterPhone/characterPhoneThreadService";
 import { discoverCharacterPhoneActions } from "../src/features/characterPhone/characterPhoneDetection";
 import { buildCharacterPhoneActionDiscoveryMessage, buildCharacterPhoneAwarenessMessage } from "../src/features/characterPhone/characterPhoneReaction";
+import { buildCharacterPhoneContactReplyPrompt, normalizeCharacterPhoneContactReply } from "../src/features/characterPhone/characterPhoneConversation";
 import type { CharacterPhoneRecord } from "../src/domain/characterPhone/types";
 
 const character = {
@@ -135,9 +136,28 @@ const immediateChatDiscovery = discoverCharacterPhoneActions({
     phoneOpenCountAtAction: 1,
   }],
 }, character, 500);
-assert.equal(immediateChatDiscovery.actionLog?.[0]?.discovered, true, "chat messages sent as the character are noticed immediately");
-assert.equal(immediateChatDiscovery.actionLog?.[0]?.discoveryResponse, "ask");
-assert.match(immediateChatDiscovery.messages.at(-1)?.body || "", /不是我发的/);
+assert.equal(immediateChatDiscovery.actionLog?.[0]?.discovered, undefined, "chat messages sent as the character stay undiscovered until a later opening or elapsed time");
+assert.equal(immediateChatDiscovery.messages.length, 0, "sending a phone message does not create an immediate awareness alert");
+
+const incomingReply = appendCharacterPhoneThreadMessage({
+  phone: sent,
+  contactId: "npc-1",
+  content: "我刚忙完，怎么啦？",
+  sender: "contact",
+  recordActivity: false,
+  now: 200,
+});
+assert.equal(incomingReply.threadMessages.at(-1)?.sender, "contact", "friend replies render on the incoming side");
+assert.equal(incomingReply.activities.length, sent.activities.length, "generated contact replies do not look like user operations");
+const replyPrompt = buildCharacterPhoneContactReplyPrompt({
+  phone: incomingReply,
+  contact: phone.contacts[0],
+  character,
+  now: 300,
+});
+assert.match(replyPrompt.message, /最近对话/);
+assert.match(replyPrompt.systemInstruction, /不要提及用户/);
+assert.equal(normalizeCharacterPhoneContactReply("```text\n回复：好的，晚点聊。\n```"), "好的，晚点聊。");
 
 const quietDiaryDiscovery = discoverCharacterPhoneActions({
   ...phone,
