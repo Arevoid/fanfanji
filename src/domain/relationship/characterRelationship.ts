@@ -2,6 +2,7 @@ import type { Character, UserIdentity } from "../../types";
 import { resolveCanonicalCharacterId } from "../character/characterIdentity";
 
 export type CharacterRelationshipState = "unknown" | "friend" | "close_friend" | "ambiguous" | "partner";
+export type IdentityRecognitionState = "unknown" | "suspected" | "recognized" | "confirmed";
 
 /** A direct, user-identity-to-canonical-character relationship. */
 export interface CharacterRelationship {
@@ -12,6 +13,9 @@ export interface CharacterRelationship {
   rootIdentityId?: string;
   conversationId: string;
   relationship: CharacterRelationshipState;
+  /** How confidently the character has connected this identity to another one. */
+  identityRecognitionState?: IdentityRecognitionState;
+  identityRecognitionUpdatedAt?: number;
   createdAt: number;
   updatedAt: number;
   lastActiveTime?: number;

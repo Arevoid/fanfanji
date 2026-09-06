@@ -1,5 +1,6 @@
 import type { Message, OfflineStory } from "../../../types";
 import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../services/chatMemoryRetrievalSettings";
+import { buildAliasIdentityBoundaryPrompt } from "../../../domain/prompt/aliasIdentityBoundary";
 
 /** Mechanical extraction of the existing regeneration path; dependencies stay explicit in the page context. */
 export function useChatRegenerationAction(context: Record<string, any>) {
@@ -15,6 +16,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
     getPendingOfflineHandoff, buildPendingOfflineTimelineHandoff, isOfflineStoryHandoffMemory,
     buildOfflineTimelineHandoff, allMoments, activeIdentityId, getKnownMomentsContextString, relationships,
+    getRootIdentityId,
     getOfflineStoriesContextForOnlineChat, musicTracks, identityMusicStates, relationshipMusicStates,
     buildRelationMusicContext, loadForumShares, loadForumThreads, buildRelationForumContext, getConversationId,
     loadDiaryShares, buildRelationDiaryContext, loadUserMemoPromptContext, buildCharacterBehaviorPrompt,
@@ -227,6 +229,11 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       }
 
       const activeIdentity = settings.identities?.find((identity: { id: string }) => identity.id === activeIdentityId);
+      const identityRootId = getRootIdentityId(activeIdentityId, settings.identities || []);
+      const primaryIdentity = activeIdentity?.kind === "alias"
+        ? settings.identities?.find((identity: { id: string; kind?: string }) => identity.kind === "primary" && getRootIdentityId(identity.id, settings.identities || []) === identityRootId)
+        : undefined;
+      const primaryIdentityName = primaryIdentity?.name?.trim() || "主号联系人";
       const userProfileText = activeIdentity?.kind === "alias"
         ? `User Profile:
 - This is a separate contact using an alias. Their real identity is unknown to you.
@@ -238,12 +245,20 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const relationshipContext = characterProjection.relationship?.content || "";
       if (activeIdentity?.kind === "alias") {
         const primaryRelation = relationships?.find((relation: { userIdentityId: string; characterId: string }) =>
-          relation.userIdentityId === "identity-1" && relation.characterId === activeCharacter.id,
+          relation.userIdentityId === primaryIdentity?.id && relation.characterId === activeCharacter.id,
         );
         if (primaryRelation) {
           characterContextText += `\n[角色自身关于另一位联系人的既有记忆]\n这些是角色过去对主号联系人或相关事件的记忆，不是当前马甲的身份信息。当前说话者仍是陌生联系人；不得因为职业、措辞或事件相似就认定当前马甲是饭饭，也不得把主号聊天历史当作当前对话历史。只有当前联系人明确说“我就是饭饭”等内容时，才允许建立身份关联。\n${primaryRelation.compressedMemory?.trim() ? `关系记忆：${primaryRelation.compressedMemory.trim()}` : "暂无相关既有记忆"}`;
         }
       }
+      const aliasIdentityBoundaryPrompt = activeIdentity?.kind === "alias"
+        ? buildAliasIdentityBoundaryPrompt({
+          primaryName: primaryIdentityName,
+          hasPrimaryRelationship: relationships?.some((relation: { userIdentityId: string; characterId: string }) => relation.userIdentityId === primaryIdentity?.id && relation.characterId === activeCharacter.id) === true,
+          recognitionState: activeRelationship?.identityRecognitionState,
+          aliasName: activeIdentity.name,
+        })
+        : "";
 
       const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
       const offlineStoriesContextRegen = getOfflineStoriesContextForOnlineChat();
@@ -370,6 +385,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
 
       // 6. User Profile
       assembledInstructions.push(userProfileText);
+      if (aliasIdentityBoundaryPrompt) assembledInstructions.push(aliasIdentityBoundaryPrompt);
       assembledInstructions.push(userKnowledgeBoundary);
       assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
       assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);

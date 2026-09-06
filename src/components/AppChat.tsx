@@ -65,6 +65,7 @@ import { analyzeRecentConversation, formatProactiveConversationGuidance } from "
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import { formatUserKnowledgeBoundary } from "../domain/prompt/userKnowledgeBoundary";
 import { buildAliasIdentityBoundaryPrompt } from "../domain/prompt/aliasIdentityBoundary";
+import { hasExplicitIdentityDisclosure } from "../domain/relationship/identityRecognition";
 import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
 import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
 import type { CharacterCognitiveContext, CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
@@ -1987,21 +1988,30 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
 
       const activeIdentity = settings.identities?.find((identity) => identity.id === activeIdentityId);
-      const primaryIdentity = settings.identities?.find((identity) => identity.id === "identity-1")
-        || settings.identities?.find((identity) => identity.kind === "primary");
+      const identityRootId = getRootIdentityId(activeIdentityId, settings.identities || []);
+      const primaryIdentity = activeIdentity?.kind === "alias"
+        ? settings.identities?.find((identity) => identity.kind === "primary" && getRootIdentityId(identity.id, settings.identities || []) === identityRootId)
+        : undefined;
       const primaryIdentityName = primaryIdentity?.name?.trim() || "主号联系人";
       const primaryRelation = activeIdentity?.kind === "alias"
         ? relationships.find((relation) =>
-          relation.userIdentityId === "identity-1"
-          && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
+          relation.userIdentityId === primaryIdentity?.id
+            && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
         )
         : undefined;
       const aliasIdentityBoundaryPrompt = activeIdentity?.kind === "alias"
         ? buildAliasIdentityBoundaryPrompt({
           primaryName: primaryIdentityName,
           hasPrimaryRelationship: Boolean(primaryRelation),
+          recognitionState: activeRelationship?.identityRecognitionState,
+          aliasName: activeIdentity.name,
         })
         : "";
+      if (activeIdentity?.kind === "alias" && activeRelationship && userMsg?.sender === "user" && primaryIdentity && hasExplicitIdentityDisclosure(userMsg.content, primaryIdentity.name) && activeRelationship.identityRecognitionState !== "confirmed") {
+        onSaveRelationships((previous) => previous.map((relationship) => relationship.id === activeRelationship.id
+          ? { ...relationship, identityRecognitionState: "confirmed", identityRecognitionUpdatedAt: Date.now(), updatedAt: Date.now() }
+          : relationship));
+      }
       const userProfileText = activeIdentity?.kind === "alias"
         ? `User Profile (interacting with you):
 - This is a separate contact using an alias. Their real identity is unknown to you.
@@ -3157,6 +3167,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     buildOfflineTimelineHandoff, allMoments, activeIdentityId, getKnownMomentsContextString,
     getOfflineStoriesContextForOnlineChat, musicTracks, identityMusicStates, relationshipMusicStates,
     relationships,
+    getRootIdentityId,
     buildRelationMusicContext, loadForumShares, loadForumThreads, buildRelationForumContext, getConversationId,
     loadDiaryShares, buildRelationDiaryContext, loadUserMemoPromptContext, buildCharacterBehaviorPrompt,
     worldBookEntries, buildWorldBookSystemBlocks, LIVING_HUMAN_PROMPT, buildRedPacketReactionPrompt,
@@ -3259,9 +3270,14 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       const proactiveCharacterProjection = projectCharacterPrompt(friend, relationship.relationship);
 
       const taskPrompt = customTaskText || "It has been 3 hours since the last conversation. Start a message in the way this character would naturally initiate contact with this user. Do not impose concern, warmth, brevity, or a generic check-in.";
-      if (relationship.userIdentityId === "identity-1") {
+      const proactiveIdentity = settings.identities?.find((identity) => identity.id === relationship.userIdentityId);
+      const proactiveRootId = getRootIdentityId(relationship.userIdentityId, settings.identities || []);
+      const proactivePrimaryIdentity = settings.identities?.find((identity) => identity.kind === "primary" && getRootIdentityId(identity.id, settings.identities || []) === proactiveRootId);
+      if (proactiveIdentity?.kind === "primary") {
         const aliasInteractions = relationships
           .filter((candidate) => candidate.userIdentityId !== relationship.userIdentityId
+            && settings.identities?.find((identity) => identity.id === candidate.userIdentityId)?.kind === "alias"
+            && getRootIdentityId(candidate.userIdentityId, settings.identities || []) === proactiveRootId
             && resolveCanonicalCharacterId(candidate.characterId, characters) === resolveCanonicalCharacterId(relationship.characterId, characters))
           .map((candidate) => {
             const alias = settings.identities?.find((identity) => identity.id === candidate.userIdentityId);
@@ -3277,17 +3293,16 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
         }
       }
 
-      const proactiveIdentity = settings.identities?.find((identity) => identity.id === relationship.userIdentityId);
       if (proactiveIdentity?.kind === "alias") {
-        const proactivePrimaryIdentity = settings.identities?.find((identity) => identity.id === "identity-1")
-          || settings.identities?.find((identity) => identity.kind === "primary");
         const proactivePrimaryRelation = relationships.find((candidate) =>
-          candidate.userIdentityId === "identity-1"
+          candidate.userIdentityId === proactivePrimaryIdentity?.id
           && resolveCanonicalCharacterId(candidate.characterId, characters) === resolveCanonicalCharacterId(relationship.characterId, characters),
         );
         instructionsPrompt += `\n\n${buildAliasIdentityBoundaryPrompt({
           primaryName: proactivePrimaryIdentity?.name || "主号联系人",
           hasPrimaryRelationship: Boolean(proactivePrimaryRelation),
+          recognitionState: relationship.identityRecognitionState,
+          aliasName: proactiveIdentity.name,
         })}`;
       }
 
@@ -9930,6 +9945,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                               if (findRelationship(relationships, activeIdentityId, characterId)) return;
                               const now = Date.now();
                               const relationId = `rel-${now}-${Math.random().toString(36).slice(2, 7)}`;
+                              const isAliasIdentity = settings.identities?.find((identity) => identity.id === activeIdentityId)?.kind === "alias";
                               const relationship = createRelationship({
                                 id: relationId,
                                 characterId,
@@ -9943,10 +9959,13 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                                   ? "unknown"
                                   : "friend",
                               });
-                              onSaveRelationships((previous) => previous.some((candidate) => candidate.id === relationship.id)
+                              const scopedRelationship = isAliasIdentity
+                                ? { ...relationship, identityRecognitionState: "unknown" as const }
+                                : relationship;
+                              onSaveRelationships((previous) => previous.some((candidate) => candidate.id === scopedRelationship.id)
                                 ? previous
-                                : [...previous, relationship]);
-                              captureRelationshipCreatedEvent(relationship, now);
+                                : [...previous, scopedRelationship]);
+                              captureRelationshipCreatedEvent(scopedRelationship, now);
                             }}
                             className="px-2.5 py-1 bg-[var(--button-primary-bg)] hover:bg-[var(--button-primary-hover-bg)] text-[var(--button-primary-text)] rounded-lg text-[10px] font-bold transition-colors shadow-sm shrink-0"
                           >
