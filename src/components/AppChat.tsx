@@ -64,6 +64,7 @@ import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import { formatUserKnowledgeBoundary } from "../domain/prompt/userKnowledgeBoundary";
+import { buildAliasIdentityBoundaryPrompt } from "../domain/prompt/aliasIdentityBoundary";
 import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
 import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
 import type { CharacterCognitiveContext, CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
@@ -1958,6 +1959,21 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
 
       const activeIdentity = settings.identities?.find((identity) => identity.id === activeIdentityId);
+      const primaryIdentity = settings.identities?.find((identity) => identity.id === "identity-1")
+        || settings.identities?.find((identity) => identity.kind === "primary");
+      const primaryIdentityName = primaryIdentity?.name?.trim() || "主号联系人";
+      const primaryRelation = activeIdentity?.kind === "alias"
+        ? relationships.find((relation) =>
+          relation.userIdentityId === "identity-1"
+          && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
+        )
+        : undefined;
+      const aliasIdentityBoundaryPrompt = activeIdentity?.kind === "alias"
+        ? buildAliasIdentityBoundaryPrompt({
+          primaryName: primaryIdentityName,
+          hasPrimaryRelationship: Boolean(primaryRelation),
+        })
+        : "";
       const userProfileText = activeIdentity?.kind === "alias"
         ? `User Profile (interacting with you):
 - This is a separate contact using an alias. Their real identity is unknown to you.
@@ -1965,14 +1981,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         : `User Profile (interacting with you):
 - Nickname: ${settings.name}
 - Personality/Bio: ${settings.bio}`;
-      if (activeIdentity?.kind === "alias") {
-        const primaryRelation = relationships.find((relation) =>
-          relation.userIdentityId === "identity-1"
-          && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
-        );
-        if (primaryRelation) {
-          characterContextText += `\\n[角色自身关于另一位联系人的既有记忆]\\n这些是角色过去对主号联系人或相关事件的记忆，不是当前马甲的身份信息。当前说话者仍是陌生联系人；不得因为职业、措辞或事件相似就认定当前马甲是饭饭，也不得把主号聊天历史当作当前对话历史。只有当前联系人明确说“我就是饭饭”等内容时，才允许建立身份关联。\\n${primaryRelation.compressedMemory?.trim() ? `关系记忆：${primaryRelation.compressedMemory.trim()}` : "暂无相关既有记忆"}`;
-        }
+      if (primaryRelation) {
+        characterContextText += `\n[角色自身关于另一位联系人的既有记忆]\n这些是角色过去对主号联系人或相关事件的记忆，不是当前马甲的身份信息。主号联系人姓名是“${primaryIdentityName}”；当前说话者仍是独立联系人，不得因为职业、措辞或事件相似就把两段关系合并。只有当前联系人明确说明两者关系时，才允许建立身份关联。\n${primaryRelation.compressedMemory?.trim() ? `关系记忆：${primaryRelation.compressedMemory.trim()}` : "暂无相关既有记忆"}`;
       }
       const userKnowledgeBoundary = formatUserKnowledgeBoundary();
       const relationshipContext = characterProjection.relationship?.content || "";
@@ -2111,6 +2121,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
       // 6. User Profile
       assembledInstructions.push(userProfileText);
+      if (aliasIdentityBoundaryPrompt) assembledInstructions.push(aliasIdentityBoundaryPrompt);
       assembledInstructions.push(userKnowledgeBoundary);
       assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
       assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);
@@ -3232,13 +3243,27 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
         }
       }
 
+      const proactiveIdentity = settings.identities?.find((identity) => identity.id === relationship.userIdentityId);
+      if (proactiveIdentity?.kind === "alias") {
+        const proactivePrimaryIdentity = settings.identities?.find((identity) => identity.id === "identity-1")
+          || settings.identities?.find((identity) => identity.kind === "primary");
+        const proactivePrimaryRelation = relationships.find((candidate) =>
+          candidate.userIdentityId === "identity-1"
+          && resolveCanonicalCharacterId(candidate.characterId, characters) === resolveCanonicalCharacterId(relationship.characterId, characters),
+        );
+        instructionsPrompt += `\n\n${buildAliasIdentityBoundaryPrompt({
+          primaryName: proactivePrimaryIdentity?.name || "主号联系人",
+          hasPrimaryRelationship: Boolean(proactivePrimaryRelation),
+        })}`;
+      }
+
       const systemInstruction = buildProactiveChatSystemInstruction({
         characterName: friend.name,
         description: proactiveCharacterProjection.description.content,
         personality: proactiveCharacterProjection.personality.content,
         relationship: proactiveCharacterProjection.relationship?.content || "",
-        userName: settings.name,
-        userBio: settings.bio,
+        userName: proactiveIdentity?.kind === "alias" ? "新联系人" : settings.name,
+        userBio: proactiveIdentity?.kind === "alias" ? "" : settings.bio,
         worldBook: wbPrompt,
         timeContext,
         knowledgeBoundary,
@@ -9716,7 +9741,19 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                               if (findRelationship(relationships, activeIdentityId, characterId)) return;
                               const now = Date.now();
                               const relationId = `rel-${now}-${Math.random().toString(36).slice(2, 7)}`;
-                              const relationship = createRelationship({ id: relationId, characterId, userIdentityId: activeIdentityId, now });
+                              const relationship = createRelationship({
+                                id: relationId,
+                                characterId,
+                                userIdentityId: activeIdentityId,
+                                now,
+                                // A character who already knows the primary
+                                // account should still meet a newly added
+                                // alias as a stranger until the conversation
+                                // establishes otherwise.
+                                relationship: settings.identities?.find((identity) => identity.id === activeIdentityId)?.kind === "alias"
+                                  ? "unknown"
+                                  : "friend",
+                              });
                               onSaveRelationships((previous) => previous.some((candidate) => candidate.id === relationship.id)
                                 ? previous
                                 : [...previous, relationship]);
