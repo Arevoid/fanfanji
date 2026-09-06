@@ -3461,8 +3461,6 @@ export default function App() {
     }))
     .filter((item): item is { relationship: CharacterRelationship; character: Character } =>
       Boolean(item.character && !item.character.isGroupChat));
-  const homeWidgetOpacity = Math.max(0, Math.min(100, settings.widgetOpacity ?? 70)) / 100;
-
   return (
     <div
       className="app-viewport-root min-h-0 md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
@@ -4344,7 +4342,7 @@ export default function App() {
                                           isEditingHomeScreen && !isDragged 
                                             ? (index % 2 === 0 ? "animate-jiggle" : "animate-jiggle-reverse") 
                                             : ""
-                                        }`} style={{ opacity: homeWidgetOpacity }}>
+                                        }`}>
                                           <WidgetComponent 
                                             id={item.id} 
                                             isEditing={isEditingHomeScreen}
@@ -4947,7 +4945,6 @@ export default function App() {
                 style={{ 
                   width: draggedItem.size === "1x4" || draggedItem.size === "2x4" ? "300px" : draggedItem.size === "2x3" ? "225px" : (settings.hideAppNames ? "154px" : "150px"),
                   height: draggedItem.size === "1x4" ? "54px" : draggedItem.size === "2x4" || draggedItem.size === "2x3" ? "120px" : (settings.hideAppNames ? "154px" : "150px"),
-                  opacity: draggedItem.type === "widget" ? homeWidgetOpacity : undefined,
                 }}
               >
                 {React.createElement(getWidgetComponent(draggedItem.widgetType), {

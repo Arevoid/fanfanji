@@ -51,6 +51,12 @@ const ALBUM_IMAGES = [
 
 const DEFAULT_WIDGET_TEXT_COLOR = "#ffffff";
 
+/** Keep slider opacity on surfaces/media so labels and controls stay opaque. */
+const normalizeWidgetOpacity = (value: number | undefined): number => {
+  const percentage = typeof value === "number" && Number.isFinite(value) ? value : 70;
+  return Math.max(0, Math.min(100, percentage)) / 100;
+};
+
 const normalizeWidgetTextColor = (value: string | null | undefined, fallback = DEFAULT_WIDGET_TEXT_COLOR): string => {
   if (!value || value === "default") return fallback;
   const legacyColors: Record<string, string> = {
@@ -121,11 +127,14 @@ interface WidgetProps {
   relationships?: CharacterRelationship[];
 }
 
-export function WelcomeWidget({ isEditing, onRemove, activeIdentity, widgetBorderRadius }: WidgetProps) {
+export function WelcomeWidget({ isEditing, onRemove, activeIdentity, widgetOpacity, widgetBorderRadius }: WidgetProps) {
   return (
     <div
-      className="relative flex h-full w-full items-center gap-3.5 overflow-hidden rounded-[22px] border border-neutral-200/20 bg-white/40 p-3.5 text-neutral-850 shadow-sm backdrop-blur-md select-none"
-      style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}
+      className="home-widget-card relative flex h-full w-full items-center gap-3.5 overflow-hidden rounded-[22px] border border-neutral-200/20 bg-white/40 p-3.5 text-neutral-850 shadow-sm backdrop-blur-md select-none"
+      style={{
+        borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px",
+        backgroundColor: `rgba(255, 255, 255, ${normalizeWidgetOpacity(widgetOpacity)})`,
+      }}
       aria-label="欢迎卡片"
     >
       <img
@@ -161,7 +170,7 @@ export function WelcomeWidget({ isEditing, onRemove, activeIdentity, widgetBorde
   );
 }
 
-export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBorderRadius }: WidgetProps) {
+export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetOpacity, widgetBorderRadius }: WidgetProps) {
   const [customPhotos, setCustomPhotos] = useState<string[]>(() => readArray<string>(`album_widget_photos_${id}`, []).value);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -181,7 +190,7 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
   return (
     <div className="relative w-full h-full group">
       <div 
-        className={`w-full h-full overflow-hidden cursor-pointer select-none ${
+        className={`home-widget-card w-full h-full overflow-hidden cursor-pointer select-none ${
           isTransparentPhoto
             ? "bg-transparent border-0 shadow-none"
             : "rounded-2xl shadow-md border border-white/20 bg-stone-900/10"
@@ -192,7 +201,7 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
             : widgetBorderRadius !== undefined
               ? `${widgetBorderRadius}px`
               : undefined,
-          backgroundColor: isTransparentPhoto ? "transparent" : undefined,
+          backgroundColor: isTransparentPhoto ? "transparent" : `rgba(28, 25, 23, ${0.1 * normalizeWidgetOpacity(widgetOpacity)})`,
           border: isTransparentPhoto ? "none" : undefined,
           boxShadow: isTransparentPhoto ? "none" : undefined,
         }}
@@ -217,6 +226,7 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
           className={`w-full h-full transform hover:scale-105 transition-transform duration-500 ${
             isTransparentPhoto ? "object-contain" : "object-cover"
           }`}
+          style={{ opacity: normalizeWidgetOpacity(widgetOpacity) }}
           referrerPolicy="no-referrer"
         />
       </div>
@@ -240,7 +250,7 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetBo
 
 /** A wide, date-led photo widget. Its image is intentionally unmasked so the
  * user controls contrast solely with the single date-text colour setting. */
-export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadius }: WidgetProps) {
+export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetOpacity, widgetBorderRadius }: WidgetProps) {
   const [backgroundImage, setBackgroundImage] = useState(() => readString(`calendar_album_image_${id}`).value || ALBUM_IMAGES[2]);
   const [fontColor, setFontColor] = useState(() => normalizeWidgetTextColor(readString(`calendar_album_font_color_${id}`).value));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -291,12 +301,10 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
     <div className="calendar-album-widget relative w-full h-full group" style={{ "--calendar-album-date-color": fontColor } as React.CSSProperties}>
       <button
         type="button"
-        className="relative w-full h-full overflow-hidden text-left shadow-md border border-white/20 cursor-pointer select-none"
+        className="home-widget-card relative w-full h-full overflow-hidden text-left shadow-md border border-white/20 cursor-pointer select-none"
         style={{
           borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined,
-          backgroundImage: `url(${backgroundImage})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
+          backgroundColor: "transparent",
         }}
         onClick={(event) => {
           event.stopPropagation();
@@ -308,11 +316,18 @@ export function CalendarAlbumWidget({ id, isEditing, onRemove, widgetBorderRadiu
         }}
         aria-label="编辑日历相册小组件"
       >
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url(${backgroundImage})`, opacity: normalizeWidgetOpacity(widgetOpacity) }}
+        />
         <div
-          className="absolute left-4 bottom-3 flex flex-col leading-[0.9]"
+          className="relative z-10 flex h-full w-full items-end"
         >
-          <span ref={(element) => { dateTextRefs.current[0] = element; }} className="calendar-album-date text-[24px] font-semibold tracking-[-0.03em]">{weekday}</span>
-          <span ref={(element) => { dateTextRefs.current[1] = element; }} className="calendar-album-date mt-1 text-[25px] font-semibold tracking-[-0.04em]">{monthAndDay}</span>
+          <div className="absolute bottom-3 left-4 flex flex-col leading-[0.9]">
+            <span ref={(element) => { dateTextRefs.current[0] = element; }} className="calendar-album-date text-[24px] font-semibold tracking-[-0.03em]">{weekday}</span>
+            <span ref={(element) => { dateTextRefs.current[1] = element; }} className="calendar-album-date mt-1 text-[25px] font-semibold tracking-[-0.04em]">{monthAndDay}</span>
+          </div>
         </div>
       </button>
 
@@ -521,7 +536,7 @@ export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, 
             onOpenApp("music");
           }
         }}
-        className={`w-full h-full rounded-2xl p-3 flex flex-col justify-between backdrop-blur-md border border-white/30 shadow-md text-stone-800 text-left relative overflow-hidden select-none ${
+        className={`home-widget-card w-full h-full rounded-2xl p-3 flex flex-col justify-between backdrop-blur-md border border-white/30 shadow-md text-stone-800 text-left relative overflow-hidden select-none ${
           !isEditing ? "cursor-pointer hover:bg-white/50 active:scale-[0.98] transition-all duration-200" : ""
         }`}
         style={{
@@ -560,7 +575,10 @@ export function MusicWidget({ id, isEditing, onRemove, isPlaying, onTogglePlay, 
         </div>
 
         {/* Control row */}
-        <div className="flex items-center justify-between gap-1 mt-2 bg-white/50 py-1.5 px-2.5 rounded-xl border border-white/40">
+        <div
+          className="flex items-center justify-between gap-1 mt-2 bg-white/50 py-1.5 px-2.5 rounded-xl border border-white/40"
+          style={{ backgroundColor: `rgba(255, 255, 255, ${normalizeWidgetOpacity(widgetOpacity) * 0.5})` }}
+        >
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -666,9 +684,18 @@ export function AnniversaryWidget({ id, isEditing, onRemove, widgetOpacity, widg
 
   return (
     <div className="relative h-full w-full group">
-      <button type="button" className="relative h-full w-full overflow-hidden border border-white/20 p-3 text-left shadow-md" onClick={openSettings}
-        style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined, backgroundColor: backgroundImage ? undefined : (widgetOpacity !== undefined ? `rgba(255, 255, 255, ${widgetOpacity / 100})` : "rgba(255, 255, 255, 0.4)"), backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined, backgroundSize: "cover", backgroundPosition: "center" }}>
-        <div className="flex h-full flex-col justify-between" style={{ color: fontColor }}>
+      <button type="button" className="home-widget-card relative h-full w-full overflow-hidden border border-white/20 p-3 text-left shadow-md" onClick={openSettings}
+        style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : undefined, backgroundColor: "transparent" }}>
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundColor: backgroundImage ? undefined : "#ffffff",
+            backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
+            opacity: normalizeWidgetOpacity(widgetOpacity),
+          }}
+        />
+        <div className="relative z-10 flex h-full flex-col justify-between" style={{ color: fontColor }}>
           <span className="max-w-[120px] truncate pt-1 text-xs font-black" style={{ color: fontColor }}>{title}</span>
           <span className="flex items-baseline justify-center text-4xl font-black tracking-tight leading-none" style={{ color: fontColor }}>
             {days}<span className="ml-0.5 text-[10px] font-bold opacity-80">天</span>
@@ -771,7 +798,7 @@ export function DualMusicWidget({
     const playing = Boolean(input.track && isPlaying && currentTrack?.id === input.track.id && playbackOrigin === input.origin);
     return (
       <div
-        className="flex min-w-0 flex-1 flex-col rounded-[18px] p-1.5 shadow-sm"
+        className="home-widget-card flex min-w-0 flex-1 flex-col rounded-[18px] p-1.5 shadow-sm"
         style={{ backgroundColor: `rgba(255, 255, 255, ${(widgetOpacity ?? 70) / 100})` }}
       >
         <div className="relative aspect-square min-h-0 w-full">
@@ -934,7 +961,7 @@ export function TodoWidget({ id, isEditing, onRemove, onOpenApp, installedAppIds
   return (
     <div className="relative w-full h-full group">
       <div 
-        className="w-full h-full rounded-2xl p-3 flex flex-col justify-between backdrop-blur-md border border-white/30 shadow-md text-stone-800 text-left relative cursor-pointer overflow-hidden"
+        className="home-widget-card w-full h-full rounded-2xl p-3 flex flex-col justify-between backdrop-blur-md border border-white/30 shadow-md text-stone-800 text-left relative cursor-pointer overflow-hidden"
         onClick={() => {
           if (!isEditing && onOpenApp) {
             const isInstalled = installedAppIds 
@@ -1062,7 +1089,7 @@ function getReadingWidgetEntry(ownerIdentityId?: string): ReadingWidgetEntry | n
   return sorted[readingWidgetHash(`${ownerIdentityId}:${readingWidgetDayKey()}`) % sorted.length];
 }
 
-export function ReadingWidget({ isEditing, onRemove, activeIdentity, widgetBorderRadius, onOpenReading }: WidgetProps) {
+export function ReadingWidget({ isEditing, onRemove, activeIdentity, widgetOpacity, widgetBorderRadius, onOpenReading }: WidgetProps) {
   const [entry, setEntry] = useState<ReadingWidgetEntry | null>(() => getReadingWidgetEntry(activeIdentity?.id));
   const refresh = () => setEntry(getReadingWidgetEntry(activeIdentity?.id));
   useEffect(() => {
@@ -1086,8 +1113,11 @@ export function ReadingWidget({ isEditing, onRemove, activeIdentity, widgetBorde
 
   return (
     <div
-      className="relative flex h-full w-full overflow-visible border border-stone-200/60 bg-white/90 p-3 text-left shadow-sm backdrop-blur-sm"
-      style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}
+      className="home-widget-card relative flex h-full w-full overflow-visible border border-stone-200/60 bg-white/90 p-3 text-left shadow-sm backdrop-blur-sm"
+      style={{
+        borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px",
+        backgroundColor: `rgba(255, 255, 255, ${normalizeWidgetOpacity(widgetOpacity)})`,
+      }}
       onClick={() => entry && onOpenReading?.(entry.book.id, entry.comment?.targetParagraphAnchorId)}
       role="button"
       tabIndex={0}
@@ -1197,7 +1227,7 @@ function getChatStatsData(
   };
 }
 
-export function ChatStatsWidget({ isEditing, onRemove, activeIdentity, characters = [], relationships = [], messages = [], widgetBorderRadius }: WidgetProps) {
+export function ChatStatsWidget({ isEditing, onRemove, activeIdentity, characters = [], relationships = [], messages = [], widgetOpacity, widgetBorderRadius }: WidgetProps) {
   const data = useMemo(() => getChatStatsData(messages, relationships, characters, activeIdentity), [messages, relationships, characters, activeIdentity]);
   const today = new Date();
   const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -1214,7 +1244,7 @@ export function ChatStatsWidget({ isEditing, onRemove, activeIdentity, character
   const latestText = data.latest ? `最晚${chatStatsFormatTime(data.latest.timestamp)}分，您还在与${latestName}畅聊` : "还没有聊天记录";
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-visible border border-stone-200/70 bg-white/90 px-3 py-2.5 text-stone-900 shadow-sm backdrop-blur-sm" style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px" }}>
+    <div className="home-widget-card relative flex h-full w-full flex-col overflow-visible border border-stone-200/70 bg-white/90 px-3 py-2.5 text-stone-900 shadow-sm backdrop-blur-sm" style={{ borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px", backgroundColor: `rgba(255, 255, 255, ${normalizeWidgetOpacity(widgetOpacity)})` }}>
       <div className="flex items-start justify-between">
         <div>
           <h3 className="text-[12px] font-black leading-tight">连续聊天</h3>
