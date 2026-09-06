@@ -1748,6 +1748,7 @@ export default function AppCharacterPhone({
     const commentDetail: CharacterPhonePostComment = {
       id: `phone-comment-${postId}-${now}`,
       authorName: activeIdentity?.name?.trim() || "我",
+      authorIdentityId: userIdentityId,
       content,
       timestamp: now,
       authorAvatar: currentUserAvatar,

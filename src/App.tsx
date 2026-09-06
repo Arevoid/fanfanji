@@ -2773,6 +2773,7 @@ export default function App() {
       if (!comments.some((comment) => comment.id === commentId || (comment.authorName === authorName && comment.content === content))) {
         comments.push({
           id: commentId,
+          authorIdentityId: detail?.authorIdentityId,
           characterId: detail?.authorId,
           sourceNpcId: detail?.sourceNpcId,
           relationId: detail?.relationId || (detail?.authorId === character.id ? relation?.id : undefined),

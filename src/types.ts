@@ -283,6 +283,8 @@ export interface InnerVoiceRecord {
 
 export interface MomentComment {
   id: string;
+  /** Identity that authored this comment when it came from the local user. */
+  authorIdentityId?: string;
   /** Stable actor identity prevents comments from different relationships being mixed by display name. */
   characterId?: string;
   relationId?: string;
@@ -308,6 +310,8 @@ export interface Moment {
   relationshipNetworkNpcId?: string;
   authorName: string;
   authorAvatar: string;
+  /** Identity that owns this user-authored post; character posts keep ownerIdentityId. */
+  authorIdentityId?: string;
   content: string;
   timestamp: number;
   likes: string[]; // List of names

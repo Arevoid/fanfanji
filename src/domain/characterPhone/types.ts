@@ -79,6 +79,8 @@ export interface CharacterPhonePost {
 export interface CharacterPhonePostComment {
   id: string;
   authorName: string;
+  /** Local user identity that authored this comment, when applicable. */
+  authorIdentityId?: string;
   content: string;
   timestamp: number;
   authorId?: string;

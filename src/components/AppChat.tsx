@@ -4540,6 +4540,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     const newMo: Moment = {
       id: Date.now().toString(),
       ownerIdentityId: activeIdentityId,
+      authorIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
       content,
@@ -4586,6 +4587,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
 
     const newComment: MomentComment = {
       id: Date.now().toString(),
+      authorIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
       content: finalContent,
@@ -4615,6 +4617,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     const newMo: Moment = {
       id: Date.now().toString(),
       ownerIdentityId: activeIdentityId,
+      authorIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
       content: sanitizeMomentPublishText(input.content),
@@ -4639,6 +4642,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     if (!content.trim()) return;
     const newComment: MomentComment = {
       id: Date.now().toString(),
+      authorIdentityId: activeIdentityId,
       authorName: settings.name,
       authorAvatar: settings.avatar,
       content,
