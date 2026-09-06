@@ -52,6 +52,7 @@ assert.deepEqual(createUserTextMessage({ id: "u1", characterId: "c1", content: "
 assert.deepEqual(createCharacterTextMessage({ id: "c1", characterId: "c1", content: "hello", timestamp: 2 }), { id: "c1", characterId: "c1", sender: "character", content: "hello", timestamp: 2 });
 assert.deepEqual(createGroupCharacterMessage({ id: "g1", characterId: "group", senderId: "member", content: "group hello", timestamp: 3 }), { id: "g1", characterId: "group", sender: "character", senderId: "member", content: "group hello", timestamp: 3 });
 assert.deepEqual(createUserTextMessage({ id: "q1", characterId: "c1", content: "引用内容", timestamp: 4, isOffline: true, isNarration: false }), { id: "q1", characterId: "c1", sender: "user", content: "引用内容", timestamp: 4, isOffline: true, isNarration: false });
+assert.deepEqual(createUserTextMessage({ id: "snapshot-1", characterId: "c1", content: "来自马甲", timestamp: 5, authorIdentityId: "identity-alias", authorNameSnapshot: "小雨", authorAvatarSnapshot: "avatar-alias" }), { id: "snapshot-1", characterId: "c1", sender: "user", authorIdentityId: "identity-alias", authorNameSnapshot: "小雨", authorAvatarSnapshot: "avatar-alias", content: "来自马甲", timestamp: 5 });
 
 assert.equal(normalizePaymentMarkup("[微信红包]|1|x"), "[红包]|1.00|x");
 assert.equal(normalizePaymentMarkup("[红包]|金额|x"), "[红包]|8.88|x");

@@ -39,6 +39,9 @@ export interface UserMessageInput {
   conversationId?: string;
   content: string;
   timestamp: number;
+  authorIdentityId?: string;
+  authorNameSnapshot?: string;
+  authorAvatarSnapshot?: string;
   isOffline?: boolean;
   isNarration?: boolean;
   redPacket?: RedPacketPayload;

@@ -32,6 +32,8 @@ export interface UseChatControllerOptions {
   onSaveOfflineStory?: (story: OfflineStory) => void;
   isOfflineModeActive: boolean;
   isInputNarration: boolean;
+  activeIdentityName?: string;
+  activeIdentityAvatar?: string;
   activeOfflineStoryId: string | null;
   runtimeContext: ChatRuntimeContext;
   onReplyStopped?: () => void;
@@ -54,6 +56,8 @@ export function useChatController({
   onSaveOfflineStory,
   isOfflineModeActive,
   isInputNarration,
+  activeIdentityName,
+  activeIdentityAvatar,
   activeOfflineStoryId,
   runtimeContext,
   onReplyStopped,
@@ -105,6 +109,9 @@ export function useChatController({
       content: userMsgText,
       isOfflineModeActive,
       isInputNarration,
+      authorIdentityId: runtimeContext.userIdentityId,
+      authorNameSnapshot: activeIdentityName,
+      authorAvatarSnapshot: activeIdentityAvatar,
     });
     onSendMessage(userMessage);
     appendChatUserMessageToOfflineStory({
@@ -148,6 +155,9 @@ export function useChatController({
         content: userMsgText,
         isOfflineModeActive,
         isInputNarration,
+        authorIdentityId: runtimeContext.userIdentityId,
+        authorNameSnapshot: activeIdentityName,
+        authorAvatarSnapshot: activeIdentityAvatar,
       });
       onSendMessage(userMessage);
 

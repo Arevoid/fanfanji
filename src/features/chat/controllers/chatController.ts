@@ -32,6 +32,9 @@ export function createChatUserMessage(input: {
   content: string;
   isOfflineModeActive: boolean;
   isInputNarration: boolean;
+  authorIdentityId?: string;
+  authorNameSnapshot?: string;
+  authorAvatarSnapshot?: string;
 }): Message {
   return createUserTextMessage({
     id: createId("user"),
@@ -39,6 +42,9 @@ export function createChatUserMessage(input: {
     context: input.context,
     content: input.content,
     timestamp: Date.now(),
+    authorIdentityId: input.authorIdentityId || input.context?.userIdentityId,
+    authorNameSnapshot: input.authorNameSnapshot,
+    authorAvatarSnapshot: input.authorAvatarSnapshot,
     isOffline: input.isOfflineModeActive ? true : undefined,
     isNarration: input.isOfflineModeActive ? input.isInputNarration : undefined,
   });

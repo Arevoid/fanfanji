@@ -107,6 +107,10 @@ export interface Message {
   conversationId?: string;
   sender: "user" | "character";
   senderId?: string;
+  /** Frozen identity metadata for user-authored messages. Legacy messages fall back to current settings. */
+  authorIdentityId?: string;
+  authorNameSnapshot?: string;
+  authorAvatarSnapshot?: string;
   /** The user typed this message from the character's simulated phone. */
   sentFromCharacterPhone?: boolean;
   content: string;

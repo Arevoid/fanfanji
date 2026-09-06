@@ -2665,11 +2665,15 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     options: { triggerReply?: boolean; redPacket?: RedPacketPayload } = {},
   ) => {
     if (!activeChatCharId || !activeCharacter || !isCapturedRuntimeCurrent(capturedContext)) return;
+    const capturedIdentity = settings.identities?.find((identity) => identity.id === capturedContext.userIdentityId);
     const userMsg = createUserTextMessage({
       id: Date.now().toString(),
       context: capturedContext,
       content: contentString,
       timestamp: Date.now(),
+      authorIdentityId: capturedContext.userIdentityId,
+      authorNameSnapshot: capturedIdentity?.name || settings.name,
+      authorAvatarSnapshot: capturedIdentity?.avatar || settings.avatar,
       redPacket: options.redPacket,
     });
     const normalizedUserMsg = { ...userMsg, content: normalizePaymentMarkup(userMsg.content) };
@@ -2843,6 +2847,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     isInputNarration,
     activeOfflineStoryId,
     runtimeContext: activeRuntimeContext,
+    activeIdentityName: settings.name,
+    activeIdentityAvatar: settings.avatar,
     onReplyStopped: () => {
       setIsTyping(false);
       setImageGenerationActive(false);
@@ -6689,8 +6695,13 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
               const groupSenderChar = !isSelf && activeCharacter.isGroupChat && msg.senderId
                 ? (characters.find(c => c.id === msg.senderId) || characters.find(c => c.name === msg.senderId))
                 : null;
-              const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? settings.avatar : activeCharacter.avatar);
-              const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : activeCharacterDisplayName;
+              const messageIdentity = isSelf && msg.authorIdentityId
+                ? settings.identities?.find((identity) => identity.id === msg.authorIdentityId)
+                : undefined;
+              const userNameSnapshot = msg.authorNameSnapshot || messageIdentity?.name || settings.name;
+              const userAvatarSnapshot = msg.authorAvatarSnapshot || messageIdentity?.avatar || settings.avatar;
+              const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? userAvatarSnapshot : activeCharacter.avatar);
+              const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : (isSelf ? userNameSnapshot : activeCharacterDisplayName);
               // A direct AI turn can be split into several consecutive bubbles,
               // while the collapsed avatar is rendered only on the first one.
               // Inline inner voice records are attached to the last delivered
@@ -7098,9 +7109,9 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                         isSelf ? "flex-row-reverse" : "flex-row"
                       }`}>
                         <RenderAvatar
-                          src={isSelf ? settings.avatar : msgAvatar}
+                          src={msgAvatar}
                           alt=""
-                          name={isSelf ? settings.name : msgName}
+                          name={msgName}
                           onClick={() => {
                             if (!isSelf) {
                               void openInnerVoice(groupSenderChar ? groupSenderChar.id : activeCharacter.id, innerVoiceTriggerMessage);
@@ -7140,9 +7151,9 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                     {/* Avatar */}
                     {showAvatar ? (
                       <RenderAvatar
-                        src={isSelf ? settings.avatar : msgAvatar}
+                        src={msgAvatar}
                         alt=""
-                        name={isSelf ? settings.name : msgName}
+                        name={msgName}
                         onClick={() => {
                           if (!isSelf) {
                             void openInnerVoice(groupSenderChar ? groupSenderChar.id : activeCharacter.id, innerVoiceTriggerMessage);
