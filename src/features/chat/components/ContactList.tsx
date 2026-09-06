@@ -21,7 +21,7 @@ export function ContactList({ header, contacts, onSelect }: ContactListProps) {
           </div>
           <h4 className="text-xs font-bold text-[var(--text-primary)]">通讯录空空如也</h4>
           <p className="text-[10px] text-[var(--text-tertiary)] mt-1 max-w-xs mx-auto leading-relaxed">
-            暂无好友。请点击右上角“+”号直接从档案馆添加已创建的角色，或到桌面打开“档案馆”新建！
+            暂无好友。请点击右上角“+”号选择添加方式，再从档案馆添加已创建的角色，或到桌面打开“档案馆”新建！
           </p>
         </div>
       ) : (

@@ -94,6 +94,22 @@ assert.equal(restored.value.bio, "最新资料");
 
 console.log("settings identity persistence tests passed");
 
+const aliasScopedSettings = {
+  ...defaultSettings,
+  name: "主号资料",
+  avatar: "primary-avatar",
+  activeIdentityId: "identity-alias",
+  identities: [
+    { id: "identity-primary", name: "主号资料", avatar: "primary-avatar", signature: "主号签名", bio: "主号人设", kind: "primary" as const, rootIdentityId: "identity-primary" },
+    { id: "identity-alias", name: "马甲资料", avatar: "alias-avatar", signature: "", bio: "马甲人设", kind: "alias" as const, parentIdentityId: "identity-primary", rootIdentityId: "identity-primary" },
+  ],
+} as UserSettings;
+const normalizedAlias = normalizeIdentitySettings(aliasScopedSettings);
+assert.equal(normalizedAlias.settings.activeIdentityId, "identity-alias");
+assert.equal(normalizedAlias.settings.name, "主号资料", "selecting an alias must not overwrite the parent persona name");
+assert.equal(normalizedAlias.settings.avatar, "primary-avatar", "selecting an alias must not overwrite the parent persona avatar");
+assert.equal(normalizedAlias.settings.bio, "主号人设", "selecting an alias must not overwrite the parent persona bio");
+
 const duplicatedSettings = {
   ...defaultSettings,
   activeIdentityId: "identity-3",

@@ -1,6 +1,6 @@
 import type { Message, OfflineStory } from "../../../types";
 import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../services/chatMemoryRetrievalSettings";
-import { buildAliasIdentityBoundaryPrompt } from "../../../domain/prompt/aliasIdentityBoundary";
+import { buildAliasIdentityBoundaryPrompt, buildAliasIdentityFinalGuardPrompt } from "../../../domain/prompt/aliasIdentityBoundary";
 
 /** Mechanical extraction of the existing regeneration path; dependencies stay explicit in the page context. */
 export function useChatRegenerationAction(context: Record<string, any>) {
@@ -83,13 +83,33 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     try {
       // Short-term real-time context limit: 10~300 messages, default 150.
       const limit = resolveChatContextMemoryLimit(activeCharacter.contextMemoryLimit);
+      const activeIdentity = settings.identities?.find((identity: { id: string }) => identity.id === activeIdentityId);
+      const promptUserName = activeIdentity?.name?.trim() || settings.name;
+      const isAliasIdentity = activeIdentity?.kind === "alias";
+      const identityRootId = getRootIdentityId(activeIdentityId, settings.identities || []);
+      const primaryIdentity = isAliasIdentity
+        ? settings.identities?.find((identity: { id: string; kind?: string }) => identity.kind === "primary" && getRootIdentityId(identity.id, settings.identities || []) === identityRootId)
+        : undefined;
+      const primaryIdentityName = primaryIdentity?.name?.trim() || "主号联系人";
+      const primaryRelation = isAliasIdentity
+        ? relationships?.find((relation: { userIdentityId: string; characterId: string }) =>
+          relation.userIdentityId === primaryIdentity?.id && relation.characterId === activeCharacter.id)
+        : undefined;
+      const aliasIdentityFinalGuardPrompt = isAliasIdentity
+        ? buildAliasIdentityFinalGuardPrompt({
+          primaryName: primaryIdentityName,
+          hasPrimaryRelationship: Boolean(primaryRelation),
+          recognitionState: activeRelationship?.identityRecognitionState,
+          aliasName: promptUserName,
+        })
+        : "";
       
       // Exclude lastUserMsg from the history parameter since it is sent as the main message parameter.
       const msgsForHistory = previousMessages.filter(m => m.id !== lastUserMsg.id);
       const turnSettings = resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter);
       const currentMessageContextText = serializeMessageContentForPrompt(lastUserMsg, {
         mode: "history",
-        userName: settings.name,
+        userName: promptUserName,
         characterName: activeCharacter.name,
       });
       const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
@@ -118,7 +138,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
         const speaker = message.sender === "user" ? "用户" : activeCharacter.name;
         const content = serializeMessageContentForPrompt(message, {
           mode: "history",
-          userName: settings.name,
+          userName: promptUserName,
           characterName: activeCharacter.name,
           includeCallTranscript: false,
         }).replace(/\s+/gu, " ").trim().slice(0, 240);
@@ -126,7 +146,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
       });
       const crossDayHistoricalReference = buildCrossDayHistoricalReferencePrompt(historicalReferenceLines);
       const history = slicedMsgs.flatMap((m) => serializeMessageToPromptTurns(m, {
-          userName: settings.name,
+          userName: promptUserName,
           characterName: activeCharacter.name,
         }).map((turn) => ({
           role: turn.role,
@@ -148,7 +168,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
           const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
           let snippet = serializeMessageContentForPrompt(m, {
             mode: "history",
-            userName: settings.name,
+            userName: promptUserName,
             characterName: activeCharacter.name,
             includeCallTranscript: false,
           });
@@ -228,25 +248,16 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         characterContextText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, lastUserMsg.timestamp);
       }
 
-      const activeIdentity = settings.identities?.find((identity: { id: string }) => identity.id === activeIdentityId);
-      const identityRootId = getRootIdentityId(activeIdentityId, settings.identities || []);
-      const primaryIdentity = activeIdentity?.kind === "alias"
-        ? settings.identities?.find((identity: { id: string; kind?: string }) => identity.kind === "primary" && getRootIdentityId(identity.id, settings.identities || []) === identityRootId)
-        : undefined;
-      const primaryIdentityName = primaryIdentity?.name?.trim() || "主号联系人";
       const userProfileText = activeIdentity?.kind === "alias"
         ? `User Profile:
 - This is a separate contact using an alias. Their real identity is unknown to you.
-- The alias profile is private setup guidance, not a fact the character already knows. Do not address them by their alias name or reveal/guess their identity unless they explicitly disclose it in the conversation.`
+- The alias profile is private setup guidance, not a fact the character already knows. The current display name is “${promptUserName}”, but do not reveal or guess their primary identity unless they explicitly disclose it in the conversation.`
         : `User Profile:
-- Nickname: ${settings.name}
-- Personality/Bio: ${settings.bio}`;
+- Nickname: ${promptUserName}
+- Personality/Bio: ${activeIdentity?.bio ?? settings.bio}`;
       const userKnowledgeBoundary = formatUserKnowledgeBoundary();
       const relationshipContext = characterProjection.relationship?.content || "";
       if (activeIdentity?.kind === "alias") {
-        const primaryRelation = relationships?.find((relation: { userIdentityId: string; characterId: string }) =>
-          relation.userIdentityId === primaryIdentity?.id && relation.characterId === activeCharacter.id,
-        );
         if (primaryRelation) {
           characterContextText += `\n[角色自身关于另一位联系人的既有记忆]\n这些是角色过去对主号联系人或相关事件的记忆，不是当前马甲的身份信息。当前说话者仍是陌生联系人；不得因为职业、措辞或事件相似就认定当前马甲是饭饭，也不得把主号聊天历史当作当前对话历史。只有当前联系人明确说“我就是饭饭”等内容时，才允许建立身份关联。\n${primaryRelation.compressedMemory?.trim() ? `关系记忆：${primaryRelation.compressedMemory.trim()}` : "暂无相关既有记忆"}`;
         }
@@ -260,7 +271,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         })
         : "";
 
-      const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
+      const momentsContextRegen = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, promptUserName);
       const offlineStoriesContextRegen = getOfflineStoriesContextForOnlineChat();
       const musicContext = activeRelationship
         ? buildRelationMusicContext({
@@ -304,7 +315,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
         currentMessageContextText,
-        ...previousMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
+        ...previousMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
       const characterBehaviorPrompt = buildCharacterBehaviorPrompt({
@@ -431,6 +442,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         finalPersonaRules: wbBlocks.allTriggered
           .filter((entry) => entry.purpose === "persona_rule")
           .map((entry) => `【${entry.title}】\n${entry.content}`),
+        finalPriorityInstructions: aliasIdentityFinalGuardPrompt ? [aliasIdentityFinalGuardPrompt] : undefined,
         finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           activeCharacter,
           getVisibleWorldBookEntries(worldBookEntries || [], activeChatCharId || "", {
@@ -445,7 +457,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
       const promptMessage = serializeMessageContentForPrompt(lastUserMsg, {
         mode: "current",
-        userName: settings.name,
+        userName: promptUserName,
         characterName: activeCharacter.name,
       });
       const { data, candidates: replyCandidates } = await generateRegeneratedChatTurn({
@@ -456,11 +468,20 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           keepPeriods,
           characterId: activeChatCharId,
           characterName: activeCharacter?.name,
-          userName: settings.name,
+          userName: promptUserName,
           allowEmoji: false,
           createId: () => createId("regen"),
           currentTime: (idx) => Date.now() + idx,
         },
+        aliasIdentityGuard: isAliasIdentity
+          ? {
+            aliasName: promptUserName,
+            primaryName: primaryIdentityName,
+            hasPrimaryRelationship: Boolean(primaryRelation),
+            recognitionState: activeRelationship?.identityRecognitionState,
+            currentUserMessage: lastUserMsg.content,
+          }
+          : undefined,
       });
 
       if (data && data.text && replyCandidates) {

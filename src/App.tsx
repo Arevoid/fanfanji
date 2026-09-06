@@ -61,7 +61,7 @@ import { imageAssetDb } from "./utils/imageAssetDb";
 import { createCharacterPhone, getCharacterPhone, removeCharacterPhonesByCharacterIds, saveCharacterPhone } from "./core/storage/repositories/characterPhoneRepository";
 import { normalizeCharacterPhoneProactiveMessages } from "./features/characterPhone/characterPhoneContent";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
-import { createRelationship, DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, normalizeRelationshipIdentityScopes, type CharacterRelationship } from "./domain/relationship/characterRelationship";
+import { createRelationship, DEFAULT_IDENTITY_ID, findPrimaryIdentityForIdentity, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, normalizeRelationshipIdentityScopes, type CharacterRelationship } from "./domain/relationship/characterRelationship";
 import { resolveRelationshipNetworkNpcActor } from "./domain/relationshipNetwork/relationshipNetworkNpcActor";
 import type { RelationshipNetworkNpc } from "./domain/relationshipNetwork/relationshipNetworkTypes";
 import { findRelationshipNetworkChatLink, loadRelationshipNetworkChatLinks } from "./core/storage/repositories/relationshipNetworkChatLinkRepository";
@@ -3172,6 +3172,7 @@ export default function App() {
     const currentSettings = settingsRef.current;
     const identity = currentSettings.identities?.find((item) => item.id === identityId);
     if (!identity) return;
+    const primaryIdentity = findPrimaryIdentityForIdentity(identity.id, currentSettings.identities || []) || identity;
     const targetRelation = openChat
       ? relationships.find((relation) => relation.id === openChat.relationId
         && relation.userIdentityId === identity.id
@@ -3187,10 +3188,13 @@ export default function App() {
     const saved = setSettings((previous) => ({
       ...previous,
       activeIdentityId: identity.id,
-      name: identity.name,
-      avatar: identity.avatar,
-      signature: identity.signature || "",
-      bio: identity.bio || "",
+      // Keep the legacy profile fields owned by the selected主人设. A child
+      // alias changes the active chat identity, but must never overwrite its
+      // parent's profile data.
+      name: primaryIdentity.name,
+      avatar: primaryIdentity.avatar,
+      signature: primaryIdentity.signature || "",
+      bio: primaryIdentity.bio || "",
     }));
     if (!saved) {
       alert("身份已切换，但当前浏览器存储空间不足，刷新页面后可能无法保留本次切换。请先清理存储空间。");
@@ -4509,8 +4513,12 @@ export default function App() {
                 {(activeApp === "chat" || chatModuleActivated) && (
                   <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
                   <LazyAppBoundary>
-                      <AppChat
-                    key={`chat-${activeIdentityId}`}
+                    <AppChat
+                    // Keep the chat shell mounted while switching identities so
+                    // selecting a persona/alias does not reset the current tab
+                    // or sub-view back to the chat list. Identity-scoped data is
+                    // still selected by activeIdentityId in AppChat and its hooks.
+                    key="chat"
                     characters={characters}
                     relationships={relationships}
                     settings={settings}

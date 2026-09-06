@@ -16,13 +16,14 @@ storage.setItem("phone_homescreen_items", JSON.stringify([
 ]));
 storage.setItem("calendar_album_image_widget-1", "data:image/png;base64,calendar");
 storage.setItem("anniversary_title_widget-2", "纪念日");
+storage.setItem("welcome_widget_name_welcome_widget_1", "桌面欢迎");
 storage.setItem("phone_messages", "must-not-export");
 const settings: any = { wallpaper: "wallpaper", customIcons: { chat: "icon" }, dockColor: "#fff", dockOpacity: 70, apiKey: "secret", selectedModel: "model" };
 
 const exported = buildDesktopModuleBackup(settings, storage);
 assert.equal(exported.settings.wallpaper, "wallpaper");
 assert.equal("apiKey" in exported.settings, false);
-assert.deepEqual(Object.keys(exported.storage).sort(), ["anniversary_title_widget-2", "calendar_album_image_widget-1", "phone_homescreen_items"]);
+assert.deepEqual(Object.keys(exported.storage).sort(), ["anniversary_title_widget-2", "calendar_album_image_widget-1", "phone_homescreen_items", "welcome_widget_name_welcome_widget_1"]);
 const parsedBackup = parseDesktopModuleBackup(exported);
 assert.equal(parsedBackup.format, "fanfanji-desktop-module");
 assert.deepEqual(
@@ -38,6 +39,7 @@ applyDesktopModuleBackup(parsedBackup, destination);
 assert.deepEqual(JSON.parse(destination.getItem("phone_settings") || "{}"), { apiKey: "keep", wallpaper: "wallpaper", customIcons: { chat: "icon" }, dockColor: "#fff", dockOpacity: 70 });
 assert.equal(destination.getItem("calendar_album_image_old"), null);
 assert.equal(destination.getItem("anniversary_title_widget-2"), "纪念日");
+assert.equal(destination.getItem("welcome_widget_name_welcome_widget_1"), "桌面欢迎");
 assert.deepEqual(
   JSON.parse(destination.getItem("phone_homescreen_items") || "[]")[0].position,
   { page: 0, row: 3, column: 3 },

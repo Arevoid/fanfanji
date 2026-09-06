@@ -1,4 +1,5 @@
 import type { UserSettings, UserSettingsUpdate } from "../../../types";
+import { findPrimaryIdentityForIdentity } from "../../../domain/relationship/characterRelationship";
 import { readJson, writeJson } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
@@ -113,11 +114,12 @@ export function normalizeIdentitySettings(settings: UserSettings): { settings: U
     // current pointer rather than silently unarchiving or deleting anything.
     || normalizedIdentities.find((identity) => identity.id === requestedActiveId)
     || normalizedIdentities[0];
+  const primaryIdentity = findPrimaryIdentityForIdentity(activeIdentity.id, normalizedIdentities) || activeIdentity;
   if (activeIdentity.id !== settings.activeIdentityId
-    || settings.name !== activeIdentity.name
-    || settings.avatar !== activeIdentity.avatar
-    || settings.signature !== activeIdentity.signature
-    || settings.bio !== activeIdentity.bio) {
+    || settings.name !== primaryIdentity.name
+    || settings.avatar !== primaryIdentity.avatar
+    || settings.signature !== primaryIdentity.signature
+    || settings.bio !== primaryIdentity.bio) {
     changed = true;
   }
 
@@ -127,10 +129,12 @@ export function normalizeIdentitySettings(settings: UserSettings): { settings: U
       identities: normalizedIdentities,
       identityDataVersion: Math.max(IDENTITY_DATA_VERSION, Number(settings.identityDataVersion) || 0),
       activeIdentityId: activeIdentity.id,
-      name: activeIdentity.name,
-      avatar: activeIdentity.avatar,
-      signature: activeIdentity.signature,
-      bio: activeIdentity.bio,
+      // Legacy top-level profile fields represent the selected主人设. They
+      // must remain stable when a child alias becomes the active chat identity.
+      name: primaryIdentity.name,
+      avatar: primaryIdentity.avatar,
+      signature: primaryIdentity.signature,
+      bio: primaryIdentity.bio,
     },
     changed,
   };

@@ -23,6 +23,12 @@ import {
   compressImagePreservingTransparency,
   isTransparencyPreservedImage,
 } from "../utils/pngParser";
+import {
+  ensureWelcomeWidgetProfile,
+  loadWelcomeWidgetProfile,
+  saveWelcomeWidgetProfile,
+  type WelcomeWidgetProfile,
+} from "../features/home/welcomeWidgetProfile";
 import { 
   Play, 
   Pause, 
@@ -127,46 +133,148 @@ interface WidgetProps {
   relationships?: CharacterRelationship[];
 }
 
-export function WelcomeWidget({ isEditing, onRemove, activeIdentity, widgetOpacity, widgetBorderRadius }: WidgetProps) {
+export function WelcomeWidget({ id, isEditing, onRemove, activeIdentity, widgetOpacity, widgetBorderRadius }: WidgetProps) {
+  const [profile, setProfile] = useState<WelcomeWidgetProfile>(() => loadWelcomeWidgetProfile(id, activeIdentity));
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [draft, setDraft] = useState(profile);
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // Materialize the one-time legacy fallback so later identity switches or
+    // reloads cannot make this card follow the active persona again.
+    ensureWelcomeWidgetProfile(id, profile);
+  }, [id]);
+
+  const openSettings = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    if (isEditing) return;
+    setDraft(profile);
+    setIsSettingsOpen(true);
+  };
+
+  const saveSettings = () => {
+    const nextProfile = saveWelcomeWidgetProfile(id, draft);
+    setProfile(nextProfile);
+    setIsSettingsOpen(false);
+  };
+
+  const cancelSettings = () => {
+    setDraft(profile);
+    setIsSettingsOpen(false);
+  };
+
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const avatar = await compressImagePreservingTransparency(file, 512, 512, 0.82);
+      setDraft((current) => ({ ...current, avatar }));
+    } catch (error) {
+      console.warn("Failed to prepare welcome widget avatar:", error);
+    }
+  };
+
   return (
-    <div
-      className="home-widget-card relative flex h-full w-full items-center gap-3.5 overflow-hidden rounded-[22px] border border-neutral-200/20 bg-white/40 p-3.5 text-neutral-850 shadow-sm backdrop-blur-md select-none"
-      style={{
-        borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px",
-        backgroundColor: `rgba(255, 255, 255, ${normalizeWidgetOpacity(widgetOpacity)})`,
-      }}
-      aria-label="欢迎卡片"
-    >
-      <img
-        src={activeIdentity?.avatar || ""}
-        alt={activeIdentity?.name || ""}
-        className="h-12 w-12 shrink-0 rounded-full border border-slate-200/20 object-cover shadow-sm"
-        referrerPolicy="no-referrer"
-      />
-      <div className="min-w-0 flex-1">
-        <h2 className="truncate text-sm font-extrabold tracking-tight leading-tight text-neutral-900">
-          {activeIdentity?.name || "欢迎"}
-        </h2>
-        <p className="mt-1 line-clamp-1 text-[11px] leading-relaxed text-neutral-500">
-          {activeIdentity?.signature || "今天也要好好生活"}
-        </p>
+    <>
+      <div
+        className="home-widget-card relative flex h-full w-full cursor-pointer items-center gap-3.5 overflow-hidden rounded-[22px] border border-neutral-200/20 bg-white/40 p-3.5 text-neutral-850 shadow-sm backdrop-blur-md select-none"
+        style={{
+          borderRadius: widgetBorderRadius !== undefined ? `${widgetBorderRadius}px` : "22px",
+          backgroundColor: `rgba(255, 255, 255, ${normalizeWidgetOpacity(widgetOpacity)})`,
+        }}
+        onClick={openSettings}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            if (!isEditing) {
+              setDraft(profile);
+              setIsSettingsOpen(true);
+            }
+          }
+        }}
+        role="button"
+        tabIndex={isEditing ? -1 : 0}
+        aria-label="编辑欢迎卡片"
+      >
+        {profile.avatar ? (
+          <img
+            src={profile.avatar}
+            alt={profile.name}
+            className="h-12 w-12 shrink-0 rounded-full border border-slate-200/20 object-cover shadow-sm"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-slate-200/20 bg-slate-100 text-sm font-bold text-slate-500 shadow-sm">
+            {profile.name.slice(0, 1) || "?"}
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-sm font-extrabold tracking-tight leading-tight text-neutral-900">
+            {profile.name}
+          </h2>
+          <p className="mt-1 line-clamp-1 text-[11px] leading-relaxed text-neutral-500">
+            {profile.signature}
+          </p>
+        </div>
+        {isEditing && onRemove && (
+          <button
+            type="button"
+            data-home-delete
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove();
+            }}
+            className="absolute -left-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-stone-900/90 text-xs font-black text-white shadow transition-transform active:scale-90"
+            aria-label="删除欢迎卡片"
+          >
+            -
+          </button>
+        )}
       </div>
-      {isEditing && onRemove && (
-        <button
-          type="button"
-          data-home-delete
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            onRemove();
-          }}
-          className="absolute -left-1.5 -top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded-full bg-stone-900/90 text-xs font-black text-white shadow transition-transform active:scale-90"
-          aria-label="删除欢迎卡片"
-        >
-          -
-        </button>
+
+      {isSettingsOpen && createPortal(
+        <div className="theme-widget-sheet fixed inset-0 z-[100] flex items-end justify-center bg-[var(--overlay)] p-4" onClick={cancelSettings}>
+          <div className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-[28px] bg-[var(--surface)] text-[var(--text-primary)] shadow-[var(--shadow-modal)]" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[var(--divider)] px-5 py-4">
+              <div>
+                <h3 className="text-sm font-black text-[var(--text-primary)]">欢迎小组件</h3>
+                <p className="mt-0.5 text-[11px] text-[var(--text-tertiary)]">独立于“我的人设”，只影响桌面这张卡片</p>
+              </div>
+              <button type="button" onClick={cancelSettings} className="rounded-full p-1 text-lg font-bold text-[var(--text-tertiary)]" aria-label="关闭">×</button>
+            </div>
+            <div className="space-y-4 overflow-y-auto px-5 py-4">
+              <div className="flex items-center gap-3">
+                {draft.avatar ? (
+                  <img src={draft.avatar} alt={draft.name} className="h-14 w-14 rounded-full border border-[var(--border)] object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--surface-muted)] text-base font-bold text-[var(--text-secondary)]">{draft.name.slice(0, 1) || "?"}</div>
+                )}
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  <button type="button" onClick={() => uploadRef.current?.click()} className="w-full rounded-xl bg-[var(--surface-muted)] px-3 py-2 text-xs font-bold text-[var(--text-primary)]">上传头像</button>
+                  <button type="button" onClick={() => setDraft((current) => ({ ...current, avatar: "" }))} className="w-full rounded-xl border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text-secondary)]">移除头像</button>
+                </div>
+                <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
+              </div>
+              <label className="block text-xs font-bold text-[var(--text-primary)]">
+                名称
+                <input value={draft.name} maxLength={40} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] outline-none" />
+              </label>
+              <label className="block text-xs font-bold text-[var(--text-primary)]">
+                个性签名
+                <input value={draft.signature} maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, signature: event.target.value }))} className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] outline-none" />
+              </label>
+            </div>
+            <div className="flex gap-2 border-t border-[var(--divider)] p-4">
+              <button type="button" onClick={cancelSettings} className="flex-1 rounded-xl bg-[var(--surface-muted)] py-2.5 text-xs font-bold text-[var(--text-secondary)]">取消</button>
+              <button type="button" onClick={saveSettings} className="flex-1 rounded-xl bg-[var(--accent)] py-2.5 text-xs font-bold text-[var(--accent-contrast)]">保存</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }
 
@@ -226,7 +334,6 @@ export function AlbumWidget({ id, isEditing, onRemove, characters = [], widgetOp
           className={`w-full h-full transform hover:scale-105 transition-transform duration-500 ${
             isTransparentPhoto ? "object-contain" : "object-cover"
           }`}
-          style={{ opacity: normalizeWidgetOpacity(widgetOpacity) }}
           referrerPolicy="no-referrer"
         />
       </div>

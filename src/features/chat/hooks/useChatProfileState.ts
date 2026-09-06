@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { UserSettings } from "../../../types";
 
-export type ChatProfileSubView = "none" | "identities" | "wallet" | "stickers" | "favorites";
+export type ChatProfileSubView = "none" | "identities" | "identity-detail" | "identities-legacy" | "wallet" | "stickers" | "favorites";
 export type ChatStylePreset = "default" | "floating-cute" | "liquid-glass";
 
 /** Owns the Me tab navigation, top-up modal and profile edit draft. */

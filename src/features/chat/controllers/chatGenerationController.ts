@@ -13,6 +13,11 @@ import { buildTextAiRuntimeConfig } from "../services/textAiRuntimeConfig";
 import { CHAT_DEGENERATE_RETRY_INSTRUCTION, isDegenerateDirectReply, removeDegenerateReplyPattern } from "../services/chatEchoGuard";
 import { CHAT_RESPONSE_FORMAT_RETRY_INSTRUCTION, parseChatTurnResponse } from "../services/chatTurnResponseProtocol";
 import type { ParsedAiChatResponse } from "../services/chatServiceTypes";
+import {
+  buildAliasIdentityCorrectionPrompt,
+  detectAliasIdentityBoundaryViolation,
+  type AliasIdentityResponseGuardContext,
+} from "../../../domain/prompt/aliasIdentityResponseGuard";
 
 type PromptInput = Pick<PromptContext, "scenario" | "message" | "history" | "systemInstruction" | "imageDataUrl" | "historyInjections">;
 type RequestAi = typeof apiChat;
@@ -143,25 +148,59 @@ const requestDirectChatResponseWithContextRecovery = async (input: {
   throw lastContextError || new Error("上下文过长，已尝试缩减本次请求后仍无法发送。未修改聊天记录或记忆，请减少本条消息或关闭部分附加设定后重试。");
 };
 
-export async function requestDirectChatTurn(input: { prompt: PromptInput; settings: UserSettings; requestAi?: RequestAi; signal?: AbortSignal; includeInnerVoice?: boolean }): Promise<ParsedAiChatResponse> {
+export async function requestDirectChatTurn(input: {
+  prompt: PromptInput;
+  settings: UserSettings;
+  requestAi?: RequestAi;
+  signal?: AbortSignal;
+  includeInnerVoice?: boolean;
+  /** Optional identity-boundary validation for alias conversations. */
+  aliasIdentityGuard?: AliasIdentityResponseGuardContext;
+}): Promise<ParsedAiChatResponse> {
   const requestAi = input.requestAi || apiChat;
   const request = { ...buildComposedAiChatRequest(input.prompt, input.settings), signal: input.signal };
-  const first = await requestDirectChatResponseWithContextRecovery({ requestAi, request, includeInnerVoice: input.includeInnerVoice });
-  if (!isDegenerateDirectReply(input.prompt.message, first.text, request.history)) return first;
-  const retryHistory = removeDegenerateReplyPattern(request.history, first.text);
-  const retry = await requestDirectChatResponseWithContextRecovery({
+  let response = await requestDirectChatResponseWithContextRecovery({ requestAi, request, includeInnerVoice: input.includeInnerVoice });
+  if (isDegenerateDirectReply(input.prompt.message, response.text, request.history)) {
+    const retryHistory = removeDegenerateReplyPattern(request.history, response.text);
+    response = await requestDirectChatResponseWithContextRecovery({
+      requestAi,
+      request: {
+        ...request,
+        history: retryHistory,
+        systemInstruction: [request.systemInstruction, CHAT_DEGENERATE_RETRY_INSTRUCTION].filter(Boolean).join("\n\n"),
+      },
+      includeInnerVoice: input.includeInnerVoice,
+    });
+    if (!response.text.trim() || isDegenerateDirectReply(input.prompt.message, response.text, request.history)) {
+      throw new Error("模型连续返回重复或无意义的回复，本次回复已停止写入，请重试。");
+    }
+  }
+
+  const aliasGuard = input.aliasIdentityGuard;
+  const violation = aliasGuard
+    ? detectAliasIdentityBoundaryViolation(response.text, aliasGuard)
+    : undefined;
+  if (!violation) return response;
+
+  // A single request-local retry keeps the generated wording/persona intact
+  // while correcting only high-impact identity-boundary mistakes. Persisted
+  // history and relationship data are never changed by this guard.
+  console.warn(`[alias-identity-guard] retrying response after ${violation}`);
+  const corrected = await requestDirectChatResponseWithContextRecovery({
     requestAi,
     request: {
       ...request,
-      history: retryHistory,
-      systemInstruction: [request.systemInstruction, CHAT_DEGENERATE_RETRY_INSTRUCTION].filter(Boolean).join("\n\n"),
+      systemInstruction: [request.systemInstruction, buildAliasIdentityCorrectionPrompt(aliasGuard, violation)]
+        .filter(Boolean)
+        .join("\n\n"),
     },
     includeInnerVoice: input.includeInnerVoice,
   });
-  if (!retry.text.trim() || isDegenerateDirectReply(input.prompt.message, retry.text, request.history)) {
-    throw new Error("模型连续返回重复或无意义的回复，本次回复已停止写入，请重试。");
+  const correctedViolation = detectAliasIdentityBoundaryViolation(corrected.text, aliasGuard);
+  if (correctedViolation) {
+    console.warn(`[alias-identity-guard] retry still contains ${correctedViolation}; keeping the natural retry response`);
   }
-  return retry;
+  return corrected;
 }
 
 export function generateGroupChatTurn(input: {
@@ -181,8 +220,24 @@ export function generateGroupChatTurn(input: {
 
 export async function generateRegeneratedChatTurn(input: {
   prompt: PromptInput; settings: UserSettings; candidateContext: Omit<ReplyCandidateContext, "rawText">; requestAi?: RequestAi;
+  aliasIdentityGuard?: AliasIdentityResponseGuardContext;
 }) {
-  const data = await requestAiReply(input.requestAi || apiChat, buildComposedAiChatRequest(input.prompt, input.settings));
+  const requestAi = input.requestAi || apiChat;
+  const request = buildComposedAiChatRequest(input.prompt, input.settings);
+  let data = await requestAiReply(requestAi, request);
+  const violation = input.aliasIdentityGuard
+    ? detectAliasIdentityBoundaryViolation(data.text, input.aliasIdentityGuard)
+    : undefined;
+  if (violation) {
+    console.warn(`[alias-identity-guard] retrying regenerated response after ${violation}`);
+    const corrected = await requestAiReply(requestAi, {
+      ...request,
+      systemInstruction: [request.systemInstruction, buildAliasIdentityCorrectionPrompt(input.aliasIdentityGuard!, violation)]
+        .filter(Boolean)
+        .join("\n\n"),
+    });
+    if (corrected.text.trim()) data = corrected;
+  }
   return { data, candidates: data?.text ? createRegeneratedReplyCandidates({ ...input.candidateContext, rawText: data.text }) : null };
 }
 

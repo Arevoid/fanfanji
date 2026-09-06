@@ -62,6 +62,19 @@ export function getRootIdentityId(identityId: string, identities: readonly UserI
   return resolve(identityId, new Set<string>());
 }
 
+/** Returns the primary persona that owns an identity, if one is available. */
+export function findPrimaryIdentityForIdentity(
+  identityId: string,
+  identities: readonly UserIdentity[] = [],
+): UserIdentity | undefined {
+  const rootIdentityId = getRootIdentityId(identityId, identities);
+  return identities.find((identity) =>
+    !identity.archived
+    && identity.kind === "primary"
+    && getRootIdentityId(identity.id, identities) === rootIdentityId,
+  );
+}
+
 /** Adds missing relationship owner scopes while preserving every relation ID. */
 export function normalizeRelationshipIdentityScopes(
   relationships: readonly CharacterRelationship[],

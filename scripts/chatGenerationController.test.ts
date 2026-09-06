@@ -16,6 +16,29 @@ const directAi = (async (input) => { capturedMessage = input.message; return { t
 assert.equal((await requestDirectChatTurn({ prompt, settings, requestAi: directAi })).text, "回复");
 assert.equal(capturedMessage, "当前");
 
+let aliasGuardAttempts = 0;
+let aliasGuardInstruction = "";
+const aliasGuardAi = (async (input) => {
+  aliasGuardAttempts += 1;
+  aliasGuardInstruction = input.systemInstruction || "";
+  return { text: aliasGuardAttempts === 1 ? "？宝宝你别吓我，我是步随影啊。" : "你找步随影有什么事？我们好像还不熟。" };
+}) as typeof apiChat;
+const aliasGuarded = await requestDirectChatTurn({
+  prompt: { ...prompt, message: "你是步随影？" },
+  settings,
+  requestAi: aliasGuardAi,
+  aliasIdentityGuard: {
+    aliasName: "老莫",
+    primaryName: "饭饭",
+    hasPrimaryRelationship: true,
+    recognitionState: "unknown",
+    currentUserMessage: "你是步随影？",
+  },
+});
+assert.equal(aliasGuardAttempts, 2);
+assert.equal(aliasGuarded.text, "你找步随影有什么事？我们好像还不熟。");
+assert.match(aliasGuardInstruction, /不要使用主号专属的亲昵称呼/);
+
 let formatRecoveryAttempts = 0;
 let formatRecoveryInstruction = "";
 const malformedFormatAi = (async (input) => {

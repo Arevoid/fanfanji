@@ -24,9 +24,10 @@ assert.equal(proactive.indexOf("PERSONA_RULE") > proactive.indexOf("UNIQUE_ANCHO
 assert.equal(proactive.endsWith("FINAL_LANG"), true);
 
 const projection = projectCharacterPrompt({ id: "c", name: "角色", personality: "活泼", backstory: "背景" }, "friend");
-const finalized = finalizeCharacterChatSystemInstruction({ instructions: [projection.description.content, projection.personality.content, projection.personality.content], characterProjection: projection, characterDescriptionText: projection.description.content, diagnosticLabel: "direct chat prompt", finalLanguageInstruction: "FINAL_LANG" });
+const finalized = finalizeCharacterChatSystemInstruction({ instructions: [projection.description.content, projection.personality.content, projection.personality.content], characterProjection: projection, characterDescriptionText: projection.description.content, diagnosticLabel: "direct chat prompt", finalPriorityInstructions: ["ALIAS_FINAL_GUARD"], finalLanguageInstruction: "FINAL_LANG" });
 assert.equal(finalized.split("[Character Personality / 角色性格与行为]").length - 1, 1);
 assert.equal(finalized.indexOf("最终角色专属表达锚点") > finalized.indexOf("[Character Personality / 角色性格与行为]"), true);
+assert.equal(finalized.indexOf("ALIAS_FINAL_GUARD") > finalized.indexOf("最终角色专属表达锚点"), true);
 assert.equal(finalized.endsWith("FINAL_LANG"), true);
 
 const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");

@@ -1,0 +1,56 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const chatStart = appChat.indexOf("{/* TABS: CHATS LIST (聊天首页) */}");
+const contactsStart = appChat.indexOf("{/* TABS: CONTACTS LIST (通讯录) */}", chatStart);
+assert.ok(chatStart >= 0 && contactsStart > chatStart);
+const chatSource = appChat.slice(chatStart, contactsStart);
+assert.doesNotMatch(chatSource, /全部身份/);
+assert.doesNotMatch(appChat, /chatIdentityFilter|setChatIdentityFilter/);
+const meStart = appChat.indexOf("{/* TABS: ME PROFILE (我) */}");
+const nextTabStart = appChat.indexOf("/* Edit Profile Page Overlay", meStart);
+assert.ok(meStart >= 0 && nextTabStart > meStart);
+
+const meSource = appChat.slice(meStart, nextTabStart);
+const mainSource = meSource.slice(meSource.indexOf('meActiveSubView === "none"'), meSource.indexOf('meActiveSubView === "identities"'));
+const personasStart = meSource.indexOf('meActiveSubView === "identities"');
+const detailStart = meSource.indexOf('meActiveSubView === "identity-detail"');
+assert.ok(personasStart >= 0 && detailStart > personasStart);
+const personasSource = meSource.slice(personasStart, detailStart);
+const detailSource = meSource.slice(detailStart, meSource.indexOf('meActiveSubView === "identities-legacy"', detailStart));
+
+assert.match(mainSource, /打开我的人设/);
+assert.doesNotMatch(mainSource, /编辑资料/);
+assert.doesNotMatch(mainSource, /签名:/);
+assert.match(mainSource, /title="点击更换头像"/);
+assert.match(mainSource, /aria-label="更换头像"/);
+assert.doesNotMatch(mainSource, /Sliders className="w-3 h-3 text-white"/);
+assert.match(mainSource, /items-center justify-between relative z-10/);
+assert.match(personasSource, /我的人设/);
+assert.match(personasSource, /settings-panel-card/);
+assert.match(personasSource, /identity\.kind === "primary"/);
+assert.match(personasSource, /新增人设面具/);
+assert.match(personasSource, /title="新增人设面具"/);
+assert.match(personasSource, /<Plus className="h-4 w-4 text-slate-700" \/>/);
+assert.doesNotMatch(personasSource, /empty-state-action/);
+assert.match(personasSource, /bg-\[var\(--surface\)\]/);
+assert.match(personasSource, /选择人设/);
+assert.match(personasSource, /修改人设/);
+assert.match(personasSource, /border-\[var\(--color-accent\)\] ring-1/);
+assert.match(personasSource, /onClick=\{openIdentityEditor\}/);
+assert.match(personasSource, /setMeActiveSubView\("identity-detail"\)/);
+assert.match(detailSource, /人设设置/);
+assert.match(detailSource, /名称/);
+assert.match(detailSource, /人设设定/);
+assert.match(detailSource, /删除人设/);
+assert.match(detailSource, /aria-label="保存人设"/);
+assert.match(detailSource, /deleteIdentity/);
+assert.match(detailSource, /bg-\[var\(--surface\)\]/);
+assert.doesNotMatch(detailSource, /border-b border-\[var\(--divider\)\] pb-4/);
+assert.doesNotMatch(detailSource, /个性签名/);
+assert.match(detailSource, /item\.id === identity\.id \? \{ \.\.\.item, name, avatar, bio \} : item/);
+assert.match(app, /key="chat"/);
+
+console.log("Me profile persona cards select in place and edit only through the trailing arrow");

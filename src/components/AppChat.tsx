@@ -64,7 +64,7 @@ import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
 import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } from "../domain/prompt/characterKnowledgeBoundary";
 import { formatUserKnowledgeBoundary } from "../domain/prompt/userKnowledgeBoundary";
-import { buildAliasIdentityBoundaryPrompt } from "../domain/prompt/aliasIdentityBoundary";
+import { buildAliasIdentityBoundaryPrompt, buildAliasIdentityFinalGuardPrompt } from "../domain/prompt/aliasIdentityBoundary";
 import { hasExplicitIdentityDisclosure } from "../domain/relationship/identityRecognition";
 import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
 import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
@@ -75,7 +75,7 @@ import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
-import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, getRootIdentityId, listIdentitiesForRoot, listIdentityRoots, listRelationshipsForIdentityWorkspace, sortIdentitiesForDisplay, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { createRelationship, DEFAULT_IDENTITY_ID, findPrimaryIdentityForIdentity, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, getRootIdentityId, listIdentitiesForRoot, listIdentityRoots, listRelationshipsForIdentityWorkspace, sortIdentitiesForDisplay, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { findInnerVoiceByMessage, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords } from "../core/storage/repositories/innerVoiceRepository";
 import { createInlineInnerVoiceRecord } from "../features/chat/services/innerVoiceService";
 import { INLINE_INNER_VOICE_INSTRUCTION, isChatResponseFormatError } from "../features/chat/services/chatTurnResponseProtocol";
@@ -516,7 +516,7 @@ export default function AppChat({
 
   const { initiatedChatIds, setInitiatedChatIds, lastReadTimestamps, setLastReadTimestamps, getUnreadCount } = useChatReadState({ activeChatCharId, activeChatRelationId, messages });
   const [showAliasDirectory, setShowAliasDirectory] = useState(false);
-  const [chatIdentityFilter, setChatIdentityFilter] = useState("all");
+  const [showContactAddMenu, setShowContactAddMenu] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [aliasDeleteTarget, setAliasDeleteTarget] = useState<string | null>(null);
   const [showCreateAliasModal, setShowCreateAliasModal] = useState(false);
@@ -524,10 +524,12 @@ export default function AppChat({
   const [aliasDraftName, setAliasDraftName] = useState("");
   const [aliasDraftBio, setAliasDraftBio] = useState("");
   const [aliasDraftAvatar, setAliasDraftAvatar] = useState("");
+  const [selectedAliasId, setSelectedAliasId] = useState<string | null>(null);
   const [showCreateIdentityModal, setShowCreateIdentityModal] = useState(false);
   const [identityDraftName, setIdentityDraftName] = useState("");
   const [identityDraftBio, setIdentityDraftBio] = useState("");
   const [identityDraftAvatar, setIdentityDraftAvatar] = useState("");
+  const [selectedIdentityId, setSelectedIdentityId] = useState<string | null>(null);
   const aliasLongPressTimerRef = useRef<number | null>(null);
   const startAliasLongPress = (identityId: string) => {
     if (aliasLongPressTimerRef.current !== null) window.clearTimeout(aliasLongPressTimerRef.current);
@@ -580,6 +582,15 @@ export default function AppChat({
   // lookup to the active identity prevents the primary account's context from
   // leaking into an alias turn.
   const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const activeIdentityRecord = settings.identities?.find((identity) => identity.id === activeIdentityId);
+  // The selected identity drives chats and new content. The legacy settings
+  // profile fields intentionally remain owned by the active主人设, so an alias
+  // can be used without changing the parent persona shown in “我”.
+  const activeIdentityName = activeIdentityRecord?.name?.trim() || settings.name || "用户";
+  const activeIdentityAvatar = activeIdentityRecord?.avatar || settings.avatar;
+  const activeIdentityBio = activeIdentityRecord?.bio ?? settings.bio;
+  const activeIdentitySignature = activeIdentityRecord?.signature ?? settings.signature;
+  const activeIdentityRootId = getRootIdentityId(activeIdentityId, settings.identities || []);
   const loadPendingRelationshipNetworkInteractions = (): RelationshipNetworkPendingInteraction[] => {
     const stored = listRelationshipNetworkPendingInteractionsForIdentity(activeIdentityId);
     const storedIds = new Set(stored.map((interaction) => interaction.id));
@@ -722,7 +733,7 @@ export default function AppChat({
     return buildPendingOfflineTimelineHandoffPrompt({
       story,
       characterName: activeCharacter?.remark || activeCharacter?.name || "当前角色",
-      userName: settings.name || "用户",
+      userName: activeIdentityName,
       currentChatMessages,
       currentOnlineAt,
       summaryMemory,
@@ -811,14 +822,8 @@ export default function AppChat({
   // composer. The visible inbox is scoped to the owning主人设空间 so its
   // primary identity and aliases remain discoverable together.
   const chatListRelationships = workspaceRelationships;
-  const visibleChatListRelationships = chatIdentityFilter === "all"
-    ? chatListRelationships
-    : chatListRelationships.filter((relation) => relation.userIdentityId === chatIdentityFilter);
-  useEffect(() => {
-    if (chatIdentityFilter !== "all" && !workspaceIdentities.some((identity) => identity.id === chatIdentityFilter)) {
-      setChatIdentityFilter("all");
-    }
-  }, [chatIdentityFilter, currentIdentityRootId, settings.identities]);
+  // 主号与马甲共用同一通讯录/聊天入口；身份仅作为每条联系人记录的标识展示。
+  const visibleChatListRelationships = chatListRelationships;
   const friends = activeRelationships.map((relation) =>
     characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters)),
   ).filter((character): character is Character => Boolean(character));
@@ -894,6 +899,25 @@ export default function AppChat({
     editGlobalChatStylePreset, setEditGlobalChatStylePreset,
   } = useChatProfileState(settings);
   const mainTabsViewportRef = useRef<HTMLDivElement>(null);
+  const previousActiveTabRef = useRef(activeTab);
+
+  // The chat shell stays mounted across identity switches so a selected card
+  // remains on its list. Reset nested routes when the user changes bottom tabs,
+  // otherwise a detail page from one tab could appear unexpectedly in another.
+  useEffect(() => {
+    if (previousActiveTabRef.current === activeTab) return;
+    previousActiveTabRef.current = activeTab;
+    setMeActiveSubView("none");
+    setSelectedIdentityId(null);
+    setShowAliasDirectory(false);
+    setSelectedAliasId(null);
+    setAliasEditTargetId(null);
+    setAliasDeleteTarget(null);
+    setShowCreateAliasModal(false);
+    setShowCreateIdentityModal(false);
+    setShowContactAddMenu(false);
+    setIsShowingAddFriendDialog(false);
+  }, [activeTab, setIsShowingAddFriendDialog, setMeActiveSubView]);
 
   useEffect(() => {
     if (activeTab === "me") mainTabsViewportRef.current?.scrollTo({ top: 0 });
@@ -1071,7 +1095,7 @@ export default function AppChat({
           const claims = redPacketClaims[getPaymentStatusKey(message)] || [];
           const alreadyClaimed = claims.some((claim) => claim.claimantId === claimant.id);
           const packetSender = message.sender === "user"
-            ? settings.name
+            ? activeIdentityName
             : characters.find((character) => character.id === message.characterId);
           const packetSenderName = typeof packetSender === "string"
             ? packetSender
@@ -1090,7 +1114,7 @@ export default function AppChat({
 
       processedRedPacketClaimNoticeIdsRef.current.add(noticeMessage.id);
       const packetSender = packet.sender === "user"
-        ? settings.name
+        ? activeIdentityName
         : characters.find((character) => character.id === packet.characterId);
       const packetSenderName = typeof packetSender === "string"
         ? packetSender
@@ -1112,7 +1136,7 @@ export default function AppChat({
       // otherwise multiple notices in one render could reuse the same slot.
       break;
     }
-  }, [activeCharacter, characters, claimRedPacket, currentChatMessages, onSendMessageRaw, redPacketClaims, settings.name]);
+  }, [activeCharacter, activeIdentityName, characters, claimRedPacket, currentChatMessages, onSendMessageRaw, redPacketClaims]);
 
   const settleGroupClaimBeforeReply = (reply: Message): Message | null => {
     if (!activeCharacter?.isGroupChat || reply.sender !== "character") return null;
@@ -1136,7 +1160,7 @@ export default function AppChat({
         const payload = parseRedPacketPayload(message);
         const claims = redPacketClaims[getPaymentStatusKey(message)] || [];
         const packetSender = message.sender === "user"
-          ? settings.name
+          ? activeIdentityName
           : characters.find((character) => character.id === message.characterId);
         const packetSenderName = typeof packetSender === "string"
           ? packetSender
@@ -1155,7 +1179,7 @@ export default function AppChat({
     if (amount <= 0) return null;
 
     const packetSender = packet.sender === "user"
-      ? settings.name
+      ? activeIdentityName
       : characters.find((character) => character.id === packet.characterId);
     const packetSenderName = typeof packetSender === "string"
       ? packetSender
@@ -1295,7 +1319,7 @@ export default function AppChat({
         alreadyPromptedMessageIds: previewPromptedMessages.map((message) => message.id),
         alreadyPromptedTexts: previewPromptedMessages.map((message) => serializeMessageContentForPrompt(message, {
           mode: "history",
-          userName: settings.name,
+          userName: activeIdentityName,
           characterName: activeCharacter.name,
         })),
         claims: loadKnowledgeClaims().value,
@@ -1305,7 +1329,7 @@ export default function AppChat({
       : undefined;
     const truthPrompt = truthRetrieval ? formatTruthRetrievalForPrompt(truthRetrieval) : "";
     return truthPrompt;
-  }, [activeCharacter, activeRelationship, currentChatMessages, draftContextMemoryLimit, draftRetrievalHistoryLimit, memories, settings.name]);
+  }, [activeCharacter, activeIdentityName, activeRelationship, currentChatMessages, draftContextMemoryLimit, draftRetrievalHistoryLimit, memories]);
   const estimatedTokens = React.useMemo(() => estimateChatTokens({
     character: activeCharacter,
     relationshipCompressedMemory: activeRelationship?.compressedMemory,
@@ -1578,8 +1602,8 @@ export default function AppChat({
         currentMessages: currentChatMessages,
         userMessage: userMsg,
         customHistoryOverride,
-        userName: settings.name,
-        userBio: settings.bio,
+        userName: activeIdentityName,
+        userBio: activeIdentityBio,
         settings,
         recallLimit: resolveChatLongTermMemoryLimit(latestActiveCharacterRef.current?.retrievalHistoryLimit),
         timeAwarenessEnabled: resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter).enableTimeAwareness,
@@ -1770,6 +1794,46 @@ export default function AppChat({
     const turnCharacter = latestActiveCharacterRef.current || activeCharacter;
     const turnRelationship = latestActiveRelationshipRef.current;
     const turnSettings = resolveChatTurnSettings(turnCharacter);
+    // Resolve the active identity before building any prompt history. The
+    // legacy global settings.name is kept for backwards compatibility, but it
+    // can lag behind a fast identity switch and must not be the source of
+    // truth for alias conversations.
+    const activeIdentity = settings.identities?.find((identity) => identity.id === activeIdentityId);
+    const promptUserName = activeIdentity?.name?.trim() || activeIdentityName;
+    const isAliasIdentity = activeIdentity?.kind === "alias";
+    const identityRootId = getRootIdentityId(activeIdentityId, settings.identities || []);
+    const primaryIdentity = isAliasIdentity
+      ? settings.identities?.find((identity) => identity.kind === "primary" && getRootIdentityId(identity.id, settings.identities || []) === identityRootId)
+      : undefined;
+    const primaryIdentityName = primaryIdentity?.name?.trim() || "主号联系人";
+    const primaryRelation = isAliasIdentity
+      ? relationships.find((relation) =>
+        relation.userIdentityId === primaryIdentity?.id
+          && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
+      )
+      : undefined;
+    const currentIdentityRelationship = [turnRelationship, activeRelationship].find((relation) =>
+      relation
+      && relation.userIdentityId === activeIdentityId
+      && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
+    );
+    const identityRecognitionState = currentIdentityRelationship?.identityRecognitionState;
+    const aliasIdentityBoundaryPrompt = isAliasIdentity
+      ? buildAliasIdentityBoundaryPrompt({
+        primaryName: primaryIdentityName,
+        hasPrimaryRelationship: Boolean(primaryRelation),
+        recognitionState: identityRecognitionState,
+        aliasName: activeIdentity?.name,
+      })
+      : "";
+    const aliasIdentityFinalGuardPrompt = isAliasIdentity
+      ? buildAliasIdentityFinalGuardPrompt({
+        primaryName: primaryIdentityName,
+        hasPrimaryRelationship: Boolean(primaryRelation),
+        recognitionState: identityRecognitionState,
+        aliasName: activeIdentity?.name,
+      })
+      : "";
     const pendingProactiveOfflineAppointment = turnRelationship && userMsg?.sender === "user"
       ? appointments.find((appointment) => appointment.relationId === turnRelationship.id
         && appointment.characterId === turnRelationship.characterId
@@ -1857,7 +1921,7 @@ export default function AppChat({
         historyCharacterLimit: 16_000,
         historicalReferenceCharacterLimit: 6_000,
         characterName: activeCharacter.name,
-        userName: settings.name,
+        userName: promptUserName,
       });
       const { finalMessages: finalMsgs, messagesForHistory: msgsForHistory, recentMessages: slicedMsgs, history, crossDayHistoricalReference, timeLogString, isCrossDayNewSession } = historyContext;
       const historyPartition = { hasCrossDayHistory: historyContext.hasCrossDayHistory };
@@ -1883,7 +1947,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const characterProjection = projectCharacterPrompt(activeCharacter, activeRelationship?.relationship);
       let characterDescriptionText = characterProjection.description.content;
       let characterContextText = "";
-      const isAliasIdentity = settings.identities?.some((identity) => identity.id === activeIdentityId && identity.kind === "alias") ?? false;
 
       if (!isAliasIdentity && activeCharacter.initialChatMode === "context" && activeCharacter.initialChatContext?.trim() && msgsForHistory.length === 0) {
         characterDescriptionText += `\n\n[First chat setup — hidden guidance only]\n${activeCharacter.initialChatContext.trim()}\nUse this scene and relationship as the starting point for your first reply. Do not quote, mention, or render this setup as a system message or chat bubble.`;
@@ -1905,7 +1968,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         const latestProxyMessages = characterPhoneProxyMessages.slice(-3).map((message) =>
           `- “${serializeMessageContentForPrompt(message, {
             mode: "history",
-            userName: settings.name,
+            userName: promptUserName,
             characterName: activeCharacter.name,
           })}”`,
         ).join("\n");
@@ -1920,7 +1983,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       if (crossDayHistoricalReference) characterContextText += `\n${crossDayHistoricalReference}`;
 
       const currentMessageContextText = userMsg
-        ? serializeMessageContentForPrompt(userMsg, { mode: "history", userName: settings.name, characterName: activeCharacter.name })
+        ? serializeMessageContentForPrompt(userMsg, { mode: "history", userName: promptUserName, characterName: activeCharacter.name })
         : "";
 
       const callTopicShiftDetected = detectCallTopicShift({
@@ -1946,7 +2009,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           alreadyPromptedMessageIds: [...slicedMsgs, ...(userMsg ? [userMsg] : [])].map((message) => message.id),
           alreadyPromptedTexts: [...slicedMsgs, ...(userMsg ? [userMsg] : [])].map((message) => serializeMessageContentForPrompt(message, {
             mode: "history",
-            userName: settings.name,
+            userName: promptUserName,
             characterName: activeCharacter.name,
           })),
           claims: loadKnowledgeClaims().value,
@@ -1987,27 +2050,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         characterContextText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, userMsg?.timestamp);
       }
 
-      const activeIdentity = settings.identities?.find((identity) => identity.id === activeIdentityId);
-      const identityRootId = getRootIdentityId(activeIdentityId, settings.identities || []);
-      const primaryIdentity = activeIdentity?.kind === "alias"
-        ? settings.identities?.find((identity) => identity.kind === "primary" && getRootIdentityId(identity.id, settings.identities || []) === identityRootId)
-        : undefined;
-      const primaryIdentityName = primaryIdentity?.name?.trim() || "主号联系人";
-      const primaryRelation = activeIdentity?.kind === "alias"
-        ? relationships.find((relation) =>
-          relation.userIdentityId === primaryIdentity?.id
-            && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
-        )
-        : undefined;
-      const aliasIdentityBoundaryPrompt = activeIdentity?.kind === "alias"
-        ? buildAliasIdentityBoundaryPrompt({
-          primaryName: primaryIdentityName,
-          hasPrimaryRelationship: Boolean(primaryRelation),
-          recognitionState: activeRelationship?.identityRecognitionState,
-          aliasName: activeIdentity.name,
-        })
-        : "";
-      if (activeIdentity?.kind === "alias" && activeRelationship && userMsg?.sender === "user" && primaryIdentity && hasExplicitIdentityDisclosure(userMsg.content, primaryIdentity.name) && activeRelationship.identityRecognitionState !== "confirmed") {
+      if (isAliasIdentity && activeRelationship && userMsg?.sender === "user" && primaryIdentity && hasExplicitIdentityDisclosure(userMsg.content, primaryIdentity.name) && activeRelationship.identityRecognitionState !== "confirmed") {
         onSaveRelationships((previous) => previous.map((relationship) => relationship.id === activeRelationship.id
           ? { ...relationship, identityRecognitionState: "confirmed", identityRecognitionUpdatedAt: Date.now(), updatedAt: Date.now() }
           : relationship));
@@ -2015,10 +2058,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const userProfileText = activeIdentity?.kind === "alias"
         ? `User Profile (interacting with you):
 - This is a separate contact using an alias. Their real identity is unknown to you.
-- The alias profile is private setup guidance, not a fact the character already knows. Do not address them by their alias name or reveal/guess their identity unless they explicitly disclose it in the conversation.`
+- The alias profile is private setup guidance, not a fact the character already knows. The current display name is “${promptUserName}”, but do not reveal or guess their primary identity unless they explicitly disclose it in the conversation.`
         : `User Profile (interacting with you):
-- Nickname: ${settings.name}
-- Personality/Bio: ${settings.bio}`;
+- Nickname: ${promptUserName}
+- Personality/Bio: ${activeIdentity?.bio ?? activeIdentityBio}`;
       if (primaryRelation) {
         characterContextText += `\n[角色自身关于另一位联系人的既有记忆]\n这些是角色过去对主号联系人或相关事件的记忆，不是当前马甲的身份信息。主号联系人姓名是“${primaryIdentityName}”；当前说话者仍是独立联系人，不得因为职业、措辞或事件相似就把两段关系合并。只有当前联系人明确说明两者关系时，才允许建立身份关联。\n${primaryRelation.compressedMemory?.trim() ? `关系记忆：${primaryRelation.compressedMemory.trim()}` : "暂无相关既有记忆"}`;
       }
@@ -2077,7 +2120,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
         currentMessageContextText,
-        ...currentChatMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: settings.name, characterName: activeCharacter.name }))
+        ...currentChatMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
       const characterBehaviorPrompt = buildCharacterBehaviorPrompt({
@@ -2176,7 +2219,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       if (beforeHistoryWorldBook) assembledInstructions.push(beforeHistoryWorldBook);
 
       // 8. WeChat Moments Context memory
-      const momentsContext = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, settings.name);
+      const momentsContext = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, promptUserName);
       if (momentsContext && shouldLoadLongTermMemory) {
         assembledInstructions.push(momentsContext);
       }
@@ -2259,6 +2302,7 @@ ${aliasEvents.join("\n")}
         finalPersonaRules: wbBlocks.allTriggered
           .filter((entry) => entry.purpose === "persona_rule")
           .map((entry) => `【${entry.title}】\n${entry.content}`),
+        finalPriorityInstructions: aliasIdentityFinalGuardPrompt ? [aliasIdentityFinalGuardPrompt] : undefined,
         finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           activeCharacter,
           getVisibleWorldBookEntries(worldBookEntries || [], activeChatCharId || "", {
@@ -2276,7 +2320,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       const promptMessage = userMsg
         ? `${serializeMessageContentForPrompt(userMsg, {
           mode: "current",
-          userName: settings.name,
+          userName: promptUserName,
           characterName: activeCharacter.name,
         })}${immediateCharacterPhoneProxyMessage?.sentFromCharacterPhone
           ? `\n\n[本轮隐性归因提醒] 历史中的“角色手机代发消息”不是${activeCharacter.name}本人说的。用户当前只是在对这条消息作反应；回复第一句必须先自然地质疑或否认作者身份（例如“分手？我什么时候说过这句？”），再回应用户，不要先道歉、认领、说成玩笑或把代发内容归因于模型抽风。不要把代发内容改写成${activeCharacter.name}刚刚主动说过的话，也不要主动告诉用户是谁操作的。`
@@ -2311,6 +2355,15 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
         settings,
         signal,
         includeInnerVoice: true,
+        aliasIdentityGuard: isAliasIdentity
+          ? {
+            aliasName: promptUserName,
+            primaryName: primaryIdentityName,
+            hasPrimaryRelationship: Boolean(primaryRelation),
+            recognitionState: identityRecognitionState,
+            currentUserMessage: userMsg?.content,
+          }
+          : undefined,
       });
 
       if (signal?.aborted) return;
@@ -2437,7 +2490,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
             keepPeriods,
             context: replyContext,
             characterName: activeCharacter?.name,
-            userName: settings.name,
+            userName: activeIdentityName,
             allowEmoji: mayCharacterUseEmoji({
               latestUserMessage: userMsg?.content,
               recentCharacterMessages: currentChatMessages
@@ -2682,8 +2735,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       content: contentString,
       timestamp: Date.now(),
       authorIdentityId: capturedContext.userIdentityId,
-      authorNameSnapshot: capturedIdentity?.name || settings.name,
-      authorAvatarSnapshot: capturedIdentity?.avatar || settings.avatar,
+      authorNameSnapshot: capturedIdentity?.name || activeIdentityName,
+      authorAvatarSnapshot: capturedIdentity?.avatar || activeIdentityAvatar,
       redPacket: options.redPacket,
     });
     const normalizedUserMsg = { ...userMsg, content: normalizePaymentMarkup(userMsg.content) };
@@ -2857,8 +2910,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     isInputNarration,
     activeOfflineStoryId,
     runtimeContext: activeRuntimeContext,
-    activeIdentityName: settings.name,
-    activeIdentityAvatar: settings.avatar,
+    activeIdentityName,
+    activeIdentityAvatar,
     onReplyStopped: () => {
       setIsTyping(false);
       setImageGenerationActive(false);
@@ -3200,6 +3253,9 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
         instructionsPrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
+      const proactiveIdentity = settings.identities?.find((identity) => identity.id === relationship.userIdentityId);
+      const proactiveIdentityName = proactiveIdentity?.kind === "alias" ? "新联系人" : proactiveIdentity?.name || activeIdentityName;
+      const proactiveIdentityBio = proactiveIdentity?.kind === "alias" ? "" : proactiveIdentity?.bio || activeIdentityBio;
       const charMsgs = messagesRef.current.filter((message) => message.relationId === relationId);
       const proactiveOfflineEligibility = evaluateProactiveOfflineEligibility({
         enabled: relationship.enableProactiveOffline === true,
@@ -3223,7 +3279,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       }
       const recentConversation = analyzeRecentConversation(charMsgs, friend.id);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
-      const scanText = charMsgs.slice(-10).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: friend.name })).join("\n");
+      const scanText = charMsgs.slice(-10).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: proactiveIdentityName, characterName: friend.name })).join("\n");
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, scanText, {
         scenario: "chat",
         characterId: relationship.characterId,
@@ -3242,12 +3298,12 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
           userIdentityId: relationship.userIdentityId,
           conversationId: relationship.conversationId,
         },
-        queryText: recentConversation.recentMessages.slice(-2).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: friend.name })).join(" "),
+        queryText: recentConversation.recentMessages.slice(-2).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: proactiveIdentityName, characterName: friend.name })).join(" "),
         limit: resolveChatLongTermMemoryLimit(friend.retrievalHistoryLimit),
         alreadyPromptedMessageIds: recentConversation.recentMessages.map((message) => message.id),
         alreadyPromptedTexts: recentConversation.recentMessages.map((message) => serializeMessageContentForPrompt(message, {
           mode: "history",
-          userName: settings.name,
+          userName: proactiveIdentityName,
           characterName: friend.name,
         })),
         claims: loadKnowledgeClaims().value,
@@ -3270,7 +3326,6 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       const proactiveCharacterProjection = projectCharacterPrompt(friend, relationship.relationship);
 
       const taskPrompt = customTaskText || "It has been 3 hours since the last conversation. Start a message in the way this character would naturally initiate contact with this user. Do not impose concern, warmth, brevity, or a generic check-in.";
-      const proactiveIdentity = settings.identities?.find((identity) => identity.id === relationship.userIdentityId);
       const proactiveRootId = getRootIdentityId(relationship.userIdentityId, settings.identities || []);
       const proactivePrimaryIdentity = settings.identities?.find((identity) => identity.kind === "primary" && getRootIdentityId(identity.id, settings.identities || []) === proactiveRootId);
       if (proactiveIdentity?.kind === "primary") {
@@ -3311,8 +3366,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
         description: proactiveCharacterProjection.description.content,
         personality: proactiveCharacterProjection.personality.content,
         relationship: proactiveCharacterProjection.relationship?.content || "",
-        userName: proactiveIdentity?.kind === "alias" ? "新联系人" : settings.name,
-        userBio: proactiveIdentity?.kind === "alias" ? "" : settings.bio,
+        userName: proactiveIdentityName,
+        userBio: proactiveIdentityBio,
         worldBook: wbPrompt,
         timeContext,
         knowledgeBoundary,
@@ -3348,7 +3403,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
           message: "(你主动给用户发送了一条信息)",
           history: recentConversation.recentMessages.flatMap((message) => serializeMessageToPromptTurns(message, {
             mode: "history",
-            userName: settings.name,
+            userName: proactiveIdentityName,
             characterName: friend.name,
           }).map((turn) => ({ role: turn.role, text: turn.text }))),
           systemInstruction,
@@ -3922,7 +3977,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       ownerIdentityId: activeIdentityId,
       ...(newMo.characterId
         ? { targetCharacterId: newMo.characterId }
-        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: settings.name }),
+        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: activeIdentityName }),
       characters,
       relationships,
       existingMoments: moments,
@@ -4044,7 +4099,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       ownerIdentityId: activeIdentityId,
       ...(newMo.characterId
         ? { targetCharacterId: newMo.characterId }
-        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: settings.name }),
+        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: activeIdentityName }),
       characters,
       relationships,
       existingMoments: moments,
@@ -4108,7 +4163,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       ownerIdentityId: activeIdentityId,
       ...(replyTargetCharacterId
         ? { targetCharacterId: replyTargetCharacterId }
-        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: settings.name }),
+        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: activeIdentityName }),
       characters,
       relationships,
       existingMoments: moments,
@@ -4495,7 +4550,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     relationships: activeRelationships,
     characters,
     messages: messagesRef.current,
-    settingsName: settings.name,
+    settingsName: activeIdentityName,
     isOfflineStoryActiveFor,
     processedCatchups: new Set(Object.entries(processedCatchupsRef.current).filter(([, processed]) => processed).map(([id]) => id)),
     scheduleNextProactiveMessage,
@@ -4541,8 +4596,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       id: Date.now().toString(),
       ownerIdentityId: activeIdentityId,
       authorIdentityId: activeIdentityId,
-      authorName: settings.name,
-      authorAvatar: settings.avatar,
+      authorName: activeIdentityName,
+      authorAvatar: activeIdentityAvatar,
       content,
       timestamp: Date.now(),
       likes: [],
@@ -4588,8 +4643,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     const newComment: MomentComment = {
       id: Date.now().toString(),
       authorIdentityId: activeIdentityId,
-      authorName: settings.name,
-      authorAvatar: settings.avatar,
+      authorName: activeIdentityName,
+      authorAvatar: activeIdentityAvatar,
       content: finalContent,
       timestamp: Date.now(),
       ...(replyingTo ? { replyToCommentId: replyingTo.id } : {}),
@@ -4618,8 +4673,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       id: Date.now().toString(),
       ownerIdentityId: activeIdentityId,
       authorIdentityId: activeIdentityId,
-      authorName: settings.name,
-      authorAvatar: settings.avatar,
+      authorName: activeIdentityName,
+      authorAvatar: activeIdentityAvatar,
       content: sanitizeMomentPublishText(input.content),
       timestamp: Date.now(),
       likes: [],
@@ -4643,8 +4698,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     const newComment: MomentComment = {
       id: Date.now().toString(),
       authorIdentityId: activeIdentityId,
-      authorName: settings.name,
-      authorAvatar: settings.avatar,
+      authorName: activeIdentityName,
+      authorAvatar: activeIdentityAvatar,
       content,
       timestamp: Date.now(),
       ...(replyingTo ? { replyToCommentId: replyingTo.id } : {}),
@@ -4697,12 +4752,12 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     let count = 0;
     allMoments.forEach((mom) => {
       getMomentComments(mom).forEach((comm) => {
-        if (comm.authorName !== settings.name && comm.timestamp > lastViewedMomentsTime) {
+        if (comm.authorName !== activeIdentityName && comm.timestamp > lastViewedMomentsTime) {
           // Check if it's user's moment, or a reply targeting the user
-          const isUserMoment = mom.authorName === settings.name;
-          const isReplyToUser = comm.content.startsWith(`回复（${settings.name}）：`) || 
-                                comm.content.startsWith(`回复 ${settings.name}：`) ||
-                                comm.content.startsWith(`回复${settings.name}：`);
+          const isUserMoment = mom.authorName === activeIdentityName;
+          const isReplyToUser = comm.content.startsWith(`回复（${activeIdentityName}）：`) ||
+                                comm.content.startsWith(`回复 ${activeIdentityName}：`) ||
+                                comm.content.startsWith(`回复${activeIdentityName}：`);
           if (isUserMoment || isReplyToUser) {
             count++;
           }
@@ -5714,7 +5769,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                       {/* User */}
                       <div className="flex flex-col items-center space-y-1 text-center">
                         <RenderAvatar
-                          src={settings.avatar}
+                          src={activeIdentityAvatar}
                           alt="我"
                           name="我"
                           className="w-10 h-10 rounded-full border border-slate-100 object-cover shrink-0 flex items-center justify-center text-xs select-none font-bold"
@@ -6717,8 +6772,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
               const messageIdentity = isSelf && msg.authorIdentityId
                 ? settings.identities?.find((identity) => identity.id === msg.authorIdentityId)
                 : undefined;
-              const userNameSnapshot = msg.authorNameSnapshot || messageIdentity?.name || settings.name;
-              const userAvatarSnapshot = msg.authorAvatarSnapshot || messageIdentity?.avatar || settings.avatar;
+              const userNameSnapshot = msg.authorNameSnapshot || messageIdentity?.name || activeIdentityName;
+              const userAvatarSnapshot = msg.authorAvatarSnapshot || messageIdentity?.avatar || activeIdentityAvatar;
               const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? userAvatarSnapshot : activeCharacter.avatar);
               const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : (isSelf ? userNameSnapshot : activeCharacterDisplayName);
               // A direct AI turn can be split into several consecutive bubbles,
@@ -7801,7 +7856,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
             const packetClaims = redPacketClaims[getPaymentStatusKey(openRedPacketDetail.message)] || [];
             const claimedAmount = packetClaims.reduce((sum, claim) => sum + claim.amount, 0);
             const getClaimantName = (claimantId: string) => claimantId.startsWith("user:")
-              ? settings.name || "我"
+              ? activeIdentityName || "我"
               : (characters.find((character) => character.id === claimantId)?.remark
                 || characters.find((character) => character.id === claimantId)?.name
                 || claimantId);
@@ -8360,13 +8415,6 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
               }}
               header={<>
                 <ChatTopBar title={<>聊天 ({chatThreads.length})</>} leftAction={<button onClick={onClose} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => { setGroupNameInput(""); setSelectedGroupMemberIds([]); setShowCreateGroupModal(true); }} className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10" title="发起群聊"><Plus className="w-4 h-4" /></button>} />
-                <div className="flex gap-1 overflow-x-auto border-b border-[var(--divider)] bg-[var(--surface)] px-3 py-2">
-                  <button type="button" onClick={() => setChatIdentityFilter("all")} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-semibold ${chatIdentityFilter === "all" ? "bg-[var(--text-primary)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"}`}>全部身份</button>
-                  {workspaceIdentities.map((identity) => {
-                    const label = identity.kind === "alias" ? identity.name || "未命名马甲" : "主号";
-                    return <button key={identity.id} type="button" onClick={() => setChatIdentityFilter(identity.id)} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-semibold ${chatIdentityFilter === identity.id ? "bg-[var(--text-primary)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"}`}>{label}</button>;
-                  })}
-                </div>
               </>}
             />
           )}
@@ -8375,6 +8423,79 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
           {activeTab === "contacts" && (
             showAliasDirectory ? (
               <div className="min-h-full bg-[var(--surface)] text-[var(--text-primary)]">
+                {selectedAliasId ? (
+                  (() => {
+                    const alias = (settings.identities || []).find((identity) => identity.id === selectedAliasId && identity.kind === "alias" && !identity.archived);
+                    if (!alias) {
+                      return (
+                        <>
+                          <ChatTopBar
+                            title="修改马甲"
+                            leftAction={<button type="button" onClick={() => setSelectedAliasId(null)} className="app-nav-icon-button flex h-8 w-8 items-center justify-center" title="返回我的马甲"><ChevronLeft className="h-4 w-4 text-slate-700" /></button>}
+                            rightAction={<div className="h-8 w-8" />}
+                          />
+                          <div className="p-4 text-center text-xs text-[var(--text-tertiary)]">该马甲已不存在</div>
+                        </>
+                      );
+                    }
+                    const saveAliasEdits = () => {
+                      const name = aliasDraftName.trim();
+                      if (!name) {
+                        showToast("名称不能为空");
+                        return;
+                      }
+                      const avatar = aliasDraftAvatar || alias.avatar;
+                      const bio = aliasDraftBio.trim();
+                      onSaveSettings((previous) => ({
+                        ...previous,
+                        identities: (previous.identities || []).map((identity) => identity.id === alias.id
+                          ? { ...identity, name, avatar, bio }
+                          : identity),
+                      }));
+                      setSelectedAliasId(null);
+                      setAliasEditTargetId(null);
+                      showToast(`已保存马甲：${name}`);
+                    };
+                    const openAliasDelete = () => {
+                      setSelectedAliasId(null);
+                      setAliasEditTargetId(null);
+                      setAliasDeleteTarget(alias.id);
+                    };
+                    return (
+                      <>
+                        <ChatTopBar
+                          title="修改马甲"
+                          leftAction={<button type="button" onClick={() => { setSelectedAliasId(null); setAliasEditTargetId(null); }} className="app-nav-icon-button flex h-8 w-8 items-center justify-center" title="返回我的马甲"><ChevronLeft className="h-4 w-4 text-slate-700" /></button>}
+                          rightAction={(
+                            <button type="button" onClick={openAliasDelete} className="app-nav-icon-button flex h-8 w-8 items-center justify-center text-slate-700" aria-label="删除马甲" title="删除马甲">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        />
+                        <div className="space-y-3 bg-[var(--surface)] p-4 pb-24">
+                          <div className="space-y-4 text-left">
+                            <label className="flex cursor-pointer flex-col items-center gap-2">
+                              {aliasDraftAvatar ? (
+                                <img src={aliasDraftAvatar} alt={aliasDraftName || alias.name} className="h-16 w-16 rounded-xl border border-[var(--border)] object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-lg font-bold text-[var(--text-secondary)]">{aliasDraftName.slice(0, 1) || "头"}</div>
+                              )}
+                              <span className="text-xs font-medium text-[var(--text-secondary)]">点击更换头像</span>
+                              <input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setAliasDraftAvatar(await compressImage(file, 400, 400, 0.75)); }} />
+                            </label>
+                            <label className="block text-xs font-bold text-[var(--text-primary)]">名称<input value={aliasDraftName} maxLength={40} onChange={(event) => setAliasDraftName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" /></label>
+                            <label className="block text-xs font-bold text-[var(--text-primary)]">人设<textarea value={aliasDraftBio} onChange={(event) => setAliasDraftBio(event.target.value)} className="mt-1 h-36 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm leading-relaxed text-[var(--text-primary)] outline-none" placeholder="这个身份对外呈现的性格、背景和说话方式" /></label>
+                          </div>
+                          <button type="button" onClick={saveAliasEdits} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[var(--button-primary-bg)] px-4 text-sm font-semibold text-[var(--button-primary-text)] shadow-sm transition-colors hover:opacity-90" aria-label="保存马甲">
+                            <Check className="h-4 w-4" />
+                            保存修改
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()
+                ) : (
+                  <>
                 <ChatTopBar
                   title="我的马甲"
                   leftAction={<button onClick={() => setShowAliasDirectory(false)} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回通讯录"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>}
@@ -8390,9 +8511,6 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                     title="新建马甲"
                   ><Plus className="w-4 h-4 text-slate-700" /></button>}
                 />
-                <div className="border-b border-[var(--divider)] px-4 py-3 text-xs text-[var(--text-secondary)]">
-                  每个马甲拥有独立的联系人、聊天记录、关系和记忆。角色不会自动知道不同身份属于同一个人。
-                </div>
                 {showCreateAliasModal && (
                   <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
                     <form
@@ -8411,7 +8529,6 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                             identities: (previous.identities || []).map((identity) => identity.id === aliasEditTargetId
                               ? { ...identity, name, avatar, bio }
                               : identity),
-                            ...(previous.activeIdentityId === aliasEditTargetId ? { name, avatar, bio } : {}),
                           }));
                           setShowCreateAliasModal(false);
                           setAliasEditTargetId(null);
@@ -8451,64 +8568,74 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                     </form>
                   </div>
                 )}
-                <div className="divide-y divide-[var(--divider)]">
-                  {(settings.identities || []).filter((identity) => identity.kind === "alias" && identity.name.trim()).map((identity) => {
-                    const aliasRelations = relationships.filter((relation) => relation.userIdentityId === identity.id);
+                <div className="space-y-3 bg-[var(--surface)] p-4">
+                  {(settings.identities || []).filter((identity) =>
+                    identity.kind === "alias"
+                    && !identity.archived
+                    && identity.name.trim()
+                    && getRootIdentityId(identity.id, settings.identities || []) === activeIdentityRootId,
+                  ).map((identity) => {
                     const isActive = identity.id === activeIdentityId;
-                    const primaryIdentityName = settings.identities?.find((item) => item.id === "identity-1")?.name || "主号";
+                    const primaryIdentity = findPrimaryIdentityForIdentity(identity.id, settings.identities || []);
+                    const selectAlias = () => {
+                      if (isActive) {
+                        showToast(`当前已是：${identity.name}`);
+                        return;
+                      }
+                      if (onSwitchIdentity) onSwitchIdentity(identity.id);
+                      else onSaveSettings((previous) => ({
+                        ...previous,
+                        activeIdentityId: identity.id,
+                        ...(primaryIdentity ? {
+                          name: primaryIdentity.name,
+                          avatar: primaryIdentity.avatar,
+                          signature: primaryIdentity.signature,
+                          bio: primaryIdentity.bio,
+                        } : {}),
+                      }));
+                      showToast(`已选择马甲：${identity.name}`);
+                    };
+                    const editAlias = (event: React.MouseEvent<HTMLButtonElement>) => {
+                      event.stopPropagation();
+                      setAliasEditTargetId(identity.id);
+                      setAliasDraftName(identity.name);
+                      setAliasDraftBio(identity.bio || "");
+                      setAliasDraftAvatar(identity.avatar);
+                      setSelectedAliasId(identity.id);
+                    };
                     return (
-                      <div key={identity.id} onPointerDown={() => startAliasLongPress(identity.id)} onPointerUp={clearAliasLongPress} onPointerLeave={clearAliasLongPress} onContextMenu={(event) => { event.preventDefault(); setAliasDeleteTarget(identity.id); }} className="flex items-center gap-3 px-4 py-3">
-                        <button
-                          type="button"
-                          aria-label={`编辑马甲${identity.name}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setAliasEditTargetId(identity.id);
-                            setAliasDraftName(identity.name);
-                            setAliasDraftBio(identity.bio || "");
-                            setAliasDraftAvatar(identity.avatar);
-                            setShowCreateAliasModal(true);
-                          }}
-                          className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
-                        >
-                          <img src={identity.avatar} alt={identity.name} className="h-12 w-12 rounded-full object-cover border border-[var(--border)] bg-[var(--surface-muted)]" referrerPolicy="no-referrer" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const nextIdentityId = isActive ? "identity-1" : identity.id;
-                            const nextIdentity = isActive
-                              ? settings.identities?.find((item) => item.id === "identity-1")
-                              : identity;
-                            if (!nextIdentity) return;
-                            if (onSwitchIdentity) onSwitchIdentity(nextIdentityId);
-                            else onSaveSettings((previous) => ({ ...previous, activeIdentityId: nextIdentity.id, name: nextIdentity.name, avatar: nextIdentity.avatar, signature: nextIdentity.signature, bio: nextIdentity.bio }));
-                            showToast(isActive ? `已切换为：${primaryIdentityName}` : `已切换为：${identity.name}`);
-                          }}
-                          className="min-w-0 flex-1 text-left"
-                        >
-                          <p className="truncate text-sm font-bold">{identity.name}</p>
-                          <p className="mt-0.5 text-[10px] font-semibold text-[var(--text-secondary)]">{isActive ? `切换（${primaryIdentityName}）` : "切换马甲身份"}</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">已添加 {aliasRelations.length} 个角色</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isActive) {
-                              if (onSwitchIdentity) onSwitchIdentity(identity.id);
-                              else onSaveSettings((previous) => ({ ...previous, activeIdentityId: identity.id, name: identity.name, avatar: identity.avatar, signature: identity.signature, bio: identity.bio }));
-                            }
-                            setShowAliasDirectory(false);
-                            setIsShowingAddFriendDialog(true);
-                          }}
-                          className="shrink-0 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-muted)]"
-                        >
-                          添加角色
+                      <div
+                        key={identity.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`选择马甲${identity.name}`}
+                        onClick={selectAlias}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            selectAlias();
+                          }
+                        }}
+                        onPointerDown={() => startAliasLongPress(identity.id)}
+                        onPointerUp={clearAliasLongPress}
+                        onPointerLeave={clearAliasLongPress}
+                        onContextMenu={(event) => { event.preventDefault(); setAliasDeleteTarget(identity.id); }}
+                        className={`settings-panel-card flex min-h-[76px] items-center gap-3 border p-4 text-left transition-colors hover:bg-[var(--surface-muted)] ${isActive ? "border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/20" : "border-[var(--border)]"}`}
+                      >
+                        <img src={identity.avatar} alt={identity.name} className="h-12 w-12 shrink-0 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] object-cover" referrerPolicy="no-referrer" />
+                        <span className="min-w-0 flex-1 truncate text-base font-medium text-[var(--text-primary)]">{identity.name}</span>
+                        <button type="button" aria-label={`修改马甲${identity.name}`} onClick={editAlias} onKeyDown={(event) => event.stopPropagation()} className="app-nav-icon-button flex h-8 w-8 shrink-0 items-center justify-center text-[var(--text-tertiary)]" title="修改马甲">
+                          <ChevronRight className="h-5 w-5" />
                         </button>
                       </div>
                     );
                   })}
-                  {(settings.identities || []).filter((identity) => identity.kind === "alias" && identity.name.trim()).length === 0 && (
+                  {(settings.identities || []).filter((identity) =>
+                    identity.kind === "alias"
+                    && !identity.archived
+                    && identity.name.trim()
+                    && getRootIdentityId(identity.id, settings.identities || []) === activeIdentityRootId,
+                  ).length === 0 && (
                     <div className="px-4 py-16 text-center text-xs text-[var(--text-tertiary)]">还没有马甲，点击右上角 + 创建</div>
                   )}
                 </div>
@@ -8529,11 +8656,24 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                     }
                     onSaveRelationships(relationships.filter((relation) => relation.userIdentityId !== target.id));
                     if (activeIdentityId === target.id) {
-                      if (onSwitchIdentity) onSwitchIdentity("identity-1");
+                      const fallbackIdentity = findPrimaryIdentityForIdentity(target.id, settings.identities || [])
+                        || (settings.identities || []).find((identity) => identity.kind === "primary" && !identity.archived && identity.id !== target.id)
+                        || (settings.identities || []).find((identity) => !identity.archived && identity.id !== target.id);
+                      if (fallbackIdentity && onSwitchIdentity) onSwitchIdentity(fallbackIdentity.id);
                       onSaveSettings((previous) => {
                         const remainingIdentities = (previous.identities || []).filter((identity) => identity.id !== target.id);
-                        const primary = remainingIdentities.find((identity) => identity.id === "identity-1");
-                        return { ...previous, identities: remainingIdentities, activeIdentityId: "identity-1", name: primary?.name || previous.name, avatar: primary?.avatar || previous.avatar, signature: primary?.signature || previous.signature, bio: primary?.bio || previous.bio };
+                        const nextActiveIdentityId = previous.activeIdentityId === target.id
+                          ? (fallbackIdentity?.id || remainingIdentities.find((identity) => !identity.archived)?.id || DEFAULT_IDENTITY_ID)
+                          : previous.activeIdentityId;
+                        const primary = findPrimaryIdentityForIdentity(nextActiveIdentityId, remainingIdentities)
+                          || remainingIdentities.find((identity) => identity.id === nextActiveIdentityId)
+                          || remainingIdentities.find((identity) => !identity.archived);
+                        return {
+                          ...previous,
+                          identities: remainingIdentities,
+                          activeIdentityId: nextActiveIdentityId,
+                          ...(primary ? { name: primary.name, avatar: primary.avatar, signature: primary.signature, bio: primary.bio } : {}),
+                        };
                       });
                     } else {
                       onSaveSettings((previous) => ({ ...previous, identities: (previous.identities || []).filter((identity) => identity.id !== target.id) }));
@@ -8555,6 +8695,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                     </div>
                   );
                 })()}
+                  </>
+                )}
               </div>
             ) : (
                   <>
@@ -8562,14 +8704,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                   contacts={friendContacts}
                   onSelect={startChatWith}
                   header={<>
-                    <ChatTopBar title={<>通讯录 ({friendContacts.length})</>} leftAction={<button onClick={onClose} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => setIsShowingAddFriendDialog(true)} className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10" title="添加好友"><Plus className="w-4 h-4 text-slate-700" /></button>} />
-                    <div className="flex gap-1 overflow-x-auto border-b border-[var(--divider)] bg-[var(--surface)] px-3 py-2">
-                      <button type="button" onClick={() => setChatIdentityFilter("all")} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-semibold ${chatIdentityFilter === "all" ? "bg-[var(--text-primary)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"}`}>全部身份</button>
-                      {workspaceIdentities.map((identity) => {
-                        const label = identity.kind === "alias" ? identity.name || "未命名马甲" : "主号";
-                        return <button key={identity.id} type="button" onClick={() => setChatIdentityFilter(identity.id)} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-semibold ${chatIdentityFilter === identity.id ? "bg-[var(--text-primary)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"}`}>{label}</button>;
-                      })}
-                    </div>
+                    <ChatTopBar title={<>通讯录 ({friendContacts.length})</>} leftAction={<button onClick={onClose} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => setShowContactAddMenu(true)} className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10" title="添加联系人" aria-label="添加联系人"><Plus className="w-4 h-4 text-slate-700" /></button>} />
                     <button type="button" onClick={() => setShowAliasDirectory(true)} className="flex w-full items-center gap-3 border-b border-[var(--divider)] bg-[var(--surface)] px-4 py-3 text-left hover:bg-[var(--surface-muted)]">
                       <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-lg">◎</div>
                       <div className="min-w-0 flex-1"><p className="text-sm font-bold">我的马甲</p><p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">管理多个身份，分别与角色聊天</p></div>
@@ -8641,27 +8776,65 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                   {/* Settings Main Entrance Menu */}
                   <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
                     {/* User Profile Card */}
-                    <div 
-                      onClick={() => setIsEditingProfile(true)}
-                      className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm flex flex-col gap-4 relative overflow-hidden cursor-pointer hover:bg-slate-50/40 transition-colors text-left"
+                    <div
+                      onClick={() => setMeActiveSubView("identities")}
+                      className="bg-white rounded-[24px] p-5 border border-slate-100 shadow-sm flex flex-col relative overflow-hidden cursor-pointer hover:bg-slate-50/40 transition-colors text-left"
+                      role="button"
+                      tabIndex={0}
+                      aria-label="打开我的人设"
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setMeActiveSubView("identities");
+                        }
+                      }}
                     >
                       {/* Background decorative soft blur gradients */}
                       <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50/40 rounded-full blur-2xl pointer-events-none" />
                       <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-purple-50/30 rounded-full blur-2xl pointer-events-none" />
                       
-                      <div className="flex items-start justify-between relative z-10">
+                      <div className="flex items-center justify-between relative z-10">
                         <div className="flex gap-4">
-                          <div className="relative">
+                          <label
+                            className="relative block h-16 w-16 shrink-0 cursor-pointer rounded-full focus-within:ring-2 focus-within:ring-slate-300"
+                            title="点击更换头像"
+                            onClick={(event) => event.stopPropagation()}
+                          >
                             <img
                               src={settings.avatar}
                               alt={settings.name}
-                              className="w-16 h-16 rounded-full border border-slate-200/80 object-cover shadow-sm bg-slate-50"
+                              className="h-16 w-16 rounded-full border border-slate-200/80 object-cover shadow-sm bg-slate-50"
                               referrerPolicy="no-referrer"
                             />
-                            <div className="absolute -bottom-1 -right-1 bg-neutral-950 text-white rounded-full p-1 border border-white shadow-sm">
-                              <Sliders className="w-3 h-3 text-white" />
-                            </div>
-                          </div>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="sr-only"
+                              aria-label="更换头像"
+                              onChange={async (event) => {
+                                const file = event.target.files?.[0];
+                                if (!file) return;
+                                try {
+                                  const avatar = await compressImage(file, 400, 400, 0.75);
+                                  onSaveSettings((previous) => {
+                                    const profileIdentity = findPrimaryIdentityForIdentity(previous.activeIdentityId || DEFAULT_IDENTITY_ID, previous.identities || [])
+                                      || previous.identities?.find((identity) => identity.id === (previous.activeIdentityId || DEFAULT_IDENTITY_ID));
+                                    return {
+                                      ...previous,
+                                      avatar,
+                                      identities: (previous.identities || []).map((identity) => identity.id === profileIdentity?.id ? { ...identity, avatar } : identity),
+                                    };
+                                  });
+                                  showToast("头像已更新");
+                                } catch (error) {
+                                  console.error("Profile avatar compression failed:", error);
+                                  showToast("头像上传失败，请重试");
+                                } finally {
+                                  event.target.value = "";
+                                }
+                              }}
+                            />
+                          </label>
 
                           <div className="flex flex-col justify-center min-h-[64px]">
                             <span className="text-base font-extrabold text-slate-800 tracking-tight">{settings.name}</span>
@@ -8669,22 +8842,16 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                         </div>
 
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setIsEditingProfile(true);
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setMeActiveSubView("identities");
                           }}
-                          className="text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors px-3 py-1.5 rounded-[8px]"
+                          className="app-nav-icon-button flex h-8 w-8 items-center justify-center text-slate-400 transition-colors"
+                          aria-label="打开我的人设"
                         >
-                          编辑资料
+                          <ChevronRight className="h-5 w-5" />
                         </button>
-                      </div>
-
-                      {/* Signature */}
-                      <div className="space-y-1.5 pt-2 border-t border-slate-100/60 relative z-10 text-left">
-                        <div className="text-xs text-slate-700 flex items-start gap-1">
-                          <span className="text-slate-400 font-medium shrink-0">签名:</span>
-                          <span className="italic text-slate-600 font-medium line-clamp-1">{settings.signature || "暂无签名"}</span>
-                        </div>
                       </div>
                     </div>
 
@@ -8758,6 +8925,226 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                   </div>
                 </>
               ) : meActiveSubView === "identities" ? (
+                <div className="min-h-full bg-[var(--surface)] text-[var(--text-primary)]">
+                  <ChatTopBar
+                    title="我的人设"
+                    leftAction={<button type="button" onClick={() => setMeActiveSubView("none")} className="app-nav-icon-button flex h-8 w-8 items-center justify-center" title="返回我"><ChevronLeft className="h-4 w-4 text-slate-700" /></button>}
+                    rightAction={<button type="button" onClick={() => { setIdentityDraftName(""); setIdentityDraftBio(""); setIdentityDraftAvatar(settings.avatar); setShowCreateIdentityModal(true); }} className="app-nav-icon-button flex h-8 w-8 items-center justify-center text-slate-700" title="新增人设面具" aria-label="新增人设面具"><Plus className="h-4 w-4 text-slate-700" /></button>}
+                  />
+
+                  <div className="space-y-3 bg-[var(--surface)] p-4">
+                    {sortIdentitiesForDisplay(settings.identities || []).filter((identity) => identity.kind === "primary" && !identity.archived && identity.name.trim()).map((identity) => {
+                      const isActiveIdentity = identity.id === activeIdentityId;
+                      const isActiveRoot = activeIdentityRootId === identity.id;
+                      const selectIdentity = () => {
+                        if (isActiveIdentity) {
+                          showToast(`当前已是：${identity.name}`);
+                          return;
+                        }
+                        onSwitchIdentity
+                          ? onSwitchIdentity(identity.id)
+                          : onSaveSettings((previous) => ({
+                            ...previous,
+                            activeIdentityId: identity.id,
+                            name: identity.name,
+                            avatar: identity.avatar,
+                            signature: identity.signature,
+                            bio: identity.bio,
+                          }));
+                        showToast(`已选择人设：${identity.name}`);
+                      };
+                      const openIdentityEditor = (event: React.MouseEvent<HTMLButtonElement>) => {
+                        event.stopPropagation();
+                        setSelectedIdentityId(identity.id);
+                        setEditMyName(identity.name);
+                        setEditMyAvatar(identity.avatar);
+                        setEditMyBio(identity.bio || "");
+                        setMeActiveSubView("identity-detail");
+                      };
+                      return (
+                        <div
+                          key={identity.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`选择人设${identity.name}`}
+                          onClick={selectIdentity}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              selectIdentity();
+                            }
+                          }}
+                          className={`settings-panel-card flex min-h-[76px] w-full items-center gap-4 border bg-[var(--surface)] p-4 text-left transition-colors hover:bg-[var(--surface-muted)] ${isActiveRoot ? "border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/20" : "border-[var(--border)]"}`}
+                        >
+                          {identity.avatar ? (
+                            <img src={identity.avatar} alt={identity.name} className="h-12 w-12 shrink-0 rounded-xl border border-[var(--border)] object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-sm font-bold text-[var(--text-secondary)]">{identity.name.slice(0, 1) || "头"}</div>
+                          )}
+                          <span className="min-w-0 flex-1 truncate text-base font-medium text-[var(--text-primary)]">{identity.name}</span>
+                          <button
+                            type="button"
+                            aria-label={`修改人设${identity.name}`}
+                            title="修改人设"
+                            onClick={openIdentityEditor}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            className="app-nav-icon-button flex h-8 w-8 shrink-0 items-center justify-center text-[var(--text-tertiary)]"
+                          >
+                            <ChevronRight className="h-5 w-5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+
+                    {sortIdentitiesForDisplay(settings.identities || []).filter((identity) => identity.kind === "primary" && !identity.archived && identity.name.trim()).length === 0 && (
+                      <div className="settings-panel-card px-4 py-12 text-center text-xs text-[var(--text-tertiary)]">还没有创建人设</div>
+                    )}
+
+                  </div>
+
+                  {showCreateIdentityModal && (
+                    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
+                      <form
+                        className="w-full max-w-[320px] rounded-2xl bg-[var(--surface)] p-4 shadow-xl"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          const name = identityDraftName.trim();
+                          if (!name) return;
+                          const id = createId("identity");
+                          const avatar = identityDraftAvatar || settings.avatar;
+                          const bio = identityDraftBio.trim();
+                          onSaveSettings((previous) => {
+                            const identities = previous.identities || [];
+                            const maxSortOrder = identities.reduce((max, identity) => Math.max(max, identity.sortOrder ?? -1), -1);
+                            return {
+                              ...previous,
+                              identities: [...identities, {
+                                id,
+                                name,
+                                avatar,
+                                signature: "",
+                                bio,
+                                kind: "primary" as const,
+                                rootIdentityId: id,
+                                sortOrder: maxSortOrder + 1,
+                              }],
+                              identityDataVersion: Math.max(2, previous.identityDataVersion || 0),
+                            };
+                          });
+                          setShowCreateIdentityModal(false);
+                          showToast(`已创建人设：${name}`);
+                        }}
+                      >
+                        <h3 className="text-sm font-bold text-[var(--text-primary)]">新增人设面具</h3>
+                        <div className="mt-3 flex flex-col items-center gap-2">
+                          {identityDraftAvatar ? (
+                            <img src={identityDraftAvatar} alt="" className="h-16 w-16 rounded-xl border border-[var(--border)] object-cover" />
+                          ) : (
+                            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]">头像</div>
+                          )}
+                          <label className="cursor-pointer text-[10px] text-[var(--text-secondary)]">选择头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setIdentityDraftAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
+                        </div>
+                        <label className="mt-3 block text-xs text-[var(--text-secondary)]">名称<input required value={identityDraftName} onChange={(event) => setIdentityDraftName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" placeholder="例如：工作号" /></label>
+                        <label className="mt-3 block text-xs text-[var(--text-secondary)]">人设设定<textarea value={identityDraftBio} onChange={(event) => setIdentityDraftBio(event.target.value)} className="mt-1 h-20 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none" placeholder="这个身份的背景和说话方式" /></label>
+                        <div className="mt-4 flex gap-2"><button type="button" onClick={() => setShowCreateIdentityModal(false)} className="flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-xs">取消</button><button type="submit" className="flex-1 rounded-xl bg-[var(--button-primary-bg)] px-3 py-2 text-xs font-semibold text-[var(--button-primary-text)]">创建</button></div>
+                      </form>
+                    </div>
+                  )}
+                </div>
+              ) : meActiveSubView === "identity-detail" ? (
+                (() => {
+                  const identity = (settings.identities || []).find((item) => item.id === selectedIdentityId && !item.archived);
+                  if (!identity) {
+                    return (
+                      <div className="min-h-full bg-[var(--surface)] text-[var(--text-primary)]">
+                        <ChatTopBar title="人设设置" leftAction={<button type="button" onClick={() => setMeActiveSubView("identities")} className="app-nav-icon-button flex h-8 w-8 items-center justify-center" title="返回我的人设"><ChevronLeft className="h-4 w-4 text-slate-700" /></button>} rightAction={<div className="h-8 w-8" />} />
+                        <div className="p-4 text-center text-xs text-[var(--text-tertiary)]">该人设已不存在</div>
+                      </div>
+                    );
+                  }
+
+                  const persistIdentityEdits = () => {
+                    const name = editMyName.trim();
+                    if (!name) {
+                      showToast("名称不能为空");
+                      return false;
+                    }
+                    const avatar = editMyAvatar || identity.avatar;
+                    const bio = editMyBio.trim();
+                    onSaveSettings((previous) => ({
+                      ...previous,
+                      identities: (previous.identities || []).map((item) => item.id === identity.id ? { ...item, name, avatar, bio } : item),
+                      ...(findPrimaryIdentityForIdentity(previous.activeIdentityId || DEFAULT_IDENTITY_ID, previous.identities || [])?.id === identity.id
+                        ? { name, avatar, bio }
+                        : {}),
+                    }));
+                    return true;
+                  };
+
+                  const returnToIdentityList = () => {
+                    if (!persistIdentityEdits()) return;
+                    setMeActiveSubView("identities");
+                    setSelectedIdentityId(null);
+                  };
+
+                  const deleteIdentity = () => {
+                    const fallback = (settings.identities || []).find((item) => !item.archived && item.id !== identity.id);
+                    const isActive = activeIdentityId === identity.id;
+                    if (isActive && !fallback) {
+                      showToast("至少保留一个人设");
+                      return;
+                    }
+                    if (!window.confirm(`确定删除人设“${identity.name}”吗？删除后将从人设列表移除，历史聊天和关系记录会保留。`)) return;
+                    onSaveSettings((previous) => {
+                      const identities = (previous.identities || []).map((item) => item.id === identity.id ? { ...item, archived: true } : item);
+                      if (isActive && fallback) {
+                        return {
+                          ...previous,
+                          identities,
+                          activeIdentityId: fallback.id,
+                          name: fallback.name,
+                          avatar: fallback.avatar,
+                          signature: fallback.signature,
+                          bio: fallback.bio,
+                        };
+                      }
+                      return { ...previous, identities };
+                    });
+                    if (isActive && fallback) onSwitchIdentity?.(fallback.id);
+                    setSelectedIdentityId(null);
+                    setMeActiveSubView("identities");
+                    showToast(`已删除人设：${identity.name}（历史记录已保留）`);
+                  };
+
+                  return (
+                    <div className="min-h-full bg-[var(--surface)] text-[var(--text-primary)]">
+                      <ChatTopBar
+                        title="人设设置"
+                        leftAction={<button type="button" onClick={returnToIdentityList} className="app-nav-icon-button flex h-8 w-8 items-center justify-center" title="返回我的人设"><ChevronLeft className="h-4 w-4 text-slate-700" /></button>}
+                        rightAction={<button type="button" onClick={deleteIdentity} className="app-nav-icon-button flex h-8 w-8 items-center justify-center text-slate-700" aria-label="删除人设" title="删除人设"><Trash2 className="h-4 w-4" /></button>}
+                      />
+                      <div className="space-y-3 bg-[var(--surface)] p-4 pb-24">
+                        <div className="space-y-4 text-left">
+                          <div className="flex flex-col items-center gap-2">
+                            {editMyAvatar ? (
+                              <img src={editMyAvatar} alt={editMyName} className="h-16 w-16 rounded-xl border border-[var(--border)] object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-lg font-bold text-[var(--text-secondary)]">{editMyName.slice(0, 1) || "头"}</div>
+                            )}
+                            <label className="cursor-pointer text-xs font-medium text-[var(--text-secondary)]">更换头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setEditMyAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
+                          </div>
+                          <label className="block text-xs font-bold text-[var(--text-primary)]">名称<input value={editMyName} maxLength={40} onChange={(event) => setEditMyName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" /></label>
+                          <label className="block text-xs font-bold text-[var(--text-primary)]">人设设定<textarea value={editMyBio} onChange={(event) => setEditMyBio(event.target.value)} className="mt-1 h-36 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm leading-relaxed text-[var(--text-primary)] outline-none" placeholder="填写这个人设的背景、性格和说话方式" /></label>
+                        </div>
+                        <button type="button" onClick={() => { if (!persistIdentityEdits()) return; setMeActiveSubView("identities"); setSelectedIdentityId(null); showToast(`已保存人设：${editMyName.trim()}`); }} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[var(--button-primary-bg)] px-4 text-sm font-semibold text-[var(--button-primary-text)] shadow-sm transition-colors hover:opacity-90" aria-label="保存人设">
+                          <Check className="h-4 w-4" />
+                          保存修改
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : meActiveSubView === "identities-legacy" ? (
                 // SUB-VIEW: ROLE PRESETS (角色预设)
                 <div className="animate-fade-in">
                   <div className="px-4 py-1.5 bg-white sticky top-0 z-10 flex items-center justify-between border-b border-slate-100">
@@ -8839,16 +9226,16 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                   {/* Active identity details */}
                   <div className="m-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3 text-left">
                     <div className="flex items-center gap-3">
-                      <img src={settings.avatar} alt="" className="w-10 h-10 rounded-xl object-cover border" />
+                      <img src={activeIdentityAvatar} alt="" className="w-10 h-10 rounded-xl object-cover border" />
                       <div>
-                        <h4 className="text-xs font-bold text-slate-800">当前活跃身份：{settings.name}</h4>
-                        <p className="text-[10px] text-slate-400 italic mt-0.5">{settings.signature || "暂无签名"}</p>
+                        <h4 className="text-xs font-bold text-slate-800">当前活跃身份：{activeIdentityName}</h4>
+                        <p className="text-[10px] text-slate-400 italic mt-0.5">{activeIdentitySignature || "暂无签名"}</p>
                       </div>
                     </div>
                     <div className="border-t border-slate-100 pt-3">
                       <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">活跃背景设定</span>
                       <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                        {settings.bio || "暂无设定背景，系统将采用默认极简人设。您可以点击下方编辑按钮来丰富它。"}
+                        {activeIdentityBio || "暂无设定背景，系统将采用默认极简人设。您可以点击下方编辑按钮来丰富它。"}
                       </p>
                     </div>
 
@@ -9251,7 +9638,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                                 className="p-3 bg-white border border-slate-100 rounded-xl relative group flex gap-2.5 items-start text-left shadow-sm"
                               >
                                 <img
-                                  src={bm.sender === "user" ? settings.avatar : (owner?.avatar || "")}
+                                  src={bm.sender === "user" ? activeIdentityAvatar : (owner?.avatar || "")}
                                   alt=""
                                   className="w-7 h-7 rounded-full object-cover shrink-0"
                                 />
@@ -9451,7 +9838,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                 allMoments
                   .filter(m => m.characterId === singleCharacterMomentsId)
                   .map((mom) => {
-                    const hasLiked = mom.likes.includes(settings.name);
+                    const hasLiked = mom.likes.includes(activeIdentityName);
                     const momChar = mom.characterId
                       ? characters.find((c) => c.id === resolveCanonicalCharacterId(mom.characterId!, characters))
                       : null;
@@ -9556,7 +9943,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                             {/* Like / Comment small buttons */}
                             <div className="flex items-center gap-4">
                               <button
-                                onClick={() => onLikeMoment(mom.id, settings.name)}
+                                onClick={() => onLikeMoment(mom.id, activeIdentityName)}
                                 className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${
                                   hasLiked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"
                                 }`}
@@ -9859,6 +10246,44 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
         </div>
       )}
 
+      {/* Contact add-mode menu */}
+      {showContactAddMenu && (
+        <div className="absolute inset-0 z-40" onClick={() => setShowContactAddMenu(false)}>
+          <div className="absolute right-3 top-12 w-44 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => {
+                const primaryIdentity = workspaceIdentities.find((identity) => identity.kind === "primary" && !identity.archived);
+                if (primaryIdentity && primaryIdentity.id !== activeIdentityId) {
+                  if (onSwitchIdentity) onSwitchIdentity(primaryIdentity.id);
+                  else onSaveSettings((previous) => ({ ...previous, activeIdentityId: primaryIdentity.id, name: primaryIdentity.name, avatar: primaryIdentity.avatar, signature: primaryIdentity.signature, bio: primaryIdentity.bio }));
+                }
+                setShowContactAddMenu(false);
+                setIsShowingAddFriendDialog(true);
+              }}
+              className="flex w-full items-center rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-[var(--text-primary)] hover:bg-[var(--surface-muted)]"
+            >
+              添加好友
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const activeIdentity = workspaceIdentities.find((identity) => identity.id === activeIdentityId);
+                setShowContactAddMenu(false);
+                if (!activeIdentity || activeIdentity.kind !== "alias") {
+                  showToast("请先在“我的马甲”中选择要使用的马甲");
+                  return;
+                }
+                setIsShowingAddFriendDialog(true);
+              }}
+              className="flex w-full items-center rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-[var(--text-primary)] hover:bg-[var(--surface-muted)]"
+            >
+              马甲添加
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Add Friend Confirmation Overlay */}
       {isShowingAddFriendDialog && (() => {
         const addedSourceIds = new Set(friends.map((friend) => friend.profileSourceId || friend.id));
@@ -9890,7 +10315,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
               {/* Modal Body */}
               <div className={`${unaddedCharacters.length === 0 ? "" : "flex-1 overflow-y-auto"} py-3 space-y-3 pr-1`}>
                 <div className="rounded-xl bg-[var(--surface-raised)] border border-[var(--border)] px-3 py-2 text-[10px] text-[var(--text-secondary)] font-semibold">
-                  正在以「{settings.name}」的身份添加好友；好友、群聊和朋友圈将只属于这个身份。
+                  正在以「{activeIdentityName}」的身份添加好友；好友、群聊和朋友圈将只属于这个身份。
                 </div>
                 {unaddedCharacters.length === 0 ? (
                   <div className="text-center py-4 px-2 space-y-3">
@@ -10109,7 +10534,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                     name: finalGroupName,
                     avatar: "👥",
                     personality: `微信群聊：${finalGroupName}。`,
-                    backstory: `这是一个微信群聊，群名是「${finalGroupName}」。群内成员包括机主（${settings.name}）以及以下虚拟伙伴：${selectedGroupMemberIds.map(id => {
+                    backstory: `这是一个微信群聊，群名是「${finalGroupName}」。群内成员包括机主（${activeIdentityName}）以及以下虚拟伙伴：${selectedGroupMemberIds.map(id => {
                       const c = characters.find(char => char.id === id);
                       return c ? (c.remark || c.name) : "";
                     }).filter(Boolean).join("、")}。`,

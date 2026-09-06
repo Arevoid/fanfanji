@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { UserSettings, StylePreset, type ChatIconKey, type ChatIconOverrides, type OfflineStory, type UserSettingsUpdate } from "../types";
 import {
   ChevronLeft,
@@ -22,10 +23,10 @@ import {
   Moon,
   Sun,
   Type as TypeIcon,
-  Link
+  Link,
 } from "lucide-react";
 
-import { isTransparencyPreservedImage } from "../utils/pngParser";
+import { compressImagePreservingTransparency, isTransparencyPreservedImage } from "../utils/pngParser";
 import { useTheme } from "../features/theme/ThemeProvider";
 import { type ThemeMode } from "../features/theme/theme";
 import { hasUserDesktopWallpaper } from "../features/theme/desktopBackground";
@@ -81,6 +82,13 @@ import { useSettingsCssTemplateCopy } from "../features/settings/hooks/useSettin
 import { getSettingsPreviewBubbleBackground, getSettingsPreviewBubbleStyle } from "../features/settings/settingsPreviewStyle";
 import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
 import { sortIdentitiesForDisplay } from "../domain/relationship/characterRelationship";
+import {
+  WELCOME_WIDGET_ID,
+  ensureWelcomeWidgetProfile,
+  loadWelcomeWidgetProfile,
+  saveWelcomeWidgetProfile,
+  type WelcomeWidgetProfile,
+} from "../features/home/welcomeWidgetProfile";
 
 interface AppSettingsProps {
   settings: UserSettings;
@@ -312,6 +320,44 @@ export default function AppSettings({
 
   // Local Form state
   const { name, setName, avatar, setAvatar, signature, setSignature, bio, setBio } = useSettingsProfileDraftState(settings);
+  // This profile belongs only to the desktop welcome card. It is deliberately
+  // separate from the active persona draft above; editing it must never update
+  // an identity or any chat context.
+  const [welcomeWidgetProfile, setWelcomeWidgetProfile] = React.useState<WelcomeWidgetProfile>(() => loadWelcomeWidgetProfile(
+    WELCOME_WIDGET_ID,
+    { avatar: settings.avatar, name: settings.name, signature: settings.signature },
+  ));
+  const [welcomeWidgetDraft, setWelcomeWidgetDraft] = React.useState<WelcomeWidgetProfile>(welcomeWidgetProfile);
+  const [isWelcomeWidgetEditorOpen, setIsWelcomeWidgetEditorOpen] = React.useState(false);
+  const welcomeWidgetUploadRef = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    ensureWelcomeWidgetProfile(WELCOME_WIDGET_ID, welcomeWidgetProfile);
+  }, [welcomeWidgetProfile]);
+
+  const openWelcomeWidgetEditor = () => {
+    setWelcomeWidgetDraft(welcomeWidgetProfile);
+    setIsWelcomeWidgetEditorOpen(true);
+  };
+
+  const saveWelcomeWidgetSettings = () => {
+    const nextProfile = saveWelcomeWidgetProfile(WELCOME_WIDGET_ID, welcomeWidgetDraft);
+    setWelcomeWidgetProfile(nextProfile);
+    setIsWelcomeWidgetEditorOpen(false);
+  };
+
+  const handleWelcomeWidgetAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const nextAvatar = await compressImagePreservingTransparency(file, 512, 512, 0.82);
+      setWelcomeWidgetDraft((current) => ({ ...current, avatar: nextAvatar }));
+    } catch (error) {
+      console.warn("Failed to prepare welcome widget avatar:", error);
+    }
+  };
+
   const apiPresetState = useSettingsApiPresetState(settings);
   const voiceConfigState = useSettingsVoiceConfigState(settings);
   const styleDraftState = useSettingsStyleDraftState(settings);
@@ -565,50 +611,45 @@ export default function AppSettings({
       {/* Settings Navigation and Body Wrapper */}
       <div className="flex-1 flex overflow-hidden">
         {activeTab === null ? (
-          /* Settings Main Entrance Menu (QQ Style) */
+          /* Settings Main Entrance Menu */
           <div className="flex-1 overflow-y-auto p-4 pb-[34px] space-y-3 bg-[#F7F7F9]">
-            {/* QQ Style User Profile Card */}
-            <div className="bg-white rounded-[16px] p-4 border border-[#F0F0F0] shadow-[0_2px_12px_rgba(0,0,0,0.06)] flex flex-col gap-3 relative overflow-hidden">
+            {/* Desktop-only welcome profile. This is intentionally not the active persona. */}
+            <div className="bg-white rounded-[16px] p-4 border border-[#F0F0F0] shadow-[0_2px_12px_rgba(0,0,0,0.06)] flex flex-col gap-3 relative overflow-hidden" data-welcome-widget-profile-card>
               <div className="flex items-start justify-between relative z-10">
-                <div className="flex gap-4">
-                  {/* Avatar with modify overlay */}
-                  <div className="relative group">
-                    <img
-                      src={avatar}
-                      alt={name}
-                      className="w-12 h-12 rounded-full border border-slate-200/80 object-cover shadow-sm bg-slate-50"
-                      referrerPolicy="no-referrer"
-                    />
-                    <label className="absolute -bottom-1 -right-1 bg-neutral-950 text-white rounded-full p-1 border-2 border-white cursor-pointer shadow-sm hover:bg-neutral-900 transition-colors">
-                      <Sliders className="w-3 h-3" />
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleAvatarUpload}
-                        className="hidden"
+                <div className="flex gap-4 min-w-0">
+                  <div className="shrink-0">
+                    {welcomeWidgetProfile.avatar ? (
+                      <img
+                        src={welcomeWidgetProfile.avatar}
+                        alt={welcomeWidgetProfile.name}
+                        className="w-12 h-12 rounded-full border border-slate-200/80 object-cover shadow-sm bg-slate-50"
+                        referrerPolicy="no-referrer"
                       />
-                    </label>
+                    ) : (
+                      <div className="w-12 h-12 rounded-full border border-slate-200/80 bg-slate-100 flex items-center justify-center text-sm font-bold text-slate-500 shadow-sm">
+                        {welcomeWidgetProfile.name.slice(0, 1) || "?"}
+                      </div>
+                    )}
                   </div>
-
-                  <div className="flex flex-col justify-center min-h-[48px]">
-                    <span className="text-base font-medium text-slate-800 tracking-tight">{name}</span>
+                  <div className="flex min-w-0 flex-col justify-center min-h-[48px]">
+                    <span className="text-base font-medium text-slate-800 tracking-tight truncate">{welcomeWidgetProfile.name}</span>
+                    <span className="mt-0.5 text-[10px] text-slate-400">桌面欢迎卡片资料</span>
                   </div>
                 </div>
 
-                {/* Edit button */}
                 <button
-                  onClick={() => setActiveTab("profile")}
-                  className="text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors px-3 py-1.5 rounded-[8px]"
+                  type="button"
+                  onClick={openWelcomeWidgetEditor}
+                  className="shrink-0 text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors px-3 py-1.5 rounded-[8px]"
                 >
-                  编辑资料
+                  编辑
                 </button>
               </div>
 
-              {/* Signature */}
               <div className="space-y-1.5 pt-2 border-t border-slate-100 relative z-10 text-left">
                 <div className="text-xs text-slate-700 flex items-start gap-1">
                   <span className="text-slate-400 font-medium shrink-0">签名:</span>
-                  <span className="italic text-slate-600 font-medium line-clamp-1">{signature || "暂无签名"}</span>
+                  <span className="italic text-slate-600 font-medium line-clamp-1">{welcomeWidgetProfile.signature || "暂无签名"}</span>
                 </div>
               </div>
             </div>
@@ -2890,6 +2931,113 @@ export default function AppSettings({
         </div>
       </div>
     )}
+      {isWelcomeWidgetEditorOpen && createPortal(
+        <div
+          className="theme-widget-sheet fixed inset-0 z-[100] flex items-end justify-center bg-[var(--overlay)] p-4"
+          onClick={() => setIsWelcomeWidgetEditorOpen(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-[28px] bg-[var(--surface)] text-[var(--text-primary)] shadow-[var(--shadow-modal)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--divider)] px-5 py-4">
+              <div>
+                <h3 className="text-sm font-black text-[var(--text-primary)]">欢迎小组件</h3>
+                <p className="mt-0.5 text-[11px] text-[var(--text-tertiary)]">与桌面置顶欢迎卡片同步，不影响任何人设</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsWelcomeWidgetEditorOpen(false)}
+                className="rounded-full p-1 text-lg font-bold text-[var(--text-tertiary)]"
+                aria-label="关闭"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto px-5 py-4">
+              <div className="flex items-center gap-3">
+                {welcomeWidgetDraft.avatar ? (
+                  <img
+                    src={welcomeWidgetDraft.avatar}
+                    alt={welcomeWidgetDraft.name}
+                    className="h-14 w-14 rounded-full border border-[var(--border)] object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--surface-muted)] text-base font-bold text-[var(--text-secondary)]">
+                    {welcomeWidgetDraft.name.slice(0, 1) || "?"}
+                  </div>
+                )}
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => welcomeWidgetUploadRef.current?.click()}
+                    className="w-full rounded-xl bg-[var(--surface-muted)] px-3 py-2 text-xs font-bold text-[var(--text-primary)]"
+                  >
+                    上传头像
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWelcomeWidgetDraft((current) => ({ ...current, avatar: "" }))}
+                    className="w-full rounded-xl border border-[var(--border)] px-3 py-2 text-xs font-bold text-[var(--text-secondary)]"
+                  >
+                    移除头像
+                  </button>
+                </div>
+                <input
+                  ref={welcomeWidgetUploadRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleWelcomeWidgetAvatarUpload}
+                />
+              </div>
+
+              <label className="block text-xs font-bold text-[var(--text-primary)]">
+                名称
+                <input
+                  value={welcomeWidgetDraft.name}
+                  maxLength={40}
+                  onChange={(event) => setWelcomeWidgetDraft((current) => ({ ...current, name: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] outline-none"
+                />
+              </label>
+
+              <label className="block text-xs font-bold text-[var(--text-primary)]">
+                个性签名
+                <input
+                  value={welcomeWidgetDraft.signature}
+                  maxLength={120}
+                  onChange={(event) => setWelcomeWidgetDraft((current) => ({ ...current, signature: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] outline-none"
+                />
+              </label>
+            </div>
+
+            <div className="flex gap-2 border-t border-[var(--divider)] p-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setWelcomeWidgetDraft(welcomeWidgetProfile);
+                  setIsWelcomeWidgetEditorOpen(false);
+                }}
+                className="flex-1 rounded-xl bg-[var(--surface-muted)] py-2.5 text-xs font-bold text-[var(--text-secondary)]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={saveWelcomeWidgetSettings}
+                className="flex-1 rounded-xl bg-[var(--accent)] py-2.5 text-xs font-bold text-[var(--accent-contrast)]"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
   </div>
 </div>
   );

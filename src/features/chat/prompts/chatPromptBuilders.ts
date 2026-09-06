@@ -11,6 +11,8 @@ export function finalizeCharacterChatSystemInstruction(input: {
   characterDescriptionText: string;
   diagnosticLabel: "direct chat prompt" | "regenerate prompt";
   finalPersonaRules?: readonly string[];
+  /** Rules that must be placed immediately before the final language contract. */
+  finalPriorityInstructions?: readonly string[];
   finalLanguageInstruction: string;
 }): string {
   const assembly = assembleChatInstructions(input.instructions, [
@@ -24,7 +26,11 @@ export function finalizeCharacterChatSystemInstruction(input: {
   const personaRuleReminder = input.finalPersonaRules?.length
     ? `\n\n[本轮常驻角色规则]\n${input.finalPersonaRules.join("\n\n").slice(0, 1800)}`
     : "";
-  return `${assembly.systemInstruction}\n\n${input.characterProjection.expressionAnchor.content}${personaRuleReminder}\n\n---\n\n${input.finalLanguageInstruction}`;
+  const finalPriorityInstructions = input.finalPriorityInstructions?.filter(Boolean).join("\n\n") || "";
+  const finalPriorityText = finalPriorityInstructions
+    ? `\n\n【本轮最终优先规则】\n${finalPriorityInstructions}`
+    : "";
+  return `${assembly.systemInstruction}\n\n${input.characterProjection.expressionAnchor.content}${personaRuleReminder}${finalPriorityText}\n\n---\n\n${input.finalLanguageInstruction}`;
 }
 
 export function buildGroupChatSystemInstruction(input: { userName: string; userBio?: string; groupName: string; worldContext: string; memberDefinitions: string }): string {

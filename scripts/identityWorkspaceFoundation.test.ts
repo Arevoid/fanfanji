@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { normalizeIdentitySettings } from "../src/core/storage/repositories/settingsRepository";
-import { getRootIdentityId, listIdentitiesForRoot, listIdentityRoots, listRelationshipsForIdentityWorkspace, normalizeRelationshipIdentityScopes, sortIdentitiesForDisplay, type CharacterRelationship } from "../src/domain/relationship/characterRelationship";
+import { findPrimaryIdentityForIdentity, getRootIdentityId, listIdentitiesForRoot, listIdentityRoots, listRelationshipsForIdentityWorkspace, normalizeRelationshipIdentityScopes, sortIdentitiesForDisplay, type CharacterRelationship } from "../src/domain/relationship/characterRelationship";
 import type { UserSettings } from "../src/types";
 
 const settings = {
@@ -31,6 +31,7 @@ assert.equal(normalized.settings.identities?.find((item) => item.id === "identit
 assert.equal(normalized.settings.identities?.find((item) => item.id === "identity-alias")?.rootIdentityId, "identity-primary");
 assert.equal(normalized.settings.identities?.find((item) => item.id === "identity-other")?.rootIdentityId, "identity-other");
 assert.equal(getRootIdentityId("identity-alias", normalized.settings.identities), "identity-primary");
+assert.equal(findPrimaryIdentityForIdentity("identity-alias", normalized.settings.identities)?.id, "identity-primary");
 assert.deepEqual(
   sortIdentitiesForDisplay(normalized.settings.identities || []).map((item) => item.id),
   ["identity-primary", "identity-alias", "identity-other"],
