@@ -28,8 +28,14 @@ function sameIdentity(a: UserSettings["identities"] extends (infer T)[] | undefi
     && a.avatar === b.avatar
     && a.signature === b.signature
     && a.bio === b.bio
-    && a.kind === b.kind;
+    && a.kind === b.kind
+    && a.rootIdentityId === b.rootIdentityId
+    && a.parentIdentityId === b.parentIdentityId
+    && a.archived === b.archived
+    && a.sortOrder === b.sortOrder;
 }
+
+const IDENTITY_DATA_VERSION = 1;
 
 /** Repairs legacy identity records without guessing or rewriting user profile text. */
 export function normalizeIdentitySettings(settings: UserSettings): { settings: UserSettings; changed: boolean } {
@@ -39,8 +45,8 @@ export function normalizeIdentitySettings(settings: UserSettings): { settings: U
   }
 
   const usedIds = new Set<string>();
-  let changed = false;
-  const normalizedIdentities = identities.map((identity, index) => {
+  let changed = (Number(settings.identityDataVersion) || 0) < IDENTITY_DATA_VERSION;
+  const idNormalizedIdentities = identities.map((identity, index) => {
     let id = typeof identity.id === "string" && identity.id.trim() ? identity.id : `identity-${index + 1}`;
     if (usedIds.has(id)) {
       let repairIndex = index + 1;
@@ -50,7 +56,47 @@ export function normalizeIdentitySettings(settings: UserSettings): { settings: U
       } while (usedIds.has(id));
     }
     usedIds.add(id);
-    const normalized = id === identity.id ? identity : { ...identity, id };
+    return id === identity.id ? identity : { ...identity, id };
+  });
+
+  const identityIds = new Set(idNormalizedIdentities.map((identity) => identity.id));
+  const rootById = new Map<string, string>();
+  const resolveRoot = (identityId: string, seen = new Set<string>()): string => {
+    const cached = rootById.get(identityId);
+    if (cached) return cached;
+    if (seen.has(identityId)) return identityId;
+    seen.add(identityId);
+    const identity = idNormalizedIdentities.find((item) => item.id === identityId);
+    if (!identity || identity.kind !== "alias") {
+      rootById.set(identityId, identityId);
+      return identityId;
+    }
+    const parentId = identity.parentIdentityId && identityIds.has(identity.parentIdentityId)
+      ? identity.parentIdentityId
+      : identityId;
+    const rootId = parentId === identityId ? identityId : resolveRoot(parentId, seen);
+    rootById.set(identityId, rootId);
+    return rootId;
+  };
+
+  const normalizedIdentities = idNormalizedIdentities.map((identity, index) => {
+    const kind = identity.kind || "primary";
+    // Legacy aliases without an explicit parent remain their own root. This is
+    // deliberately conservative: it preserves boundaries instead of guessing
+    // ownership from a shared name, avatar, or profile text.
+    const parentIdentityId = kind === "alias"
+      && identity.parentIdentityId
+      && identityIds.has(identity.parentIdentityId)
+      && identity.parentIdentityId !== identity.id
+      ? identity.parentIdentityId
+      : undefined;
+    const normalized: typeof identity = {
+      ...identity,
+      kind,
+      rootIdentityId: resolveRoot(identity.id),
+      ...(parentIdentityId ? { parentIdentityId } : { parentIdentityId: undefined }),
+      sortOrder: Number.isFinite(identity.sortOrder) ? identity.sortOrder : index,
+    };
     if (!sameIdentity(normalized, identity)) changed = true;
     return normalized;
   });
@@ -71,6 +117,7 @@ export function normalizeIdentitySettings(settings: UserSettings): { settings: U
     settings: {
       ...settings,
       identities: normalizedIdentities,
+      identityDataVersion: Math.max(IDENTITY_DATA_VERSION, Number(settings.identityDataVersion) || 0),
       activeIdentityId: activeIdentity.id,
       name: activeIdentity.name,
       avatar: activeIdentity.avatar,

@@ -61,7 +61,7 @@ import { imageAssetDb } from "./utils/imageAssetDb";
 import { createCharacterPhone, getCharacterPhone, removeCharacterPhonesByCharacterIds, saveCharacterPhone } from "./core/storage/repositories/characterPhoneRepository";
 import { normalizeCharacterPhoneProactiveMessages } from "./features/characterPhone/characterPhoneContent";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
-import { createRelationship, DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "./domain/relationship/characterRelationship";
+import { createRelationship, DEFAULT_IDENTITY_ID, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, normalizeRelationshipIdentityScopes, type CharacterRelationship } from "./domain/relationship/characterRelationship";
 import { resolveRelationshipNetworkNpcActor } from "./domain/relationshipNetwork/relationshipNetworkNpcActor";
 import type { RelationshipNetworkNpc } from "./domain/relationshipNetwork/relationshipNetworkTypes";
 import { findRelationshipNetworkChatLink, loadRelationshipNetworkChatLinks } from "./core/storage/repositories/relationshipNetworkChatLinkRepository";
@@ -506,6 +506,7 @@ const DEFAULT_SETTINGS: UserSettings = {
     }
   ],
   activeIdentityId: "identity-1",
+  identityDataVersion: 1,
   identities: [
     {
       id: "identity-1",
@@ -1396,8 +1397,9 @@ export default function App() {
       defaultIdentityId: DEFAULT_IDENTITY_ID,
       now: Date.now(),
     });
-    const relationshipsChanged = result.createdRelationshipCount || result.deduplicatedRelationshipCount;
-    if (relationshipsChanged) setRelationships(result.relationships);
+    const scopedRelationships = normalizeRelationshipIdentityScopes(result.relationships, settings.identities || []);
+    const relationshipsChanged = result.createdRelationshipCount || result.deduplicatedRelationshipCount || scopedRelationships.changed;
+    if (relationshipsChanged) setRelationships(scopedRelationships.relationships);
     if (result.migratedMessageCount || result.deduplicatedRelationshipCount) setMessages(result.messages);
     if (result.migratedMemoryCount || result.deduplicatedRelationshipCount) setMemories(result.memories);
     if (result.migratedStoryCount || result.deduplicatedRelationshipCount) replaceOfflineStories(result.offlineStories);
@@ -1409,7 +1411,7 @@ export default function App() {
       removeStoredValue(getOfflineStoryStorageKey(fromRelationId));
       removeStoredValue(getOfflineModeStorageKey(fromRelationId));
     });
-  }, [characters, relationships, messages, memories, offlineStories]);
+  }, [characters, relationships, messages, memories, offlineStories, settings.identities]);
 
   // Keep legacy contact copies readable, while canonicalizing dependent data so
   // every feature sees one archive character for the same identity.

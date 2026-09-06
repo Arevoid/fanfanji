@@ -281,7 +281,7 @@ assert.match(appSource, /placeItemWithDisplacement/);
 assert.match(appSource, /distance > 24/);
 assert.match(appSource, /DEFAULT_HOME_SCREEN_ITEMS/);
 assert.match(appSource, /id: HOME_WELCOME_WIDGET_ID, type: "widget", widgetType: "welcome", size: "1x4"/);
-assert.match(appSource, /style=\{\{ opacity: homeWidgetOpacity \}\}/);
+assert.match(appSource, /widgetOpacity=\{settings\.widgetOpacity\}/, "widget opacity must be scoped inside each widget surface");
 assert.match(appSource, /id:\s*"album_widget_1"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*1,\s*column:\s*0\s*\}/);
 assert.match(appSource, /id:\s*"music_widget_1"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*3,\s*column:\s*2\s*\}/);
 assert.match(appSource, /id:\s*"notes"[\s\S]*position:\s*\{\s*page:\s*0,\s*row:\s*5,\s*column:\s*0\s*\}/);

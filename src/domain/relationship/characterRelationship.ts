@@ -1,4 +1,4 @@
-import type { Character } from "../../types";
+import type { Character, UserIdentity } from "../../types";
 import { resolveCanonicalCharacterId } from "../character/characterIdentity";
 
 export type CharacterRelationshipState = "unknown" | "friend" | "close_friend" | "ambiguous" | "partner";
@@ -8,6 +8,8 @@ export interface CharacterRelationship {
   id: string;
   characterId: string;
   userIdentityId: string;
+  /** Stable owner space used to aggregate a primary identity and its aliases. */
+  rootIdentityId?: string;
   conversationId: string;
   relationship: CharacterRelationshipState;
   createdAt: number;
@@ -35,6 +37,41 @@ export const getOfflineModeStorageKey = (relationId: string) => `offline_mode_ac
 export const getOfflineStoryStorageKey = (relationId: string) => `offline_story_id_${relationId}`;
 export const getOfflineGroupModeStorageKey = (groupId: string) => `offline_group_mode_active_${groupId}`;
 export const getOfflineGroupStoryStorageKey = (groupId: string) => `offline_group_story_id_${groupId}`;
+
+/**
+ * Resolves the persistent owner space for an identity. Missing legacy
+ * ownership is intentionally treated as self-owned; no relationship is
+ * reassigned based on names, avatars, or profile text.
+ */
+export function getRootIdentityId(identityId: string, identities: readonly UserIdentity[] = []): string {
+  const identityById = new Map(identities.map((identity) => [identity.id, identity]));
+  const resolve = (candidateId: string, seen: Set<string>): string => {
+    if (seen.has(candidateId)) return candidateId;
+    seen.add(candidateId);
+    const identity = identityById.get(candidateId);
+    if (!identity || identity.kind !== "alias") return candidateId;
+    const parentId = identity.parentIdentityId && identityById.has(identity.parentIdentityId)
+      ? identity.parentIdentityId
+      : candidateId;
+    return parentId === candidateId ? candidateId : resolve(parentId, seen);
+  };
+  return resolve(identityId, new Set<string>());
+}
+
+/** Adds missing relationship owner scopes while preserving every relation ID. */
+export function normalizeRelationshipIdentityScopes(
+  relationships: readonly CharacterRelationship[],
+  identities: readonly UserIdentity[] = [],
+): { relationships: CharacterRelationship[]; changed: boolean } {
+  let changed = false;
+  const normalized = relationships.map((relationship) => {
+    const rootIdentityId = getRootIdentityId(relationship.userIdentityId, identities);
+    if (relationship.rootIdentityId === rootIdentityId) return relationship;
+    changed = true;
+    return { ...relationship, rootIdentityId };
+  });
+  return { relationships: normalized, changed };
+}
 
 export function findRelationship(
   relationships: readonly CharacterRelationship[],
@@ -66,6 +103,7 @@ export function createRelationship(input: {
   id: string;
   characterId: string;
   userIdentityId: string;
+  rootIdentityId?: string;
   now: number;
   relationship?: CharacterRelationshipState;
 }): CharacterRelationship {
@@ -73,6 +111,7 @@ export function createRelationship(input: {
     id: input.id,
     characterId: input.characterId,
     userIdentityId: input.userIdentityId,
+    ...(input.rootIdentityId ? { rootIdentityId: input.rootIdentityId } : {}),
     conversationId: getConversationId(input.id),
     relationship: input.relationship || "friend",
     createdAt: input.now,

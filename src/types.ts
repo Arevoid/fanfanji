@@ -679,6 +679,14 @@ export interface UserIdentity {
   bio: string;
   /** Alias identities belong to the contacts identity switcher, not the main profile/settings surfaces. */
   kind?: "primary" | "alias";
+  /** Stable owner space for grouping a primary identity and its aliases. */
+  rootIdentityId?: string;
+  /** The primary identity that owns this alias. Never inferred from names or avatars. */
+  parentIdentityId?: string;
+  /** Archived identities remain addressable so their history is not lost. */
+  archived?: boolean;
+  /** Stable ordering for identity managers; legacy records use array order. */
+  sortOrder?: number;
 }
 
 export interface UserSettings {
@@ -756,6 +764,8 @@ export interface UserSettings {
   homeButtonPosition?: { x: number; y: number };
   identities?: UserIdentity[];
   activeIdentityId?: string;
+  /** Version of the identity/alias ownership model. Added without rewriting history. */
+  identityDataVersion?: number;
   avatarBorderRadius?: number;
   otherBubbleBg?: string;
   otherBubbleColor?: string;
