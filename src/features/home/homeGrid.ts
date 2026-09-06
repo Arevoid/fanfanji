@@ -36,6 +36,28 @@ export const getItemSpan = (size: HomeItemSize) => {
 
 export const getHomeItemDimensions = getItemSpan;
 
+/**
+ * Runtime home-screen data is user-editable JSON, so older or hand-edited
+ * layouts can contain a size that is not valid for the current item type.
+ * Keep apps square and give malformed widgets the safest supported widget
+ * shape. This prevents the renderer from combining a one-cell position with
+ * a multi-row widget and producing a stretched rectangle.
+ */
+export const normalizeHomeItemSize = (
+  item: Pick<HomeScreenItem, "type" | "size">,
+): HomeItemSize => {
+  if (item.type === "app") return "1x1";
+  switch (item.size) {
+    case "2x2":
+    case "1x4":
+    case "2x3":
+    case "2x4":
+      return item.size;
+    default:
+      return "2x2";
+  }
+};
+
 const isInteger = (value: number) => Number.isFinite(value) && Number.isInteger(value);
 
 export const isValidHomePosition = (
@@ -316,7 +338,7 @@ export const migrateLegacyHomeScreenLayout = (
   for (const item of sourceItems) {
     if (!item || typeof item.id !== "string" || !item.id || seenIds.has(item.id)) continue;
     seenIds.add(item.id);
-    uniqueItems.push({ ...item });
+    uniqueItems.push({ ...item, size: normalizeHomeItemSize(item) });
   }
 
   const placed: HomeScreenItem[] = [];

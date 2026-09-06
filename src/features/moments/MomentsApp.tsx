@@ -106,7 +106,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
   };
 
   return (
-    <div data-theme-page="moments" className="bg-[var(--app-bg)] text-[var(--text-primary)] min-h-full pb-20 overflow-y-auto">
+    <div data-theme-page="moments" className="h-full min-h-0 bg-[var(--app-bg)] text-[var(--text-primary)] pb-20 overflow-y-auto overscroll-contain">
       <div className="h-64 bg-slate-200 relative shrink-0">
         <img src={tabCover} alt="Moments Cover" className="w-full h-full object-cover" />
         <button onClick={onClose} className="app-nav-icon-button absolute top-4 left-4 p-1.5 text-white z-20 transition-colors" title="返回主页">

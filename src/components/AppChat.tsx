@@ -8398,7 +8398,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       <div className="flex-1 overflow-hidden flex flex-col h-full bg-white">
         
         {/* Main tabs viewports */}
-        <div ref={mainTabsViewportRef} className="flex-1 overflow-y-auto">
+        <div ref={mainTabsViewportRef} className={`flex-1 min-h-0 ${activeTab === "moments" ? "overflow-hidden" : "overflow-y-auto"}`}>
           
           {/* TABS: CHATS LIST (聊天首页) */}
           {activeTab === "chats" && (
@@ -8757,7 +8757,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
 
           {/* TABS: ME PROFILE (我) */}
           {activeTab === "me" && (
-            <div className="bg-slate-50 min-h-full pb-20 flex flex-col font-sans">
+            <div className="bg-white min-h-full pb-20 flex flex-col font-sans">
               {meActiveSubView === "none" ? (
                 <>
                   {/* Sticky header */}
@@ -8774,7 +8774,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                   </div>
 
                   {/* Settings Main Entrance Menu */}
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
                     {/* User Profile Card */}
                     <div
                       onClick={() => setMeActiveSubView("identities")}

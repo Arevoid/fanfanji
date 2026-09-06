@@ -106,6 +106,7 @@ import {
   getOverlappingItemIds,
   getResponsiveHomeGridRowCount,
   getVisibleHomePageCount,
+  normalizeHomeItemSize,
   normalizeHomeScreenLayout,
   placeItemAt,
   placeItemWithDisplacement,
@@ -342,9 +343,8 @@ const AppIcons = {
   wallet: (className = "w-6 h-6") => <WalletCards className={className} strokeWidth={1.8} />,
 };
 
-// Keep the user's desktop and Dock tiles consistent with the larger iOS-like
-// visual scale used by the main phone.
-const HOME_APP_ICON_SIZE = 60;
+// Keep the user's desktop and Dock tiles on the same compact iOS-like scale.
+const HOME_APP_ICON_SIZE = 55;
 const HOME_APP_ICON_GLYPH_CLASS = "h-9 w-9";
 
 const hexToRgba = (hex: string, opacityPercent: number) => {
@@ -1691,18 +1691,21 @@ export default function App() {
     typeof window === "undefined" ? 343 : Math.max(0, window.innerWidth - 32),
   );
   const [homeGridHeight, setHomeGridHeight] = useState(0);
-  const homeGridIconWidth = HOME_APP_ICON_SIZE;
-  const homeGridPadding = 12;
-  const homeGridInnerWidth = homeGridWidth - homeGridPadding * 2;
-  const homeGridGap = 16;
+  // Keep the reference spacing on the normal 375px phone while allowing the
+  // same grid to breathe on narrow browser viewports. A fixed minimum tile
+  // width was previously able to overflow the four-column grid.
+  const homeGridPadding = Math.max(8, Math.min(12, homeGridWidth * 0.034));
+  const homeGridInnerWidth = Math.max(0, homeGridWidth - homeGridPadding * 2);
+  const homeGridGap = Math.max(8, Math.min(16, homeGridWidth * 0.045));
   const homeGridColumnGap = homeGridGap;
   // Keep rows and columns on the same square grid so widgets retain their
   // original proportions. App labels use a compact line box below the tile.
   const homeGridRowGap = homeGridGap;
   const homeGridTrackWidth = Math.max(
-    homeGridIconWidth,
+    1,
     (homeGridInnerWidth - homeGridColumnGap * (HOME_GRID_COLUMNS - 1)) / HOME_GRID_COLUMNS,
   );
+  const homeGridIconWidth = Math.min(HOME_APP_ICON_SIZE, homeGridTrackWidth);
   const homeGridRowHeight = homeGridTrackWidth;
   const homeGridRows = getResponsiveHomeGridRowCount({
     containerHeight: homeGridHeight,
@@ -1875,6 +1878,7 @@ export default function App() {
     if (!item || !container) return;
     const rect = container.getBoundingClientRect();
     const style = window.getComputedStyle(container);
+    const itemSize = normalizeHomeItemSize(item);
     const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
     const paddingRight = Number.parseFloat(style.paddingRight) || 0;
     const paddingTop = Number.parseFloat(style.paddingTop) || 0;
@@ -1898,7 +1902,7 @@ export default function App() {
       rowGap,
       rowHeight: Number.parseFloat(style.gridAutoRows) || fallbackTrackWidth,
       rowCount: homeGridRows,
-      size: item.size,
+      size: itemSize,
     });
     const overlaps = getOverlappingItemIds(homeScreenItems, item, target, homeGridRows);
     const swapTarget = overlaps.length === 1
@@ -1906,8 +1910,8 @@ export default function App() {
       : undefined;
     const canSwap = Boolean(
       swapTarget
-      && item.size === "1x1"
-      && swapTarget.size === "1x1",
+      && itemSize === "1x1"
+      && normalizeHomeItemSize(swapTarget) === "1x1",
     );
     const displacedLayout = overlaps.length > 0
       ? placeItemWithDisplacement(homeScreenItems, item.id, target, homeGridRows)
@@ -4159,11 +4163,11 @@ export default function App() {
                           const isHiddenNames = !!settings.hideAppNames;
                           const iconWidth = homeGridIconWidth;
                           const iconSizeStyle = {
-                            width: `${HOME_APP_ICON_SIZE}px`,
-                            height: `${HOME_APP_ICON_SIZE}px`,
+                            width: `${iconWidth}px`,
+                            height: `${iconWidth}px`,
                           };
 
-                          const gridPadding = homeGridPadding; // 12px padding left/right (matches px-3 of dock!)
+                          const gridPadding = homeGridPadding;
                           const gapWidth = homeGridColumnGap;
                           const widgetHeight = `${2 * homeGridRowHeight + homeGridRowGap}px`;
                           const rowGapValue = homeGridRowGap;
@@ -4195,7 +4199,7 @@ export default function App() {
                                 style={gridStyle}
                               >
                                 {dragSession?.target?.page === pageIdx && draggedItem && (() => {
-                                  const span = getHomeItemDimensions(draggedItem.size);
+                                  const span = getHomeItemDimensions(normalizeHomeItemSize(draggedItem));
                                   return (
                                     <div
                                       className={`pointer-events-none z-40 rounded-xl border-2 ${
@@ -4219,7 +4223,8 @@ export default function App() {
                                   .map((item, index) => {
                                   const alignClass = "justify-self-center items-center text-center";
                                   const itemPosition = item.position!;
-                                  const itemSpan = getHomeItemDimensions(item.size);
+                                  const itemSize = normalizeHomeItemSize(item);
+                                  const itemSpan = getHomeItemDimensions(itemSize);
                                   const explicitGridStyle = {
                                     gridColumnStart: itemPosition.column + 1,
                                     gridColumnEnd: `span ${itemSpan.width}`,
@@ -4307,19 +4312,19 @@ export default function App() {
                                     let rowSpanClass = "row-span-2";
                                     let currentWidgetHeight = widgetHeight;
 
-                                    if (item.size === "1x4") {
+                                    if (itemSize === "1x4") {
                                       colSpanClass = "col-span-4";
                                       rowSpanClass = "row-span-1";
                                       currentWidgetHeight = `${rowHeightValue}px`;
-                                    } else if (item.size === "2x4") {
+                                    } else if (itemSize === "2x4") {
                                       colSpanClass = "col-span-4";
                                       rowSpanClass = "row-span-2";
                                       currentWidgetHeight = `${2 * rowHeightValue + rowGapValue}px`;
-                                    } else if (item.size === "2x3") {
+                                    } else if (itemSize === "2x3") {
                                       colSpanClass = "col-span-3";
                                       rowSpanClass = "row-span-2";
                                       currentWidgetHeight = `${2 * rowHeightValue + rowGapValue}px`;
-                                    } else if (item.size === "2x2") {
+                                    } else if (itemSize === "2x2") {
                                       colSpanClass = "col-span-2";
                                       rowSpanClass = "row-span-2";
                                       currentWidgetHeight = widgetHeight;
@@ -4330,7 +4335,7 @@ export default function App() {
                                         key={item.id}
                                         data-id={item.id}
                                         data-page={pageIdx}
-                                        className={`grid-item ${colSpanClass} ${rowSpanClass} relative transition-opacity duration-200 ${
+                                        className={`grid-item ${colSpanClass} ${rowSpanClass} relative min-w-0 min-h-0 transition-opacity duration-200 ${
                                           isDragged ? "z-30 opacity-30 scale-95" : ""
                                         }`}
                                         style={{ ...explicitGridStyle, height: currentWidgetHeight }}
@@ -4345,7 +4350,7 @@ export default function App() {
                                           }
                                         }}
                                       >
-                                        <div className={`w-full h-full ${
+                                        <div className={`w-full h-full min-w-0 min-h-0 ${
                                           isEditingHomeScreen && !isDragged 
                                             ? (index % 2 === 0 ? "animate-jiggle" : "animate-jiggle-reverse") 
                                             : ""
@@ -4365,7 +4370,7 @@ export default function App() {
                                             installedAppIds={installedAppIds}
                                             widgetOpacity={settings.widgetOpacity}
                                             widgetBorderRadius={settings.widgetBorderRadius}
-                                            size={item.size}
+                                            size={itemSize}
                                             tracks={tracks}
                                             activeIdentity={activeIdentity}
                                             dualMusicConfig={dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === activeIdentityId)}
@@ -4418,10 +4423,10 @@ export default function App() {
 
               {/* Elegant Dock section (containing quick indicators) */}
               {(() => {
-                const iconWidth = HOME_APP_ICON_SIZE;
+                const iconWidth = homeGridIconWidth;
                 const iconSizeStyle = {
-                  width: `${HOME_APP_ICON_SIZE}px`,
-                  height: `${HOME_APP_ICON_SIZE}px`,
+                  width: `${iconWidth}px`,
+                  height: `${iconWidth}px`,
                 };
                 const dockAppIds = (settings.dockApps?.length === 4
                   ? settings.dockApps
@@ -4929,8 +4934,8 @@ export default function App() {
                     borderRadius: isTransparencyPreservedImage(settings.customIcons[draggedItem.id])
                       ? 0
                       : "var(--app-icon-radius, 35%)",
-                    width: `${HOME_APP_ICON_SIZE}px`,
-                    height: `${HOME_APP_ICON_SIZE}px`
+                    width: `${homeGridIconWidth}px`,
+                    height: `${homeGridIconWidth}px`
                   }}
                 >
                   {settings.customIcons[draggedItem.id] ? (
@@ -4952,11 +4957,14 @@ export default function App() {
                 )}
               </div>
             ) : (
-              <div 
-                style={{ 
-                  width: draggedItem.size === "1x4" || draggedItem.size === "2x4" ? "300px" : draggedItem.size === "2x3" ? "225px" : (settings.hideAppNames ? "154px" : "150px"),
-                  height: draggedItem.size === "1x4" ? "54px" : draggedItem.size === "2x4" || draggedItem.size === "2x3" ? "120px" : (settings.hideAppNames ? "154px" : "150px"),
-                }}
+              <div
+                style={(() => {
+                  const draggedItemSize = normalizeHomeItemSize(draggedItem);
+                  return {
+                    width: draggedItemSize === "1x4" || draggedItemSize === "2x4" ? "300px" : draggedItemSize === "2x3" ? "225px" : (settings.hideAppNames ? "154px" : "150px"),
+                    height: draggedItemSize === "1x4" ? "54px" : draggedItemSize === "2x4" || draggedItemSize === "2x3" ? "120px" : (settings.hideAppNames ? "154px" : "150px"),
+                  };
+                })()}
               >
                 {React.createElement(getWidgetComponent(draggedItem.widgetType), {
                   id: draggedItem.id,
@@ -4968,7 +4976,7 @@ export default function App() {
                   installedAppIds,
                   widgetOpacity: settings.widgetOpacity,
                   widgetBorderRadius: settings.widgetBorderRadius,
-                  size: draggedItem.size,
+                  size: normalizeHomeItemSize(draggedItem),
                   tracks,
                   activeIdentity,
                   dualMusicConfig: dualMusicConfigs.find((config) => config.widgetId === draggedItem.id && config.ownerIdentityId === activeIdentityId),

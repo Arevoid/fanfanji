@@ -15,6 +15,7 @@ import {
   getResponsiveHomeGridRowCount,
   getVisibleHomePageCount,
   migrateLegacyHomeScreenLayout,
+  normalizeHomeItemSize,
   normalizeHomeScreenLayout,
   placeItemAt,
   placeItemWithDisplacement,
@@ -46,6 +47,8 @@ assert.deepEqual(getItemSpan("2x2"), { width: 2, height: 2 });
 assert.deepEqual(getItemSpan("1x4"), { width: 4, height: 1 });
 assert.deepEqual(getItemSpan("2x4"), { width: 4, height: 2 });
 assert.deepEqual(getItemSpan("2x3"), { width: 3, height: 2 });
+assert.equal(normalizeHomeItemSize({ ...item("app-size", "2x2"), type: "app" }), "1x1");
+assert.equal(normalizeHomeItemSize({ ...item("widget-size", "1x1"), type: "widget" }), "2x2");
 
 const fixed = [
   item("app-a", "1x1", 0, 0, 0),
@@ -209,6 +212,21 @@ assert.equal(positionedAndBroken.filter((entry) => entry.id === "duplicate").len
 assert.ok(positionedAndBroken.every((entry) => entry.page === entry.position?.page));
 assert.deepEqual(normalizeHomeScreenLayout(positionedAndBroken), positionedAndBroken);
 
+const malformedSizes = normalizeHomeScreenLayout([
+  { ...item("malformed-widget", "1x1"), type: "widget" },
+  { ...item("malformed-app", "2x2"), type: "app" },
+]);
+assert.equal(
+  malformedSizes.find((entry) => entry.id === "malformed-widget")?.size,
+  "2x2",
+  "invalid widget sizes must be repaired to a square widget",
+);
+assert.equal(
+  malformedSizes.find((entry) => entry.id === "malformed-app")?.size,
+  "1x1",
+  "app tiles must always keep a one-cell size",
+);
+
 assert.equal(getHighestOccupiedPage([item("later", "1x1", 5, 0, 0)]), 5);
 assert.equal(getVisibleHomePageCount([item("later", "1x1", 5, 0, 0)], false), 6);
 assert.equal(getVisibleHomePageCount([item("later", "1x1", 5, 0, 0)], true), 7);
@@ -267,11 +285,13 @@ assert.match(appSource, /onDragStartCapture=\{\(event\) => event\.preventDefault
 assert.match(appSource, /gridTemplateColumns:\s*`repeat\(\$\{HOME_GRID_COLUMNS\}, minmax\(0, 1fr\)\)`/);
 assert.match(appSource, /justifyContent:\s*"stretch"/);
 assert.match(appSource, /gridTemplateRows:\s*`repeat\(\$\{homeGridRows\}/);
-assert.match(appSource, /const HOME_APP_ICON_SIZE = 60/);
-assert.match(appSource, /width: `\$\{HOME_APP_ICON_SIZE\}px`/);
+assert.match(appSource, /const HOME_APP_ICON_SIZE = 55/);
+assert.match(appSource, /width: `\$\{iconWidth\}px`/);
 assert.match(appSource, /const HOME_APP_ICON_GLYPH_CLASS = "h-9 w-9"/);
 assert.match(appSource, /const homeGridRowGap = homeGridGap/);
 assert.match(appSource, /const homeGridRowHeight = homeGridTrackWidth/);
+assert.match(appSource, /const homeGridIconWidth = Math\.min\(HOME_APP_ICON_SIZE, homeGridTrackWidth\)/);
+assert.match(appSource, /className=\{`grid-item \$\{colSpanClass\} \$\{rowSpanClass\} relative min-w-0 min-h-0/);
 assert.match(appSource, /desktop-app-label text-\[10px\] leading-3[\s\S]*mt-0\.5/);
 assert.match(appSource, /useState\(\(\) =>\s*typeof window === "undefined" \? 343 : Math\.max\(0, window\.innerWidth - 32\)/);
 assert.match(appSource, /useLayoutEffect\(\(\) => \{[\s\S]*pageViewportRef\.current/);

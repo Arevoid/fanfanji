@@ -25,6 +25,7 @@ assert.equal(isMomentSkipResponse("我也这么觉得。"), false);
 assert.equal(getMomentComments({ ...moment, comments: [{ id: "voice-comment", authorName: "阿岚", authorAvatar: "avatar.png", content: "[voice|3]评论文字", timestamp: 2 }] })[0].content, "评论文字");
 assert.ok(markup.includes("今天很开心"));
 assert.ok(markup.includes("w-10 h-10 rounded-[6px]"));
+assert.ok(markup.includes("h-full min-h-0 bg-[var(--app-bg)] text-[var(--text-primary)] pb-20 overflow-y-auto overscroll-contain"));
 assert.ok(markup.includes("生成图片"));
 assert.match(markup, />文字图<\/span>/);
 assert.match(markup, /aria-label="生成朋友圈图片"/);
