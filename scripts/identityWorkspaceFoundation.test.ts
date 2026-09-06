@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { normalizeIdentitySettings } from "../src/core/storage/repositories/settingsRepository";
-import { getRootIdentityId, normalizeRelationshipIdentityScopes, type CharacterRelationship } from "../src/domain/relationship/characterRelationship";
+import { getRootIdentityId, listRelationshipsForIdentityWorkspace, normalizeRelationshipIdentityScopes, type CharacterRelationship } from "../src/domain/relationship/characterRelationship";
 import type { UserSettings } from "../src/types";
 
 const settings = {
@@ -49,5 +49,14 @@ assert.equal(relationResult.relationships[0].rootIdentityId, "identity-primary")
 
 const alreadyNormalized = normalizeRelationshipIdentityScopes(relationResult.relationships, normalized.settings.identities);
 assert.equal(alreadyNormalized.changed, false, "normalization must be idempotent");
+
+const primaryRelation = { ...relation, id: "relation-primary", userIdentityId: "identity-primary" } satisfies CharacterRelationship;
+const unrelatedRelation = { ...relation, id: "relation-other", userIdentityId: "identity-other" } satisfies CharacterRelationship;
+const workspaceRelations = listRelationshipsForIdentityWorkspace(
+  [relationResult.relationships[0], primaryRelation, unrelatedRelation],
+  "identity-primary",
+  normalized.settings.identities,
+);
+assert.deepEqual(workspaceRelations.map((item) => item.id), ["relation-alias", "relation-primary"], "workspace list includes primary and aliases but not another主人设");
 
 console.log("identity workspace foundation tests passed");

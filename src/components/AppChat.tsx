@@ -74,7 +74,7 @@ import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
-import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, getRootIdentityId, listRelationshipsForIdentityWorkspace, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { findInnerVoiceByMessage, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords } from "../core/storage/repositories/innerVoiceRepository";
 import { createInlineInnerVoiceRecord } from "../features/chat/services/innerVoiceService";
 import { INLINE_INNER_VOICE_INSTRUCTION, isChatResponseFormatError } from "../features/chat/services/chatTurnResponseProtocol";
@@ -513,6 +513,7 @@ export default function AppChat({
 
   const { initiatedChatIds, setInitiatedChatIds, lastReadTimestamps, setLastReadTimestamps, getUnreadCount } = useChatReadState({ activeChatCharId, activeChatRelationId, messages });
   const [showAliasDirectory, setShowAliasDirectory] = useState(false);
+  const [chatIdentityFilter, setChatIdentityFilter] = useState("all");
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [aliasDeleteTarget, setAliasDeleteTarget] = useState<string | null>(null);
   const [showCreateAliasModal, setShowCreateAliasModal] = useState(false);
@@ -531,10 +532,11 @@ export default function AppChat({
   };
 
   const startChatWith = (relationId: string) => {
-    // Relation IDs are globally unique, but the active identity is still a
-    // required ownership boundary. Never open a relation from another
-    // identity when a stale list item or navigation event is replayed.
-    const relation = relationships.find((item) => item.id === relationId && item.userIdentityId === activeIdentityId);
+    // Relation IDs are globally unique, and the visible list is still bounded
+    // to the current主人设 workspace. A row may belong to an alias, in which
+    // case the identity switch and conversation selection are committed
+    // together so the relation-scoped prompt context remains isolated.
+    const relation = chatListRelationships.find((item) => item.id === relationId);
     if (!relation) {
       const directRelation = relationForCharacter(relationId);
       if (directRelation) {
@@ -783,23 +785,43 @@ export default function AppChat({
     relation.userIdentityId === activeIdentityId
     && availableCharacterIds.has(resolveCanonicalCharacterId(relation.characterId, characters)),
   );
+  const currentIdentityRootId = getRootIdentityId(activeIdentityId, settings.identities || []);
+  const workspaceRelationships = listRelationshipsForIdentityWorkspace(
+    relationships,
+    activeIdentityId,
+    settings.identities || [],
+  ).filter((relation) => availableCharacterIds.has(resolveCanonicalCharacterId(relation.characterId, characters)));
+  const workspaceIdentities = (settings.identities || [])
+    .filter((identity) => !identity.archived && getRootIdentityId(identity.id, settings.identities || []) === currentIdentityRootId)
+    .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
   const relationForCharacter = (characterId: string) => findRelationshipForCanonicalCharacter(
     relationships,
     activeIdentityId,
     characterId,
     characters,
   );
-  // The chat list is scoped to the active identity. Cross-identity threads
-  // must not leak into the current profile; switching profiles is handled by
-  // the identity picker instead of mixing every relation into one list.
-  const chatListRelationships = activeRelationships;
+  // The active identity still scopes generation, memory writes, and the
+  // composer. The visible inbox is scoped to the owning主人设空间 so its
+  // primary identity and aliases remain discoverable together.
+  const chatListRelationships = workspaceRelationships;
+  const visibleChatListRelationships = chatIdentityFilter === "all"
+    ? chatListRelationships
+    : chatListRelationships.filter((relation) => relation.userIdentityId === chatIdentityFilter);
+  useEffect(() => {
+    if (chatIdentityFilter !== "all" && !workspaceIdentities.some((identity) => identity.id === chatIdentityFilter)) {
+      setChatIdentityFilter("all");
+    }
+  }, [chatIdentityFilter, currentIdentityRootId, settings.identities]);
   const friends = activeRelationships.map((relation) =>
     characters.find((character) => character.id === resolveCanonicalCharacterId(relation.characterId, characters)),
   ).filter((character): character is Character => Boolean(character));
-  const friendContacts = chatListRelationships.map((relation) => {
+  const friendContacts = visibleChatListRelationships.map((relation) => {
     const character = characters.find((item) => item.id === resolveCanonicalCharacterId(relation.characterId, characters))!;
     const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
-    return { id: relation.id, character, subtitle: identity?.kind === "alias" ? identity.name : undefined };
+    const subtitle = identity
+      ? identity.kind === "alias" ? identity.name : "主号"
+      : undefined;
+    return { id: relation.id, character, subtitle };
   }).filter((item) => Boolean(item.character));
 
   // Never leave an old identity's direct or group thread open after switching
@@ -4611,15 +4633,22 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
   };
 
   // Active chat threads list builder
-  const directThreads = chatListRelationships.map((relation) => {
+  const directThreads = visibleChatListRelationships.map((relation) => {
     const character = characters.find((item) => item.id === resolveCanonicalCharacterId(relation.characterId, characters));
     if (!character) return null;
     const threadMsgs = messages.filter((message) => message.relationId === relation.id && !message.isOffline);
     if (!threadMsgs.length && !initiatedChatIds.includes(relation.id) && activeChatRelationId !== relation.id) return null;
     const identity = settings.identities?.find((item) => item.id === relation.userIdentityId);
-    return { id: relation.id, character, lastMessage: threadMsgs.at(-1) || null, isPinned: character.isPinned || false, subtitle: identity?.kind === "alias" ? identity.name : undefined };
+    return {
+      id: relation.id,
+      character,
+      lastMessage: threadMsgs.at(-1) || null,
+      isPinned: character.isPinned || false,
+      subtitle: identity ? (identity.kind === "alias" ? identity.name : "主号") : undefined,
+    };
   }).filter((thread): thread is NonNullable<typeof thread> => Boolean(thread));
-  const groupThreads = characters.filter((character) => character.isGroupChat && belongsToActiveIdentity(character.ownerIdentityId)).map((character) => {
+  const groupThreads = characters.filter((character) => character.isGroupChat
+    && getRootIdentityId(character.ownerIdentityId || activeIdentityId, settings.identities || []) === currentIdentityRootId).map((character) => {
     const threadMsgs = messages.filter((message) => message.characterId === character.id && !message.isOffline);
     if (!threadMsgs.length && !initiatedChatIds.includes(character.id) && activeChatCharId !== character.id) return null;
     return { id: character.id, character, lastMessage: threadMsgs.at(-1) || null, isPinned: character.isPinned || false };
@@ -8293,7 +8322,16 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                 const senderChar = characters.find((character) => character.id === message.senderId);
                 return `${senderChar ? (senderChar.remark || senderChar.name) : "成员"}: ${content}`;
               }}
-              header={<ChatTopBar title={<>聊天 ({chatThreads.length})</>} leftAction={<button onClick={onClose} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => { setGroupNameInput(""); setSelectedGroupMemberIds([]); setShowCreateGroupModal(true); }} className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10" title="发起群聊"><Plus className="w-4 h-4 text-slate-700" /></button>} />}
+              header={<>
+                <ChatTopBar title={<>聊天 ({chatThreads.length})</>} leftAction={<button onClick={onClose} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => { setGroupNameInput(""); setSelectedGroupMemberIds([]); setShowCreateGroupModal(true); }} className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10" title="发起群聊"><Plus className="w-4 h-4" /></button>} />
+                <div className="flex gap-1 overflow-x-auto border-b border-[var(--divider)] bg-[var(--surface)] px-3 py-2">
+                  <button type="button" onClick={() => setChatIdentityFilter("all")} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-semibold ${chatIdentityFilter === "all" ? "bg-[var(--text-primary)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"}`}>全部身份</button>
+                  {workspaceIdentities.map((identity) => {
+                    const label = identity.kind === "alias" ? identity.name || "未命名马甲" : "主号";
+                    return <button key={identity.id} type="button" onClick={() => setChatIdentityFilter(identity.id)} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-semibold ${chatIdentityFilter === identity.id ? "bg-[var(--text-primary)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"}`}>{label}</button>;
+                  })}
+                </div>
+              </>}
             />
           )}
 
@@ -8344,7 +8382,20 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                           showToast(`已更新马甲：${name}`);
                           return;
                         }
-                        const alias = { id: createId("identity"), name, avatar, signature: "", bio, kind: "alias" as const };
+                        const rootIdentityId = getRootIdentityId(activeIdentityId, settings.identities || []);
+                        const parentIdentityId = settings.identities?.find((identity) =>
+                          identity.kind === "primary" && getRootIdentityId(identity.id, settings.identities || []) === rootIdentityId,
+                        )?.id;
+                        const alias = {
+                          id: createId("identity"),
+                          name,
+                          avatar,
+                          signature: "",
+                          bio,
+                          kind: "alias" as const,
+                          rootIdentityId,
+                          ...(parentIdentityId ? { parentIdentityId } : {}),
+                        };
                         onSaveSettings((previous) => ({
                           ...previous,
                           identities: [...(previous.identities || []), alias],
@@ -8470,12 +8521,19 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                 })()}
               </div>
             ) : (
-              <>
+                  <>
                 <ContactList
                   contacts={friendContacts}
                   onSelect={startChatWith}
                   header={<>
                     <ChatTopBar title={<>通讯录 ({friendContacts.length})</>} leftAction={<button onClick={onClose} className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0" title="返回主页"><ChevronLeft className="w-4 h-4 text-slate-700" /></button>} rightAction={<button onClick={() => setIsShowingAddFriendDialog(true)} className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-700 transition-colors shrink-0 z-10" title="添加好友"><Plus className="w-4 h-4 text-slate-700" /></button>} />
+                    <div className="flex gap-1 overflow-x-auto border-b border-[var(--divider)] bg-[var(--surface)] px-3 py-2">
+                      <button type="button" onClick={() => setChatIdentityFilter("all")} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-semibold ${chatIdentityFilter === "all" ? "bg-[var(--text-primary)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"}`}>全部身份</button>
+                      {workspaceIdentities.map((identity) => {
+                        const label = identity.kind === "alias" ? identity.name || "未命名马甲" : "主号";
+                        return <button key={identity.id} type="button" onClick={() => setChatIdentityFilter(identity.id)} className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-semibold ${chatIdentityFilter === identity.id ? "bg-[var(--text-primary)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"}`}>{label}</button>;
+                      })}
+                    </div>
                     <button type="button" onClick={() => setShowAliasDirectory(true)} className="flex w-full items-center gap-3 border-b border-[var(--divider)] bg-[var(--surface)] px-4 py-3 text-left hover:bg-[var(--surface-muted)]">
                       <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-lg">◎</div>
                       <div className="min-w-0 flex-1"><p className="text-sm font-bold">我的马甲</p><p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">管理多个身份，分别与角色聊天</p></div>

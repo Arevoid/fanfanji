@@ -73,6 +73,18 @@ export function normalizeRelationshipIdentityScopes(
   return { relationships: normalized, changed };
 }
 
+/** Returns every relation in the active主人设空间, including its aliases. */
+export function listRelationshipsForIdentityWorkspace(
+  relationships: readonly CharacterRelationship[],
+  activeIdentityId: string,
+  identities: readonly UserIdentity[] = [],
+): CharacterRelationship[] {
+  const rootIdentityId = getRootIdentityId(activeIdentityId, identities);
+  return relationships.filter((relationship) =>
+    getRootIdentityId(relationship.userIdentityId, identities) === rootIdentityId,
+  );
+}
+
 export function findRelationship(
   relationships: readonly CharacterRelationship[],
   userIdentityId: string,
