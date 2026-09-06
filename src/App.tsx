@@ -318,34 +318,37 @@ function LazyAppBoundary({
 }
 
 const AppIcons = {
-  archives: (className = "w-6 h-6") => <ContactRound className={className} strokeWidth={1.8} />,
-  worldbook: (className = "w-6 h-6") => <BookOpen className={className} strokeWidth={1.8} />,
-  chat: (className = "w-6 h-6") => <MessageCircle className={className} strokeWidth={1.8} />,
-  offline: (className = "w-6 h-6") => <Layers3 className={className} strokeWidth={1.8} />,
-  music: (className = "w-6 h-6") => <Music2 className={className} strokeWidth={1.8} />,
-  notes: (className = "w-6 h-6") => <NotebookText className={className} strokeWidth={1.8} />,
-  diary: (className = "w-6 h-6") => <BookHeart className={className} strokeWidth={1.8} />,
-  memory: (className = "w-6 h-6") => <NotebookTabs className={className} strokeWidth={1.8} />,
-  store: (className = "w-6 h-6") => <ShoppingBag className={className} strokeWidth={1.8} />,
-  settings: (className = "w-6 h-6") => <SettingsIcon className={className} strokeWidth={1.8} />,
-  forum: (className = "w-6 h-6") => <Images className={className} strokeWidth={1.8} />,
-  schedule: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
-  reading: (className = "w-6 h-6") => <BookOpenText className={className} strokeWidth={1.8} />,
-  cinema: (className = "w-6 h-6") => <Film className={className} strokeWidth={1.8} />,
-  "character-phone": (className = "w-6 h-6") => <Smartphone className={className} strokeWidth={1.8} />,
-  "relationship-network": (className = "w-6 h-6") => <Network className={className} strokeWidth={1.8} />,
-  timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.8} />,
-  theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.8} />,
-  activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.8} />,
-  favorites: (className = "w-6 h-6") => <Bookmark className={className} strokeWidth={1.8} />,
-  cloud: (className = "w-6 h-6") => <Cloud className={className} strokeWidth={1.8} />,
-  scan: (className = "w-6 h-6") => <ScanLine className={className} strokeWidth={1.8} />,
-  wallet: (className = "w-6 h-6") => <WalletCards className={className} strokeWidth={1.8} />,
+  archives: (className = "w-6 h-6") => <ContactRound className={className} strokeWidth={1.5} />,
+  worldbook: (className = "w-6 h-6") => <BookOpen className={className} strokeWidth={1.5} />,
+  chat: (className = "w-6 h-6") => <MessageCircle className={className} strokeWidth={1.5} />,
+  offline: (className = "w-6 h-6") => <Layers3 className={className} strokeWidth={1.5} />,
+  music: (className = "w-6 h-6") => <Music2 className={className} strokeWidth={1.5} />,
+  notes: (className = "w-6 h-6") => <NotebookText className={className} strokeWidth={1.5} />,
+  diary: (className = "w-6 h-6") => <BookHeart className={className} strokeWidth={1.5} />,
+  memory: (className = "w-6 h-6") => <NotebookTabs className={className} strokeWidth={1.5} />,
+  store: (className = "w-6 h-6") => <ShoppingBag className={className} strokeWidth={1.5} />,
+  settings: (className = "w-6 h-6") => <SettingsIcon className={className} strokeWidth={1.5} />,
+  forum: (className = "w-6 h-6") => <Images className={className} strokeWidth={1.5} />,
+  schedule: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.5} />,
+  reading: (className = "w-6 h-6") => <BookOpenText className={className} strokeWidth={1.5} />,
+  cinema: (className = "w-6 h-6") => <Film className={className} strokeWidth={1.5} />,
+  "character-phone": (className = "w-6 h-6") => <Smartphone className={className} strokeWidth={1.5} />,
+  "relationship-network": (className = "w-6 h-6") => <Network className={className} strokeWidth={1.5} />,
+  timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.5} />,
+  theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.5} />,
+  activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.5} />,
+  favorites: (className = "w-6 h-6") => <Bookmark className={className} strokeWidth={1.5} />,
+  cloud: (className = "w-6 h-6") => <Cloud className={className} strokeWidth={1.5} />,
+  scan: (className = "w-6 h-6") => <ScanLine className={className} strokeWidth={1.5} />,
+  wallet: (className = "w-6 h-6") => <WalletCards className={className} strokeWidth={1.5} />,
 };
 
 // Keep the user's desktop and Dock tiles on the same compact iOS-like scale.
 const HOME_APP_ICON_SIZE = 55;
-const HOME_APP_ICON_GLYPH_CLASS = "h-9 w-9";
+// The tile was reduced from 60px to 55px. Keep the Lucide glyph in proportion
+// so its stroke does not look heavier just because the surrounding surface is
+// smaller.
+const HOME_APP_ICON_GLYPH_CLASS = "h-8 w-8";
 
 const hexToRgba = (hex: string, opacityPercent: number) => {
   if (!hex || !hex.startsWith("#")) {
