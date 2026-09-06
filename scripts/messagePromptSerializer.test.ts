@@ -45,16 +45,33 @@ assert.doesNotMatch(imageCurrent, /VERY_SECRET/);
 assert.match(serializeMessageContentForPrompt(message("[图片]", { sender: "character", imageAssetId: "asset-1" })), /角色发送了一张图片/);
 
 const textImage = serializeMessageContentForPrompt(message(createTextImageMarkup("海边的晚霞")));
-assert.equal(textImage, "[文字图：海边的晚霞]");
+assert.match(textImage, /^\[文字图：海边的晚霞；/);
 assert.match(serializeMessageContentForPrompt(message(createTextImageMarkup("海边的晚霞")), { mode: "current" }), /不要声称看到了真实照片/);
+const aliasTextImage = serializeMessageContentForPrompt(message(createTextImageMarkup("一张user的照片（角度看起来像偷拍）"), {
+  authorIdentityId: "alias-1",
+  authorNameSnapshot: "老莫",
+}), { mode: "current", userName: "饭饭", characterName: "步随影" });
+assert.match(aliasTextImage, /当前联系人“老莫”发送/);
+assert.match(aliasTextImage, /user\/用户.*画面中的被拍摄者或主体标签/);
+assert.match(aliasTextImage, /不要把画面主体认作发送者/);
+assert.doesNotMatch(aliasTextImage, /当前联系人“饭饭”发送/);
+
+const aliasImage = serializeMessageContentForPrompt(message("data:image/png;base64,SECRET", {
+  authorIdentityId: "alias-1",
+  authorNameSnapshot: "老莫",
+}), { mode: "current", userName: "饭饭", characterName: "步随影" });
+assert.match(aliasImage, /当前联系人“老莫”给你发送了一张真实图片/);
+assert.match(aliasImage, /不能推断照片里就是发送者本人/);
 
 const voice = serializeMessageContentForPrompt(message("[语音]|3|我们接着刚才的话题"));
 assert.match(voice, /准确转写/);
 assert.match(voice, /我们接着刚才的话题/);
 assert.match(serializeMessageContentForPrompt(message("[语音]|3|我们接着刚才的话题"), { mode: "current" }), /SAME CONVERSATION/);
+assert.match(serializeMessageContentForPrompt(message("[语音]|3|我们接着刚才的话题", { authorNameSnapshot: "老莫" }), { mode: "current", userName: "饭饭" }), /current contact “老莫”/);
 assert.match(serializeMessageContentForPrompt(message("[语音: “旧格式内容” (5秒)]")), /旧格式内容/);
 
 assert.match(serializeMessageContentForPrompt(message("[红包]|6.66|开心")), /6\.66 元红包/);
+assert.match(serializeMessageContentForPrompt(message("[红包]|6.66|开心", { authorNameSnapshot: "老莫" }), { userName: "饭饭" }), /老莫发送了 6\.66 元红包/);
 assert.match(serializeMessageContentForPrompt(message("[转账]|20.00|午饭|true")), /状态：已收款/);
 assert.match(serializeMessageContentForPrompt(message("[位置]|北京站")), /不证明发送者本人身处该地点/);
 assert.match(serializeMessageContentForPrompt(message("[音乐]|晴天|周杰伦")), /《晴天》— 周杰伦/);
@@ -84,6 +101,7 @@ const callRecord = createCallRecordMarkup({
 const callTurns = serializeMessageToPromptTurns(message(callRecord));
 assert.deepEqual(callTurns.map((turn) => [turn.role, turn.text]), [["user", "喂，你在吗"], ["model", "我在"]]);
 assert.match(serializeMessageContentForPrompt(message(callRecord), { includeCallTranscript: false }), /时长 02:43/);
+assert.match(serializeMessageContentForPrompt(message(callRecord, { authorNameSnapshot: "老莫" }), { includeCallTranscript: false, userName: "饭饭", characterName: "步随影" }), /老莫发起/);
 
 const transcript = serializeMessagesAsTranscript([
   legacyImage,

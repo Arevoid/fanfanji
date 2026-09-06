@@ -145,12 +145,13 @@ ${timeLogString}
 3. 【🚨 极其重要】：上方时间仅是内部推理元数据，不是要发送给用户的内容。禁止在回复中输出或复述任何时间标签、时间戳、时钟气泡或前缀，包括但不限于 \`[发送时间: ...]\`、\`[15:10]\`、\`【15:10】\`。如果需要自然提到时间，只能把它写进完整对话句子中。回复必须保持干净，只输出角色真正要说的话。`;
 }
 
-export function buildRedPacketReactionPrompt(content: string): string {
+export function buildRedPacketReactionPrompt(content: string, senderName = "用户"): string {
   const [, amountStr, greetingStr] = content.split("|");
   const amount = amountStr || "8.88";
   const greeting = greetingStr || "恭喜发财，万事如意";
-  return `[🚨 特别行为指令：你刚刚收到了一个来自用户的微信红包！ 🚨]
-你作为扮演的角色，刚刚在微信里收到了用户给你发来的红包！
+  const sender = senderName.trim() || "用户";
+  return `[🚨 特别行为指令：你刚刚收到了一个来自${sender}的微信红包！ 🚨]
+你作为扮演的角色，刚刚在微信里收到了${sender}给你发来的红包！
 - 红包金额：¥${amount}
 - 红包留言：“${greeting}”
 

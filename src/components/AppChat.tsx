@@ -1516,6 +1516,9 @@ export default function AppChat({
       characterId: activeChatCharId,
       scope: activeVoiceCallScope,
       sender: isIncomingCall ? "character" : "user",
+      authorIdentityId: !isIncomingCall ? activeIdentityId : undefined,
+      authorNameSnapshot: !isIncomingCall ? activeIdentityName : undefined,
+      authorAvatarSnapshot: !isIncomingCall ? activeIdentityAvatar : undefined,
       timestamp: Date.now(),
       incoming: isIncomingCall,
       userEndedCall: options.userEndedCall,
@@ -1564,6 +1567,9 @@ export default function AppChat({
       scope: activeVoiceCallScope,
       id: Date.now().toString(),
       timestamp: Date.now(),
+      authorIdentityId: activeIdentityId,
+      authorNameSnapshot: activeIdentityName,
+      authorAvatarSnapshot: activeIdentityAvatar,
     });
     if (!userMsg) return;
     onSendMessage(userMsg);
@@ -2153,7 +2159,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
       // 1.2 Red Packet Reaction Prompt
       if (isRedPacket && userMsg) {
-        assembledInstructions.push(buildRedPacketReactionPrompt(userMsg.content));
+        assembledInstructions.push(buildRedPacketReactionPrompt(userMsg.content, userMsg.authorNameSnapshot || promptUserName));
       }
 
       if (isCrossDayNewSession || historyPartition.hasCrossDayHistory) {

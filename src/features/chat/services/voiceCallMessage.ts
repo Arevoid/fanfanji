@@ -9,6 +9,9 @@ export function createVoiceCallUserMessage(input: {
   scope?: DirectVoiceCallScope;
   id: string;
   timestamp: number;
+  authorIdentityId?: string;
+  authorNameSnapshot?: string;
+  authorAvatarSnapshot?: string;
 }): Message | undefined {
   const content = input.text.trim();
   if (!content || !input.characterId || !isCurrentVoiceCallScope(input.sessionRelationId, input.scope)) return undefined;
@@ -19,5 +22,8 @@ export function createVoiceCallUserMessage(input: {
     content,
     timestamp: input.timestamp,
     sender: "user",
+    authorIdentityId: input.authorIdentityId,
+    authorNameSnapshot: input.authorNameSnapshot,
+    authorAvatarSnapshot: input.authorAvatarSnapshot,
   });
 }

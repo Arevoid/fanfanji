@@ -16,6 +16,18 @@ const completed = completeVoiceCall({ ...base, requestedStatus: "completed" });
 assert.equal(completed.status, "completed");
 assert.match(completed.callRecord.content, /02:05/);
 assert.match(completed.callRecord.content, /%E4%BD%A0%E5%A5%BD/);
+const outgoing = completeVoiceCall({
+  ...base,
+  sender: "user",
+  incoming: false,
+  requestedStatus: "completed",
+  authorIdentityId: "alias-1",
+  authorNameSnapshot: "老莫",
+  authorAvatarSnapshot: "avatar://alias",
+});
+assert.equal(outgoing.callRecord.authorIdentityId, "alias-1");
+assert.equal(outgoing.callRecord.authorNameSnapshot, "老莫");
+assert.equal(outgoing.callRecord.authorAvatarSnapshot, "avatar://alias");
 const empty = completeVoiceCall({ ...base, transcript: [], requestedStatus: "completed" });
 assert.equal(empty.status, "cancelled");
 assert.equal(Boolean(empty.rejectionPatch), true);

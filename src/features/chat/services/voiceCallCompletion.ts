@@ -17,6 +17,9 @@ export function completeVoiceCall(input: {
   incoming: boolean;
   userEndedCall?: boolean;
   recentMessages: readonly Message[];
+  authorIdentityId?: string;
+  authorNameSnapshot?: string;
+  authorAvatarSnapshot?: string;
 }): { status: VoiceCallStatus; callRecord: Message; rejectionPatch?: Partial<CharacterRelationship> } {
   const meaningfulTranscript = input.transcript.filter((item) => getCallTranscriptText(item.content || "").trim());
   const status: VoiceCallStatus = input.requestedStatus === "completed" && meaningfulTranscript.length === 0
@@ -29,6 +32,9 @@ export function completeVoiceCall(input: {
     characterId: input.characterId,
     scope: input.scope,
     sender: input.sender,
+    authorIdentityId: input.sender === "user" ? input.authorIdentityId : undefined,
+    authorNameSnapshot: input.sender === "user" ? input.authorNameSnapshot : undefined,
+    authorAvatarSnapshot: input.sender === "user" ? input.authorAvatarSnapshot : undefined,
     content: createCallRecordMarkup({
       callType: "语音通话",
       status,

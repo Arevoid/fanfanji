@@ -346,7 +346,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       if (userMemoContext) assembledInstructions.push(userMemoContext);
 
       if (isRedPacketMarkup(lastUserMsg.content)) {
-        assembledInstructions.push(buildRedPacketReactionPrompt(lastUserMsg.content));
+        assembledInstructions.push(buildRedPacketReactionPrompt(lastUserMsg.content, lastUserMsg.authorNameSnapshot || promptUserName));
       }
 
       if (isCrossDayNewSession || historyPartition.hasCrossDayHistory) {

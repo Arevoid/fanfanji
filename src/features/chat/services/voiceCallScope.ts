@@ -35,6 +35,10 @@ export function createVoiceCallRecordMessage(input: {
   content: string;
   timestamp: number;
   sender?: "user" | "character";
+  /** Freeze the sending identity for user-authored call records. */
+  authorIdentityId?: string;
+  authorNameSnapshot?: string;
+  authorAvatarSnapshot?: string;
 }): Message {
   return {
     id: input.id,
@@ -42,6 +46,9 @@ export function createVoiceCallRecordMessage(input: {
     relationId: input.scope.relationId,
     conversationId: input.scope.conversationId,
     sender: input.sender || "user",
+    ...(input.authorIdentityId ? { authorIdentityId: input.authorIdentityId } : {}),
+    ...(input.authorNameSnapshot ? { authorNameSnapshot: input.authorNameSnapshot } : {}),
+    ...(input.authorAvatarSnapshot ? { authorAvatarSnapshot: input.authorAvatarSnapshot } : {}),
     content: input.content,
     timestamp: input.timestamp,
   };

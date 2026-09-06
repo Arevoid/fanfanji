@@ -38,10 +38,27 @@ const limitText = (value: string, limit: number): string => value.length > limit
   ? `${value.slice(0, limit)}\n[内容过长，后续 ${value.length - limit} 个字符未放入本次上下文]`
   : value;
 
-const actorLabel = (message: Pick<Message, "sender">, options: MessagePromptSerializerOptions): string =>
+/**
+ * Resolve the name that was true when a user message was authored. Identity
+ * snapshots prevent a later alias switch from rewriting old attachment
+ * messages as if they had been sent by the newly active identity.
+ */
+export const getMessagePromptActorName = (
+  message: Pick<Message, "sender"> & Partial<Pick<Message, "authorNameSnapshot">>,
+  options: MessagePromptSerializerOptions,
+): string =>
   message.sender === "user"
-    ? options.userName?.trim() || "用户"
+    ? message.authorNameSnapshot?.trim() || options.userName?.trim() || "用户"
     : options.characterName?.trim() || "角色";
+
+const actorLabel = getMessagePromptActorName;
+
+const promptUserNameForMessage = (message: Message, options: MessagePromptSerializerOptions): string | undefined =>
+  message.sender === "user" ? actorLabel(message, options) : options.userName;
+
+const textImageSubjectRule = `描述中的“user/用户”等词只表示画面中的被拍摄者或主体标签，不等于发送者身份；除非描述明确写“自拍”或发送者本人，否则不要把画面主体认作发送者，也不要仅凭发送者分享了画面就推断照片是发送者本人。`;
+
+const imageSubjectRule = "图片主体可能是其他人、物品或场景；仅凭发送者发送图片不能推断照片里就是发送者本人，无法确认时称为‘这张图片’。";
 
 const parseLegacyVoice = (content: string): { seconds?: string; transcript?: string } | undefined => {
   if (!content.startsWith("[语音")) return undefined;
@@ -67,7 +84,7 @@ function serializeMessageContentForPromptBase(
 
   if (isCallRecordMarkup(content)) {
     return formatCallRecordHistory(content, {
-      userName: options.userName,
+      userName: promptUserNameForMessage(message, options),
       characterName: options.characterName,
       includeTranscript: options.includeCallTranscript !== false,
     }) || "[通话记录]";
@@ -77,23 +94,23 @@ function serializeMessageContentForPromptBase(
   const isStoredImage = Boolean(message.imageAssetId) || /^\[图片\](?:$|\|)/u.test(content);
   if (isBinaryImage || isStoredImage) {
     if (mode === "current" && message.sender === "user") {
-      return `[发送图片/照片] 我给你发送了一张照片。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
+      return `[发送图片/照片] 当前联系人“${actor}”给你发送了一张真实图片。${imageSubjectRule}${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
     }
-    return `[图片消息：${actor}发送了一张图片；图片二进制内容未放入文本上下文]`;
+    return `[图片消息：${actor}发送了一张图片；图片二进制内容未放入文本上下文。${imageSubjectRule}]`;
   }
 
   const textImageDescription = parseTextImageDescription(content);
   if (textImageDescription !== null) {
     if (mode === "current" && message.sender === "user") {
-      return `[发送文字图] 我发送了一张不含真实图片、仅用文字描述画面的文字图，描述内容是：“${textImageDescription}”。请把它当作我主动分享的画面描述来回应，不要声称看到了真实照片。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
+      return `[发送文字图] 当前联系人“${actor}”发送了一张不含真实图片、仅用文字描述画面的文字图。描述内容是：“${textImageDescription}”。请把它当作发送者主动分享的画面描述来回应，不要声称看到了真实照片。${textImageSubjectRule}${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
     }
-    return `[文字图：${textImageDescription || "未提供描述"}]`;
+    return `[文字图：${textImageDescription || "未提供描述"}；${textImageSubjectRule}]`;
   }
 
   if (/^\[(?:红包|微信红包)\]/u.test(content)) {
     const [, amount = "8.88", greeting = "恭喜发财，万事如意"] = content.split("|");
     if (mode === "current" && message.sender === "user") {
-      return `[发送红包] 我给你发送了一个金额为 ${amount} 元的微信红包，祝福语是：“${greeting}”。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
+      return `[发送红包] 当前联系人“${actor}”给你发送了一个金额为 ${amount} 元的微信红包，祝福语是：“${greeting}”。${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
     }
     return `[红包消息：${actor}发送了 ${amount} 元红包，祝福语：“${greeting}”]`;
   }
@@ -152,16 +169,16 @@ function serializeMessageContentForPromptBase(
   const voiceHistory = formatVoiceMessageHistory(content);
   if (voiceHistory) {
     if (mode === "current" && message.sender === "user") {
-      return `${formatCurrentVoiceMessagePrompt(content)}\n${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
+      return `${formatCurrentVoiceMessagePrompt(content, actor)}\n${MEDIA_EVENT_PERSONA_RESPONSE_RULE}`;
     }
-    return voiceHistory;
+    return `[语音消息：${actor}发送；语音只是传递媒介，不改变当前对话关系]\n${voiceHistory}`;
   }
 
   const legacyVoice = parseLegacyVoice(content);
   if (legacyVoice) {
     return legacyVoice.transcript
-      ? `[语音消息${legacyVoice.seconds ? `，${legacyVoice.seconds}秒` : ""}；准确转写，与前后文字属于同一段对话]\n${legacyVoice.transcript}`
-      : `[语音消息${legacyVoice.seconds ? `，${legacyVoice.seconds}秒` : ""}；未提供可确认的转写]`;
+      ? `[语音消息：${actor}${legacyVoice.seconds ? `，${legacyVoice.seconds}秒` : ""}；准确转写，与前后文字属于同一段对话]\n${legacyVoice.transcript}`
+      : `[语音消息：${actor}${legacyVoice.seconds ? `，${legacyVoice.seconds}秒` : ""}；未提供可确认的转写]`;
   }
 
   if (content.startsWith("[表情]|")) {
@@ -209,7 +226,7 @@ export function serializeMessageToPromptTurns(
   options: MessagePromptSerializerOptions = {},
 ): SerializedPromptTurn[] {
   const callTurns = expandCallRecordHistory(message.content, message.timestamp, {
-    userName: options.userName,
+    userName: promptUserNameForMessage(message, options),
     characterName: options.characterName,
   });
   if (callTurns) return callTurns.map((turn) => ({ ...turn, text: stripInternalDeliveryMarkers(turn.text) }));
