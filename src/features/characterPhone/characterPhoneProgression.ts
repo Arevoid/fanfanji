@@ -220,7 +220,8 @@ function buildRecentContext(input: {
     .reverse()
     .map((message) => {
       const contact = input.phone.contacts.find((candidate) => candidate.id === message.contactId);
-      return `${message.sender === "character" ? roleDisplayName(input.character) : contact?.name || "联系人"}：${redactSourceFileName(message.content, input.character.sourceFileName)}`;
+      const content = message.recalledAt ? "你撤回了一条信息" : message.content;
+      return `${message.sender === "character" ? roleDisplayName(input.character) : contact?.name || "联系人"}：${redactSourceFileName(content, input.character.sourceFileName)}`;
     });
   const contacts = input.phone.contacts
     .filter((contact) => !contact.removedAt)
@@ -412,6 +413,8 @@ type CharacterPhoneProgressionInput = {
   relationshipNetworkMaps?: RelationshipNetworkMap[];
   musicTracks?: MusicTrack[];
   settings?: UserSettings;
+  /** First unlock generation should establish a coherent trace in every supported app. */
+  initial?: boolean;
   now?: number;
 };
 
@@ -424,6 +427,7 @@ export async function advanceCharacterPhoneWithResult(
   input: CharacterPhoneProgressionInput,
 ): Promise<CharacterPhoneGenerationResult> {
   const now = input.now ?? Date.now();
+  const isInitialGeneration = Boolean(input.initial);
   const characters = input.characters ?? [input.character];
   const relationships = input.relationships ?? [];
   const messages = input.messages ?? [];
@@ -492,23 +496,26 @@ export async function advanceCharacterPhoneWithResult(
   });
   const textImageEvidence = collectTextImageEvidence(lifeContext);
   const roleName = roleDisplayName(input.character);
+  const generationRequest = isInitialGeneration
+    ? "这是该角色手机首次初始化。请围绕同一个有证据的生活事件，必须覆盖聊天、浏览器、日程、相册、日记、备忘录、朋友圈和电话，各生成一条自然痕迹；音乐由本地曲库同步，不要伪造曲目。首次初始化允许把同一事件投影到多个应用，但仍必须遵守证据边界。"
+    : "";
   let response;
   try {
     response = await apiChat({
       message: `请根据下面这份“角色当前生活上下文”，先选定一个有证据的生活事件，再生成 2—4 条彼此呼应的手机痕迹。你是在模拟一个真实的人，而不是给应用填充示例数据。只返回 JSON，不要 Markdown：{"lifeEventSummary":"本次所有痕迹共同围绕的具体事件","lifeEventAtHoursAgo":2,"evidenceSourceIds":["chat:真实ID"],"contacts":[{"name":"有依据的联系人或群聊名称","relation":"与角色的关系","kind":"npc或group","memberNames":["有依据的群成员"],"isLongTerm":true}],"threadContactName":"本次联系人对话对应的联系人或群聊名称","threadIncoming":"联系人或群成员发给角色的一句话","threadOutgoing":"角色发给该联系人或群聊的一句话","callContactName":"有证据且已存在的通话联系人","callDirection":"incoming、outgoing或missed","callDurationSeconds":120,"searchQuery":"与该事件直接相关的搜索词","searchTitle":"搜索记录标题","searchResults":[{"platform":"平台名称","title":"该平台结果标题","snippet":"该平台对这次搜索的 AI 摘要"}],"searchReflection":"角色搜索后的一两句私下心声","diaryTitle":"角色关于该事件的私密日记标题","diaryBody":"角色关于该事件的私密想法","noteTitle":"与该事件相关的备忘录标题","noteContent":"备忘录内容","todoText":"该事件确实产生的待办","scheduleTitle":"该事件对应的具体日程标题","scheduleDetail":"具体日程详情","scheduleAtHours":5,"postContent":"角色可能就该事件发布的朋友圈内容","galleryTitle":"该事件中角色保存的相册标题","galleryCaption":"相册图片描述","hiddenGalleryTitle":"有明确私密证据时才填写的隐藏相册标题","hiddenGalleryCaption":"有明确私密证据时才填写的隐藏相册图片描述"}\n若有“主手机里可参考的文字图描述”，优先把它作为角色相册中的文字图素材；galleryCaption 只写画面描述，不要生成真实图片、data URL 或文件名。searchResults 仅在 searchQuery/searchTitle 有明确证据时填写 2—3 条不同平台的结果；平台名、标题和摘要都由你根据角色上下文生成，不要输出网址、外部链接或“查看原始页面”按钮。searchReflection 只在 searchQuery/searchTitle 有明确证据时填写：它是角色刚搜完后的私下反应，不是百科摘要或旁白。hiddenGalleryTitle/hiddenGalleryCaption 只有在证据明确包含私密、隐秘、秘密、仅自己可见等内容时才填写，否则必须为空。若没有足够依据生成某个字段，返回空字符串或空数组。`,
       history: [],
-      systemInstruction: `你扮演真实存在的角色“${roleName}”，正在整理他自己的手机。\n${context}\n\n严格规则：
+      systemInstruction: `你扮演真实存在的角色“${roleName}”，正在整理他自己的手机。\n${context}\n\n${generationRequest}\n严格规则：
 1. 所有内容必须来自角色人设、世界书、最近上下文或已有手机记录的合理延伸；不能凭空制造与角色无关的人和事件。
 2. 联系人只能是角色现实中可能认识的人：用户、已有角色关系、世界书/人设明确提到的家人朋友同事，或有明确依据的新 NPC。群聊必须有明确的群名称或成员依据。不要读取或生成用户不认识该角色的好友。name 只能填写真实的人名或群聊名，不能填写“我可”“我都开始怀疑你是不”这类句子片段；无法确定正式名称时请留空并不要添加该联系人。
 3. threadContactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成聊天字段。不要把联系人聊天塞进用户与角色的聊天镜像。
-4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律，不要每个应用都强行生成一条，不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。
+4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isInitialGeneration ? "首次初始化时必须覆盖所有支持内容生成的应用，但不要使用模板标题。" : "后续生活推进不要每个应用都强行生成一条，不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。"}
 5. 角色真实姓名、备注名和人设文件名是不同概念。绝不能把文件名、输入字段名、世界书标题当作角色姓名或正文内容。
 6. 日记必须是角色不会公开展示的私密想法；备忘录和日程必须是具体事项；浏览器输出搜索记录标题和 2—3 条不同平台的 AI 结果卡片，不能输出网址或引导查看原始页面；相册字段只描述角色真实可能保存的图片或文字图，不要凭空输出图片文件名。主手机的文字图只以描述形式参考，角色手机会在本地渲染文字图，不要声称有真实照片。
-7. lifeEventSummary 必须是本次唯一的生活事件；生成的 2—4 个应用字段必须是这个事件在不同应用中的自然痕迹，时间和人物不能互相矛盾。
+ 7. lifeEventSummary 必须是本次唯一的生活事件；生成的应用字段必须是这个事件在不同应用中的自然痕迹，时间和人物不能互相矛盾。
 8. searchReflection 必须是 1—3 句、约 15—90 字的第一人称私下反应：回答“为什么偏偏现在搜”“哪一点马上有用”“还有什么没想通或准备怎么做”。允许短句、停顿、犹豫、自我纠正和轻微情绪，必须贴合角色口吻与当下事件；不要复述搜索词，不要写成百科总结、心理分析、鸡汤或“我查这个是为了……”模板，也不要提到 AI、提示词或应用规则。若没有明确搜索动机就留空。
 9. evidenceSourceIds 只能从“可引用的证据来源ID”原样选择；没有证据就返回空数组，不得编造 ID。
 10. 隐藏相册字段只允许承载明确私密/隐秘证据，且生成的条目必须是 hidden=true 的私藏文字图；普通日常、公开动态和普通聊天图片不得放入隐藏相册。
-11. 每次最多选择 2—4 个最有依据的字段生成，其余全部留空；宁可少写，不要为了填满字段编造内容。
+11. ${isInitialGeneration ? "首次初始化必须为聊天、浏览器、电话、日程、相册、日记、备忘录、朋友圈各提供一条与同一事件一致的痕迹；只有在字段确实没有任何证据时才留空。" : "每次最多选择 2—4 个最有依据的字段生成，其余全部留空；宁可少写，不要为了填满字段编造内容。"}
 12. 不要生成解释、旁白、占位符、统一问候或应用说明；只返回 JSON。`,
       apiKey: input.settings.apiKey,
       model: input.settings.selectedModel,
@@ -577,7 +584,7 @@ export async function advanceCharacterPhoneWithResult(
     signature: (value: T) => string,
   ) => {
     if (items.some((existing) => signature(existing) === signature(item))) return false;
-    if (!artifactApps.has(app) && artifactApps.size >= 4) return false;
+    if (!artifactApps.has(app) && artifactApps.size >= (isInitialGeneration ? 8 : 4)) return false;
     item.lifeEventId = lifeEventId;
     items.push(item);
     artifactApps.add(app);
@@ -742,7 +749,13 @@ export async function advanceCharacterPhoneWithResult(
 
   if (generated) {
     return {
-      phone: { ...next, lastGeneratedAt: now, updatedAt: now },
+      phone: {
+        ...next,
+        lastGeneratedAt: now,
+        ...(isInitialGeneration ? { initialContentGeneratedAt: now } : {}),
+        ...(isInitialGeneration ? { initialContentPending: false } : {}),
+        updatedAt: now,
+      },
       status: "generated",
       createdCount: artifactRefs.length + mergedContacts.added.length,
     };

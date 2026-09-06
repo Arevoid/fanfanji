@@ -86,6 +86,7 @@ function toCharacterMessage(message: Message, phoneId: string, contactId: string
     content: message.content,
     timestamp: message.timestamp,
     sourceMessageId: message.id,
+    ...(message.recalledAt ? { recalledAt: message.recalledAt } : {}),
   };
 }
 
@@ -301,11 +302,18 @@ function syncUserChat(
     // mirror and must not be copied back as ordinary chat history.
     .filter((message) => !message.id.startsWith("phone-proactive-"))
     .sort((left, right) => left.timestamp - right.timestamp);
-  const existing = (phone.threadMessages ?? []).filter((message) => message.contactId !== userContact.id);
+  const sourceMessageIds = new Set(sourceMessages.map((message) => message.id));
+  const existing = (phone.threadMessages ?? []).filter((message) => message.contactId !== userContact.id
+    || Boolean(message.sourceMessageId && sourceMessageIds.has(message.sourceMessageId)));
   const synced = sourceMessages.map((message) => toCharacterMessage(message, phone.id, userContact.id));
   const existingSynced = (phone.threadMessages ?? []).filter((message) => message.contactId === userContact.id && message.sourceMessageId);
   const bySourceId = new Map(existingSynced.map((message) => [message.sourceMessageId, message]));
-  const merged = synced.map((message) => bySourceId.get(message.sourceMessageId || "") || message);
+  const merged = synced.map((message) => {
+    const existingMessage = bySourceId.get(message.sourceMessageId || "");
+    return existingMessage
+      ? { ...existingMessage, ...message, operatedByUser: existingMessage.operatedByUser || message.operatedByUser }
+      : message;
+  });
   // The user conversation is a strict mirror of the scoped main-chat
   // messages. Keeping a phone-local fallback when the source thread is empty
   // makes stale/generated messages look like real conversation history in the
@@ -363,7 +371,7 @@ function syncContactThreads(
     contacts: contacts.map((contact) => {
       const latest = sorted.filter((message) => message.contactId === contact.id).at(-1);
       return latest
-        ? { ...contact, lastMessage: latest.content, lastMessageAt: latest.timestamp }
+        ? { ...contact, lastMessage: latest.recalledAt ? "你撤回了一条信息" : latest.content, lastMessageAt: latest.timestamp }
         : contact;
     }),
   };

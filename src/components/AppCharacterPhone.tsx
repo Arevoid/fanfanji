@@ -48,6 +48,9 @@ import {
   Users,
   EyeOff,
   X,
+  Wifi,
+  Battery,
+  Signal,
 } from "lucide-react";
 import type { Character, Message, Moment, MomentVisibility, MusicTrack, UserIdentity, UserSettings, WorldBookEntry } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
@@ -70,6 +73,7 @@ import type {
   CharacterPhonePostComment,
   CharacterPhoneRecord,
   CharacterPhoneScheduleItem,
+  CharacterPhoneThreadMessage,
   CharacterPhoneTodo,
 } from "../domain/characterPhone/types";
 import type { Appointment, ScheduleEntry } from "../domain/schedule/scheduleTypes";
@@ -112,6 +116,7 @@ import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../domain/r
 import { stickerDb } from "../utils/stickerDb";
 import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
 import { clearRebuildableCache } from "../core/storage/rebuildableCache";
+import type { MessageMutationScope } from "../features/chat/context/directInteractionScope";
 
 interface AppCharacterPhoneProps {
   userIdentityId: string;
@@ -126,7 +131,10 @@ interface AppCharacterPhoneProps {
   settings?: UserSettings;
   musicTracks?: MusicTrack[];
   resolvedTheme?: ResolvedTheme;
+  hideStatusBar?: boolean;
   onSendMessage?: (message: Message, ownerIdentityId?: string) => void;
+  onDeleteMessage?: (messageId: string, scope?: MessageMutationScope) => void;
+  onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => void;
   onSaveImageToCharacterPhone?: (input: CharacterPhoneImageSaveInput) => void | Promise<void>;
   /** Mirrors role-phone posts into the owner's main Moments feed. */
   onSyncCharacterPhonePost?: (input: { post: CharacterPhonePost; character: Character; ownerIdentityId: string }) => void;
@@ -379,8 +387,30 @@ function openCharacterPhone(
         musicTracks: context.musicTracks,
       })
     : reopened;
-  if (contextualPhone !== existing || reopened !== basePhone) saveCharacterPhone(contextualPhone);
-  return contextualPhone;
+  const hasStoredPhoneContent = [
+    contextualPhone.messages,
+    contextualPhone.threadMessages,
+    contextualPhone.posts,
+    contextualPhone.browserHistory,
+    contextualPhone.diaryEntries,
+    contextualPhone.notes,
+    contextualPhone.todos,
+    contextualPhone.scheduleItems,
+    contextualPhone.phoneCalls,
+    contextualPhone.galleryItems,
+    contextualPhone.lifeEvents,
+  ].some((items) => items.length > 0);
+  // New records (and old empty records created before the explicit marker was
+  // introduced) should run the one-time first-entry generation. Existing
+  // phones that already contain user data are left untouched.
+  const shouldQueueInitialGeneration = !contextualPhone.initialContentGeneratedAt
+    && !contextualPhone.initialContentPending
+    && !hasStoredPhoneContent;
+  const preparedPhone = shouldQueueInitialGeneration
+    ? { ...contextualPhone, initialContentPending: true }
+    : contextualPhone;
+  if (preparedPhone !== existing || reopened !== basePhone) saveCharacterPhone(preparedPhone);
+  return preparedPhone;
 }
 function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleTimeString("zh-CN", {
@@ -408,6 +438,10 @@ function parseCharacterPhoneStickerContent(content: string): CharacterPhoneStick
 function getCharacterPhoneMessagePreview(content: string): string {
   const sticker = parseCharacterPhoneStickerContent(content);
   return sticker ? `[表情] ${sticker.name}` : content;
+}
+
+function getCharacterPhoneThreadMessageDisplay(message: CharacterPhoneThreadMessage): string {
+  return message.recalledAt ? "你撤回了一条信息" : getCharacterPhoneMessagePreview(message.content);
 }
 
 /** Render the same sticker protocol used by the main chat instead of exposing
@@ -494,6 +528,24 @@ function CharacterPhoneEvidenceEmpty({
     <div className={`${compact ? "my-2 px-3 py-3" : "mx-1 my-4 px-4 py-5"} rounded-2xl border border-dashed border-neutral-200 bg-white/60 text-center`}>
       <p className="text-xs font-semibold text-neutral-500">{title}</p>
       <p className="mt-1 text-[10px] leading-5 text-neutral-400">{detail}</p>
+    </div>
+  );
+}
+
+function CharacterPhoneStatusBar({ now, dark = false }: { now: Date; dark?: boolean }) {
+  const time = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return (
+    <div
+      className={`relative z-50 flex shrink-0 items-center justify-between px-6 pb-[7px] pt-[calc(env(safe-area-inset-top,0px)+11px)] text-xs font-semibold select-none ${dark ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" : "text-gray-800"}`}
+      aria-label={`角色手机状态栏，当前时间 ${time}`}
+    >
+      <span className="font-sans text-sm tracking-tight">{time}</span>
+      <span className="flex items-center gap-2" aria-hidden="true">
+        <Signal className="h-3.5 w-3.5" strokeWidth={2.5} />
+        <span className="text-[10px] tracking-widest font-bold">5G</span>
+        <Wifi className="h-3.5 w-3.5" strokeWidth={2.5} />
+        <Battery className="-my-1 h-5 w-5" strokeWidth={2} />
+      </span>
     </div>
   );
 }
@@ -615,7 +667,10 @@ export default function AppCharacterPhone({
   settings,
   musicTracks = [],
   resolvedTheme = "light",
+  hideStatusBar = false,
   onSendMessage,
+  onDeleteMessage,
+  onUpdateMessage,
   onSaveImageToCharacterPhone,
   onSyncCharacterPhonePost,
   onDeleteCharacterPhonePost,
@@ -740,8 +795,11 @@ export default function AppCharacterPhone({
   const [phoneNotice, setPhoneNotice] = useState("");
   const [phoneDataNotice, setPhoneDataNotice] = useState("");
   const [isAdvancing, setIsAdvancing] = useState(false);
+  const [selectedThreadMessageId, setSelectedThreadMessageId] = useState<string | null>(null);
   const generationRequestRef = useRef(0);
   const phoneReplyQueuesRef = useRef<Record<string, Promise<void>>>({});
+  const initialGenerationPhoneIdRef = useRef<string | null>(null);
+  const threadMessagePressTimerRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const phoneScopeRef = useRef({ ownerIdentityId: userIdentityId, characterId: selectedCharacterId });
   const syncedPhonePostsRef = useRef<Record<string, string>>({});
@@ -771,6 +829,9 @@ export default function AppCharacterPhone({
     if (hidingTapTimeoutRef.current !== null) {
       window.clearTimeout(hidingTapTimeoutRef.current);
     }
+    if (threadMessagePressTimerRef.current !== null) {
+      window.clearTimeout(threadMessagePressTimerRef.current);
+    }
   }, []);
   useEffect(() => {
     const timer = window.setInterval(() => setClockNow(new Date()), 1000);
@@ -779,6 +840,7 @@ export default function AppCharacterPhone({
   useEffect(() => {
     if (previousIdentityIdRef.current === userIdentityId) return;
     generationRequestRef.current += 1;
+    initialGenerationPhoneIdRef.current = null;
     setIsAdvancing(false);
     previousIdentityIdRef.current = userIdentityId;
     const nextCharacter = characters[0];
@@ -1086,6 +1148,8 @@ export default function AppCharacterPhone({
     setMusicIsPlaying(false);
     setMusicProgress(0.42);
     setDesktopPage(0);
+    initialGenerationPhoneIdRef.current = null;
+    setUnlocked(false);
     if (imageAssetIds.length > 0) {
       const results = await Promise.allSettled(imageAssetIds.map((id) => imageAssetDb.deleteImage(id)));
       if (results.some((result) => result.status === "rejected")) {
@@ -1098,6 +1162,8 @@ export default function AppCharacterPhone({
   const closeCharacterPhone = () => {
     generationRequestRef.current += 1;
     setIsAdvancing(false);
+    initialGenerationPhoneIdRef.current = null;
+    setUnlocked(false);
     setHiddenGalleryUnlocked(false);
     setHiddenGalleryInput("");
     setHiddenGalleryNotice("");
@@ -1105,6 +1171,7 @@ export default function AppCharacterPhone({
   };
   const openPhoneContact = (contact: CharacterPhoneContact) => {
     setSelectedContactId(contact.id);
+    setSelectedThreadMessageId(null);
     setPhoneChatMode("conversation");
     setContactMenuOpen(false);
     setContactRemarkEditing(false);
@@ -1348,6 +1415,7 @@ export default function AppCharacterPhone({
     const character = characters.find((item) => item.id === characterId);
     if (!character) return;
     generationRequestRef.current += 1;
+    initialGenerationPhoneIdRef.current = null;
     setIsAdvancing(false);
     setSelectedCharacterId(characterId);
     setPhone(openCharacterPhone(userIdentityId, character, phoneContext));
@@ -1382,9 +1450,13 @@ export default function AppCharacterPhone({
     setPhoneDataNotice("");
   };
 
-  const generateCharacterPhoneContent = async () => {
-    if (!unlocked || !currentPhone || !selectedCharacter || isAdvancing) return;
-    const basePhone = currentPhone;
+  const generateCharacterPhoneContent = async (options: { initial?: boolean; phone?: CharacterPhoneRecord } = {}) => {
+    const isInitialGeneration = Boolean(options.initial);
+    if ((!unlocked && !isInitialGeneration) || !selectedCharacter || isAdvancing) return;
+    const basePhone = options.phone || currentPhone;
+    if (!basePhone) return;
+    if (isInitialGeneration && (!basePhone.initialContentPending || basePhone.initialContentGeneratedAt || initialGenerationPhoneIdRef.current === basePhone.id)) return;
+    if (isInitialGeneration) initialGenerationPhoneIdRef.current = basePhone.id;
     const now = Date.now();
     const requestId = generationRequestRef.current + 1;
     generationRequestRef.current = requestId;
@@ -1418,6 +1490,7 @@ export default function AppCharacterPhone({
           relationshipNetworkMaps,
           musicTracks,
           settings,
+          initial: isInitialGeneration,
         }),
         timeoutPromise,
       ]);
@@ -1428,10 +1501,13 @@ export default function AppCharacterPhone({
         || advancedResult.phone.id !== requestScope.phoneId) return;
       const advancedPhone = advancedResult.phone;
       const discoveredPhone = discoverPhoneActions(advancedPhone, now);
-      const saved = await saveCharacterPhoneWithCacheRecovery(discoveredPhone, requestId);
+      const phoneToSave = isInitialGeneration && advancedResult.status === "generated"
+        ? { ...discoveredPhone, initialContentGeneratedAt: now, initialContentPending: false }
+        : discoveredPhone;
+      const saved = await saveCharacterPhoneWithCacheRecovery(phoneToSave, requestId);
       if (!saved) return;
-      setPhone(discoveredPhone);
-      const newGeneratedPosts = discoveredPhone.posts.filter(
+      setPhone(phoneToSave);
+      const newGeneratedPosts = phoneToSave.posts.filter(
         (post) => post.source === "generated"
           && post.authorId === selectedCharacter.id
           && !basePhone.posts.some((existing) => existing.id === post.id),
@@ -1440,7 +1516,7 @@ export default function AppCharacterPhone({
       // generated post is enough to establish the shared social trace.
       newGeneratedPosts.sort((left, right) => right.timestamp - left.timestamp).slice(0, 1).forEach(syncCharacterPhonePost);
       setPhoneNotice(advancedResult.status === "generated"
-        ? "角色手机已生成新的生活痕迹"
+        ? isInitialGeneration ? "角色手机已完成首次生活初始化" : "角色手机已生成新的生活痕迹"
         : characterPhoneGenerationNoChangeNotice(advancedResult.reason));
     } catch (error) {
       if (timedOut && mountedRef.current && generationRequestRef.current === requestId) {
@@ -1492,6 +1568,9 @@ export default function AppCharacterPhone({
       setUnlocked(true);
       setInput("");
       setNotice("");
+      if (openedPhone.initialContentPending && !openedPhone.initialContentGeneratedAt) {
+        void generateCharacterPhoneContent({ initial: true, phone: openedPhone });
+      }
       return;
     }
     const failedAttempts = currentPhone.failedAttempts + 1;
@@ -2025,6 +2104,84 @@ export default function AppCharacterPhone({
   const currentThreadMessages = selectedContact
     ? listCharacterPhoneThreadMessages(currentPhone, selectedContact.id).slice(-48)
     : [];
+  const clearThreadMessagePressTimer = () => {
+    if (threadMessagePressTimerRef.current !== null) {
+      window.clearTimeout(threadMessagePressTimerRef.current);
+      threadMessagePressTimerRef.current = null;
+    }
+  };
+  const openThreadMessageMenu = (message: CharacterPhoneThreadMessage) => {
+    if (message.sender !== "character" || !message.operatedByUser) return;
+    setSelectedThreadMessageId(message.id);
+  };
+  const beginThreadMessagePress = (event: React.PointerEvent<HTMLDivElement>, message: CharacterPhoneThreadMessage) => {
+    if (event.pointerType === "mouse" || message.sender !== "character" || !message.operatedByUser) return;
+    clearThreadMessagePressTimer();
+    threadMessagePressTimerRef.current = window.setTimeout(() => {
+      threadMessagePressTimerRef.current = null;
+      openThreadMessageMenu(message);
+    }, 480);
+  };
+  const endThreadMessagePress = () => clearThreadMessagePressTimer();
+  const getPhoneMutationScopeForMessage = (message: CharacterPhoneThreadMessage): MessageMutationScope | undefined => {
+    if (!message.sourceMessageId || !selectedCharacter) return undefined;
+    const relation = relationships.find((candidate) =>
+      candidate.userIdentityId === userIdentityId
+      && candidate.characterId === selectedCharacter.id,
+    );
+    return relation
+      ? { characterId: selectedCharacter.id, relationId: relation.id, conversationId: relation.conversationId }
+      : { characterId: selectedCharacter.id };
+  };
+  const updatePhoneThreadContactPreview = (phone: CharacterPhoneRecord, contactId: string): CharacterPhoneRecord => {
+    const latest = listCharacterPhoneThreadMessages(phone, contactId).at(-1);
+    return {
+      ...phone,
+      contacts: phone.contacts.map((contact) => contact.id === contactId
+        ? latest
+          ? { ...contact, lastMessage: getCharacterPhoneThreadMessageDisplay(latest), lastMessageAt: latest.timestamp }
+          : { ...contact, lastMessage: undefined, lastMessageAt: undefined }
+        : contact),
+    };
+  };
+  const deleteOrRecallPhoneThreadMessage = (messageId: string, mode: "delete" | "recall") => {
+    if (!currentPhone || !selectedContact) return;
+    const message = currentPhone.threadMessages.find((candidate) => candidate.id === messageId);
+    if (!message || message.sender !== "character" || !message.operatedByUser) return;
+    const now = Date.now();
+    const scope = getPhoneMutationScopeForMessage(message);
+    if (mode === "delete") {
+      const next = updatePhoneThreadContactPreview({
+        ...currentPhone,
+        threadMessages: currentPhone.threadMessages.filter((candidate) => candidate.id !== messageId),
+        updatedAt: now,
+      }, message.contactId);
+      // Deletion is intentionally hard removal: do not retain a hidden
+      // operation-log entry or any other trace in the role phone.
+      persistPhone(next);
+      if (message.sourceMessageId) onDeleteMessage?.(message.sourceMessageId, scope);
+    } else {
+      const next = updatePhoneThreadContactPreview({
+        ...currentPhone,
+        threadMessages: currentPhone.threadMessages.map((candidate) => candidate.id === messageId
+          ? { ...candidate, recalledAt: now }
+          : candidate),
+      }, message.contactId);
+      persistPhone(withPhoneAction(next, {
+        kind: "data_changed",
+        app: "chat",
+        targetId: message.contactId,
+        detail: "撤回角色手机聊天消息",
+        detectability: "possible",
+        discoveryAfterMs: 0,
+        discoveryAfterOpens: 0,
+      }, now));
+      if (message.sourceMessageId) {
+        onUpdateMessage?.(message.sourceMessageId, { content: "你撤回了一条信息", recalledAt: now }, scope);
+      }
+    }
+    setSelectedThreadMessageId(null);
+  };
   const selectedGallery =
     currentPhone.galleryItems.find((item) => item.id === selectedGalleryId) ||
     null;
@@ -2191,7 +2348,9 @@ export default function AppCharacterPhone({
           <ChevronLeft className="h-5 w-5" />
         </button>
         <div className="absolute right-4 top-3 z-20 flex gap-2.5">
-          <span className="app-nav-icon-button flex h-8 w-8 items-center justify-center text-white" aria-hidden="true"><Camera className="h-5 w-5" /></span>
+          <button type="button" disabled className="app-nav-icon-button flex h-8 w-8 cursor-not-allowed items-center justify-center text-white/70" aria-label="朋友圈背景不可更换" title="朋友圈背景不可更换">
+            <Camera className="h-5 w-5" />
+          </button>
           <button type="button" onClick={() => setPhoneMomentComposerOpen((open) => !open)} className="app-nav-icon-button flex h-8 w-8 items-center justify-center text-white" aria-label="发布新动态">
             <Plus className="h-5 w-5" />
           </button>
@@ -2292,7 +2451,7 @@ export default function AppCharacterPhone({
       <div className="relative box-border flex h-16 min-h-16 max-h-16 shrink-0 items-center justify-between border-b border-[var(--divider)] bg-[var(--surface)]/95 px-4 py-1.5 text-[var(--text-primary)] backdrop-blur-md">
         <button
           type="button"
-          onClick={() => { setPhoneChatMode("inbox"); setContactMenuOpen(false); }}
+          onClick={() => { setPhoneChatMode("inbox"); setSelectedThreadMessageId(null); setContactMenuOpen(false); }}
           className="app-nav-icon-button z-10 flex h-8 w-8 shrink-0 items-center justify-center transition-colors"
           aria-label="返回联系人列表"
         >
@@ -2339,18 +2498,46 @@ export default function AppCharacterPhone({
         </div>
       )}
       <div className="character-phone-chat-messages min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain touch-pan-y px-3 py-4">
-        {currentThreadMessages.map((message) => (
-          <div key={message.id} className={`flex ${message.sender === "character" ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${message.sender === "character" ? "rounded-tr-sm bg-[#95ec69] text-[#191919]" : "rounded-tl-sm border border-slate-100 bg-white text-slate-800"}`}>
-                {parseCharacterPhoneStickerContent(message.content) ? (
+        {currentThreadMessages.map((message) => {
+          const canOperate = message.sender === "character" && message.operatedByUser;
+          const isSelected = selectedThreadMessageId === message.id;
+          return (
+            <div
+              key={message.id}
+              className={`relative flex flex-col ${message.recalledAt ? "items-center" : message.sender === "character" ? "items-end" : "items-start"}`}
+              onPointerDown={(event) => beginThreadMessagePress(event, message)}
+              onPointerUp={endThreadMessagePress}
+              onPointerCancel={endThreadMessagePress}
+              onPointerLeave={endThreadMessagePress}
+              onContextMenu={(event) => {
+                if (!canOperate) return;
+                event.preventDefault();
+                openThreadMessageMenu(message);
+              }}
+            >
+              <div className={message.recalledAt
+                ? "max-w-[82%] px-3 py-1 text-xs leading-relaxed text-neutral-400"
+                : `max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${message.sender === "character" ? "rounded-tr-sm bg-[#95ec69] text-[#191919]" : "rounded-tl-sm border border-slate-100 bg-white text-slate-800"}`}>
+                {message.recalledAt ? (
+                  <p className="whitespace-pre-wrap text-xs text-neutral-500">你撤回了一条信息</p>
+                ) : parseCharacterPhoneStickerContent(message.content) ? (
                   <CharacterPhoneStickerMessage content={message.content} />
                 ) : (
                   <p className="whitespace-pre-wrap">{message.content}</p>
                 )}
-              {message.attachment && <div className="mt-2 rounded-xl bg-black/10 p-2 text-[10px]">▣ {message.attachment.label}<br />{message.attachment.content}</div>}
+                {!message.recalledAt && message.attachment && <div className="mt-2 rounded-xl bg-black/10 p-2 text-[10px]">▣ {message.attachment.label}<br />{message.attachment.content}</div>}
+              </div>
+              {isSelected && canOperate && (
+                <div className="mt-1 flex items-center gap-1 rounded-xl border border-black/5 bg-white px-1 py-1 text-[10px] shadow-sm" role="menu" aria-label="消息操作">
+                  {!message.recalledAt && (
+                    <button type="button" onClick={() => deleteOrRecallPhoneThreadMessage(message.id, "recall")} className="rounded-lg px-2 py-1 text-neutral-600 hover:bg-neutral-100" role="menuitem">撤回</button>
+                  )}
+                  <button type="button" onClick={() => deleteOrRecallPhoneThreadMessage(message.id, "delete")} className="rounded-lg px-2 py-1 text-rose-600 hover:bg-rose-50" role="menuitem">删除</button>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
         {currentThreadMessages.length === 0 && <p className="py-12 text-center text-xs text-neutral-400">{selectedContact.kind === "group" ? "这个群聊还没有聊天记录" : "还没有和这个人的聊天记录"}</p>}
       </div>
       {phoneNotice && (
@@ -2405,7 +2592,7 @@ export default function AppCharacterPhone({
                   <span className="absolute -bottom-1 -right-1 rounded-full bg-amber-100 px-1 text-[8px] text-amber-700">NPC</span>
                 ) : null}
               </div>
-              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[var(--text-primary)]">{contact.remark || contact.name}</p><p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">{latest ? getCharacterPhoneMessagePreview(latest.content) : "暂无聊天记录"}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[var(--text-primary)]">{contact.remark || contact.name}</p><p className="mt-1 truncate text-[11px] text-[var(--text-secondary)]">{latest ? getCharacterPhoneThreadMessageDisplay(latest) : "暂无聊天记录"}</p></div>
             </button>
           );
         })}
@@ -3748,6 +3935,7 @@ export default function AppCharacterPhone({
       className="relative flex h-full min-h-0 w-full flex-col overflow-hidden text-neutral-900"
       style={{ background: phoneBackground }}
     >
+        {!hideStatusBar && <CharacterPhoneStatusBar now={clockNow} dark={!unlocked} />}
         {!unlocked ? (
           <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 pb-7 pt-5 text-white">
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_38%,rgba(126,135,166,0.38),transparent_40%),linear-gradient(160deg,rgba(3,22,48,0.88),rgba(17,18,39,0.94)_52%,rgba(2,18,40,0.96))]" aria-hidden="true" />

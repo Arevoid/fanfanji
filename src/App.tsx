@@ -1092,7 +1092,16 @@ export default function App() {
           characterId: activeChatCharId,
           relationId: activeChatRelationId,
         });
-        if (isNotActiveChat) {
+        const previousScopedMessage = messages
+          .slice(0, -1)
+          .reverse()
+          .find((message) => message.characterId === latestMsg.characterId
+            && (message.relationId || null) === notificationScope.relationId
+            && (message.conversationId || null) === notificationScope.conversationId
+            && message.timestamp <= latestMsg.timestamp);
+        const isCharacterPhoneResponse = previousScopedMessage?.sender === "user"
+          && previousScopedMessage.sentFromCharacterPhone === true;
+        if (isNotActiveChat && !isCharacterPhoneResponse) {
           const char = characters.find((c) => c.id === latestMsg.characterId);
           if (char) {
             setGlobalNotification({
@@ -4563,7 +4572,7 @@ export default function App() {
             <div 
               className={`absolute inset-0 z-30 ${activeApp === "character-phone" ? "bg-transparent" : "bg-slate-50/92 backdrop-blur-md"} flex flex-col h-full`}
               style={{
-                 paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)",
+                 paddingTop: settings.hideStatusBar || activeApp === "character-phone" ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)",
                 paddingBottom: "env(safe-area-inset-bottom, 0px)"
               }}
             >
@@ -4802,7 +4811,10 @@ export default function App() {
                       musicTracks={tracks}
                       settings={settings}
                       resolvedTheme={resolvedTheme}
+                      hideStatusBar={settings.hideStatusBar}
                       onSendMessage={handleSendMessage}
+                      onDeleteMessage={handleDeleteMessage}
+                      onUpdateMessage={handleUpdateMessage}
                       onSaveImageToCharacterPhone={saveImageToCharacterPhone}
                       onSyncCharacterPhonePost={handleSyncCharacterPhonePost}
                       onDeleteCharacterPhonePost={handleDeleteCharacterPhonePost}
@@ -4963,6 +4975,7 @@ export default function App() {
             const activeWallpaper = (activeApp === "chat" && activeChar && activeChar.chatBg)
               ? activeChar.chatBg
               : (desktopBackground.hasUserWallpaper ? settings.wallpaper : undefined);
+            if (activeApp === "character-phone") return null;
             return <StatusBar
               wallpaper={activeWallpaper}
               hasUserWallpaper={Boolean(activeWallpaper)}

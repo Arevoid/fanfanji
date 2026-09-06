@@ -31,7 +31,8 @@ function formatThreadMessage(
   character: Character,
   contact: CharacterPhoneContact,
 ): string {
-  return `${message.sender === "character" ? character.name : contact.remark || contact.name}：${trim(message.content, 500)}`;
+  const content = message.recalledAt ? "你撤回了一条信息" : trim(message.content, 500);
+  return `${message.sender === "character" ? character.name : contact.remark || contact.name}：${content}`;
 }
 
 /** Builds an isolated prompt for the role-phone conversation. */
@@ -52,7 +53,7 @@ export function buildCharacterPhoneContactReplyPrompt(
     : "（这是刚建立的对话，还没有历史消息。）";
   const latest = recentMessages.at(-1);
   const latestMessage = latest && latest.sender === "character"
-    ? trim(latest.content)
+    ? latest.recalledAt ? "你撤回了一条信息" : trim(latest.content)
     : "（没有新的待回复消息。）";
   const groupRule = input.contact.kind === "group"
     ? "这是群聊；请以其中一位自然会先看到消息的群成员口吻回复，不要编造多个成员的长对话。"

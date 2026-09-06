@@ -335,6 +335,7 @@ export function createCharacterPhone(
     galleryItems: [],
     lifeEvents: [],
     activities: [],
+    initialContentPending: true,
   };
   saveCharacterPhone(phone);
   return phone;
@@ -745,6 +746,8 @@ export function clearCharacterPhoneData(
     lastOpenedAt: undefined,
     lastGeneratedAt: undefined,
     contentSeededAt: undefined,
+    initialContentGeneratedAt: undefined,
+    initialContentPending: true,
     lastSyncedMessageId: undefined,
     lastSyncedMomentId: undefined,
     messages: [],

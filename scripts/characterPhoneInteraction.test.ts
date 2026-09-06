@@ -149,6 +149,19 @@ const incomingReply = appendCharacterPhoneThreadMessage({
 });
 assert.equal(incomingReply.threadMessages.at(-1)?.sender, "contact", "friend replies render on the incoming side");
 assert.equal(incomingReply.activities.length, sent.activities.length, "generated contact replies do not look like user operations");
+const recalledThread = {
+  ...incomingReply,
+  threadMessages: incomingReply.threadMessages.map((message) =>
+    message.id === sent.threadMessages[0].id ? { ...message, recalledAt: 250 } : message,
+  ),
+};
+const recalledPrompt = buildCharacterPhoneContactReplyPrompt({
+  phone: recalledThread,
+  contact: phone.contacts[0],
+  character,
+  now: 300,
+});
+assert.match(recalledPrompt.message, /你撤回了一条信息/, "contact context keeps the recall event visible");
 const replyPrompt = buildCharacterPhoneContactReplyPrompt({
   phone: incomingReply,
   contact: phone.contacts[0],

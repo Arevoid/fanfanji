@@ -48,6 +48,8 @@ export interface CharacterPhoneThreadMessage {
   sender: "character" | "contact";
   content: string;
   timestamp: number;
+  /** A recalled bubble remains as an observable event in the thread. */
+  recalledAt?: number;
   operatedByUser?: boolean;
   sourceMessageId?: string;
   sourceRefs?: CharacterPhoneSourceRef[];
@@ -273,6 +275,10 @@ export interface CharacterPhoneRecord {
   lastOpenedAt?: number;
   lastGeneratedAt?: number;
   contentSeededAt?: number;
+  /** Set only after the first full phone-life generation completes. */
+  initialContentGeneratedAt?: number;
+  /** Explicit marker for newly-created or cleared phones; absent on legacy records. */
+  initialContentPending?: boolean;
   lastSyncedMessageId?: string;
   lastSyncedMomentId?: string;
   wallpaper: string;

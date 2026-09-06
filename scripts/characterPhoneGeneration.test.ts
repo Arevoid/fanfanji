@@ -202,6 +202,24 @@ try {
   assert.match(systemInstruction, /短句、停顿、犹豫/);
   assert.match(String(request.message || ""), /lifeEventSummary/);
 
+  const initialGeneration = await advanceCharacterPhoneWithResult({
+    phone: { ...phone, initialContentPending: true },
+    character,
+    activeIdentity: identity,
+    relationships: [relation],
+    messages,
+    moments: [],
+    worldBookEntries: worldBook,
+    settings,
+    initial: true,
+    now: 1_100,
+  });
+  assert.equal(initialGeneration.status, "generated");
+  assert.equal(initialGeneration.phone.initialContentPending, false);
+  assert.equal(initialGeneration.phone.initialContentGeneratedAt, 1_100);
+  assert.ok(new Set(initialGeneration.phone.lifeEvents?.[0]?.artifactRefs.map((ref) => ref.app)).size <= 8);
+  assert.match(String(requestBodies[1]?.systemInstruction || ""), /首次初始化时必须覆盖/);
+
   const missingApiConfig = await advanceCharacterPhoneWithResult({
     phone,
     character,

@@ -113,6 +113,8 @@ export interface Message {
   authorAvatarSnapshot?: string;
   /** The user typed this message from the character's simulated phone. */
   sentFromCharacterPhone?: boolean;
+  /** The message was recalled and should render as a recall notice. */
+  recalledAt?: number;
   content: string;
   timestamp: number;
   /** Optional structured metadata for red packets; legacy markup remains supported. */
