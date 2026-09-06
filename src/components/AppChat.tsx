@@ -337,7 +337,8 @@ interface AppChatProps {
   onDeleteMessage?: (messageId: string, scope?: MessageMutationScope) => void;
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => void;
   onClose: () => void;
-  onSaveSettings: (settings: UserSettingsUpdate) => void;
+  /** Returns false when the settings payload could not be persisted. */
+  onSaveSettings: (settings: UserSettingsUpdate) => boolean | void;
   onSwitchIdentity?: (id: string, openChat?: { relationId: string; characterId: string }) => void;
   onNavigateToApp: (appId: string) => void;
   worldBookEntries?: WorldBookEntry[];
@@ -8524,21 +8525,27 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                         if (aliasEditTargetId) {
                           const editedAlias = settings.identities?.find((identity) => identity.id === aliasEditTargetId);
                           if (!editedAlias) return;
-                          onSaveSettings((previous) => ({
+                          const saved = onSaveSettings((previous) => ({
                             ...previous,
                             identities: (previous.identities || []).map((identity) => identity.id === aliasEditTargetId
                               ? { ...identity, name, avatar, bio }
                               : identity),
                           }));
+                          if (saved === false) {
+                            showToast("马甲保存失败，请先清理可重建缓存后重试");
+                            return;
+                          }
                           setShowCreateAliasModal(false);
                           setAliasEditTargetId(null);
                           showToast(`已更新马甲：${name}`);
                           return;
                         }
-                        const rootIdentityId = getRootIdentityId(activeIdentityId, settings.identities || []);
-                        const parentIdentityId = settings.identities?.find((identity) =>
-                          identity.kind === "primary" && getRootIdentityId(identity.id, settings.identities || []) === rootIdentityId,
-                        )?.id;
+                        const identityRecords = settings.identities || [];
+                        const activeIdentityRecord = identityRecords.find((identity) => identity.id === activeIdentityId);
+                        const rootIdentityId = getRootIdentityId(activeIdentityId, identityRecords);
+                        const parentIdentityId = identityRecords.find((identity) =>
+                          identity.kind === "primary" && getRootIdentityId(identity.id, identityRecords) === rootIdentityId,
+                        )?.id || (activeIdentityRecord?.kind === "alias" ? activeIdentityId : undefined);
                         const alias = {
                           id: createId("identity"),
                           name,
@@ -8549,10 +8556,14 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                           rootIdentityId,
                           ...(parentIdentityId ? { parentIdentityId } : {}),
                         };
-                        onSaveSettings((previous) => ({
+                        const saved = onSaveSettings((previous) => ({
                           ...previous,
                           identities: [...(previous.identities || []), alias],
                         }));
+                        if (saved === false) {
+                          showToast("马甲创建失败，请先清理可重建缓存后重试");
+                          return;
+                        }
                         setShowCreateAliasModal(false);
                         showToast(`已创建马甲：${alias.name}`);
                       }}
@@ -9013,7 +9024,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                           const id = createId("identity");
                           const avatar = identityDraftAvatar || settings.avatar;
                           const bio = identityDraftBio.trim();
-                          onSaveSettings((previous) => {
+                          const saved = onSaveSettings((previous) => {
                             const identities = previous.identities || [];
                             const maxSortOrder = identities.reduce((max, identity) => Math.max(max, identity.sortOrder ?? -1), -1);
                             return {
@@ -9031,6 +9042,10 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                               identityDataVersion: Math.max(2, previous.identityDataVersion || 0),
                             };
                           });
+                          if (saved === false) {
+                            showToast("人设创建失败，请先清理可重建缓存后重试");
+                            return;
+                          }
                           setShowCreateIdentityModal(false);
                           showToast(`已创建人设：${name}`);
                         }}
@@ -9187,7 +9202,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                           const avatar = identityDraftAvatar || settings.avatar;
                           const bio = identityDraftBio.trim();
                           const id = createId("identity");
-                          onSaveSettings((previous) => {
+                          const saved = onSaveSettings((previous) => {
                             const identities = previous.identities || [];
                             const maxSortOrder = identities.reduce((max, identity) => Math.max(max, identity.sortOrder ?? -1), -1);
                             const identity = {
@@ -9206,6 +9221,10 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                               identityDataVersion: Math.max(2, previous.identityDataVersion || 0),
                             };
                           });
+                          if (saved === false) {
+                            showToast("主人设创建失败，请先清理可重建缓存后重试");
+                            return;
+                          }
                           setShowCreateIdentityModal(false);
                           showToast(`已创建主人设：${name}`);
                         }}
