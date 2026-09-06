@@ -217,8 +217,50 @@ try {
   assert.equal(initialGeneration.status, "generated");
   assert.equal(initialGeneration.phone.initialContentPending, false);
   assert.equal(initialGeneration.phone.initialContentGeneratedAt, 1_100);
-  assert.ok(new Set(initialGeneration.phone.lifeEvents?.[0]?.artifactRefs.map((ref) => ref.app)).size <= 8);
+  assert.ok(new Set(initialGeneration.phone.lifeEvents?.[0]?.artifactRefs.map((ref) => ref.app)).size <= 10);
   assert.match(String(requestBodies[1]?.systemInstruction || ""), /首次初始化时必须覆盖/);
+
+  responsePayload = {
+    lifeEventSummary: "首次初始化批量生活记录",
+    evidenceSourceIds: ["chat:chat-generation"],
+    threadContactName: "林晓",
+    threadMessages: [
+      { sender: "contact", content: "我快到了。" },
+      { sender: "character", content: "我在入口等你。" },
+      { sender: "contact", content: "先去买杯热饮。" },
+      { sender: "character", content: "好，路上慢点。" },
+    ],
+    browserEntries: [1, 2, 3, 4].map((index) => ({ query: `夜间路线${index}`, title: `夜间路线记录${index}`, results: [{ platform: "平台A", title: `结果${index}A`, snippet: "有用信息" }, { platform: "平台B", title: `结果${index}B`, snippet: "补充信息" }] })),
+    scheduleItems: [1, 3, 5].map((daysFromNow) => ({ title: `海边安排${daysFromNow}`, detail: "和林晓确认见面", daysFromNow })),
+    diaryEntries: [{ title: "夜里的决定", body: "把今晚的见面记下来。" }],
+    noteEntries: [{ title: "带上的东西", content: "水和外套。" }],
+    todoEntries: [{ text: "给林晓回电话" }],
+    posts: [{ content: "风比昨天温柔一点。", visibility: "private" }],
+    musicTracks: [{ title: "海边之后", artist: "林晓推荐", duration: "3:42", current: true }, { title: "慢一点", artist: "常听歌单", duration: "4:01" }],
+    musicListening: [{ trackTitle: "海边之后", playedHoursAgo: 2, durationSeconds: 240, playCount: 3 }, { trackTitle: "慢一点", playedHoursAgo: 8, durationSeconds: 180, playCount: 1 }],
+    musicNowPlaying: { trackTitle: "海边之后" },
+  };
+  const batchInitial = await advanceCharacterPhoneWithResult({
+    phone: { ...phone, id: "phone-generation-batch", initialContentPending: true },
+    character,
+    activeIdentity: identity,
+    relationships: [relation],
+    messages,
+    moments: [],
+    worldBookEntries: worldBook,
+    settings,
+    initial: true,
+    now: 1_150,
+  });
+  assert.equal(batchInitial.status, "generated");
+  assert.ok(batchInitial.phone.threadMessages.filter((message) => message.contactId === "contact-linxiao").length >= 4, "first initialization keeps a 4-message contact thread");
+  assert.ok(batchInitial.phone.browserHistory.length >= 4, "first initialization keeps at least four search records");
+  assert.ok(batchInitial.phone.scheduleItems.length >= 3, "first initialization spreads at least three schedule items");
+  assert.ok(batchInitial.phone.scheduleItems.every((item) => item.timestamp >= 1_150 + 3 * 24 * 60 * 60 * 1000 && item.timestamp <= 1_150 + 6 * 24 * 60 * 60 * 1000), "schedule records stay within the requested 3-6 day window");
+  assert.ok((batchInitial.phone.diaryEntries.length + (batchInitial.phone.notes?.length || 0) + (batchInitial.phone.todos?.length || 0)) >= 2, "first initialization keeps diary/note/todo records");
+  assert.ok(batchInitial.phone.posts.some((post) => post.visibility === "user" || post.visibility === "private"), "first initialization includes a user/private moment");
+  assert.ok((batchInitial.phone.musicTracks?.length || 0) >= 2 && (batchInitial.phone.listeningHistory?.length || 0) >= 2, "first initialization keeps music tracks and listening history");
+  assert.ok(batchInitial.phone.currentlyPlayingTrackId, "first initialization persists the currently-playing track");
 
   const missingApiConfig = await advanceCharacterPhoneWithResult({
     phone,

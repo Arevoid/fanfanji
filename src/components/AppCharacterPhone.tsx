@@ -57,6 +57,7 @@ import type { CharacterRelationship } from "../domain/relationship/characterRela
 import {
   CHARACTER_PHONE_DEFAULT_WALLPAPER,
   createCharacterPhone,
+  deriveCharacterPhonePasscode,
   getCharacterPhone,
   normalizeCharacterPhonePasscode,
   saveCharacterPhone,
@@ -360,7 +361,8 @@ function openCharacterPhone(
 ): CharacterPhoneRecord {
   const existing = getCharacterPhone(ownerIdentityId, character.id);
   const basePhone = existing || createCharacterPhone(ownerIdentityId, character);
-  const normalizedPasscode = normalizeCharacterPhonePasscode(basePhone.passcode);
+  const normalizedPasscode = normalizeCharacterPhonePasscode(basePhone.passcode)
+    || deriveCharacterPhonePasscode(character);
   const isLocked = Boolean(basePhone.lockedUntil && basePhone.lockedUntil > Date.now());
   const isExpiredLock = Boolean(basePhone.lockedUntil && basePhone.lockedUntil <= Date.now());
   const reopened = basePhone.passcode === normalizedPasscode && !isExpiredLock
@@ -536,7 +538,7 @@ function CharacterPhoneStatusBar({ now, dark = false }: { now: Date; dark?: bool
   const time = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
   return (
     <div
-      className={`relative z-50 flex shrink-0 items-center justify-between px-6 pb-[7px] pt-[calc(env(safe-area-inset-top,0px)+11px)] text-xs font-semibold select-none ${dark ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" : "text-gray-800"}`}
+      className={`relative z-50 flex shrink-0 items-center justify-between px-6 pb-[7px] pt-[calc(env(safe-area-inset-top,0px)+11px)] text-xs font-semibold select-none ${dark ? "bg-[#11152d]/95 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" : "text-gray-800"}`}
       aria-label={`角色手机状态栏，当前时间 ${time}`}
     >
       <span className="font-sans text-sm tracking-tight">{time}</span>
@@ -969,6 +971,12 @@ export default function AppCharacterPhone({
       coverUrl: "coverUrl" in track ? track.coverUrl : undefined,
     }));
   }, [currentPhone?.musicTracks]);
+  useEffect(() => {
+    if (!currentPhone?.currentlyPlayingTrackId) return;
+    const index = roleMusicTracks.findIndex((track) => track.id === currentPhone.currentlyPlayingTrackId);
+    if (index >= 0) setMusicTrackIndex(index);
+    setMusicIsPlaying(Boolean(currentPhone.currentlyPlayingSince));
+  }, [currentPhone?.id, currentPhone?.currentlyPlayingSince, currentPhone?.currentlyPlayingTrackId, roleMusicTracks]);
   const musicListeningHistory = (currentPhone?.listeningHistory ?? []).slice().sort((left, right) => right.startedAt - left.startedAt);
   const musicTodaySeconds = musicListeningHistory
     .filter((record) => record.startedAt >= characterPhoneGalleryDayStart(Date.now()))
@@ -1008,6 +1016,8 @@ export default function AppCharacterPhone({
         { id: `phone-listening-${now}`, trackId, startedAt: now, durationSeconds: 30, source: "user-library" as const },
         ...history,
       ],
+      currentlyPlayingTrackId: trackId,
+      currentlyPlayingSince: now,
     }, {
       kind: "data_changed",
       app: "music",
@@ -1017,6 +1027,16 @@ export default function AppCharacterPhone({
   const toggleMusicPlayback = () => {
     const nextPlaying = !musicIsPlaying;
     setMusicIsPlaying(nextPlaying);
+    if (currentPhone) {
+      updatePhone({
+        currentlyPlayingTrackId: nextPlaying ? musicTrack.id : undefined,
+        currentlyPlayingSince: nextPlaying ? Date.now() : undefined,
+      }, {
+        kind: "data_changed",
+        app: "music",
+        detail: nextPlaying ? `开始播放《${musicTrack.title}》` : `暂停播放《${musicTrack.title}》`,
+      });
+    }
     if (nextPlaying) recordMusicListening(musicTrack.id);
   };
   const changeMusicTrack = (direction: 1 | -1) => {
@@ -1026,6 +1046,14 @@ export default function AppCharacterPhone({
     setMusicTrackIndex(nextIndex);
     setMusicProgress(0.08);
     setMusicIsPlaying(true);
+    updatePhone({
+      currentlyPlayingTrackId: nextTrack.id,
+      currentlyPlayingSince: Date.now(),
+    }, {
+      kind: "data_changed",
+      app: "music",
+      detail: `切换并播放《${nextTrack.title}》`,
+    });
     recordMusicListening(nextTrack.id);
   };
   const placePhoneCall = (simLabel: string) => {
@@ -1688,7 +1716,8 @@ export default function AppCharacterPhone({
   const submitHiddenGalleryPasscode = (passcode = hiddenGalleryInput) => {
     if (!currentPhone || !selectedCharacter) return;
     const normalized = passcode.replace(/\D/g, "").slice(0, 4);
-    if (normalized === resolveCharacterPhoneHiddenGalleryPasscode(selectedCharacter, currentPhone)) {
+    const expected = resolveCharacterPhoneHiddenGalleryPasscode(selectedCharacter, currentPhone);
+    if (expected && normalized.length === 4 && normalized === expected) {
       setHiddenGalleryUnlocked(true);
       setHiddenGalleryInput("");
       setHiddenGalleryNotice("");
@@ -3134,7 +3163,6 @@ export default function AppCharacterPhone({
                   解锁隐藏相册
                 </button>
                 {hiddenGalleryNotice && <p role="status" className="mt-3 text-xs text-rose-500">{hiddenGalleryNotice}</p>}
-                <p className="mt-5 text-[10px] text-neutral-400">当前测试密码：3737</p>
               </form>
             ) : (
             <>

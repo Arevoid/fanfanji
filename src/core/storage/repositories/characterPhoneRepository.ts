@@ -276,18 +276,46 @@ const LEGACY_MUSIC_TITLES = new Set([
 export const CHARACTER_PHONE_DEFAULT_WALLPAPER =
   "linear-gradient(145deg, #eeeeec 0%, #fafaf9 48%, #e4e4e2 100%)";
 
-const CHARACTER_PHONE_DEFAULT_PASSCODE = "8952";
-const LEGACY_CHARACTER_PHONE_DEFAULT_PASSCODE = "0000";
-
 export function normalizeCharacterPhonePasscode(value: unknown): string {
   const digits = String(value ?? "").replace(/\D/g, "");
-  return digits.padStart(4, "0").slice(-4);
+  return digits ? digits.padStart(4, "0").slice(-4) : "";
 }
 
-const passcodeFor = (character: Character) => {
-  void character;
-  return CHARACTER_PHONE_DEFAULT_PASSCODE;
-};
+/**
+ * Create a stable, per-role four digit secret before any phone content is
+ * generated.  The source is intentionally limited to the role's own profile
+ * so one character can never inherit another character's password.
+ *
+ * This is not a global default password: changing the persona changes the
+ * derived value for newly-created phones, while persisted custom/legacy
+ * values remain untouched for backwards compatibility.
+ */
+export function deriveCharacterPhonePasscode(
+  character: Character,
+  purpose: "unlock" | "hidden-gallery" = "unlock",
+): string {
+  const source = [
+    purpose,
+    character.id,
+    character.name,
+    character.gender ?? "",
+    character.age ?? "",
+    character.personality,
+    character.backstory,
+    character.remark ?? "",
+    character.replyLanguage ?? "",
+  ].join("|");
+  let hash = 2166136261;
+  for (const codePoint of source) {
+    hash ^= codePoint.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  // Keep 0000 out of newly-created records while retaining exactly four
+  // digits for the existing numeric keypad and persisted schema.
+  return String((hash >>> 0) % 9999 + 1).padStart(4, "0");
+}
+
+const passcodeFor = (character: Character) => deriveCharacterPhonePasscode(character, "unlock");
 
 export function getCharacterPhone(
   ownerIdentityId: string,
@@ -312,7 +340,11 @@ export function createCharacterPhone(
     id: createId("character-phone"),
     ownerIdentityId,
     characterId: character.id,
+    // Set both secrets before the first content-generation request can run.
+    // The model therefore never gets a chance to invent a password first and
+    // have the storage layer adopt it afterwards.
     passcode: normalizeCharacterPhonePasscode(passcodeFor(character)),
+    hiddenGalleryPasscode: deriveCharacterPhonePasscode(character, "hidden-gallery"),
     failedAttempts: 0,
     createdAt: now,
     updatedAt: now,
@@ -350,23 +382,37 @@ function canonicalMusicId(phoneId: string, value: string): string {
 
 function normalizeMusicPersistence(phone: CharacterPhoneRecord): CharacterPhoneRecord {
   if (!phone.musicTracks?.length && !phone.musicPlaylists?.length) return phone;
-  const musicTracks = phone.musicTracks?.map((track) => ({
-    ...track,
-    id: canonicalMusicId(phone.id, track.id),
-  })).filter((track) => track.sourceTrackId || !LEGACY_MUSIC_TITLES.has(track.title));
+  const trackIdMap = new Map<string, string>();
+  const musicTracks = phone.musicTracks?.map((track) => {
+    const normalizedId = canonicalMusicId(phone.id, track.id);
+    trackIdMap.set(track.id, normalizedId);
+    return { ...track, id: normalizedId };
+  }).filter((track) => track.sourceTrackId || !LEGACY_MUSIC_TITLES.has(track.title));
   const musicTrackIds = new Set(musicTracks?.map((track) => track.id) ?? []);
+  const normalizeTrackReference = (trackId: string) => trackIdMap.get(trackId) || canonicalMusicId(phone.id, trackId);
   const musicPlaylists = phone.musicPlaylists?.map((playlist) => ({
     ...playlist,
     trackIds: playlist.trackIds
-      .map((trackId) => canonicalMusicId(phone.id, trackId))
+      .map(normalizeTrackReference)
       .filter((trackId) => musicTrackIds.has(trackId)),
   })).filter((playlist) => playlist.trackIds.length > 0);
-  const listeningHistory = phone.listeningHistory?.filter((record) => musicTrackIds.has(canonicalMusicId(phone.id, record.trackId)));
+  const listeningHistory = phone.listeningHistory
+    ?.map((record) => ({ ...record, trackId: normalizeTrackReference(record.trackId) }))
+    .filter((record) => musicTrackIds.has(record.trackId));
+  const normalizedCurrentlyPlayingTrackId = phone.currentlyPlayingTrackId
+    ? normalizeTrackReference(phone.currentlyPlayingTrackId)
+    : undefined;
+  const currentlyPlayingTrackId = normalizedCurrentlyPlayingTrackId && musicTrackIds.has(normalizedCurrentlyPlayingTrackId)
+    ? normalizedCurrentlyPlayingTrackId
+    : undefined;
   return {
     ...phone,
     ...(musicTracks ? { musicTracks } : {}),
     ...(musicPlaylists ? { musicPlaylists } : {}),
     ...(listeningHistory ? { listeningHistory } : {}),
+    ...(currentlyPlayingTrackId
+      ? { currentlyPlayingTrackId }
+      : { currentlyPlayingTrackId: undefined, currentlyPlayingSince: undefined }),
   };
 }
 
@@ -390,13 +436,16 @@ function normalizeGalleryPersistence(items: CharacterPhoneRecord["galleryItems"]
 
 function normalizeCharacterPhoneRecord(phone: CharacterPhoneRecord): CharacterPhoneRecord {
   const normalizedPasscode = normalizeCharacterPhonePasscode(phone.passcode);
+  const normalizedHiddenGalleryPasscode = phone.hiddenGalleryPasscode
+    ? normalizeCharacterPhonePasscode(phone.hiddenGalleryPasscode)
+    : undefined;
   return normalizeMusicPersistence({
     ...phone,
-    // Phones created before the default changed used 0000 and had no custom
-    // password UI, so migrate that legacy default when the record is opened.
-    passcode: normalizedPasscode === LEGACY_CHARACTER_PHONE_DEFAULT_PASSCODE
-      ? CHARACTER_PHONE_DEFAULT_PASSCODE
-      : normalizedPasscode,
+    // Never rewrite a persisted password on read. This keeps existing users'
+    // records and unlock behavior intact while new records use role-derived
+    // secrets instead of a shared default.
+    passcode: normalizedPasscode,
+    ...(normalizedHiddenGalleryPasscode ? { hiddenGalleryPasscode: normalizedHiddenGalleryPasscode } : {}),
     appIcons: phone.appIcons ?? {},
     appOrder: phone.appOrder ?? ["chat", "browser", "schedule", "gallery", "diary", "notes", "music", "settings"],
     messages: phone.messages ?? [],
@@ -748,6 +797,9 @@ export function clearCharacterPhoneData(
     contentSeededAt: undefined,
     initialContentGeneratedAt: undefined,
     initialContentPending: true,
+    currentlyPlayingTrackId: undefined,
+    currentlyPlayingSince: undefined,
+    frequentListeningHours: undefined,
     lastSyncedMessageId: undefined,
     lastSyncedMomentId: undefined,
     messages: [],

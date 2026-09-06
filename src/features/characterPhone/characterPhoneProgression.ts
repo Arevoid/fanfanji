@@ -11,6 +11,9 @@ import type {
   CharacterPhoneNote,
   CharacterPhoneCallRecord,
   CharacterPhoneBrowserResult,
+  CharacterPhoneListeningRecord,
+  CharacterPhoneMusicPlaylist,
+  CharacterPhoneMusicTrack,
   CharacterPhonePost,
   CharacterPhoneRecord,
   CharacterPhoneScheduleItem,
@@ -39,6 +42,7 @@ type GeneratedPhonePayload = {
   lifeEventAtHoursAgo?: unknown;
   evidenceSourceIds?: unknown;
   contacts?: unknown;
+  threadMessages?: unknown;
   threadContactName?: unknown;
   threadIncoming?: unknown;
   threadOutgoing?: unknown;
@@ -50,24 +54,33 @@ type GeneratedPhonePayload = {
   searchTitle?: unknown;
   searchResults?: unknown;
   searchReflection?: unknown;
+  browserEntries?: unknown;
   /** Legacy provider key accepted for browser heart-voice migration. */
   reflection?: unknown;
   diaryTitle?: unknown;
   diaryBody?: unknown;
+  diaryEntries?: unknown;
   noteTitle?: unknown;
   noteContent?: unknown;
+  noteEntries?: unknown;
   todoText?: unknown;
+  todoEntries?: unknown;
   scheduleTitle?: unknown;
   scheduleDetail?: unknown;
   scheduleAtHours?: unknown;
+  scheduleItems?: unknown;
   callContactName?: unknown;
   callDirection?: unknown;
   callDurationSeconds?: unknown;
   postContent?: unknown;
+  posts?: unknown;
   galleryTitle?: unknown;
   galleryCaption?: unknown;
   hiddenGalleryTitle?: unknown;
   hiddenGalleryCaption?: unknown;
+  musicTracks?: unknown;
+  musicListening?: unknown;
+  musicNowPlaying?: unknown;
 };
 
 function parseJson(text: string): Record<string, unknown> {
@@ -108,6 +121,109 @@ function parseGeneratedBrowserResults(value: unknown, sourceFileName?: string): 
     const snippet = cleanGeneratedText(record.snippet ?? record.summary ?? record.answer, sourceFileName, 220);
     return platform && title && snippet ? [{ platform, title, snippet }] : [];
   }).slice(0, 3);
+}
+
+function generatedRecords(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((candidate): candidate is Record<string, unknown> => Boolean(candidate && typeof candidate === "object" && !Array.isArray(candidate)));
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function parseGeneratedThreadMessages(value: unknown, sourceFileName?: string): Array<{ sender: "contact" | "character"; content: string }> {
+  return generatedRecords(value).flatMap((record) => {
+    const sender: "contact" | "character" = record.sender === "character" || record.from === "character" ? "character" : "contact";
+    const content = cleanGeneratedText(record.content ?? record.message ?? record.text, sourceFileName);
+    return content ? [{ sender, content }] : [];
+  }).slice(0, 6);
+}
+
+function parseGeneratedBrowserEntries(value: unknown, sourceFileName?: string): Array<{
+  query: string;
+  title: string;
+  results: CharacterPhoneBrowserResult[];
+  reflection: string;
+}> {
+  return generatedRecords(value).flatMap((record) => {
+    const query = cleanGeneratedText(record.query ?? record.searchQuery, sourceFileName, 180);
+    const title = cleanGeneratedText(record.title ?? record.searchTitle, sourceFileName, 180);
+    const reflection = cleanGeneratedText(record.reflection ?? record.searchReflection, sourceFileName, 240);
+    if (!query && !title) return [];
+    return [{
+      query: query || title,
+      title: title || query,
+      results: parseGeneratedBrowserResults(record.results ?? record.searchResults, sourceFileName),
+      reflection,
+    }];
+  }).slice(0, 8);
+}
+
+function parseGeneratedDiaryEntries(value: unknown, sourceFileName?: string): Array<{ title: string; body: string; hidden: boolean }> {
+  return generatedRecords(value).flatMap((record) => {
+    const body = cleanGeneratedText(record.body ?? record.content, sourceFileName);
+    const title = cleanGeneratedText(record.title, sourceFileName, 160) || deriveGeneratedTitle(body, sourceFileName);
+    return title || body ? [{ title: title || body.slice(0, 24), body, hidden: record.hidden === true }] : [];
+  }).slice(0, 4);
+}
+
+function parseGeneratedNoteEntries(value: unknown, sourceFileName?: string): Array<{ title: string; content: string }> {
+  return generatedRecords(value).flatMap((record) => {
+    const content = cleanGeneratedText(record.content ?? record.body, sourceFileName);
+    const title = cleanGeneratedText(record.title, sourceFileName, 160) || deriveGeneratedTitle(content, sourceFileName);
+    return title || content ? [{ title: title || content.slice(0, 24), content }] : [];
+  }).slice(0, 4);
+}
+
+function parseGeneratedTodoEntries(value: unknown, sourceFileName?: string): Array<{ text: string; dueAt?: number }> {
+  return generatedRecords(value).flatMap((record) => {
+    const text = cleanGeneratedText(record.text ?? record.content ?? record.title, sourceFileName, 180);
+    const dueAt = finiteNumber(record.dueAt);
+    return text ? [{ text, ...(dueAt !== undefined ? { dueAt } : {}) }] : [];
+  }).slice(0, 4);
+}
+
+function parseGeneratedScheduleItems(value: unknown, sourceFileName?: string): Array<{ title: string; detail: string; daysFromNow?: number; hoursFromNow?: number }> {
+  return generatedRecords(value).flatMap((record) => {
+    const detail = cleanGeneratedText(record.detail ?? record.content, sourceFileName);
+    const title = cleanGeneratedText(record.title, sourceFileName, 160) || deriveGeneratedTitle(detail, sourceFileName);
+    const daysFromNow = finiteNumber(record.daysFromNow ?? record.dayOffset);
+    const hoursFromNow = finiteNumber(record.hoursFromNow ?? record.atHours ?? record.scheduleAtHours);
+    return title || detail ? [{ title: title || detail.slice(0, 24), detail, ...(daysFromNow !== undefined ? { daysFromNow } : {}), ...(hoursFromNow !== undefined ? { hoursFromNow } : {}) }] : [];
+  }).slice(0, 6);
+}
+
+function parseGeneratedPosts(value: unknown, sourceFileName?: string): Array<{ content: string; visibility: "public" | "private" | "user" | "specific"; visibilityTargetIds?: string[] }> {
+  return generatedRecords(value).flatMap((record) => {
+    const content = cleanGeneratedText(record.content ?? record.body, sourceFileName);
+    const visibility: "public" | "private" | "user" | "specific" = record.visibility === "private" || record.visibility === "user" || record.visibility === "specific" ? record.visibility : "public";
+    const targets = Array.isArray(record.visibilityTargetIds)
+      ? record.visibilityTargetIds.filter((id): id is string => typeof id === "string").slice(0, 12)
+      : [];
+    return content ? [{ content, visibility, ...(targets.length > 0 ? { visibilityTargetIds: targets } : {}) }] : [];
+  }).slice(0, 4);
+}
+
+function parseGeneratedMusicTracks(value: unknown, sourceFileName?: string): Array<{ title: string; artist: string; duration: string; playCount?: number; playedHoursAgo?: number; current?: boolean }> {
+  return generatedRecords(value).flatMap((record) => {
+    const title = cleanGeneratedText(record.title ?? record.name, sourceFileName, 120);
+    const artist = cleanGeneratedText(record.artist ?? record.singer, sourceFileName, 80);
+    const duration = cleanGeneratedText(record.duration, sourceFileName, 12) || "3:30";
+    const playCount = finiteNumber(record.playCount);
+    const playedHoursAgo = finiteNumber(record.playedHoursAgo ?? record.hoursAgo);
+    return title ? [{ title, artist: artist || "未知艺术家", duration, ...(playCount !== undefined ? { playCount } : {}), ...(playedHoursAgo !== undefined ? { playedHoursAgo } : {}), ...(record.current === true ? { current: true } : {}) }] : [];
+  }).slice(0, 8);
+}
+
+function parseGeneratedMusicListening(value: unknown): Array<{ trackTitle?: string; trackIndex?: number; playedHoursAgo?: number; durationSeconds?: number; playCount?: number }> {
+  return generatedRecords(value).map((record) => ({
+    ...(typeof record.trackTitle === "string" ? { trackTitle: record.trackTitle } : {}),
+    ...(finiteNumber(record.trackIndex) !== undefined ? { trackIndex: finiteNumber(record.trackIndex) } : {}),
+    ...(finiteNumber(record.playedHoursAgo ?? record.hoursAgo) !== undefined ? { playedHoursAgo: finiteNumber(record.playedHoursAgo ?? record.hoursAgo) } : {}),
+    ...(finiteNumber(record.durationSeconds) !== undefined ? { durationSeconds: finiteNumber(record.durationSeconds) } : {}),
+    ...(finiteNumber(record.playCount) !== undefined ? { playCount: finiteNumber(record.playCount) } : {}),
+  })).slice(0, 16);
 }
 
 function deriveGeneratedTitle(body: string, sourceFileName?: string, limit = 160): string {
@@ -497,26 +613,33 @@ export async function advanceCharacterPhoneWithResult(
   const textImageEvidence = collectTextImageEvidence(lifeContext);
   const roleName = roleDisplayName(input.character);
   const generationRequest = isInitialGeneration
-    ? "这是该角色手机首次初始化。请围绕同一个有证据的生活事件，必须覆盖聊天、浏览器、日程、相册、日记、备忘录、朋友圈和电话，各生成一条自然痕迹；音乐由本地曲库同步，不要伪造曲目。首次初始化允许把同一事件投影到多个应用，但仍必须遵守证据边界。"
-    : "";
+    ? "这是该角色手机首次初始化。忽略前文可能出现的2—4条总量示例，以本条数量要求为准。请围绕同一个有证据的生活事件，批量生成完整但自然的手机生活：聊天 4—6 条；浏览器 4—8 条搜索记录；未来 3—6 天内分布 1—3 条日程；日记、备忘录、待办合计 2—4 条；朋友圈至少 1 条，visibility 必须是 user（仅用户可见）或 private（仅自己可见）；音乐必须有曲目、收听历史、常听时段和当前正在收听曲目。优先使用 threadMessages、browserEntries、scheduleItems、diaryEntries、noteEntries、todoEntries、posts、musicTracks、musicListening、musicNowPlaying 数组字段表达数量；同一事件可以投影到多个应用，但每条仍须有证据。"
+    : "这是一次追加生活痕迹。请从最有依据的 2—4 个应用中随机选择少量记录，避免每次都选择相同应用或相同数量；不要为了填满首次初始化的数量而重复旧内容。";
   let response;
   try {
     response = await apiChat({
       message: `请根据下面这份“角色当前生活上下文”，先选定一个有证据的生活事件，再生成 2—4 条彼此呼应的手机痕迹。你是在模拟一个真实的人，而不是给应用填充示例数据。只返回 JSON，不要 Markdown：{"lifeEventSummary":"本次所有痕迹共同围绕的具体事件","lifeEventAtHoursAgo":2,"evidenceSourceIds":["chat:真实ID"],"contacts":[{"name":"有依据的联系人或群聊名称","relation":"与角色的关系","kind":"npc或group","memberNames":["有依据的群成员"],"isLongTerm":true}],"threadContactName":"本次联系人对话对应的联系人或群聊名称","threadIncoming":"联系人或群成员发给角色的一句话","threadOutgoing":"角色发给该联系人或群聊的一句话","callContactName":"有证据且已存在的通话联系人","callDirection":"incoming、outgoing或missed","callDurationSeconds":120,"searchQuery":"与该事件直接相关的搜索词","searchTitle":"搜索记录标题","searchResults":[{"platform":"平台名称","title":"该平台结果标题","snippet":"该平台对这次搜索的 AI 摘要"}],"searchReflection":"角色搜索后的一两句私下心声","diaryTitle":"角色关于该事件的私密日记标题","diaryBody":"角色关于该事件的私密想法","noteTitle":"与该事件相关的备忘录标题","noteContent":"备忘录内容","todoText":"该事件确实产生的待办","scheduleTitle":"该事件对应的具体日程标题","scheduleDetail":"具体日程详情","scheduleAtHours":5,"postContent":"角色可能就该事件发布的朋友圈内容","galleryTitle":"该事件中角色保存的相册标题","galleryCaption":"相册图片描述","hiddenGalleryTitle":"有明确私密证据时才填写的隐藏相册标题","hiddenGalleryCaption":"有明确私密证据时才填写的隐藏相册图片描述"}\n若有“主手机里可参考的文字图描述”，优先把它作为角色相册中的文字图素材；galleryCaption 只写画面描述，不要生成真实图片、data URL 或文件名。searchResults 仅在 searchQuery/searchTitle 有明确证据时填写 2—3 条不同平台的结果；平台名、标题和摘要都由你根据角色上下文生成，不要输出网址、外部链接或“查看原始页面”按钮。searchReflection 只在 searchQuery/searchTitle 有明确证据时填写：它是角色刚搜完后的私下反应，不是百科摘要或旁白。hiddenGalleryTitle/hiddenGalleryCaption 只有在证据明确包含私密、隐秘、秘密、仅自己可见等内容时才填写，否则必须为空。若没有足够依据生成某个字段，返回空字符串或空数组。`,
+      // Keep the legacy response text above for backwards-compatible source
+      // context, but send the current batch schema last so the model cannot
+      // mistake the old singular example for the active quantity contract.
+      ...{
+        message: `${generationRequest}\n只返回 JSON，不要 Markdown。数量字段请优先使用数组：threadMessages:[{sender:"contact或character",content:"消息内容"}]、browserEntries:[{query:"搜索词",title:"记录标题",results:[{platform:"平台",title:"结果标题",snippet:"摘要"}],searchResults:[{platform:"平台",title:"结果标题",snippet:"摘要"}],reflection:"搜索后的私下反应"}]、scheduleItems:[{title:"日程标题",detail:"具体事项",daysFromNow:3}]、diaryEntries:[{title:"日记标题",body:"私密想法"}]、noteEntries:[{title:"备忘录标题",content:"具体内容"}]、todoEntries:[{text:"待办事项"}]、posts:[{content:"朋友圈内容",visibility:"user、private 或 public"}]、musicTracks:[{title:"曲目",artist:"艺术家",duration:"3:30",current:true}]、musicListening:[{trackTitle:"曲目",playedHoursAgo:2,durationSeconds:180,playCount:2}]、musicNowPlaying:{trackTitle:"当前曲目"}。同时保留 lifeEventSummary、evidenceSourceIds、contacts、threadContactName、callContactName、callDirection、galleryTitle、galleryCaption、hiddenGalleryTitle、hiddenGalleryCaption 等字段。首次初始化按上面的数量要求完整填写；追加生成只随机填写 2—4 个应用。没有证据的字段返回空数组或空字符串。`,
+      },
       history: [],
       systemInstruction: `你扮演真实存在的角色“${roleName}”，正在整理他自己的手机。\n${context}\n\n${generationRequest}\n严格规则：
 1. 所有内容必须来自角色人设、世界书、最近上下文或已有手机记录的合理延伸；不能凭空制造与角色无关的人和事件。
 2. 联系人只能是角色现实中可能认识的人：用户、已有角色关系、世界书/人设明确提到的家人朋友同事，或有明确依据的新 NPC。群聊必须有明确的群名称或成员依据。不要读取或生成用户不认识该角色的好友。name 只能填写真实的人名或群聊名，不能填写“我可”“我都开始怀疑你是不”这类句子片段；无法确定正式名称时请留空并不要添加该联系人。
 3. threadContactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成聊天字段。不要把联系人聊天塞进用户与角色的聊天镜像。
-4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isInitialGeneration ? "首次初始化时必须覆盖所有支持内容生成的应用，但不要使用模板标题。" : "后续生活推进不要每个应用都强行生成一条，不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。"}
+4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isInitialGeneration ? "首次初始化时必须覆盖所有支持内容生成的应用，并满足聊天4—6条、浏览器4—8条、未来3—6天的1—3条日程、日记/备忘录/待办合计2—4条、至少一条仅用户可见或仅自己可见的朋友圈和音乐收听/常听时段/正在收听数据；不要使用模板标题。" : "后续生活推进从最有依据的2—4个应用随机选择少量记录，不要每个应用都强行生成一条，也不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。"}
 5. 角色真实姓名、备注名和人设文件名是不同概念。绝不能把文件名、输入字段名、世界书标题当作角色姓名或正文内容。
 6. 日记必须是角色不会公开展示的私密想法；备忘录和日程必须是具体事项；浏览器输出搜索记录标题和 2—3 条不同平台的 AI 结果卡片，不能输出网址或引导查看原始页面；相册字段只描述角色真实可能保存的图片或文字图，不要凭空输出图片文件名。主手机的文字图只以描述形式参考，角色手机会在本地渲染文字图，不要声称有真实照片。
  7. lifeEventSummary 必须是本次唯一的生活事件；生成的应用字段必须是这个事件在不同应用中的自然痕迹，时间和人物不能互相矛盾。
 8. searchReflection 必须是 1—3 句、约 15—90 字的第一人称私下反应：回答“为什么偏偏现在搜”“哪一点马上有用”“还有什么没想通或准备怎么做”。允许短句、停顿、犹豫、自我纠正和轻微情绪，必须贴合角色口吻与当下事件；不要复述搜索词，不要写成百科总结、心理分析、鸡汤或“我查这个是为了……”模板，也不要提到 AI、提示词或应用规则。若没有明确搜索动机就留空。
 9. evidenceSourceIds 只能从“可引用的证据来源ID”原样选择；没有证据就返回空数组，不得编造 ID。
 10. 隐藏相册字段只允许承载明确私密/隐秘证据，且生成的条目必须是 hidden=true 的私藏文字图；普通日常、公开动态和普通聊天图片不得放入隐藏相册。
-11. ${isInitialGeneration ? "首次初始化必须为聊天、浏览器、电话、日程、相册、日记、备忘录、朋友圈各提供一条与同一事件一致的痕迹；只有在字段确实没有任何证据时才留空。" : "每次最多选择 2—4 个最有依据的字段生成，其余全部留空；宁可少写，不要为了填满字段编造内容。"}
-12. 不要生成解释、旁白、占位符、统一问候或应用说明；只返回 JSON。`,
+11. ${isInitialGeneration ? "首次初始化必须优先使用批量数组字段满足各应用数量下限，并让所有记录围绕同一事件；只有在字段确实没有任何证据时才留空。" : "每次随机选择 2—4 个最有依据的字段生成，其余全部留空；宁可少写，不要为了填满字段编造内容。"}
+12. 角色手机解锁密码和隐藏相册密码在手机创建时已经由系统按该角色资料先行设置并持久化；不要创建、修改、猜测或透露任何密码，也不要因为上下文中出现一串数字就回写密码字段。密码相关内容若确有证据，只能作为普通生活记录保留。
+13. 不要生成解释、旁白、占位符、统一问候或应用说明；只返回 JSON。`,
       apiKey: input.settings.apiKey,
       model: input.settings.selectedModel,
       apiEndpoint: input.settings.apiEndpoint,
@@ -559,6 +682,11 @@ export async function advanceCharacterPhoneWithResult(
   const threadContact = findThreadContact(mergedContacts.contacts, requestedThreadContact, mergedContacts.added);
   const incoming = cleanGeneratedText(raw.threadIncoming || raw.threadMessage, sourceFileName);
   const outgoing = cleanGeneratedText(raw.threadOutgoing || raw.message, sourceFileName);
+  const threadDrafts = parseGeneratedThreadMessages(raw.threadMessages, sourceFileName);
+  if (threadDrafts.length === 0) {
+    if (incoming) threadDrafts.push({ sender: "contact", content: incoming });
+    if (outgoing) threadDrafts.push({ sender: "character", content: outgoing });
+  }
   const next: CharacterPhoneRecord = {
     ...base,
     contacts: mergedContacts.contacts,
@@ -571,12 +699,16 @@ export async function advanceCharacterPhoneWithResult(
     threadMessages: [...base.threadMessages],
     posts: [...base.posts],
     phoneCalls: [...(base.phoneCalls ?? [])],
+    musicTracks: [...(base.musicTracks ?? [])],
+    listeningHistory: [...(base.listeningHistory ?? [])],
+    musicPlaylists: [...(base.musicPlaylists ?? [])],
     lifeEvents: [...(base.lifeEvents ?? [])],
   };
   let generated = mergedContacts.added.length > 0;
   const lifeEventId = createId("phone-life-event");
   const artifactRefs: CharacterPhoneLifeEvent["artifactRefs"] = [];
   const artifactApps = new Set<CharacterPhoneLifeEvent["artifactRefs"][number]["app"]>();
+  const artifactCounts = new Map<CharacterPhoneLifeEvent["artifactRefs"][number]["app"], number>();
   const pushArtifact = <T extends { id: string; lifeEventId?: string }>(
     app: CharacterPhoneLifeEvent["artifactRefs"][number]["app"],
     items: T[],
@@ -584,36 +716,31 @@ export async function advanceCharacterPhoneWithResult(
     signature: (value: T) => string,
   ) => {
     if (items.some((existing) => signature(existing) === signature(item))) return false;
-    if (!artifactApps.has(app) && artifactApps.size >= (isInitialGeneration ? 8 : 4)) return false;
+    if (!artifactApps.has(app) && artifactApps.size >= (isInitialGeneration ? 10 : 4)) return false;
+    // Follow-up generations stay intentionally small even when a provider
+    // returns an unexpectedly large array. First initialization is the one
+    // place where the requested multi-record baseline is allowed.
+    if (!isInitialGeneration && (artifactCounts.get(app) ?? 0) >= 2) return false;
     item.lifeEventId = lifeEventId;
     items.push(item);
     artifactApps.add(app);
+    artifactCounts.set(app, (artifactCounts.get(app) ?? 0) + 1);
     artifactRefs.push({ app, id: item.id });
     generated = true;
     return true;
   };
 
-  if (threadContact && (hasText(incoming) || hasText(outgoing))) {
-    if (hasText(incoming)) {
+  if (threadContact && threadDrafts.length > 0) {
+    threadDrafts.forEach((draft, index) => {
       const message: CharacterPhoneThreadMessage = {
-        id: createId("phone-life-thread-incoming"),
+        id: createId(`phone-life-thread-${draft.sender}`),
         contactId: threadContact.id,
-        sender: "contact",
-        content: incoming,
-        timestamp: now - 60 * 1000,
+        sender: draft.sender,
+        content: draft.content,
+        timestamp: now - (threadDrafts.length - index) * 60 * 1000,
       };
       pushArtifact("chat", next.threadMessages, message, (value) => `${value.contactId}|${value.sender}|${normalizeArtifactText(value.content)}`);
-    }
-    if (hasText(outgoing)) {
-      const message: CharacterPhoneThreadMessage = {
-        id: createId("phone-life-thread-outgoing"),
-        contactId: threadContact.id,
-        sender: "character",
-        content: outgoing,
-        timestamp: now,
-      };
-      pushArtifact("chat", next.threadMessages, message, (value) => `${value.contactId}|${value.sender}|${normalizeArtifactText(value.content)}`);
-    }
+    });
   }
 
   const callContactName = cleanGeneratedText(raw.callContactName, sourceFileName, 40);
@@ -640,46 +767,68 @@ export async function advanceCharacterPhoneWithResult(
 
   const searchQuery = cleanGeneratedText(raw.searchQuery, sourceFileName, 180);
   const searchTitle = cleanGeneratedText(raw.searchTitle, sourceFileName, 180) || deriveGeneratedTitle(searchQuery, sourceFileName);
-  if (searchQuery || searchTitle) {
-    const searchResults = parseGeneratedBrowserResults(raw.searchResults, sourceFileName);
-    const searchReflection = cleanGeneratedText(raw.searchReflection ?? raw.reflection, sourceFileName, 240);
-    const entryBase = {
-      id: createId("phone-life-search"),
+  const browserDrafts = parseGeneratedBrowserEntries(raw.browserEntries, sourceFileName);
+  if (browserDrafts.length === 0 && (searchQuery || searchTitle)) {
+    browserDrafts.push({
       query: searchQuery || searchTitle,
       title: searchTitle || searchQuery,
-      timestamp: now - 8 * 60 * 1000,
-      ...(searchResults.length >= 2 ? { results: searchResults } : {}),
-      ...(searchReflection ? { reflection: searchReflection } : {}),
+      results: parseGeneratedBrowserResults(raw.searchResults, sourceFileName),
+      reflection: cleanGeneratedText(raw.searchReflection ?? raw.reflection, sourceFileName, 240),
+    });
+  }
+  browserDrafts.forEach((draft, index) => {
+    const entryBase = {
+      id: createId("phone-life-search"),
+      query: draft.query,
+      title: draft.title,
+      timestamp: now - (8 + (browserDrafts.length - index) * 7) * 60 * 1000,
+      ...(draft.results.length >= 2 ? { results: draft.results } : {}),
+      ...(draft.reflection ? { reflection: draft.reflection } : {}),
     };
     const entry = { ...entryBase, ...buildCharacterPhoneBrowserDetail(entryBase, roleName) };
     pushArtifact("browser", next.browserHistory, entry, (value) => `${normalizeArtifactText(value.query)}|${normalizeArtifactText(value.title)}`);
-  }
+  });
   const diaryBody = cleanGeneratedText(raw.diaryBody, sourceFileName);
   const diaryTitle = cleanGeneratedText(raw.diaryTitle, sourceFileName, 160) || deriveGeneratedTitle(diaryBody, sourceFileName);
-  if (diaryTitle || diaryBody) {
-    const entry: CharacterPhoneDiaryEntry = { id: createId("phone-life-diary"), title: diaryTitle || diaryBody.slice(0, 24), body: diaryBody, timestamp: now - 12 * 60 * 1000 };
-    pushArtifact("diary", next.diaryEntries, entry, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.body)}`);
+  const diaryDrafts = parseGeneratedDiaryEntries(raw.diaryEntries, sourceFileName);
+  if (diaryDrafts.length === 0 && (diaryTitle || diaryBody)) {
+    diaryDrafts.push({ title: diaryTitle || diaryBody.slice(0, 24), body: diaryBody, hidden: false });
   }
+  diaryDrafts.forEach((draft, index) => {
+    const entry: CharacterPhoneDiaryEntry = { id: createId("phone-life-diary"), title: draft.title, body: draft.body, timestamp: now - (12 + (diaryDrafts.length - index) * 11) * 60 * 1000, ...(draft.hidden ? { hidden: true } : {}) };
+    pushArtifact("diary", next.diaryEntries, entry, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.body)}`);
+  });
   const noteContent = cleanGeneratedText(raw.noteContent, sourceFileName);
   const noteTitle = cleanGeneratedText(raw.noteTitle, sourceFileName, 160) || deriveGeneratedTitle(noteContent, sourceFileName);
-  if (noteTitle || noteContent) {
-    const entry: CharacterPhoneNote = { id: createId("phone-life-note"), title: noteTitle || noteContent.slice(0, 24), content: noteContent, timestamp: now - 10 * 60 * 1000 };
+  const noteDrafts = parseGeneratedNoteEntries(raw.noteEntries, sourceFileName);
+  if (noteDrafts.length === 0 && (noteTitle || noteContent)) {
+    noteDrafts.push({ title: noteTitle || noteContent.slice(0, 24), content: noteContent });
+  }
+  noteDrafts.forEach((draft, index) => {
+    const entry: CharacterPhoneNote = { id: createId("phone-life-note"), title: draft.title, content: draft.content, timestamp: now - (10 + (noteDrafts.length - index) * 9) * 60 * 1000 };
     pushArtifact("notes", next.notes ?? (next.notes = []), entry, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.content)}`);
-  }
+  });
   const todoText = cleanGeneratedText(raw.todoText, sourceFileName, 180);
-  if (todoText) {
-    const entry: CharacterPhoneTodo = { id: createId("phone-life-todo"), text: todoText, checked: false, source: "generated" };
+  const todoDrafts = parseGeneratedTodoEntries(raw.todoEntries, sourceFileName);
+  if (todoDrafts.length === 0 && todoText) todoDrafts.push({ text: todoText });
+  todoDrafts.forEach((draft) => {
+    const entry: CharacterPhoneTodo = { id: createId("phone-life-todo"), text: draft.text, checked: false, source: "generated", ...(draft.dueAt !== undefined ? { dueAt: draft.dueAt } : {}) };
     pushArtifact("notes", next.todos ?? (next.todos = []), entry, (value) => normalizeArtifactText(value.text));
-  }
+  });
   const scheduleDetail = cleanGeneratedText(raw.scheduleDetail, sourceFileName);
   const scheduleTitle = cleanGeneratedText(raw.scheduleTitle, sourceFileName, 160) || deriveGeneratedTitle(scheduleDetail, sourceFileName);
-  if (scheduleTitle || scheduleDetail) {
-    const hours = typeof raw.scheduleAtHours === "number" && Number.isFinite(raw.scheduleAtHours)
-      ? Math.max(1, Math.min(72, raw.scheduleAtHours))
-      : 5;
-    const entry: CharacterPhoneScheduleItem = { id: createId("phone-life-schedule"), title: scheduleTitle || scheduleDetail.slice(0, 24), detail: scheduleDetail, timestamp: now + hours * 60 * 60 * 1000 };
-    pushArtifact("schedule", next.scheduleItems, entry, (value) => `${value.title}|${value.detail}|${value.timestamp}`);
+  const scheduleDrafts = parseGeneratedScheduleItems(raw.scheduleItems, sourceFileName);
+  if (scheduleDrafts.length === 0 && (scheduleTitle || scheduleDetail)) {
+    const hours = finiteNumber(raw.scheduleAtHours);
+    scheduleDrafts.push({ title: scheduleTitle || scheduleDetail.slice(0, 24), detail: scheduleDetail, ...(hours !== undefined ? { hoursFromNow: hours } : {}) });
   }
+  scheduleDrafts.forEach((draft, index) => {
+    const hours = draft.daysFromNow !== undefined
+      ? Math.max(isInitialGeneration ? 3 : 1, Math.min(6, draft.daysFromNow)) * 24
+      : Math.max(isInitialGeneration ? 72 : 1, Math.min(144, draft.hoursFromNow ?? 5 + index * 24));
+    const entry: CharacterPhoneScheduleItem = { id: createId("phone-life-schedule"), title: draft.title, detail: draft.detail, timestamp: now + hours * 60 * 60 * 1000 };
+    pushArtifact("schedule", next.scheduleItems, entry, (value) => `${value.title}|${value.detail}|${value.timestamp}`);
+  });
   const requestedGalleryCaption = cleanGeneratedText(raw.galleryCaption, sourceFileName);
   const requestedGalleryTitle = cleanGeneratedText(raw.galleryTitle, sourceFileName, 160);
   const referencedTextImage = !requestedGalleryCaption && !requestedGalleryTitle
@@ -732,9 +881,94 @@ export async function advanceCharacterPhoneWithResult(
     pushArtifact("gallery", next.galleryItems, entry, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.caption)}|${value.hidden ? "hidden" : "main"}`);
   }
   const postContent = cleanGeneratedText(raw.postContent, sourceFileName);
-  if (postContent) {
-    const entry: CharacterPhonePost = { id: createId("phone-life-post"), author: roleName, authorId: input.character.id, authorAvatar: input.character.avatar, content: postContent, timestamp: now - 2 * 60 * 1000, likes: 0, comments: [], source: "generated", visibility: "public" };
+  const postDrafts = parseGeneratedPosts(raw.posts, sourceFileName);
+  if (postDrafts.length === 0 && postContent) {
+    // Preserve the old singular response shape while making the first
+    // generated trace visible to the user (or private) instead of silently
+    // creating a public post.
+    postDrafts.push({ content: postContent, visibility: isInitialGeneration ? "user" : "public" });
+  }
+  if (isInitialGeneration && postDrafts.length > 0 && !postDrafts.some((draft) => draft.visibility === "user" || draft.visibility === "private")) {
+    postDrafts[0] = { ...postDrafts[0], visibility: "private" };
+  }
+  postDrafts.forEach((draft, index) => {
+    const entry: CharacterPhonePost = { id: createId("phone-life-post"), author: roleName, authorId: input.character.id, authorAvatar: input.character.avatar, content: draft.content, timestamp: now - (2 + (postDrafts.length - index) * 13) * 60 * 1000, likes: 0, comments: [], source: "generated", visibility: draft.visibility, ...(draft.visibilityTargetIds ? { visibilityTargetIds: draft.visibilityTargetIds } : {}) };
     pushArtifact("moments", next.posts, entry, (value) => normalizeArtifactText(value.content));
+  });
+
+  const musicDrafts = parseGeneratedMusicTracks(raw.musicTracks, sourceFileName);
+  const musicByTitle = new Map(next.musicTracks.map((track) => [normalizeArtifactText(track.title), track]));
+  musicDrafts.forEach((draft) => {
+    const key = normalizeArtifactText(draft.title);
+    if (musicByTitle.has(key)) return;
+    const track: CharacterPhoneMusicTrack = {
+      id: createId("phone-life-music"),
+      title: draft.title,
+      artist: draft.artist,
+      duration: draft.duration,
+    };
+    if (pushArtifact("music", next.musicTracks, track, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.artist)}`)) {
+      musicByTitle.set(key, track);
+    }
+  });
+  // A first-life phone should never have a completely empty music surface.
+  // When no local library and no provider track are available, create one
+  // clearly role-scoped listening trace rather than falling back to a shared
+  // demo song or another role's library.
+  if (isInitialGeneration && next.musicTracks.length === 0) {
+    const track: CharacterPhoneMusicTrack = {
+      id: createId("phone-life-music"),
+      title: `${roleName}的常听片段`,
+      artist: roleName,
+      duration: "3:30",
+    };
+    if (pushArtifact("music", next.musicTracks, track, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.artist)}`)) {
+      musicByTitle.set(normalizeArtifactText(track.title), track);
+    }
+  }
+  const listeningDrafts = parseGeneratedMusicListening(raw.musicListening);
+  const defaultListeningDrafts = isInitialGeneration && listeningDrafts.length === 0
+    ? next.musicTracks.slice(0, 4).map((track, index) => ({ trackTitle: track.title, playedHoursAgo: 2 + index * 5, durationSeconds: 180 + index * 30, playCount: 1 + index }))
+    : listeningDrafts;
+  const listeningHistory = next.listeningHistory;
+  defaultListeningDrafts.forEach((draft, index) => {
+    const track = draft.trackTitle
+      ? musicByTitle.get(normalizeArtifactText(draft.trackTitle))
+      : next.musicTracks[Math.max(0, Math.min(next.musicTracks.length - 1, Math.round(draft.trackIndex ?? index)))];
+    if (!track) return;
+    const playedHoursAgo = Math.max(0, Math.min(24 * 30, draft.playedHoursAgo ?? (2 + index * 4)));
+    const durationSeconds = Math.max(30, Math.min(4 * 60 * 60, Math.round(draft.durationSeconds ?? 210)));
+    const duplicate = listeningHistory.some((record) => record.trackId === track.id && Math.abs(record.startedAt - (now - playedHoursAgo * 60 * 60 * 1000)) < 60 * 1000);
+    if (duplicate) return;
+    const record: CharacterPhoneListeningRecord = {
+      id: createId("phone-life-listening"),
+      trackId: track.id,
+      startedAt: now - playedHoursAgo * 60 * 60 * 1000,
+      durationSeconds,
+      source: "generated",
+    };
+    listeningHistory.push(record);
+    generated = true;
+  });
+  if (isInitialGeneration && next.musicTracks.length > 0 && listeningHistory.length > 0) {
+    const nowPlayingRecord = raw.musicNowPlaying && typeof raw.musicNowPlaying === "object" && !Array.isArray(raw.musicNowPlaying)
+      ? raw.musicNowPlaying as Record<string, unknown>
+      : undefined;
+    const nowPlayingTitle = cleanGeneratedText(nowPlayingRecord?.trackTitle ?? nowPlayingRecord?.title, sourceFileName, 120);
+    const nowPlayingIndex = finiteNumber(nowPlayingRecord?.trackIndex);
+    const current = next.musicTracks.find((track) => musicDrafts.find((draft) => draft.current && normalizeArtifactText(draft.title) === normalizeArtifactText(track.title)))
+      || (nowPlayingTitle ? next.musicTracks.find((track) => normalizeArtifactText(track.title) === normalizeArtifactText(nowPlayingTitle)) : undefined)
+      || (nowPlayingIndex !== undefined ? next.musicTracks[Math.max(0, Math.min(next.musicTracks.length - 1, Math.round(nowPlayingIndex)))] : undefined)
+      || next.musicTracks[0];
+    next.currentlyPlayingTrackId = current.id;
+    next.currentlyPlayingSince = now - 18 * 60 * 1000;
+    next.frequentListeningHours = [...new Set(listeningHistory.map((record) => new Date(record.startedAt).getHours()))].sort((left, right) => left - right).slice(0, 6);
+    next.musicPlaylists = [{
+      id: createId("phone-life-playlist"),
+      name: "最近常听",
+      trackIds: next.musicTracks.slice(0, 8).map((track) => track.id),
+      source: "generated",
+      }, ...next.musicPlaylists.filter((playlist) => playlist.name !== "最近常听")];
   }
 
   if (artifactRefs.length > 0) {

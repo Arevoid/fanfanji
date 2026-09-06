@@ -186,6 +186,7 @@ export interface CharacterPhoneMusicTrack {
   duration: string;
   coverUrl?: string;
   sourceTrackId?: string;
+  lifeEventId?: string;
 }
 
 export interface CharacterPhoneListeningRecord {
@@ -266,7 +267,7 @@ export interface CharacterPhoneRecord {
   ownerIdentityId: string;
   characterId: string;
   passcode: string;
-  /** Optional per-character override for the hidden album gate. Falls back to the temporary test code when absent. */
+  /** Optional per-role hidden album secret. Legacy records without it use the role phone secret. */
   hiddenGalleryPasscode?: string;
   failedAttempts: number;
   lockedUntil?: number;
@@ -299,6 +300,11 @@ export interface CharacterPhoneRecord {
   musicTracks?: CharacterPhoneMusicTrack[];
   listeningHistory?: CharacterPhoneListeningRecord[];
   musicPlaylists?: CharacterPhoneMusicPlaylist[];
+  /** Persisted player state projected by first-life generation. */
+  currentlyPlayingTrackId?: string;
+  currentlyPlayingSince?: number;
+  /** Hours of day in which the role most often listens, when known. */
+  frequentListeningHours?: number[];
   actionLog?: CharacterPhoneActionRecord[];
   lifeEvents?: CharacterPhoneLifeEvent[];
   activities: CharacterPhoneActivity[];

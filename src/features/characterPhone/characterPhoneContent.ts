@@ -382,10 +382,10 @@ function syncMusic(
   sourceTracks: MusicTrack[] | undefined,
   context: string,
 ): { musicTracks: CharacterPhoneMusicTrack[]; listeningHistory: CharacterPhoneListeningRecord[]; musicPlaylists: CharacterPhoneMusicPlaylist[] } {
-  const source = sourceTracks && sourceTracks.length > 0
+  const sourceLibrary = sourceTracks && sourceTracks.length > 0
     ? sourceTracks.slice(0, 12)
-    : (phone.musicTracks?.length ? phone.musicTracks : []);
-  const musicTracks = source.map((track, index) => {
+    : [];
+  const mappedLibrary = sourceLibrary.map((track, index) => {
     const sourceTrack = "url" in track ? track as MusicTrack : undefined;
     const sourceId = sourceTrack?.id || ("id" in track ? String(track.id) : `generated-${index}`);
     return {
@@ -397,16 +397,54 @@ function syncMusic(
       sourceTrackId: sourceTrack?.id,
     } satisfies CharacterPhoneMusicTrack;
   }).filter((track) => track.title.trim());
+  const persistedTrackIdMap = new Map<string, string>();
+  const persistedTracks = (phone.musicTracks ?? [])
+    .map((track) => {
+      const prefix = scopedId(phone.id, "music", "");
+      const normalizedId = track.id.startsWith(prefix)
+        ? scopedId(phone.id, "music", canonicalMusicSourceId(phone.id, track.id))
+        : track.id;
+      persistedTrackIdMap.set(track.id, normalizedId);
+      return normalizedId === track.id ? track : { ...track, id: normalizedId };
+    })
+    .filter((track) => track.title.trim());
+  // Generated role-phone tracks are not part of the user's main library. Keep
+  // them when the shared library is synchronized, otherwise the next phone
+  // open would silently erase first-life tracks, listening history, and the
+  // currently-playing selection. User-library tracks continue to be refreshed
+  // from the current source list.
+  const generatedTracks = persistedTracks
+    .filter((track) => !track.sourceTrackId && !isLegacyMusicTrack(track))
+    .filter((track) => track.title.trim());
+  const libraryKeys = new Set(mappedLibrary.map((track) => `${track.title.trim()}|${track.artist.trim()}`.toLocaleLowerCase()));
+  const musicTracks = sourceLibrary.length > 0
+    ? [...mappedLibrary, ...generatedTracks.filter((track) => !libraryKeys.has(`${track.title.trim()}|${track.artist.trim()}`.toLocaleLowerCase()))]
+    : persistedTracks.filter((track) => !isLegacyMusicTrack(track));
   const history = phone.listeningHistory?.length
-    ? phone.listeningHistory.filter((record) => musicTracks.some((track) => track.id === record.trackId))
+    ? phone.listeningHistory
+      .map((record) => {
+        const normalizedTrackId = persistedTrackIdMap.get(record.trackId) || record.trackId;
+        return normalizedTrackId === record.trackId ? record : { ...record, trackId: normalizedTrackId };
+      })
+      .filter((record) => musicTracks.some((track) => track.id === record.trackId))
     : [];
+  const playlistName = includesAny(context, ["夜", "夜晚", "失眠", "安静"]) ? "深夜歌单" : "最近常听";
   const playlist: CharacterPhoneMusicPlaylist = {
     id: scopedId(phone.id, "playlist", "daily"),
-    name: includesAny(context, ["夜", "夜晚", "失眠", "安静"]) ? "深夜歌单" : "最近常听",
+    name: playlistName,
     trackIds: musicTracks.map((track) => track.id),
-    source: sourceTracks && sourceTracks.length > 0 ? "user-library" : "generated",
+    source: sourceLibrary.length > 0 ? "user-library" : "generated",
   };
-  return { musicTracks, listeningHistory: history, musicPlaylists: musicTracks.length > 0 ? [playlist] : [] };
+  const preservedPlaylists = (phone.musicPlaylists ?? [])
+    .filter((candidate) => candidate.name !== playlistName)
+    .map((candidate) => ({
+      ...candidate,
+      trackIds: candidate.trackIds
+        .map((trackId) => persistedTrackIdMap.get(trackId) || trackId)
+        .filter((trackId) => musicTracks.some((track) => track.id === trackId)),
+    }))
+    .filter((candidate) => candidate.trackIds.length > 0);
+  return { musicTracks, listeningHistory: history, musicPlaylists: musicTracks.length > 0 ? [playlist, ...preservedPlaylists] : preservedPlaylists };
 }
 
 function isLegacyMusicTrack(track: CharacterPhoneMusicTrack): boolean {

@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
 import * as LZStringModule from "lz-string";
 import { createCharacterPhoneTextImageDataUrl } from "../src/features/characterPhone/characterPhoneTextImage";
-import { clearCharacterPhoneData, getCharacterPhone, getCharacterPhoneStorageUsage, migrateLegacyCharacterPhones, saveCharacterPhone } from "../src/core/storage/repositories/characterPhoneRepository";
+import { clearCharacterPhoneData, deriveCharacterPhonePasscode, getCharacterPhone, getCharacterPhoneStorageUsage, migrateLegacyCharacterPhones, saveCharacterPhone } from "../src/core/storage/repositories/characterPhoneRepository";
 import type { CharacterPhoneRecord } from "../src/domain/characterPhone/types";
+import type { Character } from "../src/types";
 
 const LZString = ((LZStringModule as typeof LZStringModule & { default?: typeof LZStringModule }).default ?? LZStringModule) as typeof import("lz-string");
+
+const testCharacter: Character = {
+  id: "character-storage-derived",
+  name: "派生角色",
+  avatar: "avatar",
+  personality: "安静而敏锐",
+  backstory: "在海边长大，习惯记录潮汐。",
+};
+const unlockPasscode = deriveCharacterPhonePasscode(testCharacter);
+const hiddenPasscode = deriveCharacterPhonePasscode(testCharacter, "hidden-gallery");
+assert.match(unlockPasscode, /^\d{4}$/);
+assert.match(hiddenPasscode, /^\d{4}$/);
+assert.notEqual(unlockPasscode, hiddenPasscode, "unlock and hidden-gallery secrets are role-scoped independently");
+assert.notEqual(unlockPasscode, "8952", "new role passwords do not use the removed global default");
+assert.notEqual(hiddenPasscode, "3737", "hidden gallery passwords do not use the removed test default");
 
 const values = new Map<string, string>();
 const localStorage: Storage = {
@@ -61,7 +77,7 @@ assert.equal(values.has("phone_character_phones_v1"), false, "new phones no long
 const loaded = getCharacterPhone(phone.ownerIdentityId, phone.characterId);
 assert.equal(loaded?.galleryItems[0]?.dataUrl, undefined);
 assert.equal(loaded?.galleryItems[0]?.textImageForId, "phone-text-image-storage");
-assert.equal(loaded?.passcode, "8952", "legacy default phone passcodes migrate to the new default");
+assert.equal(loaded?.passcode, "0000", "persisted legacy passwords remain unchanged for backwards compatibility");
 const usage = getCharacterPhoneStorageUsage(phone.ownerIdentityId, phone.characterId);
 assert.ok(usage.currentPhoneBytes > 0);
 assert.equal(usage.legacyBytes, 0);
@@ -100,6 +116,8 @@ const populated: CharacterPhoneRecord = {
   musicTracks: [{ id: "track-1", title: "测试", artist: "测试", duration: "1:00" }],
   listeningHistory: [{ id: "listen-1", trackId: "track-1", startedAt: 2, durationSeconds: 60 }],
   musicPlaylists: [{ id: "playlist-1", name: "测试", trackIds: ["track-1"] }],
+  currentlyPlayingTrackId: "track-1",
+  currentlyPlayingSince: 2,
   actionLog: [{ id: "action-1", kind: "data_changed", app: "notes", timestamp: 2, actor: "user", detectability: "none" }],
   lifeEvents: [{ id: "event-1", summary: "测试", startedAt: 2, generatedAt: 2, sourceRefs: [], artifactRefs: [] }],
   activities: [{ id: "activity-1", type: "user_edit", label: "测试", timestamp: 2 }],
@@ -107,6 +125,13 @@ const populated: CharacterPhoneRecord = {
   awarenessUpdatedAt: 2,
   phoneOpenCount: 4,
 };
+const persistedMusicPhone = { ...populated, id: "phone-music-persistence" };
+assert.equal(saveCharacterPhone(persistedMusicPhone).success, true);
+const persistedMusicLoaded = getCharacterPhone(persistedMusicPhone.ownerIdentityId, persistedMusicPhone.characterId);
+const persistedMusicTrackId = `character-phone:${persistedMusicPhone.id}:music:track-1`;
+assert.equal(persistedMusicLoaded?.musicTracks?.[0]?.id, persistedMusicTrackId, "music track IDs are canonicalized per phone");
+assert.equal(persistedMusicLoaded?.listeningHistory?.[0]?.trackId, persistedMusicTrackId, "listening history follows canonical track IDs");
+assert.equal(persistedMusicLoaded?.currentlyPlayingTrackId, persistedMusicTrackId, "currently-playing state follows canonical track IDs");
 const cleared = clearCharacterPhoneData(populated, 99);
 assert.equal(cleared.passcode, "1234");
 assert.equal(cleared.wallpaper, "custom-wallpaper");
@@ -126,6 +151,8 @@ assert.equal(cleared.galleryItems.length, 0);
 assert.equal(cleared.musicTracks?.length, 0);
 assert.equal(cleared.listeningHistory?.length, 0);
 assert.equal(cleared.musicPlaylists?.length, 0);
+assert.equal(cleared.currentlyPlayingTrackId, undefined);
+assert.equal(cleared.currentlyPlayingSince, undefined);
 assert.equal(cleared.actionLog?.length, 0);
 assert.equal(cleared.lifeEvents?.length, 0);
 assert.equal(cleared.activities.length, 0);

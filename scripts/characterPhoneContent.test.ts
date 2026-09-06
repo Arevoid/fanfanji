@@ -291,6 +291,26 @@ const normalizedMusicPhone = ensureCharacterPhoneContent({
 assert.equal(normalizedMusicPhone.musicTracks?.[0]?.id, `${repeatedMusicPrefix}track-1`, "music IDs stay bounded across repeated phone syncs");
 assert.equal(normalizedMusicPhone.musicPlaylists?.[0]?.trackIds[0], `${repeatedMusicPrefix}track-1`);
 
+const generatedTrackId = normalizedMusicPhone.musicTracks?.[0]?.id || "generated-track";
+const generatedMusicPreserved = ensureCharacterPhoneContent({
+  phone: {
+    ...normalizedMusicPhone,
+    listeningHistory: [{ id: "generated-listening", trackId: generatedTrackId, startedAt: 450, durationSeconds: 180, source: "generated" }],
+    currentlyPlayingTrackId: generatedTrackId,
+  },
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages,
+  moments,
+  worldBookEntries: worldBook,
+  musicTracks: [{ id: "main-library-track", title: "主手机歌曲", artist: "用户歌单", url: "https://example.test/song.mp3", isLocal: false, duration: "3:20" }],
+  now: 600,
+});
+assert.ok(generatedMusicPreserved.musicTracks?.some((track) => track.id === generatedTrackId), "shared library sync preserves role-generated tracks");
+assert.ok(generatedMusicPreserved.listeningHistory?.some((record) => record.trackId === generatedTrackId), "shared library sync preserves generated listening history");
+
 const scopedWorldBookPhone = ensureCharacterPhoneContent({
   phone: emptyPhone("phone-worldbook-scope", characterA.id),
   character: characterA,
