@@ -80,6 +80,7 @@ import { useSettingsChatIconActions } from "../features/settings/hooks/useSettin
 import { useSettingsCssTemplateCopy } from "../features/settings/hooks/useSettingsCssTemplateCopy";
 import { getSettingsPreviewBubbleBackground, getSettingsPreviewBubbleStyle } from "../features/settings/settingsPreviewStyle";
 import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
+import { sortIdentitiesForDisplay } from "../domain/relationship/characterRelationship";
 
 interface AppSettingsProps {
   settings: UserSettings;
@@ -757,15 +758,15 @@ export default function AppSettings({
               
               {/* Identity Switcher */}
               <div className="border-b border-slate-50 pb-4">
-                <div className="grid grid-cols-3 gap-2">
-                  {(settings.identities || []).filter((idty) => idty.kind !== "alias").map((idty, index) => {
+                <div className="flex flex-wrap gap-2">
+                  {sortIdentitiesForDisplay(settings.identities || []).filter((idty) => idty.kind !== "alias" && !idty.archived).map((idty, index) => {
                     const isSelected = idty.id === (settings.activeIdentityId || "identity-1");
                     return (
                       <button
                         key={idty.id}
                         type="button"
                         onClick={() => handleSwitchIdentity(idty.id)}
-                        className={`flex items-center justify-center py-2 px-3 rounded-[16px] border text-center transition-all ${
+                        className={`min-w-[84px] max-w-[150px] flex flex-1 items-center justify-center py-2 px-3 rounded-[16px] border text-center transition-all ${
                           isSelected
                             ? "border-[var(--segmented-border)] bg-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] font-bold shadow-sm hover:bg-[var(--segmented-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
                             : "border-[var(--segmented-border)] bg-[var(--segmented-inactive-bg)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
@@ -778,6 +779,7 @@ export default function AppSettings({
                     );
                   })}
                 </div>
+                <p className="mt-2 text-[10px] text-[var(--text-tertiary)]">可创建任意数量的主人设；已归档身份仍保留历史记录。</p>
               </div>
 
               {/* Avatar Selector */}

@@ -85,6 +85,46 @@ export function listRelationshipsForIdentityWorkspace(
   );
 }
 
+/** Stable display order for identity managers. Archived records are retained
+ * in storage, while callers decide whether to include them in active pickers. */
+export function sortIdentitiesForDisplay(identities: readonly UserIdentity[]): UserIdentity[] {
+  return [...identities].sort((left, right) => {
+    const orderDelta = (left.sortOrder ?? Number.MAX_SAFE_INTEGER) - (right.sortOrder ?? Number.MAX_SAFE_INTEGER);
+    if (orderDelta !== 0) return orderDelta;
+    const kindDelta = (left.kind === "primary" ? 0 : 1) - (right.kind === "primary" ? 0 : 1);
+    if (kindDelta !== 0) return kindDelta;
+    return left.id.localeCompare(right.id);
+  });
+}
+
+/** Returns identities belonging to one主人设 root without mutating persisted data. */
+export function listIdentitiesForRoot(
+  identities: readonly UserIdentity[],
+  rootIdentityId: string,
+  options: { includeArchived?: boolean } = {},
+): UserIdentity[] {
+  const includeArchived = options.includeArchived === true;
+  return sortIdentitiesForDisplay(identities).filter((identity) =>
+    (includeArchived || !identity.archived)
+    && getRootIdentityId(identity.id, identities) === rootIdentityId,
+  );
+}
+
+/** Returns one representative primary identity for each root, preserving order. */
+export function listIdentityRoots(
+  identities: readonly UserIdentity[],
+  options: { includeArchived?: boolean } = {},
+): UserIdentity[] {
+  const roots = new Map<string, UserIdentity>();
+  for (const identity of sortIdentitiesForDisplay(identities)) {
+    if (!options.includeArchived && identity.archived) continue;
+    const rootId = getRootIdentityId(identity.id, identities);
+    const current = roots.get(rootId);
+    if (!current || (identity.kind === "primary" && current.kind !== "primary")) roots.set(rootId, identity);
+  }
+  return [...roots.values()];
+}
+
 export function findRelationship(
   relationships: readonly CharacterRelationship[],
   userIdentityId: string,

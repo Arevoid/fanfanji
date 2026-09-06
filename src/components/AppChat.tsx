@@ -74,7 +74,7 @@ import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
-import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, getRootIdentityId, listRelationshipsForIdentityWorkspace, type CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { createRelationship, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, getRootIdentityId, listIdentitiesForRoot, listIdentityRoots, listRelationshipsForIdentityWorkspace, sortIdentitiesForDisplay, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { findInnerVoiceByMessage, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords } from "../core/storage/repositories/innerVoiceRepository";
 import { createInlineInnerVoiceRecord } from "../features/chat/services/innerVoiceService";
 import { INLINE_INNER_VOICE_INSTRUCTION, isChatResponseFormatError } from "../features/chat/services/chatTurnResponseProtocol";
@@ -258,6 +258,8 @@ import {
   ChevronLeft,
   X,
   Plus,
+  Archive,
+  RotateCcw,
   Minus,
   Sliders,
   Camera,
@@ -521,6 +523,10 @@ export default function AppChat({
   const [aliasDraftName, setAliasDraftName] = useState("");
   const [aliasDraftBio, setAliasDraftBio] = useState("");
   const [aliasDraftAvatar, setAliasDraftAvatar] = useState("");
+  const [showCreateIdentityModal, setShowCreateIdentityModal] = useState(false);
+  const [identityDraftName, setIdentityDraftName] = useState("");
+  const [identityDraftBio, setIdentityDraftBio] = useState("");
+  const [identityDraftAvatar, setIdentityDraftAvatar] = useState("");
   const aliasLongPressTimerRef = useRef<number | null>(null);
   const startAliasLongPress = (identityId: string) => {
     if (aliasLongPressTimerRef.current !== null) window.clearTimeout(aliasLongPressTimerRef.current);
@@ -791,9 +797,9 @@ export default function AppChat({
     activeIdentityId,
     settings.identities || [],
   ).filter((relation) => availableCharacterIds.has(resolveCanonicalCharacterId(relation.characterId, characters)));
-  const workspaceIdentities = (settings.identities || [])
-    .filter((identity) => !identity.archived && getRootIdentityId(identity.id, settings.identities || []) === currentIdentityRootId)
-    .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
+  const workspaceIdentities = listIdentitiesForRoot(settings.identities || [], currentIdentityRootId);
+  const allIdentityRoots = listIdentityRoots(settings.identities || []);
+  const archivedIdentities = sortIdentitiesForDisplay(settings.identities || []).filter((identity) => identity.archived);
   const relationForCharacter = (characterId: string) => findRelationshipForCanonicalCharacter(
     relationships,
     activeIdentityId,
@@ -8732,7 +8738,19 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                       <ChevronLeft className="w-4 h-4 text-slate-700" />
                     </button>
                     <h2 className="text-sm font-bold text-slate-800 tracking-tight">角色预设</h2>
-                    <div className="w-8 h-8 shrink-0" />
+                    <button
+                      type="button"
+                      title="新建主人设"
+                      onClick={() => {
+                        setIdentityDraftName("");
+                        setIdentityDraftBio("");
+                        setIdentityDraftAvatar(settings.avatar);
+                        setShowCreateIdentityModal(true);
+                      }}
+                      className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors shrink-0"
+                    >
+                      <Plus className="w-4 h-4 text-slate-700" />
+                    </button>
                   </div>
 
                   <div className="p-4 bg-indigo-50/40 border-b border-indigo-100">
@@ -8740,6 +8758,53 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                       💡 你可在下方快速选择和切换你的<b>分身预设</b>。在进行对话或群聊时，你使用的身份将会完美呈现在消息列表与属性中。
                     </p>
                   </div>
+
+                  {showCreateIdentityModal && (
+                    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
+                      <form
+                        className="w-full max-w-[320px] rounded-2xl bg-[var(--surface)] p-4 shadow-xl"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          const name = identityDraftName.trim();
+                          if (!name) return;
+                          const avatar = identityDraftAvatar || settings.avatar;
+                          const bio = identityDraftBio.trim();
+                          const id = createId("identity");
+                          onSaveSettings((previous) => {
+                            const identities = previous.identities || [];
+                            const maxSortOrder = identities.reduce((max, identity) => Math.max(max, identity.sortOrder ?? -1), -1);
+                            const identity = {
+                              id,
+                              name,
+                              avatar,
+                              signature: "",
+                              bio,
+                              kind: "primary" as const,
+                              rootIdentityId: id,
+                              sortOrder: maxSortOrder + 1,
+                            };
+                            return {
+                              ...previous,
+                              identities: [...identities, identity],
+                              identityDataVersion: Math.max(1, previous.identityDataVersion || 0),
+                            };
+                          });
+                          setShowCreateIdentityModal(false);
+                          showToast(`已创建主人设：${name}`);
+                        }}
+                      >
+                        <h3 className="text-sm font-bold text-[var(--text-primary)]">新建主人设</h3>
+                        <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">每个主人设拥有独立的好友与聊天空间，可继续创建任意数量的马甲。</p>
+                        <div className="mt-3 flex flex-col items-center gap-2">
+                          <img src={identityDraftAvatar || settings.avatar} alt="" className="h-16 w-16 rounded-full border border-[var(--border)] object-cover" />
+                          <label className="cursor-pointer text-[10px] text-[var(--text-secondary)]">选择头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setIdentityDraftAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
+                        </div>
+                        <label className="mt-3 block text-xs text-[var(--text-secondary)]">昵称<input required value={identityDraftName} onChange={(event) => setIdentityDraftName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" placeholder="例如：工作号" /></label>
+                        <label className="mt-3 block text-xs text-[var(--text-secondary)]">人设<textarea value={identityDraftBio} onChange={(event) => setIdentityDraftBio(event.target.value)} className="mt-1 h-20 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none" placeholder="这个主人设的背景和说话方式" /></label>
+                        <div className="mt-4 flex gap-2"><button type="button" onClick={() => setShowCreateIdentityModal(false)} className="flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-xs">取消</button><button type="submit" className="flex-1 rounded-xl bg-[var(--button-primary-bg)] px-3 py-2 text-xs font-semibold text-[var(--button-primary-text)]">创建</button></div>
+                      </form>
+                    </div>
+                  )}
 
                   {/* Active identity details */}
                   <div className="m-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm space-y-3 text-left">
@@ -8768,54 +8833,109 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
 
                   {/* Preset list */}
                   <div className="m-4">
-                    <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 text-left px-1">可用分身库 ({settings.identities?.length || 1})</h3>
-                    <div className="space-y-2">
-                      {/* Default primary first */}
-                      {(settings.identities || []).length === 0 ? (
-                        <div className="bg-white p-4 rounded-2xl border text-center text-xs text-slate-400">
-                          未创建其他分身。您可在系统设置中为自己添加更多独特身份和头像！
-                        </div>
-                      ) : (
-                        settings.identities?.map((idty) => {
-                          const isActive = idty.id === activeIdentityId;
+                    <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 text-left px-1">主人设与马甲 ({(settings.identities || []).filter((identity) => !identity.archived).length})</h3>
+                    <div className="space-y-3">
+                      {(() => {
+                        const identities = settings.identities || [];
+                        const activeIdentities = sortIdentitiesForDisplay(identities).filter((identity) => !identity.archived);
+                        if (activeIdentities.length === 0) {
+                          return <div className="bg-white p-4 rounded-2xl border text-center text-xs text-slate-400">还没有可用身份，请点击右上角 + 新建主人设。</div>;
+                        }
+                        return allIdentityRoots.map((root) => {
+                          const members = listIdentitiesForRoot(identities, getRootIdentityId(root.id, identities));
+                          if (members.length === 0) return null;
                           return (
-                            <div
-                              key={idty.id}
-                              onClick={() => {
-                                setEditMyName(idty.name);
-                                setEditMyAvatar(idty.avatar);
-                                setEditMySignature(idty.signature || "");
-                                setEditMyBio(idty.bio || "");
-                                if (onSwitchIdentity) onSwitchIdentity(idty.id);
-                                else onSaveSettings({
-                                  ...settings,
-                                  activeIdentityId: idty.id,
-                                  name: idty.name,
-                                  avatar: idty.avatar,
-                                  signature: idty.signature || "",
-                                  bio: idty.bio || ""
-                                });
-                                showToast(`成功切换分身为：${idty.name}`);
-                              }}
-                              className={`p-3 bg-white rounded-xl border transition-all flex items-center justify-between cursor-pointer text-left ${isActive ? "border-indigo-500 shadow-sm ring-1 ring-indigo-100" : "border-slate-100 hover:border-slate-300"}`}
-                            >
-                              <div className="flex items-center gap-3">
-                                <img src={idty.avatar} alt="" className="w-9 h-9 rounded-lg object-cover border" />
-                                <div>
-                                  <p className="text-xs font-bold text-slate-800">{idty.name}</p>
-                                  <p className="text-[10px] text-slate-400 truncate max-w-[180px]">{idty.signature || "无签名"}</p>
-                                </div>
+                            <div key={root.id} className="space-y-1.5">
+                              <div className="flex items-center gap-2 px-1">
+                                <span className="text-[10px] font-bold text-slate-500">{root.name || "未命名主人设"}</span>
+                                <span className="text-[9px] text-slate-400">{members.length > 1 ? `含 ${members.length - 1} 个马甲` : "主人设"}</span>
                               </div>
-                              {isActive ? (
-                                <span className="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-bold">使用中</span>
-                              ) : (
-                                <span className="text-[10px] text-slate-400 hover:text-slate-600 font-semibold px-2 py-0.5 bg-slate-50 rounded-full border">切换</span>
-                              )}
+                              {members.map((idty) => {
+                                const isActive = idty.id === activeIdentityId;
+                                return (
+                                  <div
+                                    key={idty.id}
+                                    onClick={() => {
+                                      setEditMyName(idty.name);
+                                      setEditMyAvatar(idty.avatar);
+                                      setEditMySignature(idty.signature || "");
+                                      setEditMyBio(idty.bio || "");
+                                      if (onSwitchIdentity) onSwitchIdentity(idty.id);
+                                      else onSaveSettings({
+                                        ...settings,
+                                        activeIdentityId: idty.id,
+                                        name: idty.name,
+                                        avatar: idty.avatar,
+                                        signature: idty.signature || "",
+                                        bio: idty.bio || ""
+                                      });
+                                      showToast(`成功切换身份为：${idty.name}`);
+                                    }}
+                                    className={`p-3 bg-white rounded-xl border transition-all flex items-center justify-between cursor-pointer text-left ${isActive ? "border-indigo-500 shadow-sm ring-1 ring-indigo-100" : "border-slate-100 hover:border-slate-300"}`}
+                                  >
+                                    <div className="flex min-w-0 items-center gap-3">
+                                      <img src={idty.avatar} alt="" className="w-9 h-9 rounded-lg object-cover border shrink-0" />
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                          <p className="truncate text-xs font-bold text-slate-800">{idty.name}</p>
+                                          <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-semibold ${idty.kind === "alias" ? "bg-amber-50 text-amber-600" : "bg-indigo-50 text-indigo-600"}`}>{idty.kind === "alias" ? "马甲" : "主人设"}</span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 truncate max-w-[180px]">{idty.signature || idty.bio || "无简介"}</p>
+                                      </div>
+                                    </div>
+                                    <div className="ml-2 flex shrink-0 items-center gap-1.5">
+                                      {isActive ? (
+                                        <span className="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-bold">使用中</span>
+                                      ) : (
+                                        <span className="text-[10px] text-slate-400 font-semibold px-2 py-0.5 bg-slate-50 rounded-full border">切换</span>
+                                      )}
+                                      <button
+                                        type="button"
+                                        disabled={isActive}
+                                        title={isActive ? "当前身份不能归档" : "归档身份（保留历史记录）"}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          if (isActive) return;
+                                          onSaveSettings((previous) => ({
+                                            ...previous,
+                                            identities: (previous.identities || []).map((identity) => identity.id === idty.id ? { ...identity, archived: true } : identity),
+                                          }));
+                                          showToast(`已归档身份：${idty.name}（历史记录已保留）`);
+                                        }}
+                                        className="rounded-lg p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-500 disabled:cursor-not-allowed disabled:opacity-40"
+                                      >
+                                        <Archive className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           );
-                        })
-                      )}
+                        });
+                      })()}
                     </div>
+                    {archivedIdentities.length > 0 && (
+                      <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-slate-500">已归档身份 ({archivedIdentities.length})</span>
+                          <span className="text-[9px] text-slate-400">历史聊天与关系不会删除</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {archivedIdentities.map((identity) => (
+                            <div key={identity.id} className="flex items-center justify-between rounded-lg bg-white px-2.5 py-2">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <img src={identity.avatar} alt="" className="h-7 w-7 rounded-md object-cover border opacity-70" />
+                                <span className="truncate text-[10px] text-slate-500">{identity.name}</span>
+                              </div>
+                              <button type="button" onClick={() => { onSaveSettings((previous) => ({ ...previous, identities: (previous.identities || []).map((item) => item.id === identity.id ? { ...item, archived: false } : item) })); showToast(`已恢复身份：${identity.name}`); }} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[9px] font-semibold text-slate-500 hover:bg-white">
+                                <RotateCcw className="h-3 w-3" />恢复
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : meActiveSubView === "wallet" ? (
@@ -9536,8 +9656,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
             <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
               {/* Identity Switcher */}
               <div className="border-b border-slate-50 pb-4">
-                <div className="grid grid-cols-3 gap-2">
-                  {(settings.identities || []).filter((idty) => idty.kind !== "alias").map((idty, index) => {
+                <div className="flex flex-wrap gap-2">
+                  {sortIdentitiesForDisplay(settings.identities || []).filter((idty) => idty.kind !== "alias" && !idty.archived).map((idty, index) => {
                     const isSelected = idty.id === (settings.activeIdentityId || "identity-1");
                     return (
                       <button
@@ -9559,7 +9679,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                             bio: idty.bio
                           });
                         }}
-                        className={`flex items-center justify-center py-2 px-3 rounded-xl border text-center transition-all ${
+                        className={`min-w-[84px] max-w-[150px] flex flex-1 items-center justify-center py-2 px-3 rounded-xl border text-center transition-all ${
                           isSelected
                             ? "border-neutral-950 ring-1 ring-neutral-950 text-neutral-950 font-bold bg-white"
                             : "border-slate-200 text-slate-400 bg-white hover:bg-slate-50 hover:text-slate-600"
