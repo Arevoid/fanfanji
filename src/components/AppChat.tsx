@@ -592,6 +592,16 @@ export default function AppChat({
   const activeIdentityBio = activeIdentityRecord?.bio ?? settings.bio;
   const activeIdentitySignature = activeIdentityRecord?.signature ?? settings.signature;
   const activeIdentityRootId = getRootIdentityId(activeIdentityId, settings.identities || []);
+  // Moments are the main persona's public social space. Chat and contacts may
+  // follow an alias, but selecting an alias must never replace the persona
+  // shown in the Moments header or switch the feed to alias-owned posts.
+  const momentsProfileIdentity = findPrimaryIdentityForIdentity(activeIdentityId, settings.identities || [])
+    || (activeIdentityRecord?.kind === "primary" ? activeIdentityRecord : undefined);
+  const momentsFeedIdentityId = momentsProfileIdentity?.id || activeIdentityRootId;
+  const momentsFeedProfile = {
+    name: momentsProfileIdentity?.name?.trim() || settings.name || "用户",
+    avatar: momentsProfileIdentity?.avatar || settings.avatar,
+  };
   const loadPendingRelationshipNetworkInteractions = (): RelationshipNetworkPendingInteraction[] => {
     const stored = listRelationshipNetworkPendingInteractionsForIdentity(activeIdentityId);
     const storedIds = new Set(stored.map((interaction) => interaction.id));
@@ -3015,8 +3025,11 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
   });
 
   // Pre-seed moments if state empty
-  const allMoments = (moments.length === 0 ? PRESEED_MOMENTS : moments)
+  const momentSource = moments.length === 0 ? PRESEED_MOMENTS : moments;
+  const allMoments = momentSource
     .filter((moment) => isMomentVisibleToUser(moment, activeIdentityId));
+  const momentsForMainPersona = momentSource
+    .filter((moment) => isMomentVisibleToUser(moment, momentsFeedIdentityId));
 
   const latestActiveMessageId = messages
     .filter((message) => !message.isOffline && (activeRelationship
@@ -4757,14 +4770,14 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
   // Get count of unread moments comments/replies
   const getUnreadMomentsCount = () => {
     let count = 0;
-    allMoments.forEach((mom) => {
+    momentsForMainPersona.forEach((mom) => {
       getMomentComments(mom).forEach((comm) => {
-        if (comm.authorName !== activeIdentityName && comm.timestamp > lastViewedMomentsTime) {
+        if (comm.authorName !== momentsFeedProfile.name && comm.timestamp > lastViewedMomentsTime) {
           // Check if it's user's moment, or a reply targeting the user
-          const isUserMoment = mom.authorName === activeIdentityName;
-          const isReplyToUser = comm.content.startsWith(`回复（${activeIdentityName}）：`) ||
-                                comm.content.startsWith(`回复 ${activeIdentityName}：`) ||
-                                comm.content.startsWith(`回复${activeIdentityName}：`);
+          const isUserMoment = mom.authorName === momentsFeedProfile.name;
+          const isReplyToUser = comm.content.startsWith(`回复（${momentsFeedProfile.name}）：`) ||
+                                comm.content.startsWith(`回复 ${momentsFeedProfile.name}：`) ||
+                                comm.content.startsWith(`回复${momentsFeedProfile.name}：`);
           if (isUserMoment || isReplyToUser) {
             count++;
           }
@@ -4776,8 +4789,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
 
   // Moments feed filtering
   const filteredMoments = momentsFilterCharId
-    ? allMoments.filter((m) => m.characterId === momentsFilterCharId)
-    : allMoments;
+    ? momentsForMainPersona.filter((m) => m.characterId === momentsFilterCharId)
+    : momentsForMainPersona;
 
 
   // Keep the settings sheet outside #conv-screen so user-authored chat CSS
@@ -8736,9 +8749,10 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
           {/* TABS: MOMENTS FEED (朋友圈) */}
           {activeTab === "moments" && (
             <MomentsApp
-              moments={allMoments}
+              moments={momentsForMainPersona}
               characters={characters}
               settings={settings}
+              feedProfile={momentsFeedProfile}
               translations={momentTranslations}
               filterCharacterId={momentsFilterCharId}
               onClearFilter={() => setMomentsFilterCharId(null)}
@@ -9855,15 +9869,15 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
 
             {/* List of moments by this character */}
             <div className="px-4 divide-y divide-slate-100 max-w-md mx-auto">
-              {allMoments.filter(m => m.characterId === singleCharacterMomentsId).length === 0 ? (
+              {momentsForMainPersona.filter(m => m.characterId === singleCharacterMomentsId).length === 0 ? (
                 <div className="text-center py-20 text-slate-400 text-xs">
                   Ta 还没有发布过朋友圈动态
                 </div>
               ) : (
-                allMoments
+                momentsForMainPersona
                   .filter(m => m.characterId === singleCharacterMomentsId)
                   .map((mom) => {
-                    const hasLiked = mom.likes.includes(activeIdentityName);
+                    const hasLiked = mom.likes.includes(momentsFeedProfile.name);
                     const momChar = mom.characterId
                       ? characters.find((c) => c.id === resolveCanonicalCharacterId(mom.characterId!, characters))
                       : null;
@@ -9968,7 +9982,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
                             {/* Like / Comment small buttons */}
                             <div className="flex items-center gap-4">
                               <button
-                                onClick={() => onLikeMoment(mom.id, activeIdentityName)}
+                                onClick={() => onLikeMoment(mom.id, momentsFeedProfile.name)}
                                 className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${
                                   hasLiked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"
                                 }`}

@@ -10,6 +10,8 @@ export interface MomentsAppProps {
   moments: Moment[];
   characters: Character[];
   settings: UserSettings;
+  /** Profile shown by the main Moments feed, independent of the active chat identity. */
+  feedProfile?: { name: string; avatar: string };
   translations: Record<string, string>;
   filterCharacterId: string | null;
   onClearFilter: () => void;
@@ -42,7 +44,7 @@ export interface MomentsAppProps {
   showToast: (message: string) => void;
 }
 
-export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, settings, translations, filterCharacterId, onClearFilter, onClose, onAddMoment: _onAddMoment, onAddComment: _onAddComment, onDeleteComment, onDeleteMoment, onLikeMoment, onSaveSettings, onPublishUserMoment, onGenerateMomentImage, onPublishComment, onUploadImage, onTriggerRelationshipNetworkComments, pendingRelationshipNetworkInteractions = [], onApproveRelationshipNetworkInteraction, onRejectRelationshipNetworkInteraction, pendingRelationshipNetworkMoments = [], onApproveRelationshipNetworkNpcMoment, onRejectRelationshipNetworkNpcMoment, showToast, onMomentTextContextMenu, onMomentTextPointerDown, onMomentTextPointerUpOrLeave, onMomentTextPointerMove, onCommentClick, onCommentPointerDown, onClearCommentLongPress }) => {
+export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, settings, feedProfile, translations, filterCharacterId, onClearFilter, onClose, onAddMoment: _onAddMoment, onAddComment: _onAddComment, onDeleteComment, onDeleteMoment, onLikeMoment, onSaveSettings, onPublishUserMoment, onGenerateMomentImage, onPublishComment, onUploadImage, onTriggerRelationshipNetworkComments, pendingRelationshipNetworkInteractions = [], onApproveRelationshipNetworkInteraction, onRejectRelationshipNetworkInteraction, pendingRelationshipNetworkMoments = [], onApproveRelationshipNetworkNpcMoment, onRejectRelationshipNetworkNpcMoment, showToast, onMomentTextContextMenu, onMomentTextPointerDown, onMomentTextPointerUpOrLeave, onMomentTextPointerMove, onCommentClick, onCommentPointerDown, onClearCommentLongPress }) => {
   const [showPublisher, setShowPublisher] = useState(false);
   const [content, setContent] = useState("");
   const [image, setImage] = useState<string | null>(null);
@@ -57,8 +59,10 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
   const [generatingMomentIds, setGeneratingMomentIds] = useState<Record<string, boolean>>({});
 
   const filterCharacter = filterCharacterId ? characters.find((character) => character.id === filterCharacterId) : null;
-  const tabName = filterCharacter ? filterCharacter.remark || filterCharacter.name : settings.name;
-  const tabAvatar = filterCharacter ? filterCharacter.avatar : settings.avatar;
+  const profileName = feedProfile?.name?.trim() || settings.name;
+  const profileAvatar = feedProfile?.avatar || settings.avatar;
+  const tabName = filterCharacter ? filterCharacter.remark || filterCharacter.name : profileName;
+  const tabAvatar = filterCharacter ? filterCharacter.avatar : profileAvatar;
   const tabCover = filterCharacter ? filterCharacter.momentsCover || "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&h=500&fit=crop" : settings.momentsCover || "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&h=500&fit=crop";
   const visibleMoments = filterCharacterId ? moments.filter((moment) => moment.characterId === filterCharacterId) : moments;
 
@@ -134,7 +138,9 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
           <img src={tabAvatar} alt="" className="w-16 h-16 rounded-[12px] border-2 border-white object-cover bg-white shadow-md z-40" />
         </div>
       </div>
-      <div className="h-0" aria-hidden="true" />
+      {/* The avatar overlaps the cover by 24px; reserve that space before the
+          pending-action banners so they never sit underneath the avatar. */}
+      <div className={pendingRelationshipNetworkInteractions.length > 0 || pendingRelationshipNetworkMoments.length > 0 ? "h-8" : "h-0"} aria-hidden="true" />
       {pendingRelationshipNetworkInteractions.length > 0 && (
         <button type="button" onClick={() => setShowPendingInteractions(true)} className="mx-4 my-2 flex w-[calc(100%-2rem)] items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-left text-[11px] text-amber-800 shadow-sm">
           <span className="font-bold">✨ 待确认互动</span>
@@ -230,7 +236,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
               </button>
             ) : null;
             const comments = getMomentComments(moment);
-            const liked = moment.likes.includes(settings.name);
+            const liked = moment.likes.includes(profileName);
             return (
               <div key={moment.id} className="py-5 first:pt-2 flex gap-3">
                 <img src={authorAvatar} alt="" className="w-10 h-10 rounded-[6px] object-cover bg-slate-50 shrink-0 border border-slate-100" />
@@ -282,7 +288,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                             <span>关系网</span>
                           </button>
                         )}
-                        <button onClick={() => onLikeMoment(moment.id, settings.name)} className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${liked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"}`}>
+                        <button onClick={() => onLikeMoment(moment.id, profileName)} className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${liked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"}`}>
                         <Heart className={`w-3.5 h-3.5 ${liked ? "fill-rose-500 text-rose-500" : ""}`} />
                         <span>{moment.likes.length || "赞"}</span>
                       </button>
@@ -380,7 +386,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                 const targetMoment = moments.find((moment) => moment.id === interaction.targetMomentId);
                 const targetName = targetMoment?.characterId
                   ? characters.find((character) => character.id === targetMoment.characterId)?.remark || targetMoment.authorName
-                  : targetMoment?.authorName || settings.name;
+                  : targetMoment?.authorName || profileName;
                 return (
                   <div key={interaction.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                     <div className="flex items-center justify-between gap-2"><p className="text-[11px] font-bold text-slate-700">{interaction.authorName} · {interaction.action === "reply" ? "回复评论" : "发表评论"}</p><span className="text-[9px] text-slate-400">{targetName}</span></div>
