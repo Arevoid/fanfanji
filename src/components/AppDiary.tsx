@@ -5,6 +5,7 @@ import {
   Heart,
   MessageCircle,
   Plus,
+  Save,
   Search,
   Share2,
   Trash2,
@@ -334,12 +335,14 @@ export default function AppDiary({
           <h1 className="truncate text-center text-base font-bold">写日记</h1>
           <button
             onClick={saveEntry}
-            className="app-nav-icon-button h-9 px-2 text-xs font-bold text-[var(--segmented-active-text)]"
+            className="app-nav-icon-button grid h-9 w-9 place-items-center"
+            aria-label="保存日记"
+            title="保存日记"
           >
-            保存
+            <Save size={18} />
           </button>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(24px+env(safe-area-inset-bottom))] pt-3">
+        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-[calc(24px+env(safe-area-inset-bottom))] pt-3">
           <input
             value={draft.title}
             onChange={(event) =>
@@ -356,7 +359,7 @@ export default function AppDiary({
             }
             placeholder="写下这一刻…"
             maxLength={4000}
-            className="diary-editor-field mt-5 min-h-[48vh] w-full resize-none border-0 bg-transparent px-0 text-[15px] leading-7 outline-none"
+            className="diary-editor-field mt-5 min-h-[48vh] w-full flex-1 resize-none border-0 bg-transparent px-0 text-[15px] leading-7 outline-none"
           />
           <div className="mt-4 grid gap-3">
             <input

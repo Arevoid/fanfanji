@@ -3293,6 +3293,13 @@ export default function App() {
     activeIdentityId,
     settings.identities || [],
   );
+  // Offline stories, diary, reading and the desktop chat-statistics widget
+  // belong to the primary persona workspace.  Selecting an alias changes the
+  // chat/contact identity only; these surfaces must keep reading the primary
+  // identity's records.
+  const primaryIdentityId = characterPhoneOwnerIdentityId;
+  const primaryIdentity = settings.identities?.find((identity) => identity.id === primaryIdentityId)
+    || activeIdentity;
   const characterPhoneIdentity = settings.identities?.find((identity) => identity.id === characterPhoneOwnerIdentityId)
     || activeIdentity;
   const relationshipNetworkNpcMomentInFlightRef = useRef<Set<string>>(new Set());
@@ -4509,6 +4516,7 @@ export default function App() {
                                             size={itemSize}
                                             tracks={tracks}
                                             activeIdentity={activeIdentity}
+                                            chatStatsIdentity={primaryIdentity}
                                             dualMusicConfig={dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === activeIdentityId)}
                                             identityMusicState={identityMusicStates.find((state) => state.ownerIdentityId === activeIdentityId)}
                                             relationshipMusicState={relationshipMusicStates.find((state) =>
@@ -4831,7 +4839,7 @@ export default function App() {
                 {isAppMounted("reading") && (
                   <LazyAppBoundary visible={activeApp === "reading"}>
                     <AppReading
-                      userIdentityId={activeIdentityId}
+                      userIdentityId={primaryIdentityId}
                       settings={settings}
                       characters={characters}
                       relationships={relationships}
@@ -4912,7 +4920,7 @@ export default function App() {
                 {isAppMounted("diary") && (
                   <LazyAppBoundary visible={activeApp === "diary"}>
                     <AppDiary
-                    activeIdentity={activeIdentity}
+                      activeIdentity={primaryIdentity}
                     characters={characters}
                     relationships={relationships}
                     messages={messages}
@@ -4920,7 +4928,11 @@ export default function App() {
                     settings={settings}
                     onSendMessage={handleSendMessage}
                     onOpenChat={(characterId, relationId, sourceMessageId) => {
-                      if (!openChatForCurrentIdentity(characterId, relationId)) return;
+                      if (primaryIdentityId !== activeIdentityId) {
+                        handleSwitchIdentity(primaryIdentityId, { relationId, characterId });
+                      } else if (!openChatForCurrentIdentity(characterId, relationId)) {
+                        return;
+                      }
                       setPendingDiaryShareMessageId(sourceMessageId || null);
                     }}
                     onClose={() => setActiveApp(null)}
@@ -4991,6 +5003,7 @@ export default function App() {
                       characters={characters}
                       relationships={relationships}
                       settings={settings}
+                      ownerIdentityId={primaryIdentityId}
                       offlineStories={offlineStories}
                       openStoryId={pendingOfflineStoryId}
                       onOpenOfflineStoryHandled={(storyId) => {
@@ -5007,7 +5020,7 @@ export default function App() {
                       onClose={() => setActiveApp(null)}
                       activeChatRelationId={activeChatRelationId}
                       onNavigateToChat={(charId, relationId, conversationId) => {
-                        const ownerIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
+                        const ownerIdentityId = primaryIdentityId;
                         const relationship = relationId
                           ? relationships.find((candidate) =>
                               candidate.id === relationId
@@ -5129,6 +5142,7 @@ export default function App() {
                   size: normalizeHomeItemSize(draggedItem),
                   tracks,
                   activeIdentity,
+                  chatStatsIdentity: primaryIdentity,
                   dualMusicConfig: dualMusicConfigs.find((config) => config.widgetId === draggedItem.id && config.ownerIdentityId === activeIdentityId),
                   identityMusicState: identityMusicStates.find((state) => state.ownerIdentityId === activeIdentityId),
                   availableMusicRelationships,

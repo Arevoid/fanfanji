@@ -118,6 +118,8 @@ interface WidgetProps {
   size?: "1x1" | "2x2" | "1x4" | "2x3" | "2x4";
   tracks?: MusicTrack[];
   activeIdentity?: UserIdentity;
+  /** Chat statistics are shared with the primary persona, not aliases. */
+  chatStatsIdentity?: UserIdentity;
   dualMusicConfig?: DualMusicWidgetConfig;
   identityMusicState?: IdentityMusicState;
   relationshipMusicState?: RelationshipMusicState;
@@ -1334,8 +1336,8 @@ function getChatStatsData(
   };
 }
 
-export function ChatStatsWidget({ isEditing, onRemove, activeIdentity, characters = [], relationships = [], messages = [], widgetOpacity, widgetBorderRadius }: WidgetProps) {
-  const data = useMemo(() => getChatStatsData(messages, relationships, characters, activeIdentity), [messages, relationships, characters, activeIdentity]);
+export function ChatStatsWidget({ isEditing, onRemove, activeIdentity, chatStatsIdentity, characters = [], relationships = [], messages = [], widgetOpacity, widgetBorderRadius }: WidgetProps) {
+  const data = useMemo(() => getChatStatsData(messages, relationships, characters, chatStatsIdentity || activeIdentity), [messages, relationships, characters, chatStatsIdentity, activeIdentity]);
   const today = new Date();
   const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const start = new Date(end);

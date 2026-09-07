@@ -64,6 +64,8 @@ interface AppOfflineProps {
   characters: Character[];
   relationships: CharacterRelationship[];
   settings: UserSettings;
+  /** Offline stories always belong to the primary persona workspace. */
+  ownerIdentityId?: string;
   offlineStories: OfflineStory[];
   onSaveOfflineStory: (story: OfflineStory) => boolean | Promise<boolean>;
   onSaveRelationships: (relationships: CharacterRelationship[]) => void;
@@ -90,6 +92,7 @@ export default function AppOffline({
   characters = [],
   relationships = [],
   settings,
+  ownerIdentityId,
   offlineStories = [],
   onSaveOfflineStory,
   onSaveRelationships,
@@ -109,7 +112,7 @@ export default function AppOffline({
   openStoryId = null,
   onOpenOfflineStoryHandled,
 }: AppOfflineProps) {
-  const activeIdentityId = settings.activeIdentityId || "identity-1";
+  const activeIdentityId = ownerIdentityId || settings.activeIdentityId || "identity-1";
   const resolveCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
   const { toast, showToast } = useOfflineToast();
   const {
