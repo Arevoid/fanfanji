@@ -804,9 +804,20 @@ export default function AppCharacterPhone({
       // Recreate an isolated, empty role-phone record rather than reopening
       // through the normal source projection path, which would immediately
       // hydrate the deleted main-phone records back into this phone.
-      const resetPhone = clearCharacterPhoneData(
-        openCharacterPhone(userIdentityId, selectedCharacter, phoneContext),
+      // Do not call openCharacterPhone here: that path intentionally projects
+      // main-phone context into an ordinary record. A storage reset must
+      // create/read the raw role-phone record and clear it before any source
+      // hydration can run.
+      generationRequestRef.current += 1;
+      initialGenerationPhoneIdRef.current = null;
+      const existing = getCharacterPhone(userIdentityId, selectedCharacter.id);
+      const resetBase = existing || createCharacterPhone(
+        userIdentityId,
+        selectedCharacter,
+        Date.now(),
+        buildCharacterPhonePasscodeContext(selectedCharacter, phoneContext),
       );
+      const resetPhone = clearCharacterPhoneData(resetBase);
       saveCharacterPhone(resetPhone);
       setPhone(resetPhone);
       setUnlocked(false);
@@ -1219,6 +1230,12 @@ export default function AppCharacterPhone({
       `确定清空${selectedCharacter.name}的角色手机数据吗？\n聊天、联系人、朋友圈、浏览记录、日记、备忘录、日程、照片、音乐、生活轨迹和操作记录都会删除；密码、壁纸和应用设置会保留。`,
     );
     if (!confirmed) return;
+    // Invalidate an in-flight first-life or follow-up generation before the
+    // cleared snapshot is persisted. Otherwise a late provider response could
+    // write the pre-clear phone back into IndexedDB.
+    generationRequestRef.current += 1;
+    initialGenerationPhoneIdRef.current = null;
+    setIsAdvancing(false);
     const imageAssetIds: string[] = [...new Set<string>(
       (currentPhone.galleryItems ?? [])
         .map((item) => item.imageAssetId)

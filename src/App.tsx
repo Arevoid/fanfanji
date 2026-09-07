@@ -59,7 +59,7 @@ import {
 } from "./core/storage/repositories/musicWidgetRepository";
 import { imageAssetDb } from "./utils/imageAssetDb";
 import { createCharacterPhone, getCharacterPhone, initializeCharacterPhoneRepository, removeCharacterPhonesByCharacterIds, saveCharacterPhone } from "./core/storage/repositories/characterPhoneRepository";
-import { runCharacterPhoneOneTimeCleanup } from "./core/storage/characterPhoneOneTimeCleanup";
+import { runCharacterPhoneIsolationRepair, runCharacterPhoneOneTimeCleanup } from "./core/storage/characterPhoneOneTimeCleanup";
 import { normalizeCharacterPhoneProactiveMessages } from "./features/characterPhone/characterPhoneContent";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
 import { createRelationship, DEFAULT_IDENTITY_ID, findPrimaryIdentityForIdentity, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, normalizeRelationshipIdentityScopes, type CharacterRelationship } from "./domain/relationship/characterRelationship";
@@ -635,8 +635,18 @@ export default function App() {
       .then(async (result) => {
         if (!active || !result.valid) return;
         const cleanup = await runCharacterPhoneOneTimeCleanup();
-        if (cleanup.result.success || !active) return;
-        console.warn("[character-phone] One-time legacy cleanup did not complete:", cleanup.result.error);
+        if (!cleanup.result.success) {
+          console.warn("[character-phone] One-time legacy cleanup did not complete:", cleanup.result.error);
+          return;
+        }
+        if (!active) return;
+        const isolationRepair = await runCharacterPhoneIsolationRepair();
+        if (!isolationRepair.result.success || !active) {
+          if (!isolationRepair.result.success) {
+            console.warn("[character-phone] Source-hydration isolation repair did not complete:", isolationRepair.result.error);
+          }
+          return;
+        }
       })
       .catch((error) => {
         console.warn("[character-phone] One-time legacy cleanup failed:", error);

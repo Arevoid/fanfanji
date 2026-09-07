@@ -591,7 +591,7 @@ export default function AppSettings({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans" data-settings-shell data-theme-page="settings">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text-primary)] font-sans" data-settings-shell data-theme-page="settings">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
@@ -749,7 +749,7 @@ export default function AppSettings({
           </div>
         ) : (
           /* Independent sub-pages */
-          <div className={`flex-1 overflow-y-auto ${activeTab === "data" ? "bg-white p-0 pb-0" : "p-4 pb-[34px] bg-[var(--app-bg)]"}`}>
+          <div className={`min-h-0 flex-1 overflow-y-auto ${activeTab === "data" ? "bg-white p-0 pb-0" : "p-4 pb-[34px] bg-[var(--app-bg)]"}`}>
             <div className="max-w-md mx-auto space-y-3">
           
           {/* PROFILE SETTINGS TAB */}

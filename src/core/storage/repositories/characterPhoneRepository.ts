@@ -320,6 +320,15 @@ export function markCharacterPhoneOneTimeCleanupComplete(): StorageWriteResult {
   return writeString(storageKeys.characterPhoneOneTimeCleanup, "completed");
 }
 
+export function isCharacterPhoneIsolationRepairComplete(): boolean {
+  const marker = readString(storageKeys.characterPhoneIsolationRepair);
+  return marker.valid && marker.found && marker.value === "completed";
+}
+
+export function markCharacterPhoneIsolationRepairComplete(): StorageWriteResult {
+  return writeString(storageKeys.characterPhoneIsolationRepair, "completed");
+}
+
 export async function flushCharacterPhoneRepository(): Promise<StorageWriteResult> {
   if (!canUseIndexedDb()) return { success: true };
   try {
@@ -341,7 +350,7 @@ const LEGACY_MUSIC_TITLES = new Set([
 export const CHARACTER_PHONE_DEFAULT_WALLPAPER =
   "linear-gradient(145deg, #eeeeec 0%, #fafaf9 48%, #e4e4e2 100%)";
 /** Records created after the source-hydration repair use this version. */
-export const CHARACTER_PHONE_DATA_VERSION = 2;
+export const CHARACTER_PHONE_DATA_VERSION = 3;
 
 export function normalizeCharacterPhonePasscode(value: unknown): string {
   const digits = String(value ?? "").replace(/\D/g, "");
@@ -423,8 +432,10 @@ export function createCharacterPhone(
     appIcons: {},
     appOrder: ["chat", "browser", "schedule", "gallery", "diary", "notes", "music", "settings"],
     // A new role phone starts empty. Its visible contacts and conversations
-    // are seeded by characterPhoneContent from this character's own context;
-    // hard-coded demo messages here would leak across characters.
+    // are generated from this character's own context after unlock. Keep the
+    // record isolated until that generation succeeds; otherwise the normal
+    // source projection would immediately copy the user's main-phone history
+    // into a brand-new role phone.
     messages: [],
     contacts: [],
     threadMessages: [],
@@ -439,6 +450,7 @@ export function createCharacterPhone(
     lifeEvents: [],
     activities: [],
     initialContentPending: true,
+    sourceHydrationSuppressedAt: now,
     phoneDataVersion: CHARACTER_PHONE_DATA_VERSION,
   };
   saveCharacterPhone(phone);

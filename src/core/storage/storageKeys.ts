@@ -49,6 +49,8 @@ export const storageKeys = {
   characterPhoneV2: (phoneId: string) => `phone_character_phone_v2_${encodeURIComponent(phoneId)}`,
   /** One-time repair marker for the role-phone storage reset and hydration fix. */
   characterPhoneOneTimeCleanup: "phone_character_phone_one_time_cleanup_v2",
+  /** One-time repair marker for records created before source hydration was isolated. */
+  characterPhoneIsolationRepair: "phone_character_phone_isolation_repair_v3",
   relationshipNetworkMaps: "phone_relationship_network_maps_v1",
   relationshipNetworkNpcs: "phone_relationship_network_npcs_v1",
   relationshipNetworkChatLinks: "phone_relationship_network_chat_links_v1",

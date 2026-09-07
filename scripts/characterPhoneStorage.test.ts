@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import * as LZStringModule from "lz-string";
 import { createCharacterPhoneTextImageDataUrl } from "../src/features/characterPhone/characterPhoneTextImage";
-import { clearCharacterPhoneData, deriveCharacterPhonePasscode, getCharacterPhone, getCharacterPhoneStorageUsage, migrateLegacyCharacterPhones, saveCharacterPhone } from "../src/core/storage/repositories/characterPhoneRepository";
+import { clearCharacterPhoneData, createCharacterPhone, deriveCharacterPhonePasscode, getCharacterPhone, getCharacterPhoneStorageUsage, migrateLegacyCharacterPhones, saveCharacterPhone } from "../src/core/storage/repositories/characterPhoneRepository";
 import type { CharacterPhoneRecord } from "../src/domain/characterPhone/types";
 import type { Character } from "../src/types";
 
@@ -32,6 +32,11 @@ const localStorage: Storage = {
   setItem(key, value) { values.set(key, value); },
 };
 Object.defineProperty(globalThis, "window", { configurable: true, value: { localStorage } });
+
+const createdPhone = createCharacterPhone("identity-storage-test", testCharacter, 2);
+assert.equal(createdPhone.initialContentPending, true);
+assert.equal(createdPhone.sourceHydrationSuppressedAt, 2, "new phones stay isolated until first-life generation succeeds");
+assert.equal(createdPhone.threadMessages.length, 0);
 
 const phone: CharacterPhoneRecord = {
   id: "phone-storage-test",

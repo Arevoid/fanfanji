@@ -1,9 +1,13 @@
 import {
   clearCharacterPhoneRecordsForOneTimeCleanup,
+  clearCharacterPhoneData,
   flushCharacterPhoneRepository,
+  isCharacterPhoneIsolationRepairComplete,
   isCharacterPhoneOneTimeCleanupComplete,
   listCharacterPhonesForOneTimeCleanup,
+  markCharacterPhoneIsolationRepairComplete,
   markCharacterPhoneOneTimeCleanupComplete,
+  saveCharacterPhone,
 } from "./repositories/characterPhoneRepository";
 import { clearRebuildableCache } from "./rebuildableCache";
 import { imageAssetDb } from "../../utils/imageAssetDb";
@@ -16,6 +20,7 @@ export interface CharacterPhoneOneTimeCleanupResult {
 }
 
 let cleanupPromise: Promise<CharacterPhoneOneTimeCleanupResult> | null = null;
+let isolationRepairPromise: Promise<CharacterPhoneOneTimeCleanupResult> | null = null;
 
 /**
  * Reset only role-phone data that already exists on this browser profile.
@@ -83,4 +88,82 @@ export function runCharacterPhoneOneTimeCleanup(): Promise<CharacterPhoneOneTime
     cleanupPromise = null;
   });
   return cleanupPromise;
+}
+
+/**
+ * Repair records created by the first source-hydration fix. Those records can
+ * already contain a mirror of the main phone while still being marked as a
+ * pending first initialization. Clear only the dedicated role-phone records,
+ * keep their identity/settings, and leave the isolation marker in place until
+ * a later successful first-life generation explicitly releases it.
+ */
+export function runCharacterPhoneIsolationRepair(): Promise<CharacterPhoneOneTimeCleanupResult> {
+  if (isolationRepairPromise) return isolationRepairPromise;
+  isolationRepairPromise = (async () => {
+    if (isCharacterPhoneIsolationRepairComplete()) {
+      return { ran: false, removedPhoneCount: 0, result: { success: true } };
+    }
+
+    // The caller normally hydrates the repository first, but flushing here
+    // also makes the repair safe when it is invoked directly by a test or a
+    // deep-link route while a previous write is still queued.
+    const beforeFlush = await flushCharacterPhoneRepository();
+    if (!beforeFlush.success) {
+      return { ran: true, removedPhoneCount: 0, result: beforeFlush };
+    }
+
+    const phones = listCharacterPhonesForOneTimeCleanup();
+    const characterIds = [...new Set(phones.map((phone) => phone.characterId).filter(Boolean))];
+    for (const characterId of characterIds) {
+      const cacheResult = await clearRebuildableCache({
+        scope: "characterPhone",
+        scopeId: characterId,
+        target: "all",
+        cleanupOrphanedResources: false,
+        clearOriginCaches: false,
+      });
+      if (cacheResult.failedLocalStorageKeys.length > 0) {
+        return {
+          ran: true,
+          removedPhoneCount: phones.length,
+          result: { success: false, error: "remove" as const },
+        };
+      }
+    }
+    for (const phone of phones) {
+      const cleared = clearCharacterPhoneData(phone);
+      const saved = saveCharacterPhone(cleared);
+      if (!saved.success) {
+        return { ran: true, removedPhoneCount: phones.length, result: saved };
+      }
+    }
+    const flushed = await flushCharacterPhoneRepository();
+    if (!flushed.success) {
+      return { ran: true, removedPhoneCount: phones.length, result: flushed };
+    }
+    // The formal records are already empty at this point. Delete their binary
+    // gallery assets afterwards so a failed media cleanup cannot leave an old
+    // record pointing at an asset that was removed prematurely.
+    const imageAssetIds = [...new Set(phones.flatMap((phone) => phone.galleryItems ?? [])
+      .map((item) => item.imageAssetId)
+      .filter((id): id is string => Boolean(id)))];
+    if (typeof indexedDB !== "undefined") {
+      for (const imageAssetId of imageAssetIds) {
+        try {
+          await imageAssetDb.deleteImage(imageAssetId);
+        } catch {
+          return {
+            ran: true,
+            removedPhoneCount: phones.length,
+            result: { success: false, error: "remove" as const },
+          };
+        }
+      }
+    }
+    const marked = markCharacterPhoneIsolationRepairComplete();
+    return { ran: true, removedPhoneCount: phones.length, result: marked };
+  })().finally(() => {
+    isolationRepairPromise = null;
+  });
+  return isolationRepairPromise;
 }

@@ -174,6 +174,7 @@ const USER_DATA_MANIFEST: Record<UserDataAppId, DataManifest> = {
       storageKeys.characterPhones,
       storageKeys.characterPhonesIndexV2,
       storageKeys.characterPhoneOneTimeCleanup,
+      storageKeys.characterPhoneIsolationRepair,
     ],
     prefixes: ["phone_character_phone_v2_"],
     clearBinary: async () => {
