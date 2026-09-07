@@ -397,15 +397,15 @@ function openCharacterPhone(
   const existing = getCharacterPhone(ownerIdentityId, character.id);
   const passcodeContext = buildCharacterPhonePasscodeContext(character, context);
   const basePhone = existing || createCharacterPhone(ownerIdentityId, character, Date.now(), passcodeContext);
-  const hasNotBeenOpened = !basePhone.phoneOpenCount && !basePhone.lastOpenedAt;
-  const normalizedPasscode = hasNotBeenOpened && passcodeContext
-    ? deriveCharacterPhonePasscode(character, "unlock", passcodeContext)
-    : normalizeCharacterPhonePasscode(basePhone.passcode)
-      || deriveCharacterPhonePasscode(character, "unlock", passcodeContext);
-  const normalizedHiddenGalleryPasscode = hasNotBeenOpened && passcodeContext
-    ? deriveCharacterPhonePasscode(character, "hidden-gallery", passcodeContext)
-    : normalizeCharacterPhonePasscode(basePhone.hiddenGalleryPasscode)
-      || deriveCharacterPhonePasscode(character, "hidden-gallery", passcodeContext);
+  // A phone's secrets are fixed when its record is first created. Do not
+  // re-derive them from a later chat/world-book snapshot while the lock screen
+  // is still unopened: doing so makes a password the character already said
+  // stop working after the context changes. Only genuinely missing legacy
+  // fields may be filled in here.
+  const normalizedPasscode = normalizeCharacterPhonePasscode(basePhone.passcode)
+    || deriveCharacterPhonePasscode(character, "unlock", passcodeContext);
+  const normalizedHiddenGalleryPasscode = normalizeCharacterPhonePasscode(basePhone.hiddenGalleryPasscode)
+    || deriveCharacterPhonePasscode(character, "hidden-gallery", passcodeContext);
   const isLocked = Boolean(basePhone.lockedUntil && basePhone.lockedUntil > Date.now());
   const isExpiredLock = Boolean(basePhone.lockedUntil && basePhone.lockedUntil <= Date.now());
   const reopened = basePhone.passcode === normalizedPasscode

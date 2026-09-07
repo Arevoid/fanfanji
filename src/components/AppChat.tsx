@@ -17,7 +17,13 @@ import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
 import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseRedPacketClaimNotice, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
-import { getCharacterPhone } from "../core/storage/repositories/characterPhoneRepository";
+import {
+  createCharacterPhone,
+  deriveCharacterPhonePasscode,
+  getCharacterPhone,
+  normalizeCharacterPhonePasscode,
+  saveCharacterPhone,
+} from "../core/storage/repositories/characterPhoneRepository";
 import type { CharacterPhoneImageSaveInput } from "../domain/characterPhone/types";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { runGroupChatReplyPipeline } from "../features/chat/services/groupChatReplyPipeline";
@@ -1858,6 +1864,59 @@ export default function AppChat({
         aliasName: activeIdentity?.name,
       })
       : "";
+    // Establish the role-phone secrets before the model can answer a message
+    // about them. This prevents the model from inventing a number first and
+    // leaving the phone with a different derived password later. Only the
+    // compact context fingerprint is used for derivation; raw context is not
+    // stored in the phone record.
+    const ensureCharacterPhonePassword = (character: Character) => {
+      if (character.isGroupChat || !resolvedCharacterPhoneOwnerIdentityId) return undefined;
+      const existingPhone = character.id === activeCharacter.id
+        ? getCharacterPhone(resolvedCharacterPhoneOwnerIdentityId, activeCharacter.id)
+        : getCharacterPhone(resolvedCharacterPhoneOwnerIdentityId, character.id);
+      const worldBookContext = (worldBookEntries || [])
+        .filter((entry) => entry.characterId === character.id
+          || entry.characterIds?.includes(character.id)
+          || (!entry.characterId && !entry.characterIds && (!entry.scope || entry.scope.kind === "global"))
+          || (entry.scope?.kind === "character" && entry.scope.characterId === character.id)
+          || (entry.scope?.kind === "characters" && entry.scope.characterIds.includes(character.id))
+          || (entry.scope?.kind === "identity" && entry.scope.userIdentityId === activeIdentityId)
+          || (entry.scope?.kind === "relationship" && entry.scope.characterId === character.id
+            && entry.scope.userIdentityId === activeIdentityId))
+        .slice(-20)
+        .map((entry) => `${entry.title}:${entry.content}`);
+      const recentMessages = messages
+        .filter((message) => message.characterId === character.id)
+        .slice(-16)
+        .map((message) => `${message.sender}:${message.content}`);
+      const recentMoments = moments
+        .filter((moment) => moment.characterId === character.id)
+        .slice(-12)
+        .map((moment) => `${moment.authorName}:${moment.content}`);
+      const contextSeed = JSON.stringify({ worldBook: worldBookContext, recentMessages, recentMoments }).slice(-12000);
+      const passcode = normalizeCharacterPhonePasscode(existingPhone?.passcode)
+        || deriveCharacterPhonePasscode(character, "unlock", contextSeed);
+      const hiddenGalleryPasscode = normalizeCharacterPhonePasscode(existingPhone?.hiddenGalleryPasscode)
+        || deriveCharacterPhonePasscode(character, "hidden-gallery", contextSeed);
+      if (existingPhone) {
+        if (existingPhone.passcode === passcode && existingPhone.hiddenGalleryPasscode === hiddenGalleryPasscode) return existingPhone;
+        const repairedPhone = {
+          ...existingPhone,
+          passcode,
+          hiddenGalleryPasscode,
+          updatedAt: Date.now(),
+        };
+        saveCharacterPhone(repairedPhone);
+        return repairedPhone;
+      }
+      return createCharacterPhone(
+        resolvedCharacterPhoneOwnerIdentityId,
+        character,
+        Date.now(),
+        contextSeed,
+      );
+    };
+    const characterPhone = ensureCharacterPhonePassword(turnCharacter);
     const pendingProactiveOfflineAppointment = turnRelationship && userMsg?.sender === "user"
       ? appointments.find((appointment) => appointment.relationId === turnRelationship.id
         && appointment.characterId === turnRelationship.characterId
@@ -2303,12 +2362,9 @@ ${aliasEvents.join("\n")}
 这些是你与其他联系人之间发生的真实互动。你可以在与当前用户聊天时，根据性格和语境自然提及“最近有人联系过你”等内容，但不要说明这些联系人与当前用户属于同一系统账户，也不要声称你已经确认他们是同一个人。`);
         }
       }
-      const characterPhone = !activeCharacter.isGroupChat
-        ? getCharacterPhone(resolvedCharacterPhoneOwnerIdentityId, activeCharacter.id)
-        : undefined;
       if (characterPhone) {
         assembledInstructions.push(`【角色手机密码事实】
-该角色的虚拟手机密码已经在手机创建时固定为“${characterPhone.passcode}”。这是一个已经存在的事实，不是让你临时生成的新密码。只有当对话自然涉及手机密码、生日或解锁时，才可以按照角色语气透露这个真实密码；不要把其他日期、金额、编号或用户猜测的数字当成密码，也不要修改这个密码。如果聊天历史中曾经说过其他数字，那些只能视为猜测或说错了，不能覆盖这条固定密码事实。`);
+本轮回复前，系统已经先为这个角色的虚拟手机固定并保存了密码“${characterPhone.passcode}”。这是一个已经存在的事实，不是让你临时生成的新密码。只有当对话自然涉及手机密码、生日或解锁时，才可以按照角色语气透露这个真实密码；不要把其他日期、金额、编号或用户猜测的数字当成密码，也不要修改这个密码。如果聊天历史中曾经说过其他数字，那些只能视为猜测或说错了，不能覆盖这条固定密码事实。`);
       }
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       const characterPhoneProxyFinalInstruction = immediateCharacterPhoneProxyMessage?.sentFromCharacterPhone
