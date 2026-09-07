@@ -14,6 +14,11 @@ import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../.
 import { buildOfflineHandoffFacts, formatOfflineHandoffFactsForPrompt } from "../../../domain/offlineStory/offlineHandoffContext";
 import { createId } from "../../../core/id/createId";
 import { isWorldBookEntryForAnyCharacter } from "../../../domain/worldbook/worldBookVisibility";
+import { boundOfflinePrompt, truncatePromptTextToEstimatedTokens } from "../../../domain/offlineStory/offlinePromptBudget";
+
+// Offline scripts are generated in bounded segments. The full story remains
+// local, while each provider request gets a predictable input/output budget.
+const OFFLINE_STORY_OUTPUT_TOKEN_CAP = 1_600;
 
 interface UseOfflineStoryGenerationActionsOptions {
   activeStory: OfflineStory | null;
@@ -297,6 +302,15 @@ ${wbPrompts}\n`;
         sysPrompt += `\n【续写模式】：以现有的聊天/故事为草稿，根据设定和目前的逻辑走向，续写故事的精彩发展。`;
       }
 
+      const segmentTargetCharacters = updatedStory.wordLimit && updatedStory.wordLimit > 0
+        ? Math.min(Math.max(200, Math.floor(updatedStory.wordLimit)), 1_800)
+        : 1_200;
+      const segmentOutputTokens = Math.min(
+        OFFLINE_STORY_OUTPUT_TOKEN_CAP,
+        Math.max(256, Math.ceil(segmentTargetCharacters * 1.35)),
+      );
+      sysPrompt += `\n\n【分段生成预算】\n本次只完成一个自然剧情片段，控制在约 ${segmentTargetCharacters} 字以内。不要试图一次写完很长的故事；在自然停顿处结束，下一次请求会从已保存的剧情继续。`;
+
       const ongoingGuidance = updatedStory.ongoingGuidance?.trim();
       const oneTimeGuidance = updatedStory.oneTimeGuidance?.trim();
       // Only an explicitly imported online story may use its frozen snapshot.
@@ -346,13 +360,14 @@ ${wbPrompts}\n`;
       if (handoffFactsPrompt) {
         sysPrompt += `\n\n${handoffFactsPrompt}`;
       }
-      const importedOnlineMessages = updatedStory.importedContext?.messages.slice(-40) || [];
+      const importedOnlineMessages = updatedStory.importedContext?.messages.slice(-16) || [];
       if (importedOnlineMessages.length > 0) {
         const lines = importedOnlineMessages.map((message) => {
           const senderCharacter = storyCharsList.find((character) =>
             character.id === message.senderId || character.id === message.characterId);
           const senderName = message.sender === "user" ? settings.name : (senderCharacter?.remark || senderCharacter?.name || selectedChar?.name || "Character");
-          return `- ${senderName}: ${serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: senderName })}`;
+          const content = serializeMessageContentForPrompt(message, { mode: "history", userName: settings.name, characterName: senderName });
+          return `- ${senderName}: ${truncatePromptTextToEstimatedTokens(content, 350)}`;
         }).join("\n");
         sysPrompt += `\n\n【互通的线上最新对话记忆（Online Chat Context）】：
 以下是各位参与角色最近在微信（线上聊天）中的最新真实对话。这些是你们当下关系的最新现状与真实记忆。请确保线下小说剧本的走向与其认知保持连贯和融合，避免发生剧情上的冲突：
@@ -404,12 +419,33 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
         ? `${lastUserMsgText}\n\n${guidanceForThisTurn}\n请直接把指导落实到本次剧情中，不要解释指导本身。`
         : lastUserMsgText;
 
-      const composedPrompt = PromptComposer.compose({
-        scenario: "offline-story",
-        message: finalGenerationMessage,
+      // Bound only the provider projection. The complete story and imported
+      // history stay untouched in local storage, while old turns are replaced
+      // in this request by a clear compression marker and the newest turns.
+      const boundedPrompt = boundOfflinePrompt({
         history: historyContext,
         systemInstruction: sysPrompt,
-        historyInjections: [...atDepthWorldBook.values()],
+        message: finalGenerationMessage,
+      }, {
+        // Leave room for depth-based World Book injections and provider
+        // protocol overhead. Long stories continue from the saved tail.
+        maxInputTokens: 9_000,
+        maxMessageTokens: 800,
+        maxSystemTokens: 5_000,
+      });
+      const boundedHistoryInjections = [...atDepthWorldBook.values()]
+        .slice(-4)
+        .map((injection) => ({
+          ...injection,
+          content: truncatePromptTextToEstimatedTokens(injection.content, 250),
+        }));
+
+      const composedPrompt = PromptComposer.compose({
+        scenario: "offline-story",
+        message: boundedPrompt.message,
+        history: boundedPrompt.history,
+        systemInstruction: boundedPrompt.systemInstruction,
+        historyInjections: boundedHistoryInjections,
       });
       const response = await apiChat({
         ...composedPrompt,
@@ -417,7 +453,8 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
         apiTemperature: settings.apiTemperature || 0.8,
-        streamCompatible: settings.streamCompatible
+        streamCompatible: settings.streamCompatible,
+        maxOutputTokens: segmentOutputTokens,
       });
 
       if (response && response.text) {
@@ -460,8 +497,12 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
         if (regenerateTarget) showToast("当前剧情已重新生成");
       }
     } catch (err: any) {
-      console.error(err);
-      setErrorMsg("呼叫主脑剧本引擎失败，请检查网络或API Key设定。");
+      console.error("Offline story generation failed:", err);
+      const detail = err instanceof Error ? err.message.trim() : String(err || "").trim();
+      setErrorMsg(detail
+        ? `呼叫主脑剧本引擎失败：${detail}`
+        : "呼叫主脑剧本引擎失败，请检查网络或 API Key 设置。",
+      );
     } finally {
       setIsGenerating(false);
     }

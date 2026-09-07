@@ -39,7 +39,16 @@ export interface TextProviderInput {
   apiEndpoint?: string;
   temperature?: number;
   streamCompatible?: boolean;
+  /** Caller-specific timeout; bounded to keep proxy requests reasonable. */
+  timeoutMs?: number;
+  /** Maximum provider output tokens for workflows that intentionally generate in segments. */
+  maxOutputTokens?: number;
   imageDataUrl?: string;
+}
+
+function resolveTextGenerationTimeout(timeoutMs?: number): number {
+  if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs)) return API_REQUEST_TIMEOUTS.textGeneration;
+  return Math.min(180_000, Math.max(10_000, Math.floor(timeoutMs)));
 }
 
 const openAiEndpoint = (value: string): string => {
@@ -87,6 +96,7 @@ const parseOpenAiText = (raw: string): string => {
 export async function callTextProvider(input: TextProviderInput): Promise<string> {
   const apiKey = input.apiKey?.trim();
   const model = input.model?.trim();
+  const requestTimeoutMs = resolveTextGenerationTimeout(input.timeoutMs);
   if (!apiKey) throw new TextApiError(400, "请先填写 API Key。", "configuration");
   if (!model) throw new TextApiError(400, "请先选择或填写模型名称。", "configuration");
 
@@ -107,9 +117,12 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
         messages,
         temperature: input.temperature ?? 0.7,
         stream: input.streamCompatible === true,
+        ...(typeof input.maxOutputTokens === "number"
+          ? { max_tokens: Math.max(128, Math.floor(input.maxOutputTokens)) }
+          : {}),
       }),
-    }, API_REQUEST_TIMEOUTS.textGeneration);
-    const raw = await readResponseTextWithTimeout(response);
+    }, requestTimeoutMs);
+    const raw = await readResponseTextWithTimeout(response, requestTimeoutMs);
     if (!response.ok) {
       const details = parseTextApiErrorPayload(raw, response.status);
       throw new TextApiError(response.status, details.message, details.code, details.reason);
@@ -143,11 +156,16 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents,
-      generationConfig: { temperature: input.temperature ?? 0.7 },
+      generationConfig: {
+        temperature: input.temperature ?? 0.7,
+        ...(typeof input.maxOutputTokens === "number"
+          ? { maxOutputTokens: Math.max(128, Math.floor(input.maxOutputTokens)) }
+          : {}),
+      },
       ...(prompt.systemInstruction ? { systemInstruction: { parts: [{ text: prompt.systemInstruction }] } } : {}),
     }),
-  }, API_REQUEST_TIMEOUTS.textGeneration);
-  const raw = await readResponseTextWithTimeout(response);
+  }, requestTimeoutMs);
+  const raw = await readResponseTextWithTimeout(response, requestTimeoutMs);
   if (!response.ok) {
     const details = parseTextApiErrorPayload(raw, response.status);
     throw new TextApiError(response.status, details.message, details.code, details.reason);

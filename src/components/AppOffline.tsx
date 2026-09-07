@@ -775,7 +775,7 @@ export default function AppOffline({
                         </button>
                       )}
                     </div>
-                    <p className="text-xs text-[#8E8E93]">设定单次生成的最大字数范围，避免回复过长或过短。</p>
+                    <p className="text-xs text-[#8E8E93]">设定单次生成的最大字数范围；长剧情会自动分段，发送空消息即可从已保存的上一段继续。</p>
 
                     <div className="border-t border-[#F0F0F0] pt-3">
                       <div className="flex items-center justify-between gap-3">

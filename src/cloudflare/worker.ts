@@ -65,6 +65,8 @@ const textInput = (body: Record<string, unknown>, message: string, systemInstruc
   apiEndpoint: typeof body.apiEndpoint === "string" ? body.apiEndpoint : undefined,
   temperature,
   streamCompatible: body.streamCompatible === true,
+  timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : undefined,
+  maxOutputTokens: typeof body.maxOutputTokens === "number" ? body.maxOutputTokens : undefined,
   imageDataUrl: typeof body.imageDataUrl === "string" && body.imageDataUrl.startsWith("data:image/") ? body.imageDataUrl : undefined,
 });
 

@@ -87,10 +87,17 @@ async function directClientChat(params: {
   apiEndpoint?: string;
   apiTemperature?: number;
   streamCompatible?: boolean;
+  /** Optional caller-specific timeout, capped by the server-side adapter. */
+  timeoutMs?: number;
+  /** Provider output budget for long-running workflows. */
+  maxOutputTokens?: number;
   imageDataUrl?: string;
   signal?: AbortSignal;
 }): Promise<{ text: string }> {
-  const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible, imageDataUrl, signal } = params;
+  const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible, timeoutMs, maxOutputTokens, imageDataUrl, signal } = params;
+  const requestTimeoutMs = typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
+    ? timeoutMs
+    : API_REQUEST_TIMEOUTS.textGeneration;
 
   if (apiEndpoint && apiEndpoint.trim()) {
     // Custom OpenAI compatible API
@@ -126,17 +133,18 @@ async function directClientChat(params: {
         model: model || "deepseek-chat",
         messages: messagesPayload,
         temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
-        stream: streamCompatible || false
+        stream: streamCompatible || false,
+        ...(typeof maxOutputTokens === "number" ? { max_tokens: Math.max(128, Math.floor(maxOutputTokens)) } : {})
       }),
       signal,
-    }, API_REQUEST_TIMEOUTS.textGeneration);
+    }, requestTimeoutMs);
 
     if (!responseFetch.ok) {
-      const details = parseTextApiErrorPayload(await readResponseTextWithTimeout(responseFetch), responseFetch.status);
+      const details = parseTextApiErrorPayload(await readResponseTextWithTimeout(responseFetch, requestTimeoutMs), responseFetch.status);
       throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason });
     }
 
-    const responseText = await readResponseTextWithTimeout(responseFetch);
+    const responseText = await readResponseTextWithTimeout(responseFetch, requestTimeoutMs);
     let aiText = "";
     const trimmedText = responseText.trim();
     if (trimmedText.startsWith("data:") || trimmedText.includes("\ndata:")) {
@@ -237,7 +245,8 @@ async function directClientChat(params: {
       body: JSON.stringify({
         contents,
         generationConfig: {
-          temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7
+          temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
+          ...(typeof maxOutputTokens === "number" ? { maxOutputTokens: Math.max(128, Math.floor(maxOutputTokens)) } : {})
         },
         ...(geminiPrompt.systemInstruction ? {
           systemInstruction: {
@@ -246,9 +255,9 @@ async function directClientChat(params: {
         } : {})
       }),
       signal,
-    }, API_REQUEST_TIMEOUTS.textGeneration);
+    }, requestTimeoutMs);
 
-    const responseText = await readResponseTextWithTimeout(responseFetch);
+    const responseText = await readResponseTextWithTimeout(responseFetch, requestTimeoutMs);
     if (!responseFetch.ok) {
       const details = parseTextApiErrorPayload(responseText, responseFetch.status);
       throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason });
@@ -311,18 +320,23 @@ async function apiChatImpl(params: {
   apiEndpoint?: string;
   apiTemperature?: number;
   streamCompatible?: boolean;
+  timeoutMs?: number;
+  maxOutputTokens?: number;
   imageDataUrl?: string;
   signal?: AbortSignal;
 }): Promise<{ text: string }> {
-  const { signal, ...requestBody } = params;
+  const { signal, timeoutMs, ...requestBody } = params;
+  const backendRequestBody = typeof timeoutMs === "number"
+    ? { ...requestBody, timeoutMs }
+    : requestBody;
   let res: Response | null = null;
   try {
     res = await fetchWithTimeout("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify(backendRequestBody),
       signal,
-    }, API_REQUEST_TIMEOUTS.textGeneration);
+    }, typeof timeoutMs === "number" ? timeoutMs : API_REQUEST_TIMEOUTS.textGeneration);
   } catch (err) {
     // A network failure means the optional app backend is genuinely absent.
     // Provider HTTP errors must not be retried through the browser because that
@@ -338,7 +352,8 @@ async function apiChatImpl(params: {
     }
   }
 
-  const responseText = await res.text();
+  const backendTimeoutMs = typeof timeoutMs === "number" ? timeoutMs : API_REQUEST_TIMEOUTS.textGeneration;
+  const responseText = await readResponseTextWithTimeout(res, backendTimeoutMs);
   const contentType = res.headers.get("content-type") || "";
   const routeMissingStatus = res.status === 404 || res.status === 405;
   const looksLikeStaticHostFallback = (/text\/html/i.test(contentType) && (routeMissingStatus || res.ok))

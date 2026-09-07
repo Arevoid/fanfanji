@@ -232,6 +232,8 @@ async function startServer() {
         apiEndpoint: typeof body.apiEndpoint === "string" ? body.apiEndpoint : undefined,
         temperature: typeof body.apiTemperature === "number" ? body.apiTemperature : 0.7,
         streamCompatible: body.streamCompatible === true,
+        timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : undefined,
+        maxOutputTokens: typeof body.maxOutputTokens === "number" ? body.maxOutputTokens : undefined,
         imageDataUrl: typeof body.imageDataUrl === "string" && body.imageDataUrl.startsWith("data:image/") ? body.imageDataUrl : undefined,
       });
       return res.json({ text });
