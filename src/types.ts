@@ -1051,6 +1051,8 @@ export interface OfflineStory {
   lastSyncedMessageCount?: number;
   memorySyncStatus?: "pending" | "synced" | "failed";
   lastMemorySyncAt?: number;
+  /** User-facing diagnostic retained when a memory extraction attempt fails. */
+  lastMemorySyncError?: string;
   syncedSourceMessageIds?: string[];
   /** Durable one-shot bridge from a completed offline story back to this relationship's online chat. */
   onlineHandoff?: {

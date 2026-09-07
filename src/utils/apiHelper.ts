@@ -576,13 +576,29 @@ async function apiExtractMemoriesImpl(params: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
     }, API_REQUEST_TIMEOUTS.memoryTask);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.candidates)) {
-        return { text: data.text || "", items: data.candidates, candidates: data.candidates };
-      }
+    let data: any = undefined;
+    try {
+      data = await res.json();
+    } catch {
+      data = undefined;
     }
-    throw new Error("后端服务不可用，尝试直连");
+    if (res.ok && Array.isArray(data?.candidates)) {
+      return {
+        text: typeof data.text === "string" ? data.text : "",
+        items: data.candidates,
+        candidates: data.candidates,
+        ...(typeof data.error === "string" && data.error.trim() ? { error: data.error.trim() } : {}),
+      };
+    }
+    const backendMessage = typeof data?.error === "string" && data.error.trim()
+      ? data.error.trim()
+      : typeof data?.message === "string" && data.message.trim()
+        ? data.message.trim()
+        : `记忆提取接口返回异常（HTTP ${res.status}）。`;
+    if (!res.ok) {
+      return { text: "", items: [], error: backendMessage };
+    }
+    return { text: typeof data?.text === "string" ? data.text : "", items: [], error: backendMessage };
   } catch (err) {
     if (isApiRequestError(err) && err.kind !== "network") {
       return { text: "", items: [], error: describeApiRequestError(err, "记忆提取") };

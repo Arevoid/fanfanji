@@ -459,35 +459,15 @@ ${historyText}
       });
 
       const generateExtractionText = async (promptText: string, temperature: number): Promise<string> => {
-        if (apiEndpoint && apiEndpoint.trim()) {
-          let endpointUrl = apiEndpoint.trim();
-          if (!endpointUrl.endsWith("/chat/completions")) endpointUrl = endpointUrl.replace(/\/+$/, "") + "/chat/completions";
-          const responseFetch = await fetchWithTimeout(endpointUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKeyValue}` },
-            body: JSON.stringify({
-              model: model || "deepseek-v4-flash",
-              messages: [
-                { role: "system", content: "你是结构化长期知识提取器。只输出可验证的 JSONL，不要解释。" },
-                { role: "user", content: promptText },
-              ],
-              temperature,
-            }),
-          }, API_REQUEST_TIMEOUTS.memoryTask);
-          if (!responseFetch.ok) {
-            const errorText = await responseFetch.text();
-            throw new Error(`中转接口提取失败 (${responseFetch.status}): ${errorText || "服务器未响应"}`);
-          }
-          const dataFetch = await responseFetch.json();
-          return dataFetch.choices?.[0]?.message?.content || "";
-        }
-        const ai = new GoogleGenAI({ apiKey: apiKeyValue, httpOptions: { headers: { "User-Agent": "aistudio-build" } } });
-        const response = await ai.models.generateContent({
-          model: model || "gemini-3.5-flash",
-          contents: promptText,
-          config: { temperature },
+        return callTextProvider({
+          message: promptText,
+          apiKey: apiKeyValue,
+          model: String(model || (apiEndpoint && apiEndpoint.trim() ? "deepseek-v4-flash" : "gemini-3.5-flash")),
+          apiEndpoint: typeof apiEndpoint === "string" ? apiEndpoint : undefined,
+          temperature,
+          timeoutMs: API_REQUEST_TIMEOUTS.memoryTask,
+          systemInstruction: "你是结构化长期知识提取器。只输出可验证的 JSONL，不要解释。",
         });
-        return response.text || "";
       };
 
       const aiText = await generateExtractionText(prompt, 0.5);
@@ -500,7 +480,13 @@ ${historyText}
       res.json({ text: repaired.text, items: repaired.candidates, candidates: repaired.candidates, repaired: repaired.repaired });
     } catch (error: any) {
       console.error("Extract Memories Error:", error);
-      res.status(500).json({ error: error.message || "提取记忆发生异常，请稍后再试。" });
+      const normalized = normalizeTextApiError(error, "提取记忆发生异常，请稍后再试。");
+      res.status(normalized.status).json({
+        success: false,
+        code: normalized.code,
+        reason: normalized.reason,
+        error: normalized.message,
+      });
     }
   });
 

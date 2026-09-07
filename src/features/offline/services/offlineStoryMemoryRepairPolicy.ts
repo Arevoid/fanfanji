@@ -18,7 +18,13 @@ export function getOfflineStoryMemoryRepairNeeds(
   const handoffMemories = memories.filter((memory) => isOfflineStoryHandoffMemory(memory, story));
   return {
     legacyHandoff: handoffMemories.some((memory) => !memory.content.includes(summaryMarker)),
-    missingSummary: Boolean(story.archivedAt || story.memorySyncStatus === "synced") && !hasOfflineStorySummary(story, memories),
+    // A failed extraction must remain retryable when the user explicitly
+    // chooses sync, but it must not be treated as a legacy missing-summary
+    // repair on every automatic lifecycle pass.
+    missingSummary: Boolean(
+      story.memorySyncStatus === "synced"
+      || (story.archivedAt && !story.memorySyncStatus),
+    ) && !hasOfflineStorySummary(story, memories),
     uninformativeSummary: handoffMemories.some((memory) =>
       memory.content.includes(summaryMarker) && memory.content.includes(UNINFORMATIVE_SUMMARY),
     ),

@@ -17,6 +17,24 @@ const createEvidenceKey = (relationId: string, sourceIds: readonly string[], sta
 
 const isMessage = (value: Message | undefined): value is Message => Boolean(value);
 
+/**
+ * Providers sometimes normalize line endings or collapse spaces while
+ * returning JSON. Keep the provenance requirement strict, but compare a
+ * whitespace-normalized form as a compatibility fallback after the exact
+ * match fails.
+ */
+const normalizeEvidenceText = (value: string): string => value
+  .replace(/\r\n?/gu, "\n")
+  .replace(/[ \t\u00a0]+/gu, " ")
+  .trim();
+
+const containsEvidence = (source: string, quote: string): boolean => {
+  if (source.includes(quote)) return true;
+  const normalizedSource = normalizeEvidenceText(source);
+  const normalizedQuote = normalizeEvidenceText(quote);
+  return Boolean(normalizedQuote) && normalizedSource.includes(normalizedQuote);
+};
+
 export async function extractMemories(
   context: MemoryExtractionContext,
   extractApi: MemoryExtractionApi,
@@ -101,11 +119,11 @@ export async function extractMemories(
       .map((id) => context.recentMessages.find((message) => message.id === id))
       .filter(isMessage);
     const quotedMessage = sourceMessages.find((message) =>
-      message.content.includes(payload.evidenceQuote)
-      || serializeMessageContentForPrompt(message, {
+      containsEvidence(message.content, payload.evidenceQuote)
+      || containsEvidence(serializeMessageContentForPrompt(message, {
         mode: "history",
         characterName: context.character.name,
-      }).includes(payload.evidenceQuote));
+      }), payload.evidenceQuote));
     if (!quotedMessage) {
       rejectedCandidateCount += 1;
       return;

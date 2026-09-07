@@ -70,7 +70,8 @@ export function useOfflineStoryMemorySyncActions({
     const repairingLegacyHandoff = needsLegacyHandoffRepair(story);
     const repairingMissingSummary = needsMissingSummaryRepair(story);
     const repairingUninformativeSummary = needsUninformativeSummaryRepair(story);
-    if (!hasUnsyncedOfflineMemoryProgress(story) && !repairingLegacyHandoff && !repairingMissingSummary && !repairingUninformativeSummary) {
+    const manualRetryAfterFailure = story.memorySyncStatus === "failed" && options.syncIntent === "manual_settings";
+    if (!hasUnsyncedOfflineMemoryProgress(story) && !repairingLegacyHandoff && !repairingMissingSummary && !repairingUninformativeSummary && !manualRetryAfterFailure) {
       showToast("当前进展已经同步，无需重复处理");
       return story;
     }
@@ -100,16 +101,19 @@ export function useOfflineStoryMemorySyncActions({
       || (character.isGroupChat && participantCharacters.length > 0),
     );
     const now = Date.now();
-    const markSynced = (memoryIds: string[] = []): OfflineStory => ({
-      ...story,
-      archivedAt: now,
-      archivedMemoryIds: Array.from(new Set([...(story.archivedMemoryIds || []), ...memoryIds])),
-      syncedSourceMessageIds: Array.from(new Set([...(story.syncedSourceMessageIds || []), ...sourceMessages.map((message) => message.id)])),
-      lastSyncedMessageCount: story.messages.length,
-      lastMemorySyncAt: now,
-      memorySyncStatus: "synced",
-      updatedAt: now,
-    });
+    const markSynced = (memoryIds: string[] = []): OfflineStory => {
+      const { lastMemorySyncError: _lastMemorySyncError, ...storyWithoutSyncError } = story;
+      return {
+        ...storyWithoutSyncError,
+        archivedAt: now,
+        archivedMemoryIds: Array.from(new Set([...(story.archivedMemoryIds || []), ...memoryIds])),
+        syncedSourceMessageIds: Array.from(new Set([...(story.syncedSourceMessageIds || []), ...sourceMessages.map((message) => message.id)])),
+        lastSyncedMessageCount: story.messages.length,
+        lastMemorySyncAt: now,
+        memorySyncStatus: "synced",
+        updatedAt: now,
+      };
+    };
 
     memorySyncInFlightRef.current.add(story.id);
     setMemorySyncingStoryId(story.id);
@@ -125,6 +129,12 @@ export function useOfflineStoryMemorySyncActions({
 
       if (isGroupStory) {
         const groupResult = await createOfflineGroupParticipantMemories({ story, participants: participantCharacters, characters: [...characters], relationships: [...relationships], activeIdentityId, sourceMessages, userName: settings.name, now, settings, recallSettings, offlineStoryPolicyInput, extractApi: (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel) });
+        if (groupResult.summaries.length < participantCharacters.length || groupResult.fallbackParticipantNames.length > 0) {
+          const failedParticipants = groupResult.fallbackParticipantNames.length > 0
+            ? groupResult.fallbackParticipantNames.join("、")
+            : "部分参与角色";
+          throw new Error(`多人线下剧情仍有${failedParticipants}未生成有效摘要，未标记为已同步。`);
+        }
         const write = await commitMemoryWriteBundle({
           claims: groupResult.acceptedClaims,
           summaries: groupResult.summaries,
@@ -154,28 +164,22 @@ export function useOfflineStoryMemorySyncActions({
       const headerLabel = isDelicate ? `【线下剧本《${story.title}》心境归档】` : `【线下剧本《${story.title}》关键剧情归档】`;
       let confirmedFacts: string[] = [];
       let acceptedOfflineClaims: KnowledgeClaim[] = [];
-      let usedSafeFallback = false;
-      const createSafeFallback = () => {
-        usedSafeFallback = true;
-      };
-      try {
-        const result = await MemoryService.extractMemories({
-          character, characterId: story.characterId, relationId: relationship.id, userIdentityId: relationship.userIdentityId, conversationId: relationship.conversationId,
-          recentMessages: sourceMessages.slice(-historyLimit), existingMemories: [], scenario: "offline", apiKey: settings.apiKey,
-          model: !recallSettings.extractModel || recallSettings.extractModel === "default-chat-model" ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
-          apiEndpoint: settings.apiEndpoint, templateType: character.archiveTemplateType, filterItems: filterOfflineExtractedFacts, offlineStoryPolicyInput,
-          createId: () => createId("mem"), currentTime: () => Date.now(),
-          formatContent: (items, formatOptions) => `${isDelicate ? `${formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)}\n${items.map((item) => `- ${item}`).join("\n")}` : formatExtractedMemorySummary(headerLabel, items)}`,
-        }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
-        if (result.apiError) createSafeFallback();
-        else {
-          acceptedOfflineClaims = result.acceptedClaims;
-          confirmedFacts = result.acceptedClaims.filter((claim) => claim.status === "active" && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted")).map((claim) => claim.statement);
-          if (acceptedOfflineClaims.length === 0) createSafeFallback();
-        }
-      } catch (error) {
-        if (error instanceof Error && error.message === "Offline story knowledge persistence failed") throw error;
-        createSafeFallback();
+      const result = await MemoryService.extractMemories({
+        character, characterId: story.characterId, relationId: relationship.id, userIdentityId: relationship.userIdentityId, conversationId: relationship.conversationId,
+        recentMessages: sourceMessages.slice(-historyLimit), existingMemories: [], scenario: "offline", apiKey: settings.apiKey,
+        model: !recallSettings.extractModel || recallSettings.extractModel === "default-chat-model" ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
+        apiEndpoint: settings.apiEndpoint, templateType: character.archiveTemplateType, filterItems: filterOfflineExtractedFacts, offlineStoryPolicyInput,
+        createId: () => createId("mem"), currentTime: () => Date.now(),
+        formatContent: (items, formatOptions) => `${isDelicate ? `${formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)}\n${items.map((item) => `- ${item}`).join("\n")}` : formatExtractedMemorySummary(headerLabel, items)}`,
+      }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
+      if (result.apiError) throw new Error(result.apiError);
+      acceptedOfflineClaims = result.acceptedClaims;
+      confirmedFacts = result.acceptedClaims.filter((claim) => claim.status === "active" && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted")).map((claim) => claim.statement);
+      if (acceptedOfflineClaims.length === 0) {
+        const rejectedHint = result.rejectedCandidateCount > 0
+          ? `接口返回了${result.rejectedCandidateCount}条候选，但都未通过来源或事实校验`
+          : "接口没有返回可用的结构化候选";
+        throw new Error(`${rejectedHint}，未写入占位记忆。`);
       }
       const extractedSummary = createConversationSummaryRecord({
         id: getOfflineStorySummaryId(story),
@@ -190,6 +194,9 @@ export function useOfflineStoryMemorySyncActions({
         generatedAt: now,
         generator: "offline-story.v2",
       });
+      if (!extractedSummary) {
+        throw new Error("已提取候选，但无法生成带来源的剧情摘要，未标记为已同步。");
+      }
       const write = await commitMemoryWriteBundle({
         claims: acceptedOfflineClaims,
         summary: extractedSummary,
@@ -203,13 +210,14 @@ export function useOfflineStoryMemorySyncActions({
       const syncedStory = markSynced();
       if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(syncedStory); else onSaveOfflineStory(syncedStory);
       if (options.userConfirmed) captureOfflineStoryCompletedEvent({ story: syncedStory, userIdentityId: relationships.find((relation) => relation.id === syncedStory.relationId)?.userIdentityId, sourceMessages, userConfirmed: true, confirmedFacts, recordedAt: now });
-      notifyOfflineMemorySync({ message: usedSafeFallback ? "提炼接口未返回可用摘要，本次不写入无意义的占位记忆" : "线下剧情摘要已同步到当前角色" });
+      notifyOfflineMemorySync({ message: "线下剧情摘要已同步到当前角色" });
       return syncedStory;
     } catch (error) {
       console.error("Failed to sync offline story memories:", error);
-      const failedStory: OfflineStory = { ...story, memorySyncStatus: "failed", updatedAt: Date.now() };
+      const errorMessage = error instanceof Error ? error.message : String(error || "未知同步错误");
+      const failedStory: OfflineStory = { ...story, memorySyncStatus: "failed", lastMemorySyncError: errorMessage, updatedAt: Date.now() };
       if (activeStoryRef.current?.id === story.id) saveActiveStorySnapshot(failedStory); else onSaveOfflineStory(failedStory);
-      notifyOfflineMemorySync({ message: "线下剧情记忆同步失败，故事已保留，可稍后重试", isError: true });
+      notifyOfflineMemorySync({ message: `线下剧情记忆同步失败：${errorMessage}。故事已保留，可稍后重试`, isError: true });
       return failedStory;
     } finally {
       memorySyncInFlightRef.current.delete(story.id);
