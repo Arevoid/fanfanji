@@ -82,7 +82,12 @@ const USER_CACHE_KEYS: Partial<Record<UserStorageAppId, readonly string[]>> = {
 const ROLE_CACHE_KEYS: Partial<Record<CharacterPhoneCacheId, readonly string[]>> = {};
 
 const REBUILDABLE_CACHE_PREFIX = "phone_rebuildable_cache_v1:";
-const CACHE_STORAGE_PREFIXES = ["fanfan-phone-", "fanfanji-"];
+// `fanfan-phone-*` is the PWA's application-shell cache. Deleting it while
+// the page is running can make the next embedded-browser navigation fall back
+// to a wallpaper-only shell when the network is unavailable. It is not an
+// app-owned rebuildable cache, so only explicitly rebuildable `fanfanji-*`
+// caches are removed by the user-facing cleanup action.
+const CACHE_STORAGE_PREFIXES = ["fanfanji-"];
 
 function getStorage(): Storage | null {
   if (typeof window === "undefined") return null;

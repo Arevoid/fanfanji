@@ -27,6 +27,7 @@ import {
 import {
   deleteSelectedUserAppData,
   getUserDataAppOption,
+  USER_DATA_RESET_EVENT,
   USER_DATA_APP_OPTIONS,
   type UserDataAppId,
 } from "../userDataDeletion";
@@ -144,7 +145,12 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
       }
       setNotice(`已删除${labels}的数据，正在恢复应用初始状态…`);
       setSelectedDataApps([]);
-      window.setTimeout(() => window.location.reload(), 250);
+      // Reset the root app in-process instead of forcing a full document
+      // reload.  Reloading from an embedded/mobile browser can race lazy
+      // chunks and leave only the wallpaper visible with no way back.
+      window.dispatchEvent(new CustomEvent(USER_DATA_RESET_EVENT, {
+        detail: { apps: result.apps },
+      }));
     } catch (error) {
       setNotice(`删除失败：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
@@ -217,17 +223,31 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
         </div>
       )}
 
-      <div className="mt-4 divide-y divide-slate-100 rounded-2xl border border-slate-100 bg-slate-50/50">
+      <div className={mode === "user"
+        ? "mt-4 grid grid-cols-3 gap-2 rounded-2xl border border-slate-100 bg-slate-50/50 p-2 sm:grid-cols-4"
+        : "mt-4 divide-y divide-slate-100 rounded-2xl border border-slate-100 bg-slate-50/50"}>
         {options.map((option) => {
           const itemUsage = usageFor(option.id);
           const isBusy = busyTarget === option.id;
           return (
-            <div key={option.id} className="flex items-center gap-3 px-3 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-slate-700">{option.label}</p>
-                <p className="mt-0.5 truncate text-[10px] text-slate-400">{option.description}</p>
+            <div
+              key={option.id}
+              title={option.description}
+              className={mode === "user"
+                ? "min-w-0 rounded-xl border border-slate-100 bg-white px-2 py-2.5 text-center"
+                : "flex items-center gap-3 px-3 py-3"}
+            >
+              <div className={mode === "user" ? "min-w-0" : "min-w-0 flex-1"}>
+                <p className="truncate text-xs font-bold text-slate-700">{option.label}</p>
+                {mode === "characterPhone" && (
+                  <p className="mt-0.5 truncate text-[10px] text-slate-400">{option.description}</p>
+                )}
               </div>
-              <span className="shrink-0 text-[10px] font-semibold text-slate-400">{formatStorageBytes(itemUsage?.bytes ?? 0)}</span>
+              <span className={mode === "user"
+                ? "mt-1 block truncate text-[10px] font-semibold text-slate-400"
+                : "shrink-0 text-[10px] font-semibold text-slate-400"}>
+                {formatStorageBytes(itemUsage?.bytes ?? 0)}
+              </span>
               {mode === "characterPhone" && (
                 <button
                   type="button"

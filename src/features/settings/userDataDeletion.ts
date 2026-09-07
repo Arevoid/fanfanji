@@ -217,6 +217,15 @@ export interface UserDataDeletionResult {
   failedKeys: string[];
 }
 
+/**
+ * Emitted after an app-scoped deletion completes.  The root app listens for
+ * this event to discard its in-memory snapshots and return to the desktop.
+ * Keeping the reset in-process avoids a full page reload, which can leave an
+ * embedded mobile browser showing only the wallpaper while its lazy chunks
+ * are still being restored.
+ */
+export const USER_DATA_RESET_EVENT = "fanfanji-user-data-reset";
+
 export async function deleteSelectedUserAppData(appIds: readonly UserDataAppId[]): Promise<UserDataDeletionResult> {
   const selected = [...new Set(appIds)].filter((id): id is UserDataAppId => Boolean(USER_DATA_MANIFEST[id]));
   const removedKeys: string[] = [];

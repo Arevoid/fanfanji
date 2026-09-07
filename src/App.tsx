@@ -134,6 +134,7 @@ import { createConversationSummaryRecord } from "./features/characterKnowledge/s
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
 import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
 import { MOMENT_CHARACTER_EXPRESSION_PROMPT } from "./utils/livingPrompt";
+import { USER_DATA_RESET_EVENT, type UserDataAppId } from "./features/settings/userDataDeletion";
 import {
   migrateLegacyClassicBubblePreset,
   migrateUnreadableClassicBubblePalette,
@@ -1423,6 +1424,57 @@ export default function App() {
 
   // Memory Vault (Memory Book) States
   const [memories, setMemories] = useState<MemoryItem[]>(() => loadMemories([]).value);
+
+  // App-scoped data deletion is handled without a document reload. A reload
+  // can race lazy chunks in an embedded/mobile browser and leave only the
+  // wallpaper visible. Reset the in-memory snapshots here, unmounting any
+  // previously opened app so its next visit reads the freshly cleared store.
+  useEffect(() => {
+    const handleUserDataReset = (event: Event) => {
+      const detail = (event as CustomEvent<{ apps?: unknown }>).detail;
+      const apps = Array.isArray(detail?.apps)
+        ? detail.apps.filter((value): value is UserDataAppId => typeof value === "string")
+        : [];
+      const selected = new Set<UserDataAppId>(apps);
+
+      if (selected.has("chat")) {
+        setMessages([]);
+        setActiveChatCharId(null);
+        setActiveChatRelationId(null);
+      }
+      if (selected.has("characters")) {
+        charactersRepositoryHydrated.current = true;
+        setCharacters(hydrateRelationshipNetworkCharacters(DEFAULT_CHARACTERS));
+        setRelationships([]);
+        setActiveChatCharId(null);
+        setActiveChatRelationId(null);
+      }
+      if (selected.has("worldbook")) setWorldBookEntries(DEFAULT_WORLDBOOK_ENTRIES);
+      if (selected.has("moments")) setMoments([]);
+      if (selected.has("diary")) setPendingDiaryShareMessageId(null);
+      if (selected.has("schedule")) setScheduleStore(loadScheduleStore().value);
+      if (selected.has("music")) {
+        setTracks([]);
+        setPlaylists([]);
+        setDualMusicConfigs([]);
+        setIdentityMusicStates([]);
+        setRelationshipMusicStates([]);
+        setCurrentTrack(null);
+        setIsPlaying(false);
+        setPlaybackOrigin(null);
+      }
+      if (selected.has("offline")) setOfflineStories([]);
+      if (selected.has("memory")) setMemories([]);
+
+      // Close the settings sub-page and discard all lazy app instances. The
+      // normal desktop remains interactive, and reopening an app mounts it
+      // from its now-clean storage instead of retaining stale component state.
+      setMountedAppIds(new Set());
+      setActiveApp(null);
+    };
+    window.addEventListener(USER_DATA_RESET_EVENT, handleUserDataReset);
+    return () => window.removeEventListener(USER_DATA_RESET_EVENT, handleUserDataReset);
+  }, []);
 
   // A one-time, idempotent bridge from character-keyed legacy data to the
   // default historical relationship. New direct data is always relation keyed.
