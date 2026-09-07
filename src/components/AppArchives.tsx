@@ -249,7 +249,6 @@ export default function AppArchives({
 
     try {
       const isPng = file.name.toLowerCase().endsWith(".png");
-      const isJson = file.name.toLowerCase().endsWith(".json");
       const isTxt = file.name.toLowerCase().endsWith(".txt");
       const isDocx = file.name.toLowerCase().endsWith(".docx");
       
@@ -275,25 +274,6 @@ export default function AppArchives({
           });
         }
         importedChar = mapSillyTavernToCharacter(parsedJson, imgDataUrl);
-      } else if (isJson) {
-        const text = await new Promise<string>((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result as string);
-          r.onerror = () => reject(new Error("读取 JSON 配置文件失败"));
-          r.readAsText(file);
-        });
-        const parsedJson = JSON.parse(text);
-        const innerData = parsedJson.data || parsedJson;
-        const embeddedCharacter = innerData?.extensions?.fanfanji?.character;
-        importedChar = embeddedCharacter && typeof embeddedCharacter === "object"
-          ? createCharacterFromImportedProfile(embeddedCharacter, "char-import-" + Date.now())
-          : mapSillyTavernToCharacter(parsedJson, "");
-        const mwb = innerData.mountedWorldbooks || innerData.mounted_worldbooks || innerData.mounted_world_books || parsedJson.mountedWorldbooks || parsedJson.mounted_worldbooks || parsedJson.mounted_world_books;
-        if (mwb && Array.isArray(mwb)) {
-          characterBook = { entries: mwb };
-        } else {
-          characterBook = innerData.character_book || innerData.world_book || innerData.worldbook;
-        }
       } else if (isTxt) {
         const text = await new Promise<string>((resolve, reject) => {
           const r = new FileReader();
@@ -312,7 +292,7 @@ export default function AppArchives({
         const text = await safeParseDocx(arrayBuffer);
         importedChar = createCharacterFromRawDocument(text, file.name, "char-import-" + Date.now());
       } else {
-        throw new Error("请上传 .png 角色卡、.json 配置文件、.txt 或 .docx 文档文件！");
+        throw new Error("档案馆暂不支持 JSON 人设导入，请上传 .png 角色卡、.txt 或 .docx 文档文件！");
       }
 
       // All supported formats pass through the same persona-only boundary.
@@ -598,7 +578,7 @@ export default function AppArchives({
                       <span>导入设定</span>
                       <input
                         type="file"
-                        accept=".png,.json,.txt,.docx"
+                        accept=".png,.txt,.docx"
                         onChange={(e) => {
                           setShowAddMenu(false);
                           handleCharacterImport(e);
