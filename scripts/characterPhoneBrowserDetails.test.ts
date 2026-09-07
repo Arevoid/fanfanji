@@ -44,6 +44,16 @@ assert.deepEqual(cachedDetail.results, [
 assert.equal(cachedDetail.sourceUrl, "https://example.test/source");
 assert.equal(cachedDetail.sourceLabel, "已保存来源");
 
+const repairedGenericReflection = buildCharacterPhoneBrowserDetail({
+  id: "search-generic-reflection",
+  query: "发烧了吃什么东西好得快",
+  title: "关于“发烧了吃什么东西好得快”的搜索结果",
+  reflection: "我刚刚搜“发烧了吃什么东西好得快”，不是突然想做功课……是这件事已经卡在眼前了。先找个能用的答案，剩下的再慢慢想。",
+  timestamp: 3,
+}, "周树生", "克制，做事很有条理");
+assert.notEqual(repairedGenericReflection.reflection, "我刚刚搜“发烧了吃什么东西好得快”，不是突然想做功课……是这件事已经卡在眼前了。先找个能用的答案，剩下的再慢慢想。", "replaces the legacy one-size-fits-all browser heart voice");
+assert.match(repairedGenericReflection.reflection, /发烧了吃什么东西好得快/);
+
 const unsafeSourceDetail = buildCharacterPhoneBrowserDetail({
   ...apiEntry,
   sourceUrl: "javascript:alert(1)",

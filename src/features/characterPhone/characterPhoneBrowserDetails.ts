@@ -42,6 +42,24 @@ function normalizeTopic(value: string): string {
   return value.trim().replace(/\s+/g, " ").slice(0, 120);
 }
 
+function stableVariantIndex(value: string, length: number): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash % length;
+}
+
+function buildRoleScopedReflection(topic: string, characterName: string, characterContext = ""): string {
+  const variants = [
+    `先把“${topic}”里最关键的那一段弄明白，其他的等有空再补。${characterName}不想因为一个小问题一直卡着。`,
+    `“${topic}”刚好碰到眼前，先找个能马上用的办法。剩下的细节，${characterName}晚点再慢慢理。`,
+    `我只是想确认“${topic}”到底怎么处理，免得临时又返工。先记下有用的，其他先放着。`,
+    `看完“${topic}”就够做决定了，没必要把时间都耗在搜索上。${characterName}先去忙手头的事。`,
+  ];
+  return variants[stableVariantIndex(`${characterName}|${characterContext}|${topic}`, variants.length)];
+}
+
 function findTopic(entry: CharacterPhoneBrowserEntry): string {
   const query = normalizeTopic(entry.query);
   if (query) return query;
@@ -76,7 +94,8 @@ function buildLegacyResults(topic: string, summary: string): CharacterPhoneBrows
 
 export function buildCharacterPhoneBrowserDetail(
   entry: CharacterPhoneBrowserEntry,
-  _characterName = "我",
+  characterName = "我",
+  characterContext = "",
 ): CharacterPhoneBrowserDetail {
   const topic = findTopic(entry);
   const normalized = topic.toLocaleLowerCase();
@@ -86,9 +105,11 @@ export function buildCharacterPhoneBrowserDetail(
   const summary = entry.summary?.trim()
     || matched?.summary
     || `关于“${topic}”的百科式简要整理：先确认它的基本定义、常见用途和注意事项；这只是快速参考，具体内容以原始资料为准。`;
-  const reflection = entry.reflection?.trim()
-    || matched?.reflection(topic)
-    || `我刚刚搜“${topic}”，不是突然想做功课……是这件事已经卡在眼前了。先找个能用的答案，剩下的再慢慢想。`;
+  const storedReflection = entry.reflection?.trim() || "";
+  const legacyGenericReflection = /^我刚刚搜[“"]?[^”"]+[”"]?，不是突然想做功课/.test(storedReflection);
+  const reflection = storedReflection && !legacyGenericReflection
+    ? storedReflection
+    : matched?.reflection(topic) || buildRoleScopedReflection(topic, characterName, characterContext);
   const generatedResults = Array.isArray(entry.results)
     ? entry.results.map(normalizeResult).filter((result): result is CharacterPhoneBrowserResult => Boolean(result)).slice(0, 3)
     : [];

@@ -280,6 +280,8 @@ export interface CharacterPhoneRecord {
   initialContentGeneratedAt?: number;
   /** Explicit marker for newly-created or cleared phones; absent on legacy records. */
   initialContentPending?: boolean;
+  /** Storage/content migration version for role-phone records. */
+  phoneDataVersion?: number;
   /**
    * Set when the role-phone data is explicitly cleared. While this marker is
    * newer than the last successful initial generation, source projections

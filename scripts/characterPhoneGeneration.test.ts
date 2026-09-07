@@ -217,6 +217,9 @@ try {
   assert.equal(initialGeneration.status, "generated");
   assert.equal(initialGeneration.phone.initialContentPending, false);
   assert.equal(initialGeneration.phone.initialContentGeneratedAt, 1_100);
+  const initialThread = initialGeneration.phone.threadMessages.filter((message) => message.contactId === "contact-linxiao");
+  assert.ok(initialThread.length >= 4, "legacy singular provider replies are expanded into a real initial conversation");
+  assert.ok(initialThread.some((message) => message.sender === "contact") && initialThread.some((message) => message.sender === "character"), "initial conversation includes both sides");
   assert.ok(new Set(initialGeneration.phone.lifeEvents?.[0]?.artifactRefs.map((ref) => ref.app)).size <= 10);
   assert.match(String(requestBodies[1]?.systemInstruction || ""), /首次初始化时必须覆盖/);
 

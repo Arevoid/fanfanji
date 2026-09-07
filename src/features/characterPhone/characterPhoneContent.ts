@@ -339,9 +339,9 @@ function buildContactStarterMessage(contact: CharacterPhoneContact): string {
 
 /**
  * Context/world-book contacts are real people in the role's life, but they
- * did not necessarily have a mirrored main-chat thread. Give an evidenced
- * contact a single small incoming opener so opening the contact is useful and
- * does not show a broken empty conversation. User chat remains a strict mirror.
+ * did not necessarily have a mirrored main-chat thread. Only preserve an
+ * opener when the source contact explicitly supplied one; never invent the
+ * same generic message for every contact. User chat remains a strict mirror.
  */
 function syncContactThreads(
   phone: CharacterPhoneRecord,
@@ -352,7 +352,7 @@ function syncContactThreads(
   const nextMessages = [...threadMessages];
   const seededAt = Math.max(0, now - 2 * 60 * 1000);
   contacts
-    .filter((contact) => !contact.removedAt && contact.source !== "user")
+    .filter((contact) => !contact.removedAt && contact.source !== "user" && Boolean(contact.lastMessage?.trim()))
     .forEach((contact) => {
       const existing = nextMessages.some((message) => message.contactId === contact.id);
       if (existing) return;
@@ -785,7 +785,12 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
   const contacts = syncContacts(scopedInput);
   const userContact = contacts[0];
   const chat = syncUserChat(sourcePhone, input.character, userContact, lifeContext.messages, lifeContext.relationships);
-  const contactThreads = syncContactThreads(sourcePhone, contacts, chat.threadMessages, now);
+  // During first-life initialization the generator owns the conversation
+  // history. Do not seed every contact with the same generic one-line opener;
+  // that makes every chat look identical and leaves no character reply.
+  const contactThreads = sourcePhone.initialContentPending
+    ? { contacts, threadMessages: chat.threadMessages }
+    : syncContactThreads(sourcePhone, contacts, chat.threadMessages, now);
   const moments = syncMoments(sourcePhone, input.character, input.characters, lifeContext.activeIdentity, lifeContext.moments, contactThreads.contacts, relationshipNetworkContacts);
   const music = syncMusic(sourcePhone, input.musicTracks, context);
 

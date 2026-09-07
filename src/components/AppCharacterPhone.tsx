@@ -56,6 +56,7 @@ import type { Character, Message, Moment, MomentVisibility, MusicTrack, UserIden
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import {
   CHARACTER_PHONE_DEFAULT_WALLPAPER,
+  CHARACTER_PHONE_DATA_VERSION,
   createCharacterPhone,
   deriveCharacterPhonePasscode,
   getCharacterPhone,
@@ -396,7 +397,13 @@ function openCharacterPhone(
 ): CharacterPhoneRecord {
   const existing = getCharacterPhone(ownerIdentityId, character.id);
   const passcodeContext = buildCharacterPhonePasscodeContext(character, context);
-  const basePhone = existing || createCharacterPhone(ownerIdentityId, character, Date.now(), passcodeContext);
+  // Legacy role-phone records were created before the clear/hydration repair.
+  // Migrate each one lazily on access as well as during app startup, so an
+  // already-open page cannot keep resurrecting its old role-phone content.
+  const migratedExisting = existing && existing.phoneDataVersion !== CHARACTER_PHONE_DATA_VERSION
+    ? clearCharacterPhoneData(existing)
+    : existing;
+  const basePhone = migratedExisting || createCharacterPhone(ownerIdentityId, character, Date.now(), passcodeContext);
   // A phone's secrets are fixed when its record is first created. Do not
   // re-derive them from a later chat/world-book snapshot while the lock screen
   // is still unopened: doing so makes a password the character already said
@@ -2130,7 +2137,11 @@ export default function AppCharacterPhone({
       title: `关于“${query}”的搜索结果`,
       timestamp: now,
     };
-    const detail = buildCharacterPhoneBrowserDetail(entryBase, selectedCharacter?.name);
+    const detail = buildCharacterPhoneBrowserDetail(
+      entryBase,
+      selectedCharacter?.name,
+      `${selectedCharacter?.personality || ""}\n${selectedCharacter?.backstory || ""}`,
+    );
     persistPhone(withPhoneAction({
       ...currentPhone,
       browserHistory: [
@@ -2364,7 +2375,11 @@ export default function AppCharacterPhone({
     ? currentPhone.browserHistory.find((entry) => entry.id === selectedBrowserEntryId) || null
     : null;
   const selectedBrowserDetail = selectedBrowserEntry
-    ? buildCharacterPhoneBrowserDetail(selectedBrowserEntry, selectedCharacter.name)
+    ? buildCharacterPhoneBrowserDetail(
+        selectedBrowserEntry,
+        selectedCharacter.name,
+        `${selectedCharacter.personality || ""}\n${selectedCharacter.backstory || ""}`,
+      )
     : null;
   const phoneScheduleEntries = useMemo<ScheduleEntry[]>(
     () =>

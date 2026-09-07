@@ -381,8 +381,8 @@ assert.equal(normalizeCharacterPhoneContactName("我们一家", [], { allowProno
 assert.notEqual(createCharacterPhoneInitialAvatar("顾沉"), createCharacterPhoneInitialAvatar("温知遥"), "initial avatars are deterministic but not shared");
 const contextContact = phoneA.contacts.find((contact) => contact.name === "林晓");
 assert.ok(contextContact?.avatar?.startsWith("data:image/svg+xml"), "unlinked context contacts use initials avatars");
-assert.ok(phoneA.threadMessages.some((message) => message.contactId === contextContact?.id), "context contacts open with an evidenced conversation opener");
-assert.equal(contextContact?.lastMessage, "最近忙什么呢？有空出来聊聊。");
+assert.equal(phoneA.threadMessages.some((message) => message.contactId === contextContact?.id), false, "context-only contacts do not receive invented starter messages");
+assert.equal(contextContact?.lastMessage, undefined);
 
 const repairedMalformedPhone = ensureCharacterPhoneContent({
   phone: {

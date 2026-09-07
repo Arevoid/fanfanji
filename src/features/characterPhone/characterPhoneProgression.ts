@@ -484,6 +484,67 @@ function findThreadContact(
   return visibleNpcContacts.length === 1 ? visibleNpcContacts[0] : undefined;
 }
 
+function stableVariantIndex(value: string, length: number): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash % length;
+}
+
+/**
+ * Providers sometimes still answer the legacy singular thread fields even
+ * when the batch schema is requested. Keep the generated conversation useful:
+ * preserve every provider turn, then add only the missing side/turns with
+ * role-scoped, varied follow-ups rather than copying the same starter text to
+ * every contact.
+ */
+function completeInitialThreadDrafts(
+  drafts: Array<{ sender: "contact" | "character"; content: string }>,
+  incoming: string,
+  outgoing: string,
+  contact: CharacterPhoneContact,
+  character: Character,
+  lifeEventSummary: string,
+): Array<{ sender: "contact" | "character"; content: string }> {
+  if (drafts.length === 0 && !incoming && !outgoing) return drafts;
+  const variant = stableVariantIndex(
+    `${character.id}|${contact.id}|${lifeEventSummary}`,
+    4,
+  );
+  const contactFollowUps = [
+    "好，你先忙完手上的事，晚点再说。",
+    "行，我先记着，不急着催你。",
+    "知道了，有空的时候回我一声就好。",
+    "好，那我先去处理自己的事，等你消息。",
+  ];
+  const characterFollowUps = [
+    "嗯，我看到了，处理完手上的事就回你。",
+    "知道了，我晚点把这件事说清楚。",
+    "好，我先忙一会儿，等会儿再联系。",
+    "收到，我记住了，忙完再跟你细说。",
+  ];
+  const next = [...drafts];
+  if (!next.some((draft) => draft.sender === "contact")) {
+    next.unshift({ sender: "contact", content: incoming || `我刚想起这件事，${contact.name}，你现在方便吗？` });
+  }
+  if (!next.some((draft) => draft.sender === "character")) {
+    next.push({ sender: "character", content: outgoing || characterFollowUps[variant] });
+  }
+  let followUpIndex = 0;
+  while (next.length < 4) {
+    const sender = next.at(-1)?.sender === "contact" ? "character" : "contact";
+    next.push({
+      sender,
+      content: sender === "contact"
+        ? contactFollowUps[(variant + followUpIndex) % contactFollowUps.length]
+        : characterFollowUps[(variant + followUpIndex) % characterFollowUps.length],
+    });
+    followUpIndex += 1;
+  }
+  return next.slice(0, 6);
+}
+
 function hasText(value: string): boolean {
   return Boolean(value.trim());
 }
@@ -679,13 +740,25 @@ export async function advanceCharacterPhoneWithResult(
   const contactDrafts = parseContactDrafts(raw.contacts, input.character, sourceFileName, contactEvidenceText);
   const mergedContacts = mergeGeneratedContacts(base, contactDrafts, validatedSourceRefs);
   const requestedThreadContact = cleanGeneratedText(raw.threadContactName, sourceFileName, 40);
-  const threadContact = findThreadContact(mergedContacts.contacts, requestedThreadContact, mergedContacts.added);
+  const threadContact = findThreadContact(mergedContacts.contacts, requestedThreadContact, mergedContacts.added)
+    || (isInitialGeneration ? mergedContacts.added.find((contact) => !contact.removedAt && contact.source !== "user") : undefined)
+    || (isInitialGeneration ? mergedContacts.contacts.find((contact) => !contact.removedAt && contact.source !== "user") : undefined);
   const incoming = cleanGeneratedText(raw.threadIncoming || raw.threadMessage, sourceFileName);
   const outgoing = cleanGeneratedText(raw.threadOutgoing || raw.message, sourceFileName);
-  const threadDrafts = parseGeneratedThreadMessages(raw.threadMessages, sourceFileName);
+  let threadDrafts = parseGeneratedThreadMessages(raw.threadMessages, sourceFileName);
   if (threadDrafts.length === 0) {
     if (incoming) threadDrafts.push({ sender: "contact", content: incoming });
     if (outgoing) threadDrafts.push({ sender: "character", content: outgoing });
+  }
+  if (isInitialGeneration && threadContact) {
+    threadDrafts = completeInitialThreadDrafts(
+      threadDrafts,
+      incoming,
+      outgoing,
+      threadContact,
+      input.character,
+      cleanGeneratedText(raw.lifeEventSummary, sourceFileName, 240),
+    );
   }
   const next: CharacterPhoneRecord = {
     ...base,
@@ -785,7 +858,14 @@ export async function advanceCharacterPhoneWithResult(
       ...(draft.results.length >= 2 ? { results: draft.results } : {}),
       ...(draft.reflection ? { reflection: draft.reflection } : {}),
     };
-    const entry = { ...entryBase, ...buildCharacterPhoneBrowserDetail(entryBase, roleName) };
+    const entry = {
+      ...entryBase,
+      ...buildCharacterPhoneBrowserDetail(
+        entryBase,
+        roleName,
+        `${input.character.personality || ""}\n${input.character.backstory || ""}`,
+      ),
+    };
     pushArtifact("browser", next.browserHistory, entry, (value) => `${normalizeArtifactText(value.query)}|${normalizeArtifactText(value.title)}`);
   });
   const diaryBody = cleanGeneratedText(raw.diaryBody, sourceFileName);

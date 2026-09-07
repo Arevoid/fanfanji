@@ -340,6 +340,8 @@ const LEGACY_MUSIC_TITLES = new Set([
 
 export const CHARACTER_PHONE_DEFAULT_WALLPAPER =
   "linear-gradient(145deg, #eeeeec 0%, #fafaf9 48%, #e4e4e2 100%)";
+/** Records created after the source-hydration repair use this version. */
+export const CHARACTER_PHONE_DATA_VERSION = 2;
 
 export function normalizeCharacterPhonePasscode(value: unknown): string {
   const digits = String(value ?? "").replace(/\D/g, "");
@@ -437,6 +439,7 @@ export function createCharacterPhone(
     lifeEvents: [],
     activities: [],
     initialContentPending: true,
+    phoneDataVersion: CHARACTER_PHONE_DATA_VERSION,
   };
   saveCharacterPhone(phone);
   return phone;
@@ -867,6 +870,7 @@ export function clearCharacterPhoneData(
     initialContentGeneratedAt: undefined,
     initialContentPending: true,
     sourceHydrationSuppressedAt: now,
+    phoneDataVersion: CHARACTER_PHONE_DATA_VERSION,
     currentlyPlayingTrackId: undefined,
     currentlyPlayingSince: undefined,
     frequentListeningHours: undefined,
