@@ -1428,7 +1428,8 @@ export default function App() {
   // App-scoped data deletion is handled without a document reload. A reload
   // can race lazy chunks in an embedded/mobile browser and leave only the
   // wallpaper visible. Reset the in-memory snapshots here, unmounting any
-  // previously opened app so its next visit reads the freshly cleared store.
+  // previously opened app so its next visit reads the freshly cleared store,
+  // while keeping the settings page available for a safe exit.
   useEffect(() => {
     const handleUserDataReset = (event: Event) => {
       const detail = (event as CustomEvent<{ apps?: unknown }>).detail;
@@ -1466,11 +1467,13 @@ export default function App() {
       if (selected.has("offline")) setOfflineStories([]);
       if (selected.has("memory")) setMemories([]);
 
-      // Close the settings sub-page and discard all lazy app instances. The
-      // normal desktop remains interactive, and reopening an app mounts it
-      // from its now-clean storage instead of retaining stale component state.
-      setMountedAppIds(new Set());
-      setActiveApp(null);
+      // Keep the settings page visible after the destructive operation. This
+      // gives the user an immediate, clickable way to leave the page instead
+      // of switching into a desktop render while the app tree is being
+      // remounted. Other lazy apps are discarded so their next visit reads
+      // the freshly cleared storage instead of retaining stale state.
+      setMountedAppIds(new Set(["settings"]));
+      setActiveApp("settings");
     };
     window.addEventListener(USER_DATA_RESET_EVENT, handleUserDataReset);
     return () => window.removeEventListener(USER_DATA_RESET_EVENT, handleUserDataReset);

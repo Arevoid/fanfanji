@@ -218,8 +218,9 @@ export interface UserDataDeletionResult {
 }
 
 /**
- * Emitted after an app-scoped deletion completes.  The root app listens for
- * this event to discard its in-memory snapshots and return to the desktop.
+ * Emitted after an app-scoped deletion completes. The root app listens for
+ * this event to discard its in-memory snapshots and keep the settings page
+ * interactive while the cleared apps are remounted on their next visit.
  * Keeping the reset in-process avoids a full page reload, which can leave an
  * embedded mobile browser showing only the wallpaper while its lazy chunks
  * are still being restored.
