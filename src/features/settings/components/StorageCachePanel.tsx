@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Database, Loader2, Trash2 } from "lucide-react";
+import { Check, CheckCircle2, Database, Loader2, Trash2 } from "lucide-react";
 import {
   CHARACTER_PHONE_CACHE_OPTIONS,
   clearRebuildableCache,
@@ -24,6 +24,12 @@ import {
   migrateLegacyCharacterPhones,
   type CharacterPhoneStorageUsage,
 } from "../../../core/storage/repositories/characterPhoneRepository";
+import {
+  deleteSelectedUserAppData,
+  getUserDataAppOption,
+  USER_DATA_APP_OPTIONS,
+  type UserDataAppId,
+} from "../userDataDeletion";
 
 interface StorageCachePanelProps {
   mode: StorageCacheScope;
@@ -38,8 +44,8 @@ function optionsFor(mode: StorageCacheScope): readonly StorageCacheOption[] {
 }
 
 function confirmationText(mode: StorageCacheScope, option: StorageCacheOption | null): string {
-  const targetLabel = option?.label || "全部可重建缓存";
-  const owner = mode === "characterPhone" ? "当前角色手机中的" : "该应用的";
+  const targetLabel = mode === "user" && !option ? "所有应用缓存" : option?.label || "全部可重建缓存";
+  const owner = mode === "characterPhone" ? "当前角色手机中的" : !option ? "所有应用的" : "该应用的";
   return `确定${targetLabel}吗？只会清理${owner}临时缓存，不会删除聊天、朋友圈、相册、日记、备忘录或其他正式数据。`;
 }
 
@@ -53,6 +59,7 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
   const [notice, setNotice] = useState("");
   const [browserStorage, setBrowserStorage] = useState<{ usage?: number; quota?: number }>({});
   const [compressionBusy, setCompressionBusy] = useState<"all" | "images" | "stickers" | "memory" | null>(null);
+  const [selectedDataApps, setSelectedDataApps] = useState<UserDataAppId[]>([]);
 
   const refreshUsage = useCallback(() => {
     setUsage(getRebuildableCacheUsage({ scope: mode, scopeId: characterId, targets }));
@@ -104,7 +111,7 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
     .reduce((total, entry) => total + entry.bytes, 0);
 
   const handleClear = async (target: StorageCacheTarget, option: StorageCacheOption | null = null) => {
-    if (busyTarget) return;
+    if (busyTarget || compressionBusy) return;
     if (!window.confirm(confirmationText(mode, option))) return;
     setBusyTarget(target);
     setNotice("");
@@ -117,6 +124,31 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
       setNotice(`清理失败，正式数据未被改动：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
       setBusyTarget(null);
+    }
+  };
+
+  const handleDeleteSelectedData = async () => {
+    if (busyTarget || compressionBusy || selectedDataApps.length === 0) {
+      if (selectedDataApps.length === 0) setNotice("请先选择要删除的应用数据。");
+      return;
+    }
+    const labels = selectedDataApps.map((appId) => getUserDataAppOption(appId).label).join("、");
+    if (!window.confirm(`确定删除${labels}的数据吗？这些应用会恢复为初始状态，未选择的应用和设置绝对不会被改动，且无法撤销。`)) return;
+    setCompressionBusy("all");
+    setNotice("");
+    try {
+      const result = await deleteSelectedUserAppData(selectedDataApps);
+      if (result.failedKeys.length > 0) {
+        setNotice(`已删除 ${result.removedKeys.length} 项数据，但有 ${result.failedKeys.length} 项未能删除，请稍后重试。`);
+        return;
+      }
+      setNotice(`已删除${labels}的数据，正在恢复应用初始状态…`);
+      setSelectedDataApps([]);
+      window.setTimeout(() => window.location.reload(), 250);
+    } catch (error) {
+      setNotice(`删除失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setCompressionBusy(null);
     }
   };
 
@@ -150,10 +182,10 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
     }
   };
 
-  const title = mode === "characterPhone" ? "角色手机缓存" : "按应用清理缓存";
+  const title = mode === "characterPhone" ? "角色手机缓存" : "应用缓存";
   const description = mode === "characterPhone"
     ? `仅清理${characterName || "当前角色"}手机中可重新生成的临时缓存，聊天、朋友圈和相册正式内容都会保留。`
-    : "按应用清理可重新生成的临时文件，不会删除应用中的正式记录。";
+    : "显示每个应用的缓存占用，统一清理所有可重新生成的临时文件，不会删除应用中的正式记录。";
 
   return (
     <section aria-label={title} className="rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm">
@@ -196,16 +228,18 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
                 <p className="mt-0.5 truncate text-[10px] text-slate-400">{option.description}</p>
               </div>
               <span className="shrink-0 text-[10px] font-semibold text-slate-400">{formatStorageBytes(itemUsage?.bytes ?? 0)}</span>
-              <button
-                type="button"
-                onClick={() => void handleClear(option.id, option)}
-                disabled={Boolean(busyTarget)}
-                className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-100 disabled:cursor-wait disabled:opacity-50"
-                aria-label={`清理${option.label}缓存`}
-              >
-                {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-                清理
-              </button>
+              {mode === "characterPhone" && (
+                <button
+                  type="button"
+                  onClick={() => void handleClear(option.id, option)}
+                  disabled={Boolean(busyTarget || compressionBusy)}
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-100 disabled:cursor-wait disabled:opacity-50"
+                  aria-label={`清理${option.label}缓存`}
+                >
+                  {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                  清理
+                </button>
+              )}
             </div>
           );
         })}
@@ -214,11 +248,11 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
       <button
         type="button"
         onClick={() => void handleClear("all")}
-        disabled={Boolean(busyTarget)}
+        disabled={Boolean(busyTarget || compressionBusy)}
         className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-3 py-2.5 text-[11px] font-bold text-white transition-colors hover:bg-slate-700 disabled:cursor-wait disabled:opacity-50"
       >
         {busyTarget === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-        清理全部可重建缓存
+        {mode === "user" ? "清理所有应用缓存" : "清理全部可重建缓存"}
       </button>
 
       {mode === "characterPhone" ? (
@@ -263,6 +297,49 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
             压缩旧记忆
           </button>
         </div>
+      )}
+
+      {mode === "user" && (
+        <section aria-label="数据删除" className="mt-5 rounded-2xl border border-rose-100 bg-rose-50/40 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-extrabold text-rose-700">数据删除</h3>
+              <p className="mt-1 text-[10px] leading-4 text-rose-600/80">按应用选择后彻底删除，选中的应用会恢复为初始状态；未选择的应用、API、外观和其他设置不会被改动。</p>
+            </div>
+            <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-rose-500">不可撤销</span>
+          </div>
+          <div className="mt-3 divide-y divide-rose-100 overflow-hidden rounded-xl border border-rose-100 bg-white/80">
+            {USER_DATA_APP_OPTIONS.map((option) => {
+              const selected = selectedDataApps.includes(option.id);
+              return (
+                <label key={option.id} className={`flex cursor-pointer items-center gap-2.5 px-3 py-2.5 transition-colors ${selected ? "bg-rose-50" : "hover:bg-slate-50"}`}>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => setSelectedDataApps((current) => selected ? current.filter((id) => id !== option.id) : [...current, option.id])}
+                    className="sr-only"
+                  />
+                  <span aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-rose-500 bg-rose-500 text-white" : "border-slate-300 bg-white"}`}>
+                    {selected && <Check className="h-3 w-3" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-bold text-slate-700">{option.label}</span>
+                    <span className="mt-0.5 block truncate text-[10px] text-slate-400">{option.description}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleDeleteSelectedData()}
+            disabled={Boolean(busyTarget || compressionBusy)}
+            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-3 py-2.5 text-[11px] font-bold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-50"
+          >
+            {compressionBusy === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            删除所选应用数据
+          </button>
+        </section>
       )}
 
       <div className="mt-3 flex items-start gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-[10px] leading-4 text-emerald-700">
