@@ -1682,15 +1682,46 @@ export default function AppCharacterPhone({
         : failedAttempts >= 3
           ? 1
           : (currentPhone.awarenessLevel ?? 0);
+    const roleWorldBookContext = worldBookEntries
+      .filter((entry) => entry.characterId === selectedCharacter.id
+        || entry.characterIds?.includes(selectedCharacter.id)
+        || (!entry.characterId && !entry.characterIds && (!entry.scope || entry.scope.kind === "global"))
+        || (entry.scope?.kind === "character" && entry.scope.characterId === selectedCharacter.id)
+        || (entry.scope?.kind === "characters" && entry.scope.characterIds.includes(selectedCharacter.id))
+        || (entry.scope?.kind === "identity" && entry.scope.userIdentityId === activeIdentity?.id)
+        || (entry.scope?.kind === "relationship" && entry.scope.characterId === selectedCharacter.id
+          && entry.scope.userIdentityId === activeIdentity?.id))
+      .slice(-8)
+      .map((entry) => `${entry.title}:${entry.content}`);
+    const recentRoleContext = [
+      ...messages
+        .filter((message) => message.characterId === selectedCharacter.id)
+        .slice(-8)
+        .map((message) => `${message.sender}:${message.content}`),
+      ...moments
+        .filter((moment) => moment.characterId === selectedCharacter.id)
+        .slice(-4)
+        .map((moment) => `${moment.authorName}:${moment.content}`),
+    ];
+    const legacyAwarenessMessage = currentPhone.messages.find((message) =>
+      message.id.startsWith("phone-awareness-")
+      && /^刚才解锁界面闪了一下/u.test(message.body));
+    const shouldRefreshAwarenessMessage = awarenessLevel > (currentPhone.awarenessLevel ?? 0)
+      || Boolean(legacyAwarenessMessage);
     const awarenessMessage =
-      awarenessLevel > (currentPhone.awarenessLevel ?? 0)
+      shouldRefreshAwarenessMessage
         ? {
-            id: `phone-awareness-${now}`,
+            id: legacyAwarenessMessage?.id || `phone-awareness-${now}`,
             sender: selectedCharacter.name,
             body: buildCharacterPhoneAwarenessMessage(
               selectedCharacter,
               awarenessLevel,
-              { attemptCount: failedAttempts },
+              {
+                attemptCount: failedAttempts,
+                previousDiscoveryCount: currentPhone.messages.filter((message) => message.id.startsWith("phone-awareness-")).length,
+                recentContext: recentRoleContext,
+                worldBookContext: roleWorldBookContext,
+              },
             ),
             timestamp: now,
             unread: true,
@@ -1701,18 +1732,23 @@ export default function AppCharacterPhone({
         item.userIdentityId === userIdentityId &&
         item.characterId === selectedCharacter.id,
     );
-    if (awarenessMessage && relation && onSendMessage)
-      onSendMessage(
-        createCharacterTextMessage({
-          id: awarenessMessage.id,
-          characterId: selectedCharacter.id,
-          relationId: relation.id,
-          conversationId: relation.conversationId,
-          content: awarenessMessage.body,
-          timestamp: now,
-        }),
-        userIdentityId,
-      );
+    if (awarenessMessage && relation) {
+      if (legacyAwarenessMessage && onUpdateMessage) {
+        onUpdateMessage(legacyAwarenessMessage.id, { content: awarenessMessage.body });
+      } else if (onSendMessage) {
+        onSendMessage(
+          createCharacterTextMessage({
+            id: awarenessMessage.id,
+            characterId: selectedCharacter.id,
+            relationId: relation.id,
+            conversationId: relation.conversationId,
+            content: awarenessMessage.body,
+            timestamp: now,
+          }),
+          userIdentityId,
+        );
+      }
+    }
     const next = {
       ...currentPhone,
       failedAttempts,
@@ -1723,7 +1759,11 @@ export default function AppCharacterPhone({
         : currentPhone.awarenessUpdatedAt,
       updatedAt: now,
       messages: awarenessMessage
-        ? [...currentPhone.messages, awarenessMessage]
+        ? currentPhone.messages.some((message) => message.id === awarenessMessage.id)
+          ? currentPhone.messages.map((message) => message.id === awarenessMessage.id
+            ? { ...message, body: awarenessMessage.body, timestamp: now, unread: true }
+            : message)
+          : [...currentPhone.messages, awarenessMessage]
         : currentPhone.messages,
       activities: [
         ...currentPhone.activities,

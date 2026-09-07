@@ -8,6 +8,10 @@ export interface CharacterPhoneReactionContext {
   previousDiscoveryCount?: number;
   /** Failed unlock count, used for escalating but non-repetitive prompts. */
   attemptCount?: number;
+  /** Short, role-scoped context snippets; raw records are never persisted here. */
+  recentContext?: readonly string[];
+  /** World-book/persona hints relevant to this role. */
+  worldBookContext?: readonly string[];
 }
 
 /**
@@ -21,8 +25,11 @@ function pickVariant<T>(key: string, variants: readonly T[]): T {
   return variants[Math.abs(hash) % variants.length];
 }
 
-function getPersonalityStyle(character: Character): "teasing" | "warm" | "calm" | "direct" | "neutral" {
-  const personality = `${character.personality || ""} ${character.backstory || ""}`;
+function getPersonalityStyle(
+  character: Character,
+  contextText = "",
+): "teasing" | "warm" | "calm" | "direct" | "neutral" {
+  const personality = `${character.personality || ""} ${character.backstory || ""} ${contextText}`;
   if (/傲娇|嘴硬|调侃|毒舌|幽默/u.test(personality)) return "teasing";
   if (/温柔|体贴|共情|敏感/u.test(personality)) return "warm";
   if (/冷静|理性|克制|谨慎/u.test(personality)) return "calm";
@@ -35,12 +42,27 @@ export function buildCharacterPhoneAwarenessMessage(
   level: CharacterPhoneAwarenessLevel,
   context: CharacterPhoneReactionContext = {},
 ): string {
-  const style = getPersonalityStyle(character);
-  const key = `${character.id}|unlock|${level}|${context.attemptCount ?? 0}|${context.previousDiscoveryCount ?? 0}`;
+  const contextText = [
+    ...(context.worldBookContext || []),
+    ...(context.recentContext || []),
+  ].join(" ");
+  const style = getPersonalityStyle(character, contextText);
+  const key = `${character.id}|unlock|${level}|${context.attemptCount ?? 0}|${context.previousDiscoveryCount ?? 0}|${contextText}`;
+  const situation = /会议|项目|工作|上班|办公室|加班/u.test(contextText)
+    ? "我刚还在忙手头的事"
+    : /学校|考试|作业|上课|老师/u.test(contextText)
+      ? "我刚还在想着学校那边的事"
+      : /医院|看诊|药|身体|疼/u.test(contextText)
+        ? "我刚还在处理身体和手边的事"
+        : /旅行|出差|机场|车站|海边|路上/u.test(contextText)
+          ? "我刚还在路上或想着接下来的安排"
+          : /家人|父母|孩子|家里/u.test(contextText)
+            ? "我刚还在处理家里的事"
+            : "";
   const variants: Record<typeof style, readonly string[]> = level === 1
     ? {
         teasing: [
-          "刚才解锁界面闪了一下……小老鼠，是你吗？",
+          "刚才解锁界面闪了一下，有人想进我的手机？",
           "有人碰过我的解锁页？别躲，出来认领一下。",
           "密码没对上，倒把我吵醒了。你在试什么？",
         ],
@@ -92,7 +114,14 @@ export function buildCharacterPhoneAwarenessMessage(
           "手机锁定了，看来刚才不只是误触。我会先确认发生了什么。",
         ],
       };
-  return pickVariant(key, variants[style]);
+  const contextualVariants = situation
+    ? [
+        `${situation}，手机突然亮了一下。刚才有人试过解锁吗？`,
+        `${situation}，解锁页却留下了一次没成功的尝试。是你碰过它吗？`,
+        `${situation}的时候手机有点动静，我先确认一下：刚才谁动过？`,
+      ]
+    : [];
+  return pickVariant(key, [...variants[style], ...contextualVariants]);
 }
 
 function extractTarget(detail?: string): string {

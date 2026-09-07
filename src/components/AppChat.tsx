@@ -6791,7 +6791,11 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
               // one collapsed story paragraph.
               const shouldCollapse = settings.collapseConsecutiveAvatars !== false && !isOfflineStoryActiveFor(activeChatCharId);
               const isConsecutivePrev = hasPreviousInGroup;
-              const showAvatar = Boolean(msg.sentFromCharacterPhone) || !isConsecutivePrev || !shouldCollapse;
+              // Security-awareness messages are a distinct incoming event even
+              // when they follow another character bubble. Keep the character
+              // avatar visible so the sender is never visually ambiguous.
+              const isPhoneAwarenessMessage = msg.id.startsWith("phone-awareness-");
+              const showAvatar = isPhoneAwarenessMessage || Boolean(msg.sentFromCharacterPhone) || !isConsecutivePrev || !shouldCollapse;
               
               const groupSenderChar = !isSelf && activeCharacter.isGroupChat && msg.senderId
                 ? (characters.find(c => c.id === msg.senderId) || characters.find(c => c.name === msg.senderId))
