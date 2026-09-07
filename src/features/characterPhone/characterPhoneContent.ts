@@ -720,6 +720,40 @@ function normalizeScheduleItems(entries: CharacterPhoneRecord["scheduleItems"]):
 export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): CharacterPhoneRecord {
   const now = input.now ?? Date.now();
   const sourcePhone = removeLegacyPresetContent(input.phone);
+
+  // Clearing a role phone is intentionally destructive. Do not immediately
+  // recreate the deleted records by projecting the main phone's chat,
+  // moments, and contacts during the next open/generation pass. The marker is
+  // released only after a successful first-life generation has established a
+  // new phone-local baseline.
+  const sourceHydrationSuppressed = Boolean(
+    sourcePhone.sourceHydrationSuppressedAt
+      && (!sourcePhone.initialContentGeneratedAt
+        || sourcePhone.sourceHydrationSuppressedAt > sourcePhone.initialContentGeneratedAt),
+  );
+  if (sourceHydrationSuppressed) {
+    const isolated: CharacterPhoneRecord = {
+      ...sourcePhone,
+      messages: normalizeCharacterPhoneMessages(sourcePhone.messages),
+      contacts: sourcePhone.contacts ?? [],
+      threadMessages: sourcePhone.threadMessages ?? [],
+      posts: sourcePhone.posts ?? [],
+      browserHistory: normalizeCharacterPhoneBrowserHistory(sourcePhone.browserHistory),
+      diaryEntries: normalizeDiaryEntries(sourcePhone.diaryEntries),
+      galleryItems: normalizeGalleryItems(sourcePhone.galleryItems),
+      scheduleItems: normalizeScheduleItems(sourcePhone.scheduleItems),
+      notes: sourcePhone.notes ?? [],
+      todos: sourcePhone.todos ?? [],
+      phoneCalls: sourcePhone.phoneCalls ?? [],
+      musicTracks: sourcePhone.musicTracks ?? [],
+      listeningHistory: sourcePhone.listeningHistory ?? [],
+      musicPlaylists: sourcePhone.musicPlaylists ?? [],
+      updatedAt: sourcePhone.updatedAt,
+    };
+    const changed = JSON.stringify(isolated) !== JSON.stringify(input.phone);
+    return changed ? { ...isolated, updatedAt: now } : input.phone;
+  }
+
   const seeded = Boolean(sourcePhone.contentSeededAt);
   const relationshipNetworkContacts = listCharacterPhoneRelationshipNetworkContacts({
     character: input.character,

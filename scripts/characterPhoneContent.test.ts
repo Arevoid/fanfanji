@@ -128,6 +128,30 @@ assert.equal(phoneA.musicTracks?.length, 0, "does not seed a synthetic music lib
 assert.equal(phoneA.listeningHistory?.length, 0, "does not seed synthetic listening history without a user source");
 assert.equal(phoneA.musicPlaylists?.length, 0, "does not seed a synthetic playlist without a user source");
 
+const clearedPhone = ensureCharacterPhoneContent({
+  phone: {
+    ...phoneA,
+    messages: [],
+    contacts: [],
+    threadMessages: [],
+    posts: [],
+    sourceHydrationSuppressedAt: 200,
+    initialContentGeneratedAt: undefined,
+    initialContentPending: true,
+  },
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages,
+  moments,
+  worldBookEntries: worldBook,
+  now: 300,
+});
+assert.equal(clearedPhone.contacts.length, 0, "cleared role phone does not recreate contacts from the main phone");
+assert.equal(clearedPhone.threadMessages.length, 0, "cleared role phone does not recreate old chat threads");
+assert.equal(clearedPhone.posts.length, 0, "cleared role phone does not recreate old moments");
+
 const staleUserThreadPhone = emptyPhone("phone-stale-user-thread", characterA.id);
 staleUserThreadPhone.contacts = [{
   id: "character-phone:phone-stale-user-thread:contact:user",

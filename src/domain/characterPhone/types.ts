@@ -280,6 +280,12 @@ export interface CharacterPhoneRecord {
   initialContentGeneratedAt?: number;
   /** Explicit marker for newly-created or cleared phones; absent on legacy records. */
   initialContentPending?: boolean;
+  /**
+   * Set when the role-phone data is explicitly cleared. While this marker is
+   * newer than the last successful initial generation, source projections
+   * (main-chat/moments/contacts) must not be hydrated back into the phone.
+   */
+  sourceHydrationSuppressedAt?: number;
   lastSyncedMessageId?: string;
   lastSyncedMomentId?: string;
   wallpaper: string;

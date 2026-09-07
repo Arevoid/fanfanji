@@ -988,6 +988,7 @@ export async function advanceCharacterPhoneWithResult(
         lastGeneratedAt: now,
         ...(isInitialGeneration ? { initialContentGeneratedAt: now } : {}),
         ...(isInitialGeneration ? { initialContentPending: false } : {}),
+        ...(isInitialGeneration ? { sourceHydrationSuppressedAt: undefined } : {}),
         updatedAt: now,
       },
       status: "generated",

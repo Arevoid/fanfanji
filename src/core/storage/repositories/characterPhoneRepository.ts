@@ -866,6 +866,7 @@ export function clearCharacterPhoneData(
     contentSeededAt: undefined,
     initialContentGeneratedAt: undefined,
     initialContentPending: true,
+    sourceHydrationSuppressedAt: now,
     currentlyPlayingTrackId: undefined,
     currentlyPlayingSince: undefined,
     frequentListeningHours: undefined,

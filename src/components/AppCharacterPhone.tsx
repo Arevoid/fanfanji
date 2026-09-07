@@ -793,7 +793,15 @@ export default function AppCharacterPhone({
       // mounted (for example in the test/deep-link route). Recreate only this
       // role-phone record and return it to its lock screen; other app state is
       // intentionally untouched.
-      setPhone(openCharacterPhone(userIdentityId, selectedCharacter, phoneContext));
+      // The one-time storage reset can fire while this screen is mounted.
+      // Recreate an isolated, empty role-phone record rather than reopening
+      // through the normal source projection path, which would immediately
+      // hydrate the deleted main-phone records back into this phone.
+      const resetPhone = clearCharacterPhoneData(
+        openCharacterPhone(userIdentityId, selectedCharacter, phoneContext),
+      );
+      saveCharacterPhone(resetPhone);
+      setPhone(resetPhone);
       setUnlocked(false);
       setActiveApp("home");
       setDesktopPage(0);

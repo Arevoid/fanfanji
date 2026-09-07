@@ -47,8 +47,8 @@ export const storageKeys = {
   characterPhones: "phone_character_phones_v1",
   characterPhonesIndexV2: "phone_character_phone_index_v2",
   characterPhoneV2: (phoneId: string) => `phone_character_phone_v2_${encodeURIComponent(phoneId)}`,
-  /** One-time migration marker for the role-phone storage reset. */
-  characterPhoneOneTimeCleanup: "phone_character_phone_one_time_cleanup_v1",
+  /** One-time repair marker for the role-phone storage reset and hydration fix. */
+  characterPhoneOneTimeCleanup: "phone_character_phone_one_time_cleanup_v2",
   relationshipNetworkMaps: "phone_relationship_network_maps_v1",
   relationshipNetworkNpcs: "phone_relationship_network_npcs_v1",
   relationshipNetworkChatLinks: "phone_relationship_network_chat_links_v1",
