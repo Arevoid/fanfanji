@@ -132,7 +132,7 @@ function mergePhoneCollections(
   return [...merged.values()];
 }
 
-function notifyPhoneStorage(eventName: "ready" | "error", error?: unknown): void {
+function notifyPhoneStorage(eventName: "ready" | "error" | "reset", error?: unknown): void {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function" || typeof CustomEvent === "undefined") return;
   window.dispatchEvent(new CustomEvent(`character-phone-storage-${eventName}`, {
     detail: error ? { error: String(error) } : undefined,
@@ -255,6 +255,71 @@ export async function initializeCharacterPhoneRepository(): Promise<StorageResul
   return initializationPromise;
 }
 
+/**
+ * Returns a detached snapshot of every persisted role-phone record. A record
+ * exists only after that role phone has been opened or an artifact has been
+ * explicitly saved into it, so this list is also the precise scope for the
+ * one-time legacy reset. No user/chat/character repositories are consulted.
+ */
+export function listCharacterPhonesForOneTimeCleanup(): CharacterPhoneRecord[] {
+  const loaded = load();
+  return loaded.valid ? clonePhones(normalizePhoneCollection(loaded.value)) : [];
+}
+
+export function isCharacterPhoneOneTimeCleanupComplete(): boolean {
+  const marker = readString(storageKeys.characterPhoneOneTimeCleanup);
+  return marker.valid && marker.found && marker.value === "completed";
+}
+
+/**
+ * Remove only the dedicated role-phone records. This deliberately avoids
+ * Storage.clear() and never touches any other application store. The caller
+ * is responsible for deleting the detached role-phone image/cache resources
+ * and for writing the completion marker after those operations succeed.
+ */
+export async function clearCharacterPhoneRecordsForOneTimeCleanup(): Promise<StorageWriteResult> {
+  if (canUseIndexedDb()) {
+    const initialized = await initializeCharacterPhoneRepository();
+    if (initialized.valid && metadataReady && indexedDbHydrated && cachedPhones) {
+      cachedPhones = [];
+      enqueueIndexedDbWrite([]);
+      const flushed = await flushCharacterPhoneRepository();
+      if (!flushed.success) return flushed;
+    }
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      const storage = window.localStorage;
+      const keys = new Set<string>([
+        storageKeys.characterPhones,
+        storageKeys.characterPhonesIndexV2,
+      ]);
+      const phonePrefix = "phone_character_phone_v2_";
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (key?.startsWith(phonePrefix)) keys.add(key);
+      }
+      for (const key of keys) {
+        const removed = removeStoredValue(key);
+        if (!removed.success) return removed;
+      }
+    } catch {
+      return { success: false, error: "unavailable" };
+    }
+  }
+
+  cachedPhones = [];
+  metadataReady = true;
+  indexedDbHydrated = canUseIndexedDb();
+  notifyPhoneStorage("reset");
+  return { success: true };
+}
+
+export function markCharacterPhoneOneTimeCleanupComplete(): StorageWriteResult {
+  return writeString(storageKeys.characterPhoneOneTimeCleanup, "completed");
+}
+
 export async function flushCharacterPhoneRepository(): Promise<StorageWriteResult> {
   if (!canUseIndexedDb()) return { success: true };
   try {
@@ -283,16 +348,18 @@ export function normalizeCharacterPhonePasscode(value: unknown): string {
 
 /**
  * Create a stable, per-role four digit secret before any phone content is
- * generated.  The source is intentionally limited to the role's own profile
- * so one character can never inherit another character's password.
+ * generated. The source starts from the role's own profile and may include a
+ * compact, role-scoped context fingerprint, so one character can never
+ * inherit another character's password.
  *
- * This is not a global default password: changing the persona changes the
- * derived value for newly-created phones, while persisted custom/legacy
- * values remain untouched for backwards compatibility.
+ * This is not a global default password: changing the persona/context changes
+ * the derived value for newly-created phones, while persisted custom values
+ * remain untouched after a phone has already been opened.
  */
 export function deriveCharacterPhonePasscode(
   character: Character,
   purpose: "unlock" | "hidden-gallery" = "unlock",
+  contextSeed = "",
 ): string {
   const source = [
     purpose,
@@ -304,6 +371,7 @@ export function deriveCharacterPhonePasscode(
     character.backstory,
     character.remark ?? "",
     character.replyLanguage ?? "",
+    contextSeed,
   ].join("|");
   let hash = 2166136261;
   for (const codePoint of source) {
@@ -315,7 +383,7 @@ export function deriveCharacterPhonePasscode(
   return String((hash >>> 0) % 9999 + 1).padStart(4, "0");
 }
 
-const passcodeFor = (character: Character) => deriveCharacterPhonePasscode(character, "unlock");
+const passcodeFor = (character: Character, contextSeed = "") => deriveCharacterPhonePasscode(character, "unlock", contextSeed);
 
 export function getCharacterPhone(
   ownerIdentityId: string,
@@ -333,6 +401,7 @@ export function createCharacterPhone(
   ownerIdentityId: string,
   character: Character,
   now = Date.now(),
+  passcodeContext = "",
 ): CharacterPhoneRecord {
   const existing = getCharacterPhone(ownerIdentityId, character.id);
   if (existing) return existing;
@@ -343,8 +412,8 @@ export function createCharacterPhone(
     // Set both secrets before the first content-generation request can run.
     // The model therefore never gets a chance to invent a password first and
     // have the storage layer adopt it afterwards.
-    passcode: normalizeCharacterPhonePasscode(passcodeFor(character)),
-    hiddenGalleryPasscode: deriveCharacterPhonePasscode(character, "hidden-gallery"),
+    passcode: normalizeCharacterPhonePasscode(passcodeFor(character, passcodeContext)),
+    hiddenGalleryPasscode: deriveCharacterPhonePasscode(character, "hidden-gallery", passcodeContext),
     failedAttempts: 0,
     createdAt: now,
     updatedAt: now,

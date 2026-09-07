@@ -161,8 +161,18 @@ export async function clearRebuildableCache(options: {
   scope: StorageCacheScope;
   target: StorageCacheTarget;
   scopeId?: string;
+  /** Startup migrations can clear only scoped keys without global orphan scans. */
+  cleanupOrphanedResources?: boolean;
+  /** Startup migrations must not invalidate caches belonging to other apps. */
+  clearOriginCaches?: boolean;
 }): Promise<StorageCacheCleanupResult> {
-  const { scope, target, scopeId } = options;
+  const {
+    scope,
+    target,
+    scopeId,
+    cleanupOrphanedResources = true,
+    clearOriginCaches: shouldClearOriginCaches = true,
+  } = options;
   const exactKeys = getTargetKeys(scope, target);
   const prefixes = getTargetPrefixes(scope, scopeId, target);
   const keys = collectLocalStorageKeys(prefixes, exactKeys);
@@ -173,10 +183,10 @@ export async function clearRebuildableCache(options: {
     if (result.success) removedLocalStorageKeys.push(key);
     else failedLocalStorageKeys.push(key);
   }
-  const shouldClearOriginCaches = target === "browser" || target === "all";
+  const clearOriginCachesForTarget = shouldClearOriginCaches && (target === "browser" || target === "all");
   const [removedCacheNames, orphanedResources] = await Promise.all([
-    shouldClearOriginCaches ? clearOriginCaches() : Promise.resolve([]),
-    cleanOrphanedResources(target),
+    clearOriginCachesForTarget ? clearOriginCaches() : Promise.resolve([]),
+    cleanupOrphanedResources ? cleanOrphanedResources(target) : Promise.resolve([]),
   ]);
   return {
     scope,

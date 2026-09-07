@@ -248,18 +248,18 @@ const CHARACTER_PHONE_UNLOCK_PAD = [
 ] as const;
 const PHONE_APP_TILE_CLASSES: Record<CharacterPhoneAppId, string> = {
   chat: "bg-white/95 text-emerald-600",
-  browser: "bg-white/95 text-slate-500",
+  browser: "bg-white/95 text-slate-700",
   schedule: "bg-white/95 text-slate-700",
-  gallery: "bg-white/95 text-slate-500",
-  diary: "bg-white/95 text-slate-600",
-  notes: "bg-white/95 text-slate-500",
-  music: "bg-white/95 text-slate-600",
-  settings: "bg-white/95 text-slate-600",
-  moments: "bg-white/95 text-slate-600",
+  gallery: "bg-white/95 text-slate-700",
+  diary: "bg-white/95 text-slate-700",
+  notes: "bg-white/95 text-slate-700",
+  music: "bg-white/95 text-slate-700",
+  settings: "bg-white/95 text-slate-700",
+  moments: "bg-white/95 text-slate-700",
 };
 const PHONE_SYSTEM_APP_TILE_CLASSES: Record<CharacterPhoneSystemAppId, string> = {
-  phone: "bg-white/95 text-slate-600",
-  camera: "bg-white/95 text-slate-600",
+  phone: "bg-white/95 text-slate-700",
+  camera: "bg-white/95 text-slate-700",
 };
 type CharacterPhoneMusicView = "home" | "playlist" | "player";
 const PHONE_MUSIC_COVER_GRADIENTS = [
@@ -344,32 +344,78 @@ function characterPhoneGenerationNoChangeNotice(
       return "本次没有生成新的生活痕迹，请补充最近聊天后重试";
   }
 }
+
+type CharacterPhoneOpenContext = {
+  activeIdentity?: UserIdentity;
+  characters: Character[];
+  relationships: CharacterRelationship[];
+  messages: Message[];
+  moments: Moment[];
+  worldBookEntries: WorldBookEntry[];
+  relationshipNetworkNpcs: RelationshipNetworkNpc[];
+  relationshipNetworkMaps: RelationshipNetworkMap[];
+  musicTracks: MusicTrack[];
+};
+
+/**
+ * Password derivation gets a compact, role-scoped context fingerprint in
+ * addition to the persona profile. The raw context is never stored; only the
+ * derived four-digit value is persisted on the phone record.
+ */
+function buildCharacterPhonePasscodeContext(
+  character: Character,
+  context?: CharacterPhoneOpenContext,
+): string {
+  if (!context) return "";
+  const worldBook = context.worldBookEntries
+    .filter((entry) => entry.characterId === character.id
+      || entry.characterIds?.includes(character.id)
+      || (!entry.characterId && !entry.characterIds && (!entry.scope || entry.scope.kind === "global"))
+      || (entry.scope?.kind === "character" && entry.scope.characterId === character.id)
+      || (entry.scope?.kind === "characters" && entry.scope.characterIds.includes(character.id))
+      || (entry.scope?.kind === "identity" && entry.scope.userIdentityId === context.activeIdentity?.id)
+      || (entry.scope?.kind === "relationship" && entry.scope.characterId === character.id
+        && entry.scope.userIdentityId === context.activeIdentity?.id))
+    .slice(-20)
+    .map((entry) => `${entry.title}:${entry.content}`);
+  const recentMessages = context.messages
+    .filter((message) => message.characterId === character.id)
+    .slice(-16)
+    .map((message) => `${message.sender}:${message.content}`);
+  const recentMoments = context.moments
+    .filter((moment) => moment.characterId === character.id)
+    .slice(-12)
+    .map((moment) => `${moment.authorName}:${moment.content}`);
+  return JSON.stringify({ worldBook, recentMessages, recentMoments }).slice(-12000);
+}
+
 function openCharacterPhone(
   ownerIdentityId: string,
   character: Character,
-  context?: {
-    activeIdentity?: UserIdentity;
-    characters: Character[];
-    relationships: CharacterRelationship[];
-    messages: Message[];
-    moments: Moment[];
-    worldBookEntries: WorldBookEntry[];
-    relationshipNetworkNpcs: RelationshipNetworkNpc[];
-    relationshipNetworkMaps: RelationshipNetworkMap[];
-    musicTracks: MusicTrack[];
-  },
+  context?: CharacterPhoneOpenContext,
 ): CharacterPhoneRecord {
   const existing = getCharacterPhone(ownerIdentityId, character.id);
-  const basePhone = existing || createCharacterPhone(ownerIdentityId, character);
-  const normalizedPasscode = normalizeCharacterPhonePasscode(basePhone.passcode)
-    || deriveCharacterPhonePasscode(character);
+  const passcodeContext = buildCharacterPhonePasscodeContext(character, context);
+  const basePhone = existing || createCharacterPhone(ownerIdentityId, character, Date.now(), passcodeContext);
+  const hasNotBeenOpened = !basePhone.phoneOpenCount && !basePhone.lastOpenedAt;
+  const normalizedPasscode = hasNotBeenOpened && passcodeContext
+    ? deriveCharacterPhonePasscode(character, "unlock", passcodeContext)
+    : normalizeCharacterPhonePasscode(basePhone.passcode)
+      || deriveCharacterPhonePasscode(character, "unlock", passcodeContext);
+  const normalizedHiddenGalleryPasscode = hasNotBeenOpened && passcodeContext
+    ? deriveCharacterPhonePasscode(character, "hidden-gallery", passcodeContext)
+    : normalizeCharacterPhonePasscode(basePhone.hiddenGalleryPasscode)
+      || deriveCharacterPhonePasscode(character, "hidden-gallery", passcodeContext);
   const isLocked = Boolean(basePhone.lockedUntil && basePhone.lockedUntil > Date.now());
   const isExpiredLock = Boolean(basePhone.lockedUntil && basePhone.lockedUntil <= Date.now());
-  const reopened = basePhone.passcode === normalizedPasscode && !isExpiredLock
+  const reopened = basePhone.passcode === normalizedPasscode
+    && basePhone.hiddenGalleryPasscode === normalizedHiddenGalleryPasscode
+    && !isExpiredLock
     ? basePhone
     : {
         ...basePhone,
         passcode: normalizedPasscode,
+        hiddenGalleryPasscode: normalizedHiddenGalleryPasscode,
         failedAttempts: isLocked ? basePhone.failedAttempts : 0,
         lockedUntil: isLocked ? basePhone.lockedUntil : undefined,
         updatedAt: Date.now(),
@@ -685,7 +731,7 @@ export default function AppCharacterPhone({
   const selectedCharacter = characters.find(
     (character) => character.id === selectedCharacterId,
   );
-  const phoneContext = {
+  const phoneContext = useMemo(() => ({
     activeIdentity,
     characters,
     relationships,
@@ -695,7 +741,17 @@ export default function AppCharacterPhone({
     relationshipNetworkNpcs,
     relationshipNetworkMaps,
     musicTracks,
-  };
+  }), [
+    activeIdentity,
+    characters,
+    relationships,
+    messages,
+    moments,
+    worldBookEntries,
+    relationshipNetworkNpcs,
+    relationshipNetworkMaps,
+    musicTracks,
+  ]);
   const [phone, setPhone] = useState<CharacterPhoneRecord | null>(() =>
     selectedCharacter
       ? openCharacterPhone(userIdentityId, selectedCharacter, phoneContext)
@@ -731,13 +787,27 @@ export default function AppCharacterPhone({
       if (!selectedCharacter) return;
       setPhoneNotice("角色手机内容暂未成功保存；请到设置→数据管理检查存储空间后重试");
     };
+    const handleStorageReset = () => {
+      if (!selectedCharacter) return;
+      // A startup migration can finish while the phone screen is already
+      // mounted (for example in the test/deep-link route). Recreate only this
+      // role-phone record and return it to its lock screen; other app state is
+      // intentionally untouched.
+      setPhone(openCharacterPhone(userIdentityId, selectedCharacter, phoneContext));
+      setUnlocked(false);
+      setActiveApp("home");
+      setDesktopPage(0);
+      setInput("");
+    };
     window.addEventListener("character-phone-storage-ready", handleStorageReady);
     window.addEventListener("character-phone-storage-error", handleStorageError);
+    window.addEventListener("character-phone-storage-reset", handleStorageReset);
     return () => {
       window.removeEventListener("character-phone-storage-ready", handleStorageReady);
       window.removeEventListener("character-phone-storage-error", handleStorageError);
+      window.removeEventListener("character-phone-storage-reset", handleStorageReset);
     };
-  }, [selectedCharacter?.id, userIdentityId]);
+  }, [selectedCharacter?.id, userIdentityId, phoneContext]);
   const [unlocked, setUnlocked] = useState(false);
   const [activeApp, setActiveApp] = useState<CharacterPhoneView>("home");
   const [desktopPage, setDesktopPage] = useState<0 | 1>(0);
@@ -1177,6 +1247,10 @@ export default function AppCharacterPhone({
     setMusicProgress(0.42);
     setDesktopPage(0);
     initialGenerationPhoneIdRef.current = null;
+    // Clearing data locks the phone again, but the next successful unlock
+    // should always return to the role-phone desktop rather than the app that
+    // happened to be open when the reset was requested.
+    setActiveApp("home");
     setUnlocked(false);
     if (imageAssetIds.length > 0) {
       const results = await Promise.allSettled(imageAssetIds.map((id) => imageAssetDb.deleteImage(id)));
