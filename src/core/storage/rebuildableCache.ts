@@ -15,6 +15,7 @@ import { storageKeys } from "./storageKeys";
 
 export type UserStorageAppId =
   | "chat"
+  | "phone"
   | "offline"
   | "diary"
   | "cinema"
@@ -48,6 +49,7 @@ export interface StorageCacheOption {
 
 export const USER_STORAGE_CACHE_OPTIONS: readonly StorageCacheOption[] = [
   { id: "chat", label: "聊天", description: "消息预览、生成临时文件" },
+  { id: "phone", label: "手机", description: "角色手机可重建缓存" },
   { id: "offline", label: "线下", description: "剧本加载和临时渲染文件" },
   { id: "diary", label: "日记", description: "翻译和生成任务临时数据" },
   { id: "cinema", label: "影视", description: "封面和页面预览缓存" },
@@ -129,9 +131,17 @@ function getTargetPrefix(scope: StorageCacheScope, scopeId: string | undefined, 
 }
 
 function getTargetPrefixes(scope: StorageCacheScope, scopeId: string | undefined, target: StorageCacheTarget): string[] {
+  // The user-facing "手机" cache card is an aggregate over every role phone.
+  // Role phones are scoped independently, so they intentionally do not use
+  // the normal `user:global:phone` prefix.
+  if (scope === "user" && target === "phone") return [`${REBUILDABLE_CACHE_PREFIX}characterPhone:`];
   if (target !== "all") return [getTargetPrefix(scope, scopeId, target)];
   const options = scope === "characterPhone" ? CHARACTER_PHONE_CACHE_OPTIONS : USER_STORAGE_CACHE_OPTIONS;
-  return options.map((option) => getTargetPrefix(scope, scopeId, option.id));
+  const prefixes = options
+    .filter((option) => !(scope === "user" && option.id === "phone"))
+    .map((option) => getTargetPrefix(scope, scopeId, option.id));
+  if (scope === "user") prefixes.push(`${REBUILDABLE_CACHE_PREFIX}characterPhone:`);
+  return prefixes;
 }
 
 async function clearOriginCaches(): Promise<string[]> {

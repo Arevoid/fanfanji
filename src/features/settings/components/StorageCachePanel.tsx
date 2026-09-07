@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, CheckCircle2, Database, Loader2, Trash2 } from "lucide-react";
+import { CheckCircle2, Database, Loader2, Trash2 } from "lucide-react";
 import {
   CHARACTER_PHONE_CACHE_OPTIONS,
   clearRebuildableCache,
@@ -26,6 +26,7 @@ import {
 } from "../../../core/storage/repositories/characterPhoneRepository";
 import {
   deleteSelectedUserAppData,
+  getUserDataAppUsage,
   getUserDataAppOption,
   USER_DATA_RESET_EVENT,
   USER_DATA_APP_OPTIONS,
@@ -61,9 +62,11 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
   const [browserStorage, setBrowserStorage] = useState<{ usage?: number; quota?: number }>({});
   const [compressionBusy, setCompressionBusy] = useState<"all" | "images" | "stickers" | "memory" | null>(null);
   const [selectedDataApps, setSelectedDataApps] = useState<UserDataAppId[]>([]);
+  const [dataUsage, setDataUsage] = useState(() => getUserDataAppUsage());
 
   const refreshUsage = useCallback(() => {
     setUsage(getRebuildableCacheUsage({ scope: mode, scopeId: characterId, targets }));
+    if (mode === "user") setDataUsage(getUserDataAppUsage());
     if (mode === "characterPhone") {
       setPhoneStorage(getCharacterPhoneStorageUsage(ownerIdentityId, characterId));
     }
@@ -136,7 +139,7 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
     const labels = selectedDataApps.map((appId) => getUserDataAppOption(appId).label).join("、");
     if (!window.confirm(`确定删除${labels}的数据吗？这些应用会恢复为初始状态，未选择的应用和设置绝对不会被改动，且无法撤销。`)) return;
     setCompressionBusy("all");
-    setNotice("");
+    setNotice(`正在删除${labels}的数据，请稍候…`);
     try {
       const result = await deleteSelectedUserAppData(selectedDataApps);
       if (result.failedKeys.length > 0) {
@@ -145,6 +148,7 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
       }
       setNotice(`已删除${labels}的数据，正在恢复应用初始状态…`);
       setSelectedDataApps([]);
+      setDataUsage(getUserDataAppUsage());
       // Reset the root app in-process instead of forcing a full document
       // reload.  Reloading from an embedded/mobile browser can race lazy
       // chunks and leave only the wallpaper visible with no way back.
@@ -194,7 +198,7 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
     : "显示每个应用的缓存占用，统一清理所有可重新生成的临时文件，不会删除应用中的正式记录。";
 
   return (
-    <section aria-label={title} className="rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm">
+    <section aria-label={title} className={`${mode === "user" ? "min-h-full" : ""} rounded-[24px] bg-white p-5 shadow-sm`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -320,32 +324,34 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
       )}
 
       {mode === "user" && (
-        <section aria-label="数据删除" className="mt-5 rounded-2xl border border-rose-100 bg-rose-50/40 p-3">
+        <section aria-label="数据删除" className="mt-5 rounded-2xl bg-rose-50/40 p-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-xs font-extrabold text-rose-700">数据删除</h3>
-              <p className="mt-1 text-[10px] leading-4 text-rose-600/80">按应用选择后彻底删除，选中的应用会恢复为初始状态；未选择的应用、API、外观和其他设置不会被改动。</p>
+              <h3 className="text-xs font-extrabold text-slate-800">数据删除</h3>
+              <p className="mt-1 text-[10px] leading-4 text-slate-600">按应用选择后彻底删除，选中的应用会恢复为初始状态；未选择的应用、API、外观和其他设置不会被改动。</p>
             </div>
-            <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-rose-500">不可撤销</span>
+            <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-slate-700">不可撤销</span>
           </div>
-          <div className="mt-3 divide-y divide-rose-100 overflow-hidden rounded-xl border border-rose-100 bg-white/80">
+          <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-rose-100 bg-rose-50/30 p-2 sm:grid-cols-4">
             {USER_DATA_APP_OPTIONS.map((option) => {
               const selected = selectedDataApps.includes(option.id);
+              const itemUsage = dataUsage.find((entry) => entry.appId === option.id);
               return (
-                <label key={option.id} className={`flex cursor-pointer items-center gap-2.5 px-3 py-2.5 transition-colors ${selected ? "bg-rose-50" : "hover:bg-slate-50"}`}>
+                <label
+                  key={option.id}
+                  title={option.description}
+                  className={`min-w-0 cursor-pointer rounded-xl border px-2 py-2.5 text-center transition-colors ${selected ? "border-rose-300 bg-rose-50" : "border-rose-100 bg-white/80 hover:bg-rose-50/60"}`}
+                >
                   <input
                     type="checkbox"
                     checked={selected}
                     onChange={() => setSelectedDataApps((current) => selected ? current.filter((id) => id !== option.id) : [...current, option.id])}
                     className="sr-only"
                   />
-                  <span aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-rose-500 bg-rose-500 text-white" : "border-slate-300 bg-white"}`}>
-                    {selected && <Check className="h-3 w-3" />}
+                  <span className="flex min-w-0 items-center justify-center">
+                    <span className="truncate text-xs font-bold text-slate-700">{option.label}</span>
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-xs font-bold text-slate-700">{option.label}</span>
-                    <span className="mt-0.5 block truncate text-[10px] text-slate-400">{option.description}</span>
-                  </span>
+                  <span className="mt-1 block truncate text-[10px] font-semibold text-slate-400">{formatStorageBytes(itemUsage?.bytes ?? 0)}</span>
                 </label>
               );
             })}
@@ -362,6 +368,7 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
         </section>
       )}
 
+      {notice && <p role="status" className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-[10px] leading-4 text-slate-600">{notice}</p>}
       <div className="mt-3 flex items-start gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-[10px] leading-4 text-emerald-700">
         <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>安全保障：清理白名单之外的正式数据不会被触碰。</span>
@@ -375,7 +382,6 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
             : ""}
         </div>
       )}
-      {notice && <p role="status" className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-[10px] leading-4 text-slate-600">{notice}</p>}
     </section>
   );
 }

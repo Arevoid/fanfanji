@@ -749,7 +749,7 @@ export default function AppSettings({
           </div>
         ) : (
           /* Independent sub-pages */
-          <div className="flex-1 overflow-y-auto p-4 pb-[34px] bg-[var(--app-bg)]">
+          <div className={`flex-1 overflow-y-auto ${activeTab === "data" ? "bg-white p-0 pb-0" : "p-4 pb-[34px] bg-[var(--app-bg)]"}`}>
             <div className="max-w-md mx-auto space-y-3">
           
           {/* PROFILE SETTINGS TAB */}
