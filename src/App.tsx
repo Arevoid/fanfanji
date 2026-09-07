@@ -3942,6 +3942,9 @@ export default function App() {
         .phone-screen-container [data-theme-page="diary"] .diary-editor-field {
           border-radius: 16px !important;
         }
+        .phone-screen-container [data-theme-page="diary"] .diary-body-editor {
+          border-radius: 28px !important;
+        }
 
         /* 5. Minimal Shadow Style (Shadows/Base/6) */
         .phone-screen-container .shadow,

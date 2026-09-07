@@ -203,7 +203,7 @@ export default function AppDiary({
       tags: entry?.tags.join("，") || "",
     });
   };
-  const saveEntry = () => {
+  const saveEntry = (selectSavedEntry = true) => {
     if (!editing || !draft.body.trim()) return;
     const now = Date.now();
     const entry: DiaryEntry = {
@@ -230,7 +230,14 @@ export default function AppDiary({
     );
     persist([entry, ...entries.filter((item) => item.id !== entry.id)]);
     setEditing(null);
-    setSelectedId(entry.id);
+    if (selectSavedEntry) setSelectedId(entry.id);
+  };
+  const handleEditorBack = () => {
+    if (editing && draft.body.trim()) {
+      saveEntry(false);
+      return;
+    }
+    setEditing(null);
   };
   const removeEntry = (entry: DiaryEntry) => {
     if (!window.confirm("删除这篇日记？关联翻译会删除；已经发送到聊天中的冻结分享仍会保留。")) return;
@@ -327,8 +334,10 @@ export default function AppDiary({
       >
         <header className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_40px] items-center px-3 py-2">
           <button
-            onClick={() => setEditing(null)}
+            onClick={handleEditorBack}
             className="app-nav-icon-button grid h-9 w-9 place-items-center"
+            aria-label="返回并保存日记"
+            title="返回并保存日记"
           >
             <ChevronLeft size={19} />
           </button>
@@ -359,7 +368,7 @@ export default function AppDiary({
             }
             placeholder="写下这一刻…"
             maxLength={4000}
-            className="diary-editor-field mt-5 min-h-[48vh] w-full flex-1 resize-none border-0 bg-transparent px-0 text-[15px] leading-7 outline-none"
+            className="diary-editor-field diary-body-editor mt-5 min-h-[48vh] w-full flex-1 resize-none px-4 py-4 text-[15px] leading-7 outline-none placeholder:text-[var(--text-secondary)]"
           />
           <div className="mt-4 grid gap-3">
             <input
