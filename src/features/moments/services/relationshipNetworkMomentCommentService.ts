@@ -27,6 +27,16 @@ const MOMENT_CADENCE_BY_FREQUENCY: Record<RelationshipNetworkMomentCommentFreque
   high: 1,
 };
 
+/** Keep relationship-network interactions inside the relationship edge's scope. */
+export function formatRelationshipBehaviorBoundary(label?: string): string {
+  const relationship = label?.trim() || "认识";
+  const isNeutral = /认识|熟人|朋友|好友|同事|同学|邻居|网友|合作|客户|关注|员工|普通|不熟|一般|陌生|路人|点头之交|泛泛/.test(relationship)
+    && !/恋|爱|暧昧|伴侣|情侣|喜欢|暗恋/.test(relationship);
+  return isNeutral
+    ? `关系边界：${relationship} 仅表示普通认识/公开礼貌关系。禁止主动暧昧、调情、告白、情侣称呼、占有欲、暧昧晚安或暗示私下亲密；除非这条动态正文明确给出，否则不要编造亲密经历。`
+    : `关系边界：${relationship} 是唯一关系标签。不得把关系升级或改写成其他关系；只有这条动态正文明确支持时才能使用亲密表达。`;
+}
+
 const belongsToIdentity = (character: Character, ownerIdentityId: string): boolean =>
   (character.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId;
 
@@ -357,7 +367,9 @@ export async function generateRelationshipNetworkNpcMomentComment(input: {
   const networkTargetDescription = [
     input.targetDescription,
     `发帖人：${targetName}`,
-    `关系网中，${candidate.npc.name} 与发帖人的关系是「${candidate.socialLink.relationshipLabel || "好友"}」。`,
+    `关系网中，${candidate.npc.name} 与发帖人的关系是「${candidate.socialLink.relationshipLabel || "认识"}」。`,
+    formatRelationshipBehaviorBoundary(candidate.socialLink.relationshipLabel),
+    `发帖主体锁定：${targetName} 是这条动态的发帖人。评论只能回应动态中明确出现的主体和事实，不得把用户或其他人物送出的物品、做过的事改写成 ${candidate.npc.name} 做的；无法确认归属时输出 [SKIP]。`,
     targetProfile,
     "这是公开朋友圈互动，不是私聊；只能回应这条新动态里明确出现的内容。",
   ].join("\n");
@@ -384,6 +396,7 @@ export async function generateRelationshipNetworkNpcMomentComment(input: {
     cleanText: input.cleanText,
     characterExpressionPrompt: input.characterExpressionPrompt,
     additionalWorldKnowledge: targetWorldKnowledge,
+    allowSkip: true,
   });
 }
 
@@ -407,6 +420,7 @@ export async function generateRelationshipNetworkCharacterMomentComment(input: {
     `发帖人：${candidate.npc.name}`,
     `你是${candidate.targetCharacter.remark || candidate.targetCharacter.name}，正在浏览这条公开朋友圈。`,
     `你与${candidate.npc.name}的关系是「${candidate.socialLink.relationshipLabel || "好友"}」。`,
+    formatRelationshipBehaviorBoundary(candidate.socialLink.relationshipLabel),
     "这是可选的公开互动；有自然想法才评论，如果话题已经结束或没有必要接话，请输出 [SKIP]。",
   ].join("\n");
   const targetWorldKnowledge = buildWorldBookSystemBlocks(
@@ -455,6 +469,7 @@ export async function generateRelationshipNetworkCharacterMomentReply(input: {
     `发帖人：${candidate.npc.name}`,
     `你是${candidate.targetCharacter.remark || candidate.targetCharacter.name}。`,
     `你正在回复${candidate.npc.name}在这条公开朋友圈下的评论。`,
+    formatRelationshipBehaviorBoundary(candidate.socialLink.relationshipLabel),
     `评论内容：${input.replyingTo.content}`,
     "这是可选的公开互动；如果事情已经说完或继续回复会显得勉强，请输出 [SKIP]。",
   ].join("\n");
@@ -518,7 +533,9 @@ export async function generateRelationshipNetworkNpcMomentReply(input: {
   const networkTargetDescription = [
     input.targetDescription,
     `发帖人：${targetName}`,
-    `关系网中，${candidate.npc.name} 与发帖人的关系是「${candidate.socialLink.relationshipLabel || "好友"}」。`,
+    `关系网中，${candidate.npc.name} 与发帖人的关系是「${candidate.socialLink.relationshipLabel || "认识"}」。`,
+    formatRelationshipBehaviorBoundary(candidate.socialLink.relationshipLabel),
+    `发帖主体锁定：${targetName} 是这条动态的发帖人。回复只能回应评论和动态中明确出现的主体，不得把用户或其他人物的物品、行为归给 ${candidate.npc.name}；无法确认归属时输出 [SKIP]。`,
     targetProfile,
   ].join("\n");
   const targetWorldKnowledge = candidate.targetCharacter

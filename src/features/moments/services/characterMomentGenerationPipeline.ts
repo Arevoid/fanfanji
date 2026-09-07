@@ -33,6 +33,8 @@ export async function generateCharacterMomentPipeline(input: {
   allowProfileDrivenPost?: boolean;
   /** Optional automation context, kept as prompt guidance rather than a fact. */
   momentPromptHint?: string;
+  /** Locks first-person ownership when a lightweight NPC is rendered through a linked character. */
+  momentAuthorIdentityHint?: string;
 }): Promise<Awaited<ReturnType<typeof requestCharacterMomentOnce>>> {
   const friend = findMomentRelationshipCharacter(input.characters, input.relationship);
   if (!friend) throw new Error("Moment character is unavailable for the relationship scope.");
@@ -75,7 +77,8 @@ export async function generateCharacterMomentPipeline(input: {
 7. Decide explicitly whether this post benefits from a visual. When a concrete scene, food, object, ticket, music, street view, outfit, or shared outing is central, prefer a text-image card. Add one final separate line in exactly this format: "(配图：图片描述)". This is an allowed Moment-only rendering instruction, not a chat attachment or body text.
 8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：".
 9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the supplied feed history. Prefer a specific detail from the scoped context over generic weather, tiredness, coffee, work, or vague feelings.
-10. Never use material from another character, relationship, or user identity. Never use director/IF/hypothetical content, unconfirmed offline content, or AI-inferred events. ${input.allowProfileDrivenPost ? "This is an explicit request to let this NPC post now; if there is no fresh event, you may create a small, concrete profile-grounded daily observation from the NPC's confirmed public profile instead of outputting SKIP." : "If there is no fresh scoped topic, output exactly \"SKIP\" and nothing else."}
+10. Never use material from another character, relationship, or user identity. Never use director/IF/hypothetical content, unconfirmed offline content, or AI-inferred events. Preserve the original actor for every confirmed action or object (for example, if the user sent the soup, do not rewrite it as the character sending it). ${input.allowProfileDrivenPost ? "This is an explicit request to let this NPC post now; if there is no fresh event, you may create a small, concrete profile-grounded daily observation from the NPC's confirmed public profile instead of outputting SKIP." : "If there is no fresh scoped topic, output exactly \"SKIP\" and nothing else."}
+${input.momentAuthorIdentityHint ? `11. 发帖身份锁定：${input.momentAuthorIdentityHint}。正文中的“我”只能指这个发帖人；不得把用户、目标角色或其他人物送出的物品/做过的事改写成发帖人做的。无法确认归属时输出 SKIP。` : ""}
 
 ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
 ${input.characterExpressionPrompt}

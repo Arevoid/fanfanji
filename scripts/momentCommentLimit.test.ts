@@ -9,6 +9,8 @@ import {
 import { upsertMomentPreservingOrder } from "../src/features/moments/services/momentState";
 import type { Moment } from "../src/types";
 
+assert.equal(MAX_MOMENT_COMMENTS_PER_ACTOR, 5, "one stable actor is capped at five comments/replies");
+
 const npcComments: MomentComment[] = Array.from({ length: 10 }, (_, index) => ({
   id: `npc-${index}`,
   sourceNpcId: "npc-a",

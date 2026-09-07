@@ -5,6 +5,7 @@ import {
   findRelationshipNetworkCharacterMomentCommentCandidate,
   listRelationshipNetworkCharacterMomentCommentCandidates,
   listRelationshipNetworkMomentCommentCandidates,
+  formatRelationshipBehaviorBoundary,
   shouldGenerateRelationshipNetworkMomentComment,
 } from "../src/features/moments/services/relationshipNetworkMomentCommentService";
 import { upsertRelationshipNetworkChatLink } from "../src/core/storage/repositories/relationshipNetworkChatLinkRepository";
@@ -28,6 +29,8 @@ Object.defineProperty(globalThis, "localStorage", { configurable: true, value: s
 Object.defineProperty(globalThis, "window", { configurable: true, value: { localStorage: storage } });
 
 const ownerIdentityId = "identity-a";
+assert.match(formatRelationshipBehaviorBoundary("认识"), /禁止主动暧昧/);
+assert.match(formatRelationshipBehaviorBoundary("暧昧"), /唯一关系标签/);
 const npc = createRelationshipNetworkNpc({
   id: "npc-a",
   ownerIdentityId,

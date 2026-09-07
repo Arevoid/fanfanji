@@ -1378,10 +1378,38 @@ export default function AppChat({
   const backgroundGenerationBlockedRef = useRef(false);
   const relationshipNetworkCommentInFlightRef = useRef<Set<string>>(new Set());
   const relationshipNetworkCharacterInteractionInFlightRef = useRef<Set<string>>(new Set());
+  // A Moment gets one shared, randomized text-interaction budget. Likes are
+  // intentionally outside this budget; comments and replies together range
+  // from 0 to 5 instead of every NPC filling the thread.
+  const relationshipNetworkTextBudgetRef = useRef<Map<string, number>>(new Map());
+  const relationshipNetworkGeneratedContentRef = useRef<Set<string>>(new Set());
   const relationshipNetworkNpcMomentsSeenRef = useRef(new Set(
     moments.filter((moment) => Boolean(moment.relationshipNetworkNpcId)).map((moment) => moment.id),
   ));
   const relationshipNetworkCommentBlockedRef = useRef(false);
+
+  const reserveRelationshipNetworkTextInteraction = (momentId: string): boolean => {
+    const current = relationshipNetworkTextBudgetRef.current.get(momentId);
+    const remaining = current ?? Math.floor(Math.random() * 6);
+    if (current === undefined) relationshipNetworkTextBudgetRef.current.set(momentId, remaining);
+    if (remaining <= 0) return false;
+    relationshipNetworkTextBudgetRef.current.set(momentId, remaining - 1);
+    return true;
+  };
+
+  const normalizeGeneratedMomentContent = (content: string): string => content.trim().replace(/\s+/g, " ");
+  const isDuplicateRelationshipNetworkContent = (moment: Moment, content: string): boolean => {
+    const normalized = normalizeGeneratedMomentContent(content);
+    if (!normalized) return true;
+    const key = `${moment.id}:${normalized}`;
+    if (relationshipNetworkGeneratedContentRef.current.has(key)) return true;
+    const current = latestMomentsRef.current.find((item) => item.id === moment.id);
+    const allComments = [...getMomentComments(moment), ...(current && current !== moment ? getMomentComments(current) : [])];
+    return allComments.some((comment) => normalizeGeneratedMomentContent(comment.content) === normalized);
+  };
+  const rememberRelationshipNetworkContent = (momentId: string, content: string) => {
+    relationshipNetworkGeneratedContentRef.current.add(`${momentId}:${normalizeGeneratedMomentContent(content)}`);
+  };
   // Prevent a burst of streamed/direct replies from opening duplicate offline
   // stories before the navigation state has caught up.
   const offlineAutoStartInFlightRef = useRef<Set<string>>(new Set());
@@ -3948,6 +3976,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
 
     const requestKey = `${targetMoment.id}:character-reply:${candidate.targetCharacter.id}:${npcComment.id}`;
     if (relationshipNetworkCharacterInteractionInFlightRef.current.has(requestKey)) return;
+    if (!reserveRelationshipNetworkTextInteraction(targetMoment.id)) return;
     relationshipNetworkCharacterInteractionInFlightRef.current.add(requestKey);
     try {
       const reply = await generateRelationshipNetworkCharacterMomentReply({
@@ -3974,6 +4003,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
         relationId: candidate.targetRelationship.id,
         replyToCommentId: npcComment.id,
       };
+      if (isDuplicateRelationshipNetworkContent(targetMoment, characterReply.content)) return;
+      rememberRelationshipNetworkContent(targetMoment.id, characterReply.content);
       onAddCommentToMoment(targetMoment.id, characterReply);
       const momentWithReply: Moment = {
         ...targetMoment,
@@ -4010,6 +4041,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       if (hasReachedMomentCommentLimit(getMomentComments(newMo), characterActor)) continue;
       const requestKey = `${newMo.id}:character-comment:${candidate.targetCharacter.id}`;
       if (relationshipNetworkCharacterInteractionInFlightRef.current.has(requestKey)) continue;
+      if (!reserveRelationshipNetworkTextInteraction(newMo.id)) break;
       relationshipNetworkCharacterInteractionInFlightRef.current.add(requestKey);
       try {
         const comment = await generateRelationshipNetworkCharacterMomentComment({
@@ -4034,6 +4066,8 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
           characterId: candidate.targetCharacter.id,
           relationId: candidate.targetRelationship.id,
         };
+        if (isDuplicateRelationshipNetworkContent(newMo, characterComment.content)) continue;
+        rememberRelationshipNetworkContent(newMo.id, characterComment.content);
         onAddCommentToMoment(newMo.id, characterComment);
         const momentWithComment: Moment = {
           ...newMo,
@@ -4082,6 +4116,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       if (hasReachedMomentCommentLimit(getMomentComments(newMo), npcActor)) continue;
       const requestKey = `${newMo.id}:${candidate.socialLink.id}`;
       if (relationshipNetworkCommentInFlightRef.current.has(requestKey)) continue;
+      if (!reserveRelationshipNetworkTextInteraction(newMo.id)) break;
       relationshipNetworkCommentInFlightRef.current.add(requestKey);
       const recordInteraction = (status: RelationshipNetworkInteractionStatus, details: { content?: string; reason?: string } = {}) => {
         const result = appendRelationshipNetworkInteractionRecord({
@@ -4119,6 +4154,11 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
           characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
         });
         if (comment) {
+          if (isDuplicateRelationshipNetworkContent(newMo, comment.content)) {
+            recordInteraction("skipped", { reason: "生成内容与现有朋友圈评论重复或为空" });
+            continue;
+          }
+          rememberRelationshipNetworkContent(newMo.id, comment.content);
           if (candidate.socialLink.interactionApprovalMode === "confirm") {
             queueRelationshipNetworkInteraction(candidate, newMo, "comment", requestKey, comment.content);
           } else {
@@ -4267,6 +4307,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
       if (hasReachedMomentCommentLimit(getMomentComments(newMo), npcActor)) continue;
       const requestKey = `${newMo.id}:${candidate.socialLink.id}:reply:${replyingTo.id}`;
       if (relationshipNetworkCommentInFlightRef.current.has(requestKey)) continue;
+      if (!reserveRelationshipNetworkTextInteraction(newMo.id)) break;
       relationshipNetworkCommentInFlightRef.current.add(requestKey);
       const recordInteraction = (status: RelationshipNetworkInteractionStatus, details: { content?: string; reason?: string } = {}) => {
         const result = appendRelationshipNetworkInteractionRecord({
@@ -4305,6 +4346,11 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
           characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
         });
         if (reply) {
+          if (isDuplicateRelationshipNetworkContent(newMo, reply.content)) {
+            recordInteraction("skipped", { reason: "生成内容与现有朋友圈评论重复或为空" });
+            continue;
+          }
+          rememberRelationshipNetworkContent(newMo.id, reply.content);
           if (candidate.socialLink.interactionApprovalMode === "confirm") {
             queueRelationshipNetworkInteraction(candidate, newMo, "reply", requestKey, reply.content);
           } else {

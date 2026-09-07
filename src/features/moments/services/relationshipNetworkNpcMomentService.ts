@@ -73,6 +73,7 @@ export async function generateRelationshipNetworkNpcMoment(input: {
     relationship,
     characters: scopedCharacters,
     allowProfileDrivenPost: true,
+    momentAuthorIdentityHint: `关系网 NPC「${npc.name}」`,
     momentPromptHint: input.automationTrigger === "chat-event"
       ? "最近的聊天对话"
       : input.automationTrigger === "relationship-event"

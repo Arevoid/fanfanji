@@ -478,7 +478,7 @@ export default function AppRelationshipNetwork({
       sourceEntityId: npc.entityId,
       targetEntityType: recipient.entityType,
       targetEntityId: recipient.entityId,
-      relationshipLabel: stored?.relationshipLabel || "好友",
+      relationshipLabel: stored?.relationshipLabel || "认识",
       enabled: stored?.enabled ?? false,
       canViewMoments: stored?.canViewMoments ?? false,
       canCommentMoments: stored?.canCommentMoments ?? false,
@@ -488,6 +488,36 @@ export default function AppRelationshipNetwork({
       commentFrequency: stored?.commentFrequency || "low",
     };
   };
+
+  const resolveNpcRelationshipLabel = (edge: RelationshipNetworkEdge, sourceEntityId: string): string => {
+    const source = networkRef.current.nodes.find((node) => node.id === edge.sourceNodeId);
+    const target = networkRef.current.nodes.find((node) => node.id === edge.targetNodeId);
+    const label = source?.entityType === "npc" && source.entityId === sourceEntityId
+      ? edge.forwardLabel
+      : target?.entityType === "npc" && target.entityId === sourceEntityId
+        ? edge.reverseLabel
+        : undefined;
+    return label?.trim() || "认识";
+  };
+
+  // Repair legacy social links that were saved with the old generic “好友”
+  // fallback. The canvas edge is authoritative, so existing relationships
+  // start using the label the user actually entered without requiring a
+  // manual re-save.
+  useEffect(() => {
+    const currentLinks = listRelationshipNetworkSocialLinksForIdentity(activeIdentity.id);
+    let changed = false;
+    currentLinks.forEach((link) => {
+      if (!link.networkEdgeId) return;
+      const edge = networkRef.current.edges.find((item) => item.id === link.networkEdgeId);
+      if (!edge) return;
+      const relationshipLabel = resolveNpcRelationshipLabel(edge, link.sourceEntityId);
+      if (relationshipLabel === link.relationshipLabel) return;
+      const result = upsertRelationshipNetworkSocialLink({ ...link, relationshipLabel, updatedAt: Date.now() });
+      if (result.success) changed = true;
+    });
+    if (changed) setSocialLinks(listRelationshipNetworkSocialLinksForIdentity(activeIdentity.id));
+  }, [activeIdentity.id, network.edges]);
 
   const openNewEdge = (sourceNodeId: string, targetNodeId: string) => {
     setEdgeDraft({
@@ -563,7 +593,9 @@ export default function AppRelationshipNetwork({
           sourceEntityId: socialDraft.sourceEntityId,
           targetEntityType: socialDraft.targetEntityType,
           targetEntityId: socialDraft.targetEntityId,
-          relationshipLabel: socialDraft.relationshipLabel.trim() || "好友",
+          // The edge direction is the source of truth. This also migrates old
+          // social-link records that were incorrectly defaulted to "好友".
+          relationshipLabel: resolveNpcRelationshipLabel(edge, socialDraft.sourceEntityId),
           enabled: true,
           canViewMoments: socialDraft.canViewMoments,
           canCommentMoments: socialDraft.canCommentMoments,

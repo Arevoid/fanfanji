@@ -1,7 +1,7 @@
 import type { MomentComment } from "../../../types";
 
 /** Maximum comments/replies one stable actor may leave under one Moment. */
-export const MAX_MOMENT_COMMENTS_PER_ACTOR = 8;
+export const MAX_MOMENT_COMMENTS_PER_ACTOR = 5;
 
 export type MomentCommentActor = Pick<MomentComment, "characterId" | "relationId" | "sourceNpcId" | "authorName">;
 
