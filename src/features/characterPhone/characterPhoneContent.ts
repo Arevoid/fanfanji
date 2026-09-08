@@ -29,6 +29,8 @@ export interface CharacterPhoneContentInput {
   character: Character;
   characters: Character[];
   activeIdentity?: UserIdentity;
+  /** All identities in the same account, used only to scope alias chat evidence. */
+  identities?: UserIdentity[];
   relationships: CharacterRelationship[];
   messages: Message[];
   moments: Moment[];
@@ -285,7 +287,35 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
     .filter((network) => !normalizedExisting.some((contact) => contactKey(contact.name) === contactKey(network.npc.name)))
     .map(toNetworkContact);
   const generated = buildContextContacts(input.phone, input.character, input.worldBookEntries);
-  return [userContact, ...normalizedExisting, ...linkedContacts, ...networkLinkedContacts, ...generated];
+  const nextContacts = [userContact, ...normalizedExisting, ...linkedContacts, ...networkLinkedContacts, ...generated];
+  const seenNames = new Set<string>();
+  return nextContacts.filter((contact) => {
+    const key = contactKey(contact.name);
+    if (!key || seenNames.has(key)) return false;
+    seenNames.add(key);
+    return true;
+  });
+}
+
+function buildRelationshipNetworkPhoneContacts(
+  phone: CharacterPhoneRecord,
+  contacts: CharacterPhoneRelationshipNetworkContact[],
+): CharacterPhoneContact[] {
+  return contacts.map((network) => ({
+    id: scopedId(phone.id, "contact", `network-${network.npc.id}`),
+    name: network.npc.name,
+    relation: network.relationLabels.length > 0
+      ? `关系网：${network.relationLabels.join("、")}`
+      : "关系网联系人",
+    kind: "npc" as const,
+    isLongTerm: true,
+    isNpc: true,
+    avatar: network.npc.avatar || createCharacterPhoneInitialAvatar(network.npc.name),
+    source: "linked" as const,
+    linkedCharacterId: network.linkedCharacterId,
+    relationshipNetworkNpcId: network.npc.id,
+    sourceRefs: [{ kind: "relationship-network" as const, id: network.npc.id }],
+  }));
 }
 
 function syncUserChat(
@@ -731,11 +761,24 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
       && (!sourcePhone.initialContentGeneratedAt
         || sourcePhone.sourceHydrationSuppressedAt > sourcePhone.initialContentGeneratedAt),
   );
+  const relationshipNetworkContacts = listCharacterPhoneRelationshipNetworkContacts({
+    character: input.character,
+    ownerIdentityId: sourcePhone.ownerIdentityId,
+    characters: input.characters,
+    npcs: input.relationshipNetworkNpcs || [],
+    maps: input.relationshipNetworkMaps || [],
+  });
   if (sourceHydrationSuppressed) {
+    // A cleared phone must not resurrect old records, but an explicitly
+    // linked relationship-network NPC is fresh evidence and must remain
+    // available for the next first-life generation.
+    const evidenceContacts = (sourcePhone.contacts ?? []).length > 0
+      ? sourcePhone.contacts ?? []
+      : buildRelationshipNetworkPhoneContacts(sourcePhone, relationshipNetworkContacts);
     const isolated: CharacterPhoneRecord = {
       ...sourcePhone,
       messages: normalizeCharacterPhoneMessages(sourcePhone.messages),
-      contacts: sourcePhone.contacts ?? [],
+      contacts: evidenceContacts,
       threadMessages: sourcePhone.threadMessages ?? [],
       posts: sourcePhone.posts ?? [],
       browserHistory: normalizeCharacterPhoneBrowserHistory(sourcePhone.browserHistory),
@@ -755,13 +798,6 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
   }
 
   const seeded = Boolean(sourcePhone.contentSeededAt);
-  const relationshipNetworkContacts = listCharacterPhoneRelationshipNetworkContacts({
-    character: input.character,
-    ownerIdentityId: sourcePhone.ownerIdentityId,
-    characters: input.characters,
-    npcs: input.relationshipNetworkNpcs || [],
-    maps: input.relationshipNetworkMaps || [],
-  });
   const lifeContext = buildCharacterPhoneLifeContext({
     phone: sourcePhone,
     character: input.character,
@@ -771,6 +807,7 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
     moments: input.moments,
     worldBookEntries: input.worldBookEntries,
     relationshipNetworkContacts,
+    identities: input.identities,
   });
   const context = buildContext(input.character, lifeContext.worldBookEntries);
   const scopedInput = {

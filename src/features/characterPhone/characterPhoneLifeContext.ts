@@ -5,7 +5,7 @@ import type {
   UserIdentity,
   WorldBookEntry,
 } from "../../types";
-import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
+import { listRelationshipsForIdentityWorkspace, type CharacterRelationship } from "../../domain/relationship/characterRelationship";
 import type { CharacterPhoneRecord } from "../../domain/characterPhone/types";
 import type { CharacterPhoneRelationshipNetworkContact } from "./characterPhoneRelationshipNetwork";
 import { isWorldBookEntryVisible } from "../../domain/worldbook/worldBookVisibility";
@@ -75,8 +75,19 @@ export function buildCharacterPhoneLifeContext(input: {
   moments: Moment[];
   worldBookEntries: WorldBookEntry[];
   relationshipNetworkContacts?: CharacterPhoneRelationshipNetworkContact[];
+  identities?: UserIdentity[];
 }): CharacterPhoneLifeContext {
-  const relationships = input.relationships.filter((relation) =>
+  const identities = input.identities ?? [];
+  // The phone is still owned by the primary identity, but direct chats made
+  // through one of its aliases are part of the same identity workspace. This
+  // lets the role phone show evidence-backed alias conversations without
+  // importing another user's data.
+  const relationships = listRelationshipsForIdentityWorkspace(
+    input.relationships.filter((relation) => relation.characterId === input.character.id),
+    input.phone.ownerIdentityId,
+    identities,
+  );
+  const ownerRelationships = input.relationships.filter((relation) =>
     relation.userIdentityId === input.phone.ownerIdentityId
       && relation.characterId === input.character.id,
   );
@@ -88,7 +99,10 @@ export function buildCharacterPhoneLifeContext(input: {
     entries: input.worldBookEntries,
     characterId: input.character.id,
     ownerIdentityId: input.phone.ownerIdentityId,
-    relationIds,
+    // World-book visibility remains tied to the primary phone owner. Alias
+    // chat history is mirrored below, but an alias must not change which
+    // private world-book entries the role phone can read.
+    relationIds: ownerRelationships.map((relation) => relation.id),
   });
   const messages = input.messages
     .filter((message) => isScopedPhoneMessage(message, input.character.id, relationIdSet, conversationIdSet))

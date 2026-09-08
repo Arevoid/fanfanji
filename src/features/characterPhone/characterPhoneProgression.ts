@@ -297,6 +297,7 @@ function buildRecentContext(input: {
   character: Character;
   phone: CharacterPhoneRecord;
   activeIdentity?: UserIdentity;
+  identities?: UserIdentity[];
   relationships: CharacterRelationship[];
   messages: Message[];
   moments: Moment[];
@@ -322,7 +323,18 @@ function buildRecentContext(input: {
     .map((message) => {
       const textImage = parseTextImageDescription(message.content);
       const content = textImage ? `文字图：${textImage}` : message.content;
-      return `${message.sender === "user" ? "用户" : roleDisplayName(input.character)}：${redactSourceFileName(content, input.character.sourceFileName)}`;
+      const relation = message.relationId
+        ? lifeContext.relationships.find((candidate) => candidate.id === message.relationId)
+        : undefined;
+      const identity = relation
+        ? input.identities?.find((candidate) => candidate.id === relation.userIdentityId)
+        : message.authorIdentityId
+          ? input.identities?.find((candidate) => candidate.id === message.authorIdentityId)
+          : undefined;
+      const sender = message.sender === "user"
+        ? identity?.name || "用户"
+        : roleDisplayName(input.character);
+      return `${sender}：${redactSourceFileName(content, input.character.sourceFileName)}`;
     });
   const recentMoments = lifeContext.recentMoments
     .filter((moment) => moment.characterId === input.character.id
@@ -535,7 +547,7 @@ function buildInitialContactFallback(
   contact: CharacterPhoneContact,
   lifeEventSummary: string,
   character: Character,
-): GeneratedThreadDraft {
+): GeneratedThreadDraft[] {
   const context = lifeEventSummary ? lifeEventSummary.slice(0, 30) : "刚才那件事";
   const variants = contact.kind === "group"
     ? [
@@ -550,10 +562,17 @@ function buildInitialContactFallback(
         `${contact.name}那边的${context}，我之后再处理。`,
         `我看到${contact.name}关于${context}的消息了，晚点说。`,
       ];
-  return {
-    sender: "character",
-    content: variants[stableVariantIndex(`${character.id}|${contact.id}|${lifeEventSummary}`, variants.length)],
-  };
+  const outgoing = variants[stableVariantIndex(`${character.id}|${contact.id}|${lifeEventSummary}`, variants.length)];
+  const incomingVariants = contact.kind === "group"
+    ? ["收到，我晚点再看。", "好，我忙完回复。", "看到了，先记着。", "嗯，之后再说。"]
+    : ["你先忙，晚点回我就好。", "好，我等你有空再说。", "看到了，不急，你先处理手上的事。", "行，忙完告诉我一声。"];
+  return [
+    {
+      sender: "contact",
+      content: incomingVariants[stableVariantIndex(`${contact.id}|${lifeEventSummary}`, incomingVariants.length)],
+    },
+    { sender: "character", content: outgoing },
+  ];
 }
 
 function stableVariantIndex(value: string, length: number): number {
@@ -654,6 +673,7 @@ type CharacterPhoneProgressionInput = {
   character: Character;
   characters?: Character[];
   activeIdentity?: UserIdentity;
+  identities?: UserIdentity[];
   relationships?: CharacterRelationship[];
   messages?: Message[];
   moments?: Moment[];
@@ -695,6 +715,7 @@ export async function advanceCharacterPhoneWithResult(
         character: input.character,
         characters,
         activeIdentity: input.activeIdentity,
+        identities: input.identities,
         relationships,
         messages,
         moments,
@@ -713,8 +734,9 @@ export async function advanceCharacterPhoneWithResult(
     galleryItems: contextualPhone.galleryItems ?? [],
     // A cleared/new phone deliberately suppresses source hydration, but the
     // owner still needs a visible direct-chat contact for first-life content.
-    // Recreate only this synthetic owner contact here; NPC contacts continue
-    // to come from the scoped generation response.
+    // Recreate only this synthetic owner contact here; evidence-backed NPC
+    // contacts (for example relationship-network links) come from the scoped
+    // context or the validated generation response.
     contacts: isInitialGeneration && !(contextualPhone.contacts ?? []).some((contact) => contact.source === "user" || contact.kind === "user")
       ? [createGeneratedUserContact(contextualPhone, input.activeIdentity), ...(contextualPhone.contacts ?? [])]
       : contextualPhone.contacts ?? [],
@@ -732,6 +754,7 @@ export async function advanceCharacterPhoneWithResult(
     character: input.character,
     phone: base,
     activeIdentity: input.activeIdentity,
+    identities: input.identities,
     relationships,
     messages,
     moments,
@@ -752,7 +775,7 @@ export async function advanceCharacterPhoneWithResult(
   const textImageEvidence = collectTextImageEvidence(lifeContext);
   const roleName = roleDisplayName(input.character);
   const generationRequest = isInitialGeneration
-    ? "这是该角色手机首次初始化。忽略前文可能出现的2—4条总量示例，以本条数量要求为准。请围绕同一个有证据的生活事件，批量生成完整但自然的手机生活：与用户的直接聊天 userThreadMessages 必须有 4—6 条且包含角色和用户双方；如有多个有证据的 NPC 联系人，用 contactThreads 分别生成对应聊天，不要把不同联系人混在同一线程；浏览器 4—8 条搜索记录；未来 3—6 天内分布 1—3 条日程；日记、备忘录、待办合计 2—4 条；朋友圈至少 1 条，visibility 必须是 user（仅用户可见）或 private（仅自己可见）；音乐必须有曲目、收听历史、常听时段和当前正在收听曲目；相册至少保存一条与该事件有关的文字图描述。优先使用 userThreadMessages、contactThreads、browserEntries、scheduleItems、diaryEntries、noteEntries、todoEntries、posts、musicTracks、musicListening、musicNowPlaying 数组字段表达数量；同一事件可以投影到多个应用，但每条仍须有证据。"
+    ? "这是该角色手机首次初始化。忽略前文可能出现的2—4条总量示例，以本条数量要求为准。请围绕同一个有证据的生活事件，批量生成完整但自然的手机生活：与用户的直接聊天 userThreadMessages 必须有 4—6 条且包含角色和用户双方；每一个有证据的非用户 NPC（包括关系网已连线 NPC）都必须在 contacts 中出现，并用 contactThreads 生成属于自己的聊天，不能把不同联系人混在同一线程；没有证据的人不要添加；浏览器 4—8 条搜索记录；未来 3—6 天内分布 1—3 条日程；日记、备忘录、待办合计 2—4 条；朋友圈至少 1 条，visibility 必须是 user（仅用户可见）或 private（仅自己可见）；音乐必须有曲目、收听历史、常听时段和当前正在收听曲目；相册至少保存一条与该事件有关的文字图描述。优先使用 userThreadMessages、contactThreads、browserEntries、scheduleItems、diaryEntries、noteEntries、todoEntries、posts、musicTracks、musicListening、musicNowPlaying 数组字段表达数量；同一事件可以投影到多个应用，但每条仍须有证据。"
     : "这是一次追加生活痕迹。请从最有依据的 2—4 个应用中随机选择少量记录，避免每次都选择相同应用或相同数量；不要为了填满首次初始化的数量而重复旧内容。";
   let response;
   try {
@@ -768,7 +791,7 @@ export async function advanceCharacterPhoneWithResult(
       systemInstruction: `你扮演真实存在的角色“${roleName}”，正在整理他自己的手机。\n${context}\n\n${generationRequest}\n严格规则：
 1. 所有内容必须来自角色人设、世界书、最近上下文或已有手机记录的合理延伸；不能凭空制造与角色无关的人和事件。
 2. 联系人只能是角色现实中可能认识的人：用户、已有角色关系、世界书/人设明确提到的家人朋友同事，或有明确依据的新 NPC。群聊必须有明确的群名称或成员依据。不要读取或生成用户不认识该角色的好友。name 只能填写真实的人名或群聊名，不能填写“我可”“我都开始怀疑你是不”这类句子片段；无法确定正式名称时请留空并不要添加该联系人。
-3. userThreadMessages 只表示用户与角色的直接对话；contactThreads/threadMessages 只表示 NPC 或群聊。每个 contactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成该线程。不要把 NPC 聊天塞进用户与角色的聊天镜像。
+3. userThreadMessages 只表示用户与角色的直接对话；contactThreads/threadMessages 只表示 NPC 或群聊。每个有证据的非用户联系人（尤其是关系网已连线 NPC）都必须对应 contacts 和自己的 contactThreads；每个 contactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成该线程。不要把 NPC 聊天塞进用户与角色的聊天镜像。
 4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isInitialGeneration ? "首次初始化时必须覆盖所有支持内容生成的应用，并满足聊天4—6条、浏览器4—8条、未来3—6天的1—3条日程、日记/备忘录/待办合计2—4条、至少一条仅用户可见或仅自己可见的朋友圈和音乐收听/常听时段/正在收听数据；不要使用模板标题。" : "后续生活推进从最有依据的2—4个应用随机选择少量记录，不要每个应用都强行生成一条，也不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。"}
 5. 角色真实姓名、备注名和人设文件名是不同概念。绝不能把文件名、输入字段名、世界书标题当作角色姓名或正文内容。
 6. 日记必须是角色不会公开展示的私密想法；备忘录和日程必须是具体事项；浏览器输出搜索记录标题和 2—3 条不同平台的 AI 结果卡片，不能输出网址或引导查看原始页面；相册字段只描述角色真实可能保存的图片或文字图，不要凭空输出图片文件名。主手机的文字图只以描述形式参考，角色手机会在本地渲染文字图，不要声称有真实照片。
@@ -889,13 +912,22 @@ export async function advanceCharacterPhoneWithResult(
   // distinct role-authored trace so the inbox is not one populated row plus a
   // list of empty contacts. This is deliberately limited to initial records;
   // later context-only contacts remain untouched.
-  if (isInitialGeneration && lifeEventSummary) {
-    mergedContacts.added
-      .filter((contact) => !contact.removedAt && contact.source !== "user" && !explicitContactThreadNames.has(contactKey(contact.name)))
+  if (isInitialGeneration && validatedSourceRefs.length > 0) {
+    const existingThreadContactIds = new Set(base.threadMessages.map((message) => message.contactId));
+    mergedContacts.contacts
+      .filter((contact) => !contact.removedAt
+        && contact.source !== "user"
+        && (contact.sourceRefs?.length ?? 0) > 0
+        && !explicitContactThreadNames.has(contactKey(contact.name))
+        && !existingThreadContactIds.has(contact.id))
       .forEach((contact) => {
+        // These contacts already came from relationship-network, character,
+        // world-book, or validated provider evidence. The fallback is only a
+        // two-sided local trace for that evidence; it never creates a new
+        // contact and never runs without a validated source reference.
         contactThreadDrafts.push({
           contactName: contact.name,
-          messages: [buildInitialContactFallback(contact, lifeEventSummary, input.character)],
+          messages: buildInitialContactFallback(contact, lifeEventSummary, input.character),
         });
       });
   }

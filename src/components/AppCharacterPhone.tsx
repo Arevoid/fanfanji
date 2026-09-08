@@ -123,6 +123,7 @@ import type { MessageMutationScope } from "../features/chat/context/directIntera
 interface AppCharacterPhoneProps {
   userIdentityId: string;
   activeIdentity?: UserIdentity;
+  identities?: UserIdentity[];
   characters: Character[];
   relationships: CharacterRelationship[];
   messages?: Message[];
@@ -348,6 +349,7 @@ function characterPhoneGenerationNoChangeNotice(
 
 type CharacterPhoneOpenContext = {
   activeIdentity?: UserIdentity;
+  identities?: UserIdentity[];
   characters: Character[];
   relationships: CharacterRelationship[];
   messages: Message[];
@@ -433,6 +435,7 @@ function openCharacterPhone(
         character,
         characters: context.characters,
         activeIdentity: context.activeIdentity,
+        identities: context.identities,
         relationships: context.relationships,
         messages: context.messages,
         moments: context.moments,
@@ -788,6 +791,7 @@ function formatCharacterPhoneDiaryGroupLabel(
 export default function AppCharacterPhone({
   userIdentityId,
   activeIdentity,
+  identities = [],
   characters,
   relationships,
   messages = [],
@@ -816,6 +820,7 @@ export default function AppCharacterPhone({
   );
   const phoneContext = useMemo(() => ({
     activeIdentity,
+    identities,
     characters,
     relationships,
     messages,
@@ -826,6 +831,7 @@ export default function AppCharacterPhone({
     musicTracks,
   }), [
     activeIdentity,
+    identities,
     characters,
     relationships,
     messages,
@@ -1715,6 +1721,7 @@ export default function AppCharacterPhone({
           character: selectedCharacter,
           characters,
           activeIdentity,
+          identities,
           relationships,
           messages,
           moments,

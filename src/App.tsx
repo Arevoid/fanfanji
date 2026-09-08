@@ -4938,6 +4938,7 @@ export default function App() {
                     <AppCharacterPhone
                       userIdentityId={characterPhoneIdentity.id}
                       activeIdentity={characterPhoneIdentity}
+                      identities={settings.identities}
                       characters={characters}
                       relationships={relationships}
                       messages={messages}
