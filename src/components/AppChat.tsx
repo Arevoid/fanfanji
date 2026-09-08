@@ -93,6 +93,7 @@ import { createChatReplyController } from "../features/chat/controllers/chatRepl
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
 import { resolveChatRoutine, resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
 import { createChatSideEffectController, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
+import { createPostReplyCoordinator } from "../features/chat/controllers/postReplyCoordinator";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
 import { useChatAttachmentState } from "../features/chat/hooks/useChatAttachmentState";
@@ -2641,26 +2642,32 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             }
           }
 
-          chatSideEffectController.afterReplySuccess({
-            userMsg,
-            currentChatMessages,
-            createdMessages,
-            activeCharacter,
-            activeRelationship,
-            relationships,
-            isOffline: false,
-            activeOfflineStoryId,
+          postReplyCoordinator.schedule({
+            mode: "send",
+            policy: "normal_send",
+            sideEffects: {
+              userMsg,
+              currentChatMessages,
+              createdMessages,
+              activeCharacter,
+              activeRelationship,
+              relationships,
+              isOffline: false,
+              activeOfflineStoryId,
+            },
+            ...(createdMessages.length > 0 && turnRelationship && !replyContext.isGroup
+              ? {
+                diary: {
+                  relation: turnRelationship,
+                  character: turnCharacter,
+                  ownerIdentityId: activeIdentityId,
+                  messages: [...sourceMsgs, ...createdMessages],
+                  worldBookEntries,
+                  settings,
+                },
+              }
+              : {}),
           });
-          if (createdMessages.length > 0 && turnRelationship && !replyContext.isGroup) {
-            void maybeGenerateDiaryAfterChat({
-              relation: turnRelationship,
-              character: turnCharacter,
-              ownerIdentityId: activeIdentityId,
-              messages: [...sourceMsgs, ...createdMessages],
-              worldBookEntries,
-              settings,
-            });
-          }
         }
       } else {
         if (isCancelledCallTurn() || signal?.aborted) return;
@@ -2783,6 +2790,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     updateRelationships: onSaveRelationships,
     onSaveCharacter,
     updateCharacter: onUpdateCharacter,
+  });
+
+  const postReplyCoordinator = createPostReplyCoordinator({
+    runReplySideEffects: (input) => chatSideEffectController.afterReplySuccess(input),
+    scheduleDiary: (input) => maybeGenerateDiaryAfterChat(input),
   });
 
   const generateResponseForUserMessage = async (
