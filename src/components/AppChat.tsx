@@ -2599,6 +2599,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             }
           }
 
+          lifecyclePhase = "delivered";
           postReplyResult = postReplyCoordinator.schedule({
             mode: "send",
             policy: "normal_send",
@@ -2651,6 +2652,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           });
           deliveredMessageIds = createdMessages.map((message) => message.id);
           if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
+          lifecyclePhase = "delivered";
 
           if (createdMessages.length > 0) {
             const inlineRelationship = turnRelationship
