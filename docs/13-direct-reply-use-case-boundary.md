@@ -7,7 +7,11 @@ Stage 3B-3 后重新审计了 `AppChat` 的 normal direct-send pipeline。原来
 
 ```text
 已持久化 user Message
-  → AppChat 准备 Context/Prompt/Request
+  → AppChat 收集 runtime facts 与 feature-owned material
+  → DirectReplyPreparation
+      → DirectChatContextSnapshotBuilder
+      → DirectChatPromptBuilder / PromptComposer 输入
+      → prepared DirectReplyTurn request
   → DirectReplyUseCase
       → DirectReplyTurnExecutor
       → caller-owned post-reply adapter
@@ -41,7 +45,7 @@ composer text，也不负责 user-message persistence；`useChatController` 仍�
 |---|---|---|
 | A Application service | lifecycle contract、TurnExecutor、PostReplyCoordinator 调度 | UseCase 直接使用前两者；Coordinator 通过 adapter 调用 |
 | B Runtime snapshot/input | character、relationship、identity、history、signal、scope | 由 AppChat 在同一 render/turn 中解析并封装；不由 UseCase 再读取页面状态 |
-| C Context/Prompt material | `buildDirectChatContextSnapshot`、WorldBook/Truth/Memory、`buildDirectChatSystemInstruction`、PromptComposer 输入 | 继续由现有 builder 与 caller 负责；UseCase 只消费 prepared request |
+| C Context/Prompt material | `buildDirectChatContextSnapshot`、WorldBook/Truth/Memory、`buildDirectChatSystemInstruction`、PromptComposer 输入 | feature producer 仍由 caller 提供 material；`directReplyPreparation.ts` 复用现有 snapshot/prompt builders 并输出 prepared request；UseCase 只消费结果 |
 | D UI-only | React state/setter/ref、toast、typing、call transcript、scroll、modal、selection、navigation | 保留在 AppChat/controller；delivery 仅以既有 adapter 传入 |
 | E Persistence | user message persistence、assistant delivery、relationship/appointment/phone repositories | user message 在 UseCase 前完成；assistant 与跨功能写入继续由 delivery/caller adapter 完成 |
 | F Post-reply/cross-feature | inner voice、offline handoff/proactive、memory、diary、Moments/cover | 不复制实现；delivery 后由 caller-owned adapter 调用现有 helper 与 PostReplyCoordinator |
@@ -71,3 +75,15 @@ implementation 与 UI 生命周期均不进入此边界。
 和 Diary service。Memory/Diary 仍是 best-effort background work：其失败记录在
 coordinator metadata，不抛回已交付的主回复。此阶段没有把这些功能迁移进 UseCase。
 
+## Stage 3B-5 preparation boundary
+
+`src/features/chat/services/directReplyPreparation.ts` 是一个 84 行的薄边界：
+
+- `prepareDirectReplyContext` 只委托现有 `buildDirectChatContextSnapshot`；
+- `prepareDirectReplyTurn` 只委托现有 `buildDirectChatSystemInstruction`，并组装现有
+  `direct-chat` PromptContext、settings、signal 与 alias guard；
+- 它不读取 React、storage 或 feature implementation，也不调用 Provider、PromptComposer、
+  retry/fallback、delivery、Ledger 或 post-reply service；
+- Truth/Memory、WorldBook、Offline、Moments、Music、Forum、Diary、Memo 的具体 producer
+  仍由 caller 生成 material，避免形成新的 God Service；
+- send-only 与 regenerate 不经过该 normal preparation boundary。

@@ -70,9 +70,9 @@ ChatComposer
 | 21 | `setCallTranscript` | call error | 写 | UI/voice adapter | 需 adapter | voice 专属 |
 | 22 | `setLastChatRequestEstimate` | post-context estimate | 写 | UI/observability adapter | 需 adapter | 由 caller/telemetry adapter 消费 |
 | 23 | `onSaveRelationships`、`onSaveAppointment`、`onSaveImageToCharacterPhone` | recognition、offline、image | 写 | persistence adapter | 需 adapter | 不直接注入核心 |
-| 24 | `buildDirectChatContextSnapshot` | history/context boundary | 读 | Direct Reply application | 是 | 目标 dependency |
+| 24 | `buildDirectChatContextSnapshot`（由 `directReplyPreparation.ts` 委托） | history/context boundary | 读 | Direct Reply preparation | 是 | normal preparation boundary |
 | 25 | Truth/Memory/offline/forum/diary/music context builders | context assembly | 读 | Context service | 是（聚合后） | 先聚合，不搬算法 |
-| 26 | `buildDirectChatMainPrompt`、`buildDirectChatSystemInstruction` 与 PromptComposer | prompt | 读 | Direct Reply application | 是 | 目标 dependency |
+| 26 | `buildDirectChatMainPrompt`、`buildDirectChatSystemInstruction` 与 PromptComposer 输入 | prompt | 读 | Direct Reply preparation | 是 | builder 复用；不在 preparation 中实现检索 |
 | 27 | alias/character/knowledge/time/voice/sticker/offline prompt policies | prompt blocks | 读 | Domain policy | 是（作为 builder 内部） | 不由 Use Case 重写 |
 | 28 | `requestDirectChatTurn` | provider request | 写 | request service | 是 | 目标 dependency |
 | 29 | response protocol、directive parsers、error classifier | parse/normalization | 读/写 data | parser/policy | 是 | 目标 dependency |

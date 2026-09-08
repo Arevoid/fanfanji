@@ -34,8 +34,9 @@ React setter、DOM、JSX、Provider、localStorage 和具体 storage implementat
 
 Outcome 只保存 ID 和分类，不保存 Prompt、response、异常正文或凭据。
 
-Stage 3B-4 已把 normal direct send 的 prepared turn → delivery → post-reply
-调度包在 `DirectReplyUseCase` 中；Context/Prompt 组装、UI adapter、user-message
+Stage 3B-5 已把 normal direct send 的 runtime/feature material → 现有
+ContextSnapshot/Prompt builder → prepared turn 送入 `DirectReplyUseCase`；delivery →
+post-reply 调度仍由既有 UseCase/adapter 边界负责。UI adapter、user-message
 persistence 与 regenerate 仍留在各自既有边界。该 outcome contract 继续作为
 页面/controller 的唯一结构化生命周期结果。
 
