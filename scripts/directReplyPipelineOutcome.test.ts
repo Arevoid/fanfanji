@@ -14,7 +14,8 @@ for (const phase of ["prepared", "requesting", "parsed", "delivering", "post_rep
   assert.match(pipeline, new RegExp(`["']${phase}["']`), `pipeline must model ${phase} phase`);
 }
 assert.match(pipeline, /buildOutcome\([^\n]*"delivered"/);
-assert.match(pipeline, /return buildOutcome\("failed", "failed"/);
+assert.match(pipeline, /return buildOutcome\("failed"/);
+assert.match(pipeline, /const failurePhase: DirectReplyLifecyclePhase/);
 assert.match(pipeline, /return buildOutcome\("cancelled", "cancelled"/);
 assert.doesNotMatch(pipeline, /generateRegeneratedChatTurn/);
 

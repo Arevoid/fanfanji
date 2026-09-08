@@ -96,7 +96,7 @@ await assert.rejects(() => requestDirectChatTurn({
 const parseFailureOutcome = createDirectReplyLifecycleOutcome({
   lifecycle,
   status: "failed",
-  phase: "failed",
+  phase: "parsed",
   delivery: { status: "not_delivered" },
   error: { kind: "parse", recoverable: true },
 });
@@ -152,7 +152,7 @@ assert.equal(failedDeliveryCount, 1);
 const failedOutcome = createDirectReplyLifecycleOutcome({
   lifecycle,
   status: "failed",
-  phase: "failed",
+  phase: "delivering",
   delivery: { status: "not_delivered" },
   error: { kind: "delivery", recoverable: true },
 });

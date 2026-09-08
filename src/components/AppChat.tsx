@@ -2742,8 +2742,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       } else {
         if (isCancelledCallTurn() || signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
         publishReplyError(`⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`);
-        lifecyclePhase = "failed";
-        return buildOutcome("failed", "failed", { kind: "parse", recoverable: true });
+        return buildOutcome("failed", "parsed", { kind: "parse", recoverable: true });
       }
     } catch (err: any) {
       if (isCancelledCallTurn() || signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
@@ -2786,8 +2785,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         : isChatResponseFormatError(err)
           ? { kind: "parse" as const, recoverable: true }
           : classifyDirectReplyError(err);
-      lifecyclePhase = "failed";
-      return buildOutcome("failed", "failed", error);
+      const failurePhase: DirectReplyLifecyclePhase = error.kind === "delivery"
+        ? "delivering"
+        : error.kind === "parse"
+          ? "parsed"
+          : failedAtPhase === "requesting"
+            ? "requesting"
+            : "failed";
+      return buildOutcome("failed", failurePhase, error);
     } finally {
       setIsTyping(false);
     }
