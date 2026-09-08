@@ -129,7 +129,13 @@ export function classifyDirectReplyError(error: unknown): DirectReplyLifecycleEr
     ? String((error as { code?: unknown }).code || "")
     : "";
   if (code === "aborted") return { kind: "cancelled", recoverable: true };
-  if (code.startsWith("provider_") || code === "network" || code === "timeout") {
+  if (
+    code.startsWith("provider_")
+    || code === "configuration"
+    || code === "context_too_large"
+    || code === "network"
+    || code === "timeout"
+  ) {
     return { kind: "provider", recoverable: true };
   }
   if (code === "response_format" || code === "invalid_response") {

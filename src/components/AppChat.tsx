@@ -94,6 +94,7 @@ import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedCh
 import { resolveChatRoutine, resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
 import { createChatSideEffectController, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { createPostReplyCoordinator } from "../features/chat/controllers/postReplyCoordinator";
+import { classifyDirectReplyError, createDirectReplyLifecycleOutcome, type DirectReplyLifecycleInput, type DirectReplyLifecycleOutcome, type DirectReplyLifecyclePhase } from "../features/chat/contracts/directReplyLifecycle";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
 import { useChatAttachmentState } from "../features/chat/hooks/useChatAttachmentState";
@@ -1826,8 +1827,60 @@ export default function AppChat({
     cognitiveContext?: CharacterCognitiveContext,
     replyContext: ChatRuntimeContext = activeRuntimeContext,
     signal?: AbortSignal,
-  ) => {
-    if (signal?.aborted) return;
+  ): Promise<DirectReplyLifecycleOutcome> => {
+    const lifecycle: DirectReplyLifecycleInput = {
+      mode: "send",
+      scope: {
+        characterId: replyContext.characterId || activeCharacter?.id || activeChatCharId || "unknown",
+        ...(replyContext.relationId ? { relationId: replyContext.relationId } : {}),
+        ...(replyContext.conversationId ? { conversationId: replyContext.conversationId } : {}),
+        userIdentityId: replyContext.userIdentityId,
+      },
+      userMessage: userMsg,
+      historyBoundary: {
+        ...(userMsg ? { userMessageId: userMsg.id } : {}),
+        ...(customHistoryOverride ? { excludedMessageIds: [] } : {}),
+      },
+      runtime: { requestedAt: Date.now(), signal },
+      postReplyPolicy: "normal_send",
+    };
+    let lifecyclePhase: DirectReplyLifecyclePhase = "prepared";
+    let generatedCandidateIds: string[] = [];
+    let deliveredMessageIds: string[] = [];
+    let postReplyResult: ReturnType<typeof postReplyCoordinator.schedule> | undefined;
+    const buildOutcome = (
+      status: DirectReplyLifecycleOutcome["status"],
+      phase: DirectReplyLifecyclePhase = lifecyclePhase,
+      error?: DirectReplyLifecycleOutcome["error"],
+    ): DirectReplyLifecycleOutcome => {
+      const deliveryStatus = deliveredMessageIds.length === 0
+        ? "not_delivered"
+        : deliveredMessageIds.length < generatedCandidateIds.length
+          ? "partial"
+          : "delivered";
+      return createDirectReplyLifecycleOutcome({
+        lifecycle,
+        status,
+        phase,
+        delivery: {
+          status: deliveryStatus,
+          generatedCandidateIds,
+          deliveredMessageIds,
+        },
+        ...(postReplyResult
+          ? {
+            postReply: {
+              scheduled: postReplyResult.scheduled.length > 0,
+              failures: postReplyResult.failures,
+            },
+          }
+          : {}),
+        ...(error ? { error } : {}),
+      });
+    };
+
+    if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
+    lifecyclePhase = "requesting";
     setIsTyping(true);
     const callTurnGeneration = activeAttachModal === "calling" && callingStatus === "connected"
       ? callSpeechGenerationRef.current
@@ -2436,7 +2489,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           : undefined,
       });
 
-      if (signal?.aborted) return;
+      lifecyclePhase = "parsed";
+      if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
 
       if (data && data.text) {
         const userImageSaveDecision = imageDataUrl
@@ -2518,15 +2572,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             }];
           }
 
+          generatedCandidateIds = newMsgs.map((message) => message.id);
+          lifecyclePhase = "delivering";
           // Send each segment with realistic typing delays and real-time timestamps
           for (let idx = 0; idx < newMsgs.length; idx++) {
-            if (signal?.aborted) return;
+            if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
             const m = newMsgs[idx];
             setIsTyping(true);
             const chars = m.content.length;
             const duration = Math.max(800, Math.min(3500, chars * 100)) + (Math.floor(Math.random() * 500) - 200);
             await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
-            if (signal?.aborted) return;
+            if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
             
             m.timestamp = Date.now();
             // This reply carries the captured conversation scope. Do not pass
@@ -2534,24 +2590,31 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             // user may have opened another private conversation while the API
             // request was in flight.
             onSendMessageRaw(m);
+            deliveredMessageIds.push(m.id);
             setIsTyping(false);
             
             if (idx < newMsgs.length - 1) {
               await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
-              if (signal?.aborted) return;
+              if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
             }
           }
 
-          chatSideEffectController.afterReplySuccess({
-            userMsg,
-            currentChatMessages,
-            createdMessages: newMsgs,
-            activeCharacter,
-            activeRelationship,
-            relationships,
-            isOffline: true,
-            activeOfflineStoryId,
+          postReplyResult = postReplyCoordinator.schedule({
+            mode: "send",
+            policy: "normal_send",
+            sideEffects: {
+              userMsg,
+              currentChatMessages,
+              createdMessages: newMsgs,
+              activeCharacter,
+              activeRelationship,
+              relationships,
+              isOffline: true,
+              activeOfflineStoryId,
+            },
           });
+          lifecyclePhase = "post_reply_scheduled";
+          return buildOutcome(newMsgs.length > 0 ? "delivered" : "no_response");
         } else {
           const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
           const replyCandidates = createDirectReplyCandidates({
@@ -2577,6 +2640,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               return `[语音]|${secs}|${bubbleText}`;
             },
           });
+          generatedCandidateIds = replyCandidates.messages.map((message) => message.id);
+          lifecyclePhase = "delivering";
           const createdMessages = await deliverDirectReplyCandidates({
             candidates: replyCandidates,
             signal,
@@ -2584,7 +2649,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             onTyping: setIsTyping,
             onSendMessage: isConnectedVoiceCall ? onSendMessage : onSendMessageRaw,
           });
-          if (signal?.aborted) return;
+          deliveredMessageIds = createdMessages.map((message) => message.id);
+          if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
 
           if (createdMessages.length > 0) {
             const inlineRelationship = turnRelationship
@@ -2642,7 +2708,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             }
           }
 
-          postReplyCoordinator.schedule({
+          postReplyResult = postReplyCoordinator.schedule({
             mode: "send",
             policy: "normal_send",
             sideEffects: {
@@ -2668,13 +2734,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               }
               : {}),
           });
+          lifecyclePhase = "post_reply_scheduled";
+          return buildOutcome(createdMessages.length > 0 ? "delivered" : "no_response");
         }
       } else {
-        if (isCancelledCallTurn() || signal?.aborted) return;
+        if (isCancelledCallTurn() || signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
         publishReplyError(`⚠️ [系统出错]：${(data as any).error || "智能体未能理解该消息。"}`);
+        lifecyclePhase = "failed";
+        return buildOutcome("failed", "failed", { kind: "parse", recoverable: true });
       }
     } catch (err: any) {
-      if (isCancelledCallTurn() || signal?.aborted) return;
+      if (isCancelledCallTurn() || signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
+      const failedAtPhase = lifecyclePhase;
       const errMsgStr = err?.message || "";
       const errorCode = err instanceof ApiChatError
         ? err.code
@@ -2708,6 +2779,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         userFacingError = `⚠️ [AI 请求失败]：${detail}`;
       }
       publishReplyError(userFacingError);
+      const error = failedAtPhase === "delivering"
+        ? { kind: "delivery" as const, recoverable: true }
+        : isChatResponseFormatError(err)
+          ? { kind: "parse" as const, recoverable: true }
+          : classifyDirectReplyError(err);
+      lifecyclePhase = "failed";
+      return buildOutcome("failed", "failed", error);
     } finally {
       setIsTyping(false);
     }

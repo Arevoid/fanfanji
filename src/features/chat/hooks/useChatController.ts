@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Character, Message, OfflineStory } from "../../../types";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
+import type { DirectReplyLifecycleOutcome } from "../contracts/directReplyLifecycle";
 import {
   appendChatUserMessageToOfflineStory,
   createChatUserMessage,
@@ -12,7 +13,7 @@ export type ChatResponseHandler = (
   userMessage: Message | null,
   history?: Message[],
   signal?: AbortSignal,
-) => Promise<void> | void;
+) => Promise<void | DirectReplyLifecycleOutcome> | void;
 
 export type CharacterImageHandler = (
   trigger: "manual" | "explicit-user-text",

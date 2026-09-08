@@ -1,6 +1,7 @@
 import type { Message } from "../../../types";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
+import type { DirectReplyLifecycleOutcome } from "../contracts/directReplyLifecycle";
 
 export interface ChatReplyRequest {
   userMsg: Message | null;
@@ -17,7 +18,7 @@ export interface ChatReplyControllerDependencies {
     context: ChatRuntimeContext;
     cognitiveContext?: CharacterCognitiveContext;
     signal?: AbortSignal;
-  }) => Promise<void> | void;
+  }) => Promise<DirectReplyLifecycleOutcome> | DirectReplyLifecycleOutcome | void;
 }
 
 /**
@@ -30,7 +31,7 @@ export interface ChatReplyControllerDependencies {
  */
 export function createChatReplyController(dependencies: ChatReplyControllerDependencies) {
   return {
-    async generate(request: ChatReplyRequest): Promise<void> {
+    async generate(request: ChatReplyRequest): Promise<DirectReplyLifecycleOutcome | void> {
       const context = dependencies.getContext();
       if (!context.characterId) return;
 
@@ -40,7 +41,7 @@ export function createChatReplyController(dependencies: ChatReplyControllerDepen
       }
 
       const cognitiveContext = dependencies.getCognitiveContext?.(context);
-      await dependencies.generateDirectReply({ ...request, context, ...(cognitiveContext ? { cognitiveContext } : {}) });
+      return dependencies.generateDirectReply({ ...request, context, ...(cognitiveContext ? { cognitiveContext } : {}) });
     },
   };
 }
