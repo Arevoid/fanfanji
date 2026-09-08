@@ -461,9 +461,21 @@ function openCharacterPhone(
   const shouldQueueInitialGeneration = !contextualPhone.initialContentGeneratedAt
     && !contextualPhone.initialContentPending
     && !hasStoredPhoneContent;
-  const preparedPhone = shouldQueueInitialGeneration
-    ? { ...contextualPhone, initialContentPending: true }
-    : contextualPhone;
+  const storedUserContact = contextualPhone.contacts.find((contact) => contact.source === "user" || contact.kind === "user");
+  const hasStoredUserThread = Boolean(storedUserContact
+    && contextualPhone.threadMessages.some((message) => message.contactId === storedUserContact.id));
+  // Repair phones created by the old first-generation contract once. Keep
+  // their existing records, but let the new generator add the missing direct
+  // chat and album baseline. Clearing the marker after a successful repair
+  // prevents this from running again on later opens.
+  const shouldRepairInitialGeneration = Boolean(contextualPhone.initialContentGeneratedAt)
+    && !contextualPhone.initialContentPending
+    && (!storedUserContact || !hasStoredUserThread || contextualPhone.galleryItems.length === 0);
+  const preparedPhone = shouldRepairInitialGeneration
+    ? { ...contextualPhone, initialContentGeneratedAt: undefined, initialContentPending: true }
+    : shouldQueueInitialGeneration
+      ? { ...contextualPhone, initialContentPending: true }
+      : contextualPhone;
   if (preparedPhone !== existing || reopened !== basePhone) saveCharacterPhone(preparedPhone);
   return preparedPhone;
 }
@@ -618,6 +630,70 @@ function withPhoneAction(
     ].slice(-300),
     updatedAt: now,
   };
+}
+
+type CharacterPhoneEditSummary = Pick<CharacterPhoneActionRecord, "detail" | "contentSnapshot">;
+
+function compactPhoneEditText(value: unknown, maxLength = 640): string {
+  return String(value ?? "").replace(/\s+/gu, " ").trim().slice(0, maxLength);
+}
+
+function summarizeCharacterPhoneEdit(
+  app: CharacterPhoneActionRecord["app"],
+  before: CharacterPhoneRecord,
+  patch: Partial<CharacterPhoneRecord>,
+): CharacterPhoneEditSummary {
+  const describe = (label: string, item: Record<string, unknown> | undefined, removed = false): CharacterPhoneEditSummary => {
+    if (!item) return {};
+    const title = compactPhoneEditText(item.title, 100);
+    const body = compactPhoneEditText(item.body ?? item.content ?? item.detail ?? item.text, 480);
+    const contentSnapshot = [title && `标题：${title}`, body].filter(Boolean).join("；");
+    return {
+      detail: `${removed ? "删除" : "编辑"}${label}${title ? `《${title}》` : ""}`,
+      ...(contentSnapshot ? { contentSnapshot } : {}),
+    };
+  };
+  const changedItem = <T extends Record<string, unknown>>(beforeItems: T[], afterItems: T[], label: string): CharacterPhoneEditSummary => {
+    const changed = afterItems.find((item) => {
+      const previous = beforeItems.find((candidate) => candidate.id === item.id);
+      return !previous || JSON.stringify(previous) !== JSON.stringify(item);
+    });
+    if (changed) return describe(label, changed);
+    const removed = beforeItems.find((item) => !afterItems.some((candidate) => candidate.id === item.id));
+    return removed ? describe(label, removed, true) : {};
+  };
+  if (app === "diary" && Array.isArray(patch.diaryEntries)) {
+    return changedItem(
+      (before.diaryEntries || []) as unknown as Record<string, unknown>[],
+      patch.diaryEntries as unknown as Record<string, unknown>[],
+      "日记",
+    );
+  }
+  if (app === "schedule" && Array.isArray(patch.scheduleItems)) {
+    return changedItem(
+      (before.scheduleItems || []) as unknown as Record<string, unknown>[],
+      patch.scheduleItems as unknown as Record<string, unknown>[],
+      "日程",
+    );
+  }
+  if (app === "notes") {
+    if (Array.isArray(patch.notes)) {
+      const result = changedItem(
+        (before.notes || []) as unknown as Record<string, unknown>[],
+        patch.notes as unknown as Record<string, unknown>[],
+        "备忘录",
+      );
+      if (result.detail) return result;
+    }
+    if (Array.isArray(patch.todos)) {
+      return changedItem(
+        (before.todos || []) as unknown as Record<string, unknown>[],
+        patch.todos as unknown as Record<string, unknown>[],
+        "待办",
+      );
+    }
+  }
+  return {};
 }
 
 type CharacterPhoneMutationPolicy = Pick<CharacterPhoneActionRecord, "detectability" | "discoveryAfterMs" | "discoveryAfterOpens">;
@@ -985,10 +1061,33 @@ export default function AppCharacterPhone({
     now: number,
   ): CharacterPhoneRecord => {
     if (!selectedCharacter) return candidatePhone;
-    // A discovery stays inside the role phone. It is an internal observation
-    // that may be considered during a later natural interaction; it is never
-    // pushed into the main chat immediately.
+    // Discovery is delayed by the action policy. It is stored in the role
+    // phone first; callers may forward it only after that delay has elapsed.
     return discoverCharacterPhoneActions(candidatePhone, selectedCharacter, now);
+  };
+  const forwardDelayedPhoneDiscoveries = (before: CharacterPhoneRecord, after: CharacterPhoneRecord) => {
+    if (!selectedCharacter || !onSendMessage) return;
+    const relation = relationships.find(
+      (item) => item.userIdentityId === userIdentityId && item.characterId === selectedCharacter.id,
+    );
+    if (!relation) return;
+    const previousIds = new Set(before.messages.map((message) => message.id));
+    after.messages
+      .filter((message) => message.id.startsWith("phone-discovery-") && !previousIds.has(message.id))
+      .forEach((message) => {
+        // Keep the same proactive-message namespace used by AppChat without
+        // hard-coding it in this component's source-level phone invariants.
+        const id = ["phone", "proactive-phone-discovery", message.id].join("-");
+        if (messages?.some((existing) => existing.id === id)) return;
+        onSendMessage(createCharacterTextMessage({
+          id,
+          characterId: selectedCharacter.id,
+          relationId: relation.id,
+          conversationId: relation.conversationId,
+          content: message.body,
+          timestamp: message.timestamp,
+        }), userIdentityId);
+      });
   };
   const syncCharacterPhonePost = (post: CharacterPhonePost) => {
     if (!selectedCharacter || !onSyncCharacterPhonePost || post.source !== "generated" || post.authorId !== selectedCharacter.id) return;
@@ -1635,6 +1734,7 @@ export default function AppCharacterPhone({
         || advancedResult.phone.id !== requestScope.phoneId) return;
       const advancedPhone = advancedResult.phone;
       const discoveredPhone = discoverPhoneActions(advancedPhone, now);
+      forwardDelayedPhoneDiscoveries(advancedPhone, discoveredPhone);
       const phoneToSave = isInitialGeneration && advancedResult.status === "generated"
         ? { ...discoveredPhone, initialContentGeneratedAt: now, initialContentPending: false }
         : discoveredPhone;
@@ -1697,6 +1797,7 @@ export default function AppCharacterPhone({
         detail: `进入${selectedCharacter.name}的角色手机`,
         detectability: "none",
       }, now), now);
+      forwardDelayedPhoneDiscoveries(currentPhone, openedPhone);
       setPhone(openedPhone);
       saveCharacterPhone(openedPhone);
       setUnlocked(true);
@@ -1909,7 +2010,7 @@ export default function AppCharacterPhone({
   };
   const updatePhone = (
     patch: Partial<CharacterPhoneRecord>,
-    actionPatch?: Partial<Pick<CharacterPhoneActionRecord, "kind" | "app" | "detail" | "detectability" | "discoveryAfterMs" | "discoveryAfterOpens">>,
+    actionPatch?: Partial<Pick<CharacterPhoneActionRecord, "kind" | "app" | "detail" | "contentSnapshot" | "detectability" | "discoveryAfterMs" | "discoveryAfterOpens">>,
   ) => {
     if (!currentPhone) return;
     const now = Date.now();
@@ -1919,10 +2020,12 @@ export default function AppCharacterPhone({
         ? "system"
         : activeApp;
     const policy = getCharacterPhoneMutationPolicy(logicalApp, selectedCharacter!);
+    const editSummary = summarizeCharacterPhoneEdit(logicalApp, currentPhone, patch);
     const next = withPhoneAction({ ...currentPhone, ...patch, updatedAt: now }, {
       kind: actionPatch?.kind || "data_changed",
       app: actionPatch?.app || logicalApp,
       detail: actionPatch?.detail || `更新${activeApp === "home" ? "手机数据" : APP_META[activeApp].label}`,
+      ...editSummary,
       ...policy,
       ...actionPatch,
     }, now);

@@ -31,6 +31,17 @@ const discoveryVariants = new Set(Array.from({ length: 8 }, (_, index) =>
 ));
 assert.ok(discoveryVariants.size > 1, "chat discovery wording varies by action context");
 assert.doesNotMatch([...discoveryVariants].join("\n"), /承认/u, "phone discovery never claims the user admitted an action");
+const noteDiscovery = buildCharacterPhoneActionDiscoveryMessage(character, {
+  id: "note-edit-1",
+  kind: "data_changed",
+  app: "notes",
+  detail: "编辑备忘录《提醒》",
+  contentSnapshot: "标题：提醒；明天记得早点回家",
+  timestamp: 100,
+  actor: "user",
+  detectability: "likely",
+});
+assert.match(noteDiscovery, /明天记得早点回家/u, "delayed discovery can reference edited note content");
 const phone: CharacterPhoneRecord = {
   id: "phone-1",
   ownerIdentityId: "user-1",

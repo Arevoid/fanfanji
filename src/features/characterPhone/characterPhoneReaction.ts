@@ -132,13 +132,18 @@ function extractTarget(detail?: string): string {
   return removedTarget || detail.replace(/^删除/u, "").trim() || "联系人";
 }
 
+function formatEditEvidence(action: CharacterPhoneActionRecord): string {
+  const evidence = action.contentSnapshot?.trim().replace(/\s+/gu, " ").slice(0, 260);
+  return evidence ? `我看到的内容大意是“${evidence}”。` : "";
+}
+
 export function buildCharacterPhoneActionDiscoveryMessage(
   character: Character,
   action: CharacterPhoneActionRecord,
   context: Pick<CharacterPhoneReactionContext, "previousDiscoveryCount"> = {},
 ): string {
   const style = getPersonalityStyle(character);
-  const key = `${character.id}|${action.id}|${action.kind}|${action.app}|${action.detail || ""}|${context.previousDiscoveryCount ?? 0}`;
+  const key = `${character.id}|${action.id}|${action.kind}|${action.app}|${action.detail || ""}${action.contentSnapshot ? `|${action.contentSnapshot}` : ""}|${context.previousDiscoveryCount ?? 0}`;
   const direct = style === "direct" || style === "teasing";
   const target = extractTarget(action.detail);
 
@@ -177,29 +182,31 @@ export function buildCharacterPhoneActionDiscoveryMessage(
         ]);
   }
   if (action.app === "diary") {
+    const evidence = formatEditEvidence(action);
     return pickVariant(key, direct
       ? [
-          "我的日记里出现了新的改动。你看过或改过哪一篇？",
-          "日记有一页被动过了。你要是看到了，直接告诉我。",
-          "我发现日记内容和记忆里不一样。别让我靠猜，谁动过它？",
+          `我的日记里出现了新的改动。${evidence}这段内容是你想留给我的吗？`,
+          `日记有一页被动过了。${evidence}你是有话想告诉我，还是只是顺手记下？`,
+          `我发现日记内容和记忆里不一样。${evidence}先告诉我，你希望我怎么理解它？`,
         ]
       : [
-          "我刚翻到日记，感觉有一页和记忆里不太一样。先记着，之后再问你。",
-          "日记像是被碰过，但我还不能确定。等我想起来再说。",
-          "有一处日记改动很细微，可能是我自己漏记了，我先留意一下。",
+          `我刚翻到日记，感觉有一页和记忆里不太一样。${evidence}我先记着，之后有合适的时候再问你。`,
+          `日记像是被碰过，但我还不能确定。${evidence}这也许只是你的随手记录，我先不急着下结论。`,
+          `有一处日记改动很细微。${evidence}我先留意一下，等确认你是不是想让我知道。`,
         ]);
   }
   if (action.app === "notes") {
+    const evidence = formatEditEvidence(action);
     return pickVariant(key, direct
       ? [
-          "备忘录里多了一处改动。这是你留下的吗？",
-          "我看到备忘录被改过了，别绕开，告诉我你写了什么。",
-          "备忘录出现了新内容。你刚才是不是动过我的手机？",
+          `备忘录里多了一处改动。${evidence}这是你留下的吗？`,
+          `我看到备忘录被改过了。${evidence}你是在提醒我什么，还是只是随手记下？`,
+          `备忘录出现了新内容。${evidence}如果这是想让我注意的事，直接告诉我也可以。`,
         ]
       : [
-          "备忘录好像被动过了，我先记下来，等想清楚再问。",
-          "我后来打开备忘录时看到一处陌生改动，暂时还说不好是谁留下的。",
-          "备忘录多了一点痕迹，也许是我自己顺手改的，先不急着问。",
+          `备忘录好像被动过了。${evidence}我先记下来，等想清楚再问。`,
+          `我后来打开备忘录时看到一处陌生改动。${evidence}暂时还说不好是谁留下的。`,
+          `备忘录多了一点痕迹。${evidence}也许只是你顺手记的，我先不急着问。`,
         ]);
   }
   if (action.app === "browser") {
@@ -216,10 +223,11 @@ export function buildCharacterPhoneActionDiscoveryMessage(
         ]);
   }
   if (action.app === "schedule") {
+    const evidence = formatEditEvidence(action);
     return pickVariant(key, [
-      `我的日程里多了一项不太像我会写的安排。${direct ? "你知道是怎么回事吗？" : "我先核对一下再说。"}`,
-      "日程出现了新安排，我不记得自己加过。你刚好看到是谁改的吗？",
-      "我发现日程有一处变化，先不急着归因，等确认时间和来源。",
+      `我的日程里多了一项不太像我会写的安排。${evidence}${direct ? "你知道是怎么回事吗？" : "我先核对一下再说。"}`,
+      `日程出现了新安排，我不记得自己加过。${evidence}你刚好知道它是怎么来的吗？`,
+      `我发现日程有一处变化。${evidence}先不急着归因，等确认时间和来源。`,
     ]);
   }
   if (action.app === "moments") {

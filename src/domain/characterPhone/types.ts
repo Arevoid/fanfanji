@@ -227,6 +227,8 @@ export interface CharacterPhoneActionRecord {
   app: CharacterPhoneAppId | "phone" | "camera" | "system";
   targetId?: string;
   detail?: string;
+  /** Bounded snapshot of the edited text so delayed discovery can reference what changed. */
+  contentSnapshot?: string;
   timestamp: number;
   actor: "user";
   detectability: "none" | "possible" | "likely";

@@ -24,6 +24,7 @@ import {
   normalizeCharacterPhonePasscode,
   saveCharacterPhone,
 } from "../core/storage/repositories/characterPhoneRepository";
+import { resolveCharacterPhoneHiddenGalleryPasscode } from "../features/characterPhone/characterPhoneGallerySecurity";
 import type { CharacterPhoneImageSaveInput } from "../domain/characterPhone/types";
 import { createDirectReplyCandidates } from "../features/chat/services/directChatService";
 import { runGroupChatReplyPipeline } from "../features/chat/services/groupChatReplyPipeline";
@@ -2222,6 +2223,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const userMemoContext = activeRelationship
         ? loadUserMemoPromptContext({
           scopeKey: activeRelationship.id,
+          ownerIdentityId: activeRelationship.userIdentityId,
           queryText: currentMessageContextText,
           hasUserMessage: Boolean(userMsg),
           nowMs: requestTime.getTime(),
@@ -2391,8 +2393,11 @@ ${aliasEvents.join("\n")}
         }
       }
       if (characterPhone) {
+        const hiddenGalleryPasscode = resolveCharacterPhoneHiddenGalleryPasscode(turnCharacter, characterPhone);
         assembledInstructions.push(`【角色手机密码事实】
-本轮回复前，系统已经先为这个角色的虚拟手机固定并保存了密码“${characterPhone.passcode}”。这是一个已经存在的事实，不是让你临时生成的新密码。只有当对话自然涉及手机密码、生日或解锁时，才可以按照角色语气透露这个真实密码；不要把其他日期、金额、编号或用户猜测的数字当成密码，也不要修改这个密码。如果聊天历史中曾经说过其他数字，那些只能视为猜测或说错了，不能覆盖这条固定密码事实。`);
+本轮回复前，系统已经先为这个角色的虚拟手机固定并保存了两组密码：解锁密码“${characterPhone.passcode}”、隐藏相册密码“${hiddenGalleryPasscode}”。这两组密码已经写入角色手机，是本轮对话开始前就存在的事实，不是让你临时生成的新密码。
+如果用户问的是解锁密码，回答解锁密码“${characterPhone.passcode}”；如果用户问的是隐藏相册密码，回答隐藏相册密码“${hiddenGalleryPasscode}”。不要把两组密码混用，也不要把隐藏相册密码说成用户生日、纪念日或其他未被明确提供的日期。
+只有当对话自然涉及手机密码、隐藏相册或解锁时，才可以按照角色语气透露对应的真实密码；不要把其他日期、金额、编号、用户猜测的数字或你临时编造的“生日”当成密码，也不要修改这两组密码。如果聊天历史中曾经说过其他数字，且没有明确的用户事实支持，那些只能视为猜测或说错了，不能覆盖这两条固定密码事实。`);
       }
       if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       const characterPhoneProxyFinalInstruction = immediateCharacterPhoneProxyMessage?.sentFromCharacterPhone

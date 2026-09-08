@@ -889,10 +889,13 @@ export function DualMusicWidget({
 }: WidgetProps) {
   const [showBindingSheet, setShowBindingSheet] = useState(false);
   const bound = availableMusicRelationships.find((item) => item.relationship.id === dualMusicConfig?.relationId);
-  const leftTrack = tracks.find((track) => track.id === identityMusicState?.currentTrackId);
-  const rightTrack = tracks.find((track) => track.id === relationshipMusicState?.currentTrackId);
-  const leftOrigin = `dual:${id}:left`;
-  const rightOrigin = `dual:${id}:right`;
+  // Keep playback origins tied to the data source (user vs. character), not
+  // to the visual column. This preserves listening-state semantics while the
+  // character is moved to the left and the user to the right.
+  const characterTrack = tracks.find((track) => track.id === relationshipMusicState?.currentTrackId);
+  const userTrack = tracks.find((track) => track.id === identityMusicState?.currentTrackId);
+  const characterOrigin = `dual:${id}:right`;
+  const userOrigin = `dual:${id}:left`;
   const fallbackUserAvatar = activeIdentity?.avatar || "";
   const fallbackFriendAvatar = bound?.character.avatar || fallbackUserAvatar;
 
@@ -916,10 +919,10 @@ export function DualMusicWidget({
             type="button"
             onClick={(event) => {
               event.stopPropagation();
-              if (input.side === "right" && !isEditing) setShowBindingSheet(true);
+              if (input.side === "left" && !isEditing) setShowBindingSheet(true);
             }}
             className={`absolute top-1.5 ${input.side === "left" ? "left-1.5" : "right-1.5"} h-7 w-7 overflow-hidden rounded-full bg-white shadow`}
-            aria-label={input.side === "right" ? "绑定或更换角色" : input.name}
+            aria-label={input.side === "left" ? "绑定或更换角色" : input.name}
           >
             <img src={input.avatar} alt="" className="h-full w-full object-cover" />
           </button>
@@ -958,19 +961,19 @@ export function DualMusicWidget({
       >
         {renderCard({
           side: "left",
-          track: leftTrack,
-          avatar: fallbackUserAvatar,
-          name: activeIdentity?.name || "我",
-          emptyText: "去音乐库播放一首歌",
-          origin: leftOrigin,
-        })}
-        {renderCard({
-          side: "right",
-          track: rightTrack,
+          track: characterTrack,
           avatar: fallbackFriendAvatar,
           name: bound ? (bound.character.remark || bound.character.name) : "绑定角色",
           emptyText: tracks.length ? (bound ? "点击换一首" : "点击头像绑定角色") : "请先在音乐库添加歌曲",
-          origin: rightOrigin,
+          origin: characterOrigin,
+        })}
+        {renderCard({
+          side: "right",
+          track: userTrack,
+          avatar: fallbackUserAvatar,
+          name: activeIdentity?.name || "我",
+          emptyText: "去音乐库播放一首歌",
+          origin: userOrigin,
         })}
       </div>
       {isEditing && onRemove && (
@@ -982,7 +985,7 @@ export function DualMusicWidget({
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-stone-900">双人音乐</h3>
-                <p className="mt-0.5 text-[10px] text-stone-400">绑定当前身份下的单聊好友</p>
+                <p className="mt-0.5 text-[10px] text-stone-400">绑定主人设下的单聊好友</p>
               </div>
               <button type="button" onClick={() => setShowBindingSheet(false)} className="h-7 w-7 rounded-full bg-stone-100 text-stone-500">×</button>
             </div>

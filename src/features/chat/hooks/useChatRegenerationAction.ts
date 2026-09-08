@@ -306,6 +306,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const userMemoContext = activeRelationship
         ? loadUserMemoPromptContext({
           scopeKey: activeRelationship.id,
+          ownerIdentityId: activeRelationship.userIdentityId,
           queryText: currentMessageContextText,
           hasUserMessage: Boolean(lastUserMsg),
           nowMs: requestTime.getTime(),

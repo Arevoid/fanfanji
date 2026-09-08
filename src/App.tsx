@@ -572,6 +572,17 @@ function resolveCharacterPhoneOwnerIdentityId(
   return identityId;
 }
 
+/** Dual-music playback is stored with the主人设 even while an alias is active. */
+function resolveMusicStateOwnerIdentityId(
+  origin: string | null | undefined,
+  identityId: string,
+  identities: readonly UserIdentity[] = [],
+): string {
+  return origin?.startsWith("dual:")
+    ? resolveCharacterPhoneOwnerIdentityId(identityId, identities)
+    : identityId;
+}
+
 const normalizeLoadedMoments = (loadedMoments: Moment[]): Moment[] => loadedMoments.map((moment) => ({
   ...moment,
   comments: limitMomentCommentsPerActor(moment.comments),
@@ -1210,7 +1221,15 @@ export default function App() {
       const nextTrack = allTracks[randomIndex];
       setCurrentTrack(nextTrack);
       if (playbackOrigin && shouldRecordIdentityListening(playbackOrigin)) {
-        setIdentityMusicStates((states) => upsertIdentityMusicTrack(states, settings.activeIdentityId || DEFAULT_IDENTITY_ID, nextTrack.id));
+        setIdentityMusicStates((states) => upsertIdentityMusicTrack(
+          states,
+          resolveMusicStateOwnerIdentityId(
+            playbackOrigin,
+            settings.activeIdentityId || DEFAULT_IDENTITY_ID,
+            settings.identities || [],
+          ),
+          nextTrack.id,
+        ));
       }
       setIsPlaying(true);
     } else {
@@ -1219,7 +1238,15 @@ export default function App() {
       const nextTrack = allTracks[nextIndex];
       setCurrentTrack(nextTrack);
       if (playbackOrigin && shouldRecordIdentityListening(playbackOrigin)) {
-        setIdentityMusicStates((states) => upsertIdentityMusicTrack(states, settings.activeIdentityId || DEFAULT_IDENTITY_ID, nextTrack.id));
+        setIdentityMusicStates((states) => upsertIdentityMusicTrack(
+          states,
+          resolveMusicStateOwnerIdentityId(
+            playbackOrigin,
+            settings.activeIdentityId || DEFAULT_IDENTITY_ID,
+            settings.identities || [],
+          ),
+          nextTrack.id,
+        ));
       }
       setIsPlaying(true);
     }
@@ -1233,7 +1260,15 @@ export default function App() {
     const previousTrack = allTracks[prevIndex];
     setCurrentTrack(previousTrack);
     if (playbackOrigin && shouldRecordIdentityListening(playbackOrigin)) {
-      setIdentityMusicStates((states) => upsertIdentityMusicTrack(states, settings.activeIdentityId || DEFAULT_IDENTITY_ID, previousTrack.id));
+      setIdentityMusicStates((states) => upsertIdentityMusicTrack(
+        states,
+        resolveMusicStateOwnerIdentityId(
+          playbackOrigin,
+          settings.activeIdentityId || DEFAULT_IDENTITY_ID,
+          settings.identities || [],
+        ),
+        previousTrack.id,
+      ));
     }
     setIsPlaying(true);
   };
@@ -1314,7 +1349,11 @@ export default function App() {
     setPlaybackOrigin(origin);
     setIsPlaying(true);
     if (recordIdentityPlayback && shouldRecordIdentityListening(origin)) {
-      const ownerIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
+      const ownerIdentityId = resolveMusicStateOwnerIdentityId(
+        origin,
+        settings.activeIdentityId || DEFAULT_IDENTITY_ID,
+        settings.identities || [],
+      );
       setIdentityMusicStates((states) => upsertIdentityMusicTrack(states, ownerIdentityId, track.id));
     }
   };
@@ -3127,7 +3166,12 @@ export default function App() {
   };
 
   const handleBindMusicRelationship = (widgetId: string, relationId: string) => {
-    const ownerIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
+    // Dual music is a primary-persona surface. An alias may open the picker,
+    // but it must bind and persist against the主人设's relationship workspace.
+    const ownerIdentityId = resolveCharacterPhoneOwnerIdentityId(
+      settings.activeIdentityId || DEFAULT_IDENTITY_ID,
+      settings.identities || [],
+    );
     const relationship = relationships.find((item) =>
       item.id === relationId && item.userIdentityId === ownerIdentityId);
     if (!relationship) {
@@ -3155,7 +3199,10 @@ export default function App() {
 
   useEffect(() => {
     if (activeApp !== null) return;
-    const ownerIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
+    const ownerIdentityId = resolveCharacterPhoneOwnerIdentityId(
+      settings.activeIdentityId || DEFAULT_IDENTITY_ID,
+      settings.identities || [],
+    );
     const now = Date.now();
     const dueRelationIds = new Set<string>(dualMusicConfigs
       .filter((config) =>
@@ -3169,7 +3216,7 @@ export default function App() {
         return !state || (state.nextRefreshAt !== undefined && state.nextRefreshAt <= now);
       }));
     dueRelationIds.forEach((relationId) => { void refreshRelationshipMusic(relationId); });
-  }, [activeApp, currentPage, dualMusicConfigs, homeScreenItems, relationshipMusicStates, settings.activeIdentityId, tracks.length]);
+  }, [activeApp, currentPage, dualMusicConfigs, homeScreenItems, relationshipMusicStates, settings.activeIdentityId, settings.identities, tracks.length]);
 
   const handleAddMusicPlaylist = (pl: MusicPlaylist) => {
     setPlaylists((prev) => {
@@ -3607,7 +3654,9 @@ export default function App() {
     settings,
   });
   const availableMusicRelationships = relationships
-    .filter((relationship) => relationship.userIdentityId === activeIdentityId)
+    // The picker is intentionally primary-scoped so switching to an alias
+    // cannot expose or create a second dual-music relationship set.
+    .filter((relationship) => relationship.userIdentityId === primaryIdentityId)
     .map((relationship) => ({
       relationship,
       character: characters.find((character) =>
@@ -4518,18 +4567,18 @@ export default function App() {
                                             widgetBorderRadius={settings.widgetBorderRadius}
                                             size={itemSize}
                                             tracks={tracks}
-                                            activeIdentity={activeIdentity}
+                                            activeIdentity={item.widgetType === "dual-music" ? primaryIdentity : activeIdentity}
                                             chatStatsIdentity={primaryIdentity}
-                                            dualMusicConfig={dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === activeIdentityId)}
-                                            identityMusicState={identityMusicStates.find((state) => state.ownerIdentityId === activeIdentityId)}
+                                            dualMusicConfig={dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === primaryIdentityId)}
+                                            identityMusicState={identityMusicStates.find((state) => state.ownerIdentityId === primaryIdentityId)}
                                             relationshipMusicState={relationshipMusicStates.find((state) =>
-                                              state.relationId === dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === activeIdentityId)?.relationId)}
+                                              state.relationId === dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === primaryIdentityId)?.relationId)}
                                             availableMusicRelationships={availableMusicRelationships}
                                             playbackOrigin={playbackOrigin}
                                             onToggleTrack={(trackId: string, origin: string) => toggleTrack(trackId, origin, origin.endsWith(":left"))}
                                             onBindMusicRelationship={handleBindMusicRelationship}
                                             onRefreshRelationshipMusic={(relationId: string) => { void refreshRelationshipMusic(relationId); }}
-                                            musicRecommendationLoading={musicRecommendationRelationId === dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === activeIdentityId)?.relationId}
+                                            musicRecommendationLoading={musicRecommendationRelationId === dualMusicConfigs.find((config) => config.widgetId === item.id && config.ownerIdentityId === primaryIdentityId)?.relationId}
                                             musicError={musicRecommendationError || musicPlaybackError}
                                             onOpenReading={(bookId, paragraphAnchorId) => {
                                               setActiveApp("reading");
@@ -5144,10 +5193,10 @@ export default function App() {
                   widgetBorderRadius: settings.widgetBorderRadius,
                   size: normalizeHomeItemSize(draggedItem),
                   tracks,
-                  activeIdentity,
+                  activeIdentity: draggedItem.widgetType === "dual-music" ? primaryIdentity : activeIdentity,
                   chatStatsIdentity: primaryIdentity,
-                  dualMusicConfig: dualMusicConfigs.find((config) => config.widgetId === draggedItem.id && config.ownerIdentityId === activeIdentityId),
-                  identityMusicState: identityMusicStates.find((state) => state.ownerIdentityId === activeIdentityId),
+                  dualMusicConfig: dualMusicConfigs.find((config) => config.widgetId === draggedItem.id && config.ownerIdentityId === primaryIdentityId),
+                  identityMusicState: identityMusicStates.find((state) => state.ownerIdentityId === primaryIdentityId),
                   availableMusicRelationships,
                 })}
               </div>
