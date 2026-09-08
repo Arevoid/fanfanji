@@ -34,6 +34,7 @@ import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallM
 import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
 import { completeVoiceCall } from "../features/chat/services/voiceCallCompletion";
 import { buildDirectChatContextSnapshot } from "../features/chat/services/directChatContextSnapshotBuilder";
+import { prepareDirectReplyContext, prepareDirectReplyTurn, type DirectReplyPromptPreparationInput } from "../features/chat/services/directReplyPreparation";
 import { useProactiveCallScheduler } from "../features/chat/hooks/useProactiveCallScheduler";
 import { useChatPaymentState } from "../features/chat/hooks/useChatPaymentState";
 import { useChatProfileState } from "../features/chat/hooks/useChatProfileState";
@@ -2079,7 +2080,7 @@ export default function AppChat({
       const immediateCharacterPhoneProxyMessage = userMsg && sourceMsgs.length > 1
         ? sourceMsgs[sourceMsgs.length - 2]
         : undefined;
-      const historyContext = buildDirectChatContextSnapshot({
+      const historyContext = prepareDirectReplyContext({
         messages: sourceMsgs,
         userMessageId: userMsg?.id,
         userMessageAt: userMsg?.timestamp,
@@ -2336,7 +2337,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         })()
         : undefined;
 
-      const systemInstruction = buildDirectChatSystemInstruction({
+      const directChatPromptInput: DirectReplyPromptPreparationInput = {
         mainPromptText,
         musicContext,
         forumContext,
@@ -2423,7 +2424,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         ],
         worldBookContextPriority: wbBlocks.allTriggered.length > 0,
         characterProjection,
-        diagnosticLabel: "direct chat prompt",
         finalPersonaRules: wbBlocks.allTriggered
           .filter((entry) => entry.purpose === "persona_rule")
           .map((entry) => "【" + entry.title + "】\n" + entry.content),
@@ -2438,7 +2438,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           }).map((entry) => entry.title + "\n" + entry.content),
         )),
         finalSystemInstructionSuffix: directChatSystemInstructionSuffix,
-      });
+      };
       // Custom tool/attachment format descriptions for character context
       const promptMessage = userMsg
         ? `${serializeMessageContentForPrompt(userMsg, {
@@ -2457,6 +2457,26 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         ? `\n【当前用户消息包含真实图片】请先直接观察并识别图片中的主体、物品和场景，再回答；不要仅凭‘发送图片’这段文字猜测，也不要把包、袋子等物品擅自判断成衣服。
 【用户图片留存判断】这张图片是否值得放进你的私人相册，由你根据当前关系、情绪、图片内容和这次对话自然判断。不要每张都保存，只有少数确实有纪念意义、对你重要或你明确想留着的图片才保存。若决定保存，请在整段回复末尾单独输出内部标记 ${"[[SAVE_USER_IMAGE]]"}，不要解释标记；若不保存，不要输出该标记。该标记不会展示给用户。`
         : "";
+      const preparedDirectReply = prepareDirectReplyTurn({
+        context: historyContext,
+        prompt: directChatPromptInput,
+        message: `${promptMessage}${imageInstruction}`,
+        imageDataUrl,
+        historyInjections: wbBlocks.at_depth,
+        settings,
+        signal,
+        includeInnerVoice: true,
+        aliasIdentityGuard: isAliasIdentity
+          ? {
+            aliasName: promptUserName,
+            primaryName: primaryIdentityName,
+            hasPrimaryRelationship: Boolean(primaryRelation),
+            recognitionState: identityRecognitionState,
+            currentUserMessage: userMsg?.content,
+          }
+          : undefined,
+      });
+      const systemInstruction = preparedDirectReply.systemInstruction;
       const requestTokenEstimate = estimateChatRequestTokens({
         systemInstruction,
         history,
@@ -2528,21 +2548,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         }
         return { data, proactiveOfflineResponseParse, proactiveOfflineParse };
       };
-      const directTurnRequest = {
-        prompt: { scenario: "direct-chat" as const, message: `${promptMessage}${imageInstruction}`, imageDataUrl, history, systemInstruction, historyInjections: wbBlocks.at_depth },
-        settings,
-        signal,
-        includeInnerVoice: true,
-        aliasIdentityGuard: isAliasIdentity
-          ? {
-            aliasName: promptUserName,
-            primaryName: primaryIdentityName,
-            hasPrimaryRelationship: Boolean(primaryRelation),
-            recognitionState: identityRecognitionState,
-            currentUserMessage: userMsg?.content,
-          }
-          : undefined,
-      };
+      const directTurnRequest = preparedDirectReply.request;
 
       if (isOfflineModeActive) {
         const prepared = normalizeDirectReplyResponse(await requestDirectChatTurn(directTurnRequest));

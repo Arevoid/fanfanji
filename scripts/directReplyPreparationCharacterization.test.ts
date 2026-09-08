@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { buildDirectChatContextSnapshot } from "../src/features/chat/services/directChatContextSnapshotBuilder";
 import { buildDirectChatSystemInstruction } from "../src/features/chat/prompts/directChatPromptBuilder";
+import { prepareDirectReplyContext, prepareDirectReplyTurn } from "../src/features/chat/services/directReplyPreparation";
 import { projectCharacterPrompt } from "../src/domain/prompt/characterPromptProjector";
 import type { Message } from "../src/types";
 
@@ -19,6 +20,7 @@ const previousReply: Message = {
   content: "上一条回复",
   timestamp: userMessage.timestamp - 1_000,
 };
+const requestTime = new Date("2026-09-08T00:00:00.000Z");
 
 const snapshot = buildDirectChatContextSnapshot({
   messages: [previousReply, userMessage],
@@ -30,6 +32,7 @@ const snapshot = buildDirectChatContextSnapshot({
   historicalReferenceCharacterLimit: 6_000,
   characterName: "角色",
   userName: "用户",
+  requestTime,
 });
 const characterProjection = projectCharacterPrompt({
   id: "preparation-character",
@@ -52,6 +55,41 @@ const systemInstruction = buildDirectChatSystemInstruction({
   diagnosticLabel: "direct chat prompt",
   finalLanguageInstruction: "LANGUAGE",
 });
+const preparedContext = prepareDirectReplyContext({
+  messages: [previousReply, userMessage],
+  userMessageId: userMessage.id,
+  userMessageAt: userMessage.timestamp,
+  enableTimeAwareness: false,
+  contextLimit: 20,
+  historyCharacterLimit: 16_000,
+  historicalReferenceCharacterLimit: 6_000,
+  characterName: "角色",
+  userName: "用户",
+  requestTime,
+});
+assert.deepEqual(preparedContext, snapshot, "preparation context must preserve the existing snapshot exactly");
+const preparedTurn = prepareDirectReplyTurn({
+  context: preparedContext,
+  prompt: {
+    mainPromptText: "MAIN_PROMPT",
+    characterDescriptionText: "DESCRIPTION",
+    personalityText: "PERSONALITY_BLOCK",
+    relationshipContext: "RELATIONSHIP",
+    characterContextText: "CONTEXT",
+    userProfileText: "PROFILE",
+    userKnowledgeBoundary: "KNOWLEDGE",
+    includeLongTermMemory: false,
+    characterKnowledgeBoundary: "CHARACTER_BOUNDARY",
+    onlineChatSpatialBoundary: "ONLINE_BOUNDARY",
+    characterProjection,
+    finalLanguageInstruction: "LANGUAGE",
+  },
+  message: userMessage.content,
+  settings: { apiKey: "key", selectedModel: "model" } as any,
+});
+assert.equal(preparedTurn.systemInstruction, systemInstruction);
+assert.equal(preparedTurn.request.prompt.message, userMessage.content);
+assert.equal("requestAi" in preparedTurn.request, false, "preparation must not own provider calls");
 
 assert.deepEqual(snapshot.history.map((entry) => entry.text), ["上一条回复"]);
 assert.equal(snapshot.messagesForHistory.some((message) => message.id === userMessage.id), false);
@@ -63,9 +101,9 @@ const normalPipeline = appChatSource.slice(
   appChatSource.indexOf("const executeDirectReplyPipeline"),
   appChatSource.indexOf("const chatReplyController"),
 );
-assert.match(normalPipeline, /buildDirectChatContextSnapshot\(\{/);
-assert.match(normalPipeline, /buildDirectChatSystemInstruction\(\{/);
-assert.match(normalPipeline, /prompt: \{ scenario: "direct-chat"/);
+assert.match(normalPipeline, /prepareDirectReplyContext\(\{/);
+assert.match(normalPipeline, /prepareDirectReplyTurn\(\{/);
+assert.match(normalPipeline, /const directTurnRequest = preparedDirectReply\.request/);
 assert.match(normalPipeline, /if \(isOfflineModeActive\)/);
 assert.match(normalPipeline, /executeDirectReplyUseCase\(/);
 assert.match(normalPipeline, /postReplyCoordinator\.schedule/);
@@ -78,8 +116,12 @@ const sendOnlyBody = controllerSource.slice(sendOnlyStart, sendOnlyEnd);
 assert.doesNotMatch(sendOnlyBody, /buildDirectChatContextSnapshot|buildDirectChatSystemInstruction|executeDirectReplyUseCase/);
 
 const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
+const preparationSource = readFileSync(new URL("../src/features/chat/services/directReplyPreparation.ts", import.meta.url), "utf8");
 assert.match(regenerationSource, /buildDirectChatContextSnapshot\(\{/);
 assert.match(regenerationSource, /buildDirectChatSystemInstruction\(\{/);
 assert.doesNotMatch(regenerationSource, /prepareDirectReplyTurn/);
+assert.match(preparationSource, /buildDirectChatContextSnapshot\(input\)/);
+assert.match(preparationSource, /buildDirectChatSystemInstruction\(/);
+assert.doesNotMatch(preparationSource, /requestDirectChatTurn|apiChat|PromptComposer/);
 
 console.log("Direct reply preparation characterization: history boundary, prompt order, normal/send-only/regenerate seams locked");

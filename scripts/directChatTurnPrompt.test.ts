@@ -112,7 +112,8 @@ const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", impo
 const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
 const historySource = readFileSync(new URL("../src/features/chat/services/directChatHistoryContext.ts", import.meta.url), "utf8");
 const promptBuilderSource = readFileSync(new URL("../src/features/chat/prompts/directChatPromptBuilder.ts", import.meta.url), "utf8");
-const chatRuntimeSource = `${appChatSource}\n${regenerationSource}\n${historySource}\n${promptBuilderSource}`;
+const preparationSource = readFileSync(new URL("../src/features/chat/services/directReplyPreparation.ts", import.meta.url), "utf8");
+const chatRuntimeSource = `${appChatSource}\n${regenerationSource}\n${historySource}\n${promptBuilderSource}\n${preparationSource}`;
 for (const pattern of [
   /buildDirectChatMainPrompt\(/g,
   /buildTimeAwarenessPrompt\(/g,
@@ -128,7 +129,9 @@ assert.equal((chatRuntimeSource.match(/NEW_DAY_CONVERSATION_BOUNDARY_PROMPT/g) |
 assert.equal((promptBuilderSource.match(/DIRECT_CHAT_SINGLE_SPEAKER_RULE/g) || []).length >= 1, true);
 assert.equal((promptBuilderSource.match(/CURRENT_SCENE_CONTINUITY_PROMPT/g) || []).length >= 1, true);
 assert.equal((promptBuilderSource.match(/CHINESE_SEMANTIC_CONTINUITY_PROMPT/g) || []).length >= 1, true);
-assert.equal((chatRuntimeSource.match(/buildDirectChatContextSnapshot\(\{/g) || []).length, 2, "send and regeneration must share the direct-chat context snapshot builder");
+assert.equal((appChatSource.match(/prepareDirectReplyContext\(\{/g) || []).length, 1, "normal send must use the preparation context boundary");
+assert.equal((regenerationSource.match(/buildDirectChatContextSnapshot\(\{/g) || []).length, 1, "regenerate must keep its existing context snapshot path");
+assert.match(preparationSource, /buildDirectChatContextSnapshot\(input\)/, "normal preparation must delegate to the shared context snapshot builder");
 assert.equal((chatRuntimeSource.match(/shouldUseCrossDayHistoryBoundary\(\{/g) || []).length, 1, "cross-day routing must be owned by the shared context snapshot builder");
 assert.equal((chatRuntimeSource.match(/partitionDirectChatHistoryByCurrentDay\(\{/g) || []).length, 1, "history partitioning must be owned by the shared context snapshot builder");
 assert.equal((chatRuntimeSource.match(/&& !isCrossDayNewSession/g) || []).length, 0, "cross-day routing must not disable relation and offline memory retrieval");
