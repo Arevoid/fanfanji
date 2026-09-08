@@ -159,4 +159,14 @@ const failedOutcome = createDirectReplyLifecycleOutcome({
 assert.equal(failedOutcome.delivery.deliveredMessageIds.length, 0, "failed delivery must not report false success");
 assert.deepEqual(failedOutcome.error, { kind: "delivery", recoverable: true });
 
+const postReplyFailureOutcome = createDirectReplyLifecycleOutcome({
+  lifecycle,
+  status: "delivered",
+  phase: "post_reply_scheduled",
+  delivery: { status: "delivered", generatedCandidateIds: ["reply-0"], deliveredMessageIds: ["reply-0"] },
+  postReply: { scheduled: false, failures: ["memory_extract", "diary_generate"] },
+});
+assert.equal(postReplyFailureOutcome.status, "delivered", "best-effort post-reply failures must not fail the main reply");
+assert.deepEqual(postReplyFailureOutcome.postReply.failures, ["memory_extract", "diary_generate"]);
+
 console.log("Direct reply lifecycle behavior: send, regenerate boundary, delivery and failure characterization passed");

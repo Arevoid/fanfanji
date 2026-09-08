@@ -69,7 +69,18 @@ assert.equal(failed.postReply.policy, "regenerate_none");
 assert.equal(failed.delivery.status, "not_delivered");
 assert.deepEqual(failed.delivery.deliveredMessageIds, []);
 assert.deepEqual(classifyDirectReplyError(Object.assign(new Error("network"), { code: "network" })), { kind: "provider", recoverable: true });
+assert.deepEqual(classifyDirectReplyError(Object.assign(new Error("provider"), { code: "provider_invalid_response" })), { kind: "provider", recoverable: true });
+assert.deepEqual(classifyDirectReplyError(Object.assign(new Error("context"), { code: "context_too_large" })), { kind: "provider", recoverable: true });
 assert.deepEqual(classifyDirectReplyError(Object.assign(new Error("aborted"), { code: "aborted" })), { kind: "cancelled", recoverable: true });
 assert.deepEqual(classifyDirectReplyError(new Error("unknown")), { kind: "unknown", recoverable: false });
 
-console.log("Direct reply lifecycle contract: 12 acceptance checks passed");
+const cancelled = createDirectReplyLifecycleOutcome({
+  lifecycle: sendInput,
+  status: "cancelled",
+  phase: "cancelled",
+  error: { kind: "cancelled", recoverable: true },
+});
+assert.equal(cancelled.status, "cancelled");
+assert.equal(cancelled.phase, "cancelled");
+
+console.log("Direct reply lifecycle contract: 16 acceptance checks passed");

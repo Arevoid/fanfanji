@@ -6,6 +6,7 @@ import { createRelationship } from "../src/domain/relationship/characterRelation
 import { createChatRuntimeContext } from "../src/features/chat/context/chatRuntimeContext";
 import type { ChatRuntimeContext } from "../src/features/chat/context/chatRuntimeContext";
 import { createChatReplyController } from "../src/features/chat/controllers/chatReplyController";
+import type { DirectReplyLifecycleOutcome } from "../src/features/chat/contracts/directReplyLifecycle";
 
 const userMessage = {
   id: "user-1",
@@ -74,6 +75,11 @@ const createCognitiveContext = (
   conversationId: runtimeContext.conversationId || relation.conversationId,
 });
 let receivedCognitiveContext: ReturnType<typeof createCognitiveContext> | undefined;
+const expectedDirectOutcome = {
+  mode: "send",
+  status: "delivered",
+  phase: "post_reply_scheduled",
+} as DirectReplyLifecycleOutcome;
 const directController = createChatReplyController({
   getContext: () => directContext,
   getCognitiveContext: createCognitiveContext,
@@ -83,12 +89,14 @@ const directController = createChatReplyController({
   generateDirectReply: ({ context, cognitiveContext, userMsg }) => {
     receivedCognitiveContext = cognitiveContext;
     calls.push(`direct:${context.relationId}:${userMsg?.id}`);
+    return expectedDirectOutcome;
   },
 });
-await directController.generate({ userMsg: userMessage });
+const returnedDirectOutcome = await directController.generate({ userMsg: userMessage });
 assert.deepEqual(calls, ["direct:relation-1:user-1"]);
 assert.deepEqual(receivedCognitiveContext?.knownFacts.map((fact) => fact.id), ["memory-1"]);
 assert.deepEqual(receivedCognitiveContext?.recentEvents.map((item) => item.id), ["event-1"]);
+assert.equal(returnedDirectOutcome, expectedDirectOutcome, "direct lifecycle outcome must cross the controller boundary unchanged");
 
 const secondDirectContext = createChatRuntimeContext({
   characterId: "character-1",
