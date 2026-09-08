@@ -8,9 +8,10 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     activeChatCharId, activeCharacter, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
     activeRelationship, listCharacterEventsByRelation, buildRelationshipCognitiveProjection, buildCharacterCognitiveContext,
     createDirectChatKnowledgeBoundary, resolveChatRoutine, buildCharacterRoutine, resolveChatTurnSettings, setIsTyping,
-    latestActiveCharacterRef, settings, serializeMessageContentForPrompt, shouldUseCrossDayHistoryBoundary,
-    activeAttachModal, callingStatus, callTranscript, detectCallTopicShift, partitionDirectChatHistoryByCurrentDay,
-    formatHistoricalMessageForPrompt, describeHistoricalRelativeTime, serializeMessageToPromptTurns, buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt,
+    latestActiveCharacterRef, settings, serializeMessageContentForPrompt,
+    activeAttachModal, callingStatus, callTranscript, detectCallTopicShift,
+    buildDirectChatMainPrompt,
+    buildDirectChatContextSnapshot,
     projectCharacterPrompt, memories, retrieveTruthForPrivatePrompt,
     loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatUserKnowledgeBoundary,
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
@@ -104,19 +105,11 @@ export function useChatRegenerationAction(context: Record<string, any>) {
         })
         : "";
       
-      // Exclude lastUserMsg from the history parameter since it is sent as the main message parameter.
-      const msgsForHistory = previousMessages.filter(m => m.id !== lastUserMsg.id);
       const turnSettings = resolveChatTurnSettings(latestActiveCharacterRef.current || activeCharacter);
       const currentMessageContextText = serializeMessageContentForPrompt(lastUserMsg, {
         mode: "history",
         userName: promptUserName,
         characterName: activeCharacter.name,
-      });
-      const latestHistoryMessage = msgsForHistory[msgsForHistory.length - 1];
-      const isCrossDayNewSession = shouldUseCrossDayHistoryBoundary({
-        enableTimeAwareness: turnSettings.enableTimeAwareness,
-        currentMessageAt: lastUserMsg.timestamp,
-        latestHistoryMessageAt: latestHistoryMessage?.timestamp,
       });
       const isConnectedVoiceCall = activeAttachModal === "calling" && callingStatus === "connected";
       const callTopicShiftDetected = detectCallTopicShift({
@@ -126,56 +119,32 @@ export function useChatRegenerationAction(context: Record<string, any>) {
       });
       const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
 
-      // Map history with timestamps for time awareness
       const requestTime = new Date();
-      const historyPartition = partitionDirectChatHistoryByCurrentDay({
-        messages: msgsForHistory,
-        currentMessageAt: lastUserMsg.timestamp,
+      const historyContext = buildDirectChatContextSnapshot({
+        messages: previousMessages,
+        userMessageId: lastUserMsg.id,
+        historyExcludedMessageIds: [lastUserMsg.id],
+        userMessageAt: lastUserMsg.timestamp,
         enableTimeAwareness: turnSettings.enableTimeAwareness,
+        contextLimit: limit,
+        historyCharacterLimit: Number.MAX_SAFE_INTEGER,
+        historicalReferenceCharacterLimit: Number.MAX_SAFE_INTEGER,
+        characterName: activeCharacter.name,
+        userName: promptUserName,
+        requestTime,
+        timeLogStyle: "compact",
       });
-      const slicedMsgs = historyPartition.liveMessages.slice(-limit);
-      const historicalReferenceLines = historyPartition.historicalMessages.map((message) => {
-        const speaker = message.sender === "user" ? "用户" : activeCharacter.name;
-        const content = serializeMessageContentForPrompt(message, {
-          mode: "history",
-          userName: promptUserName,
-          characterName: activeCharacter.name,
-          includeCallTranscript: false,
-        }).replace(/\s+/gu, " ").trim().slice(0, 240);
-        return `- ${new Date(message.timestamp).toLocaleString("zh-CN", { hour12: false })}｜${speaker}：${content}`;
-      });
-      const crossDayHistoricalReference = buildCrossDayHistoricalReferencePrompt(historicalReferenceLines);
-      const history = slicedMsgs.flatMap((m) => serializeMessageToPromptTurns(m, {
-          userName: promptUserName,
-          characterName: activeCharacter.name,
-        }).map((turn) => ({
-          role: turn.role,
-          text: turnSettings.enableTimeAwareness
-            ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime)
-            : turn.text,
-        })));
-
-      let timeLogString = "";
-      if (turnSettings.enableTimeAwareness) {
-        timeLogString = slicedMsgs.map((m) => {
-          const timeStr = new Date(m.timestamp).toLocaleString("zh-CN", {
-            month: "long",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false
-          });
-          const senderName = m.sender === "user" ? "用户" : activeCharacter.name;
-          let snippet = serializeMessageContentForPrompt(m, {
-            mode: "history",
-            userName: promptUserName,
-            characterName: activeCharacter.name,
-            includeCallTranscript: false,
-          });
-          if (snippet.length > 80) snippet = snippet.slice(0, 80) + "...";
-          return `- ${senderName}: "${snippet}" (发送于: ${timeStr}${describeHistoricalRelativeTime(m.content, m.timestamp, requestTime)})`;
-        }).join("\n");
-      }
+      const {
+        messagesForHistory: normalizedMessagesForHistory,
+        recentMessages: slicedMsgs,
+        history,
+        crossDayHistoricalReference,
+        timeLogString,
+        isCrossDayNewSession,
+        hasCrossDayHistory,
+      } = historyContext;
+      const msgsForHistory = normalizedMessagesForHistory;
+      const historyPartition = { hasCrossDayHistory };
 
       const mainPromptText = buildDirectChatMainPrompt({
         characterName: activeCharacter.name,

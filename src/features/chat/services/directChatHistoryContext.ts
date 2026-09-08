@@ -35,6 +35,8 @@ function selectRecentMessagesWithinBudget(
 export function buildDirectChatHistoryContext(input: {
   messages: readonly Message[];
   userMessageId?: string;
+  /** Additional visible messages that must stay out of the prompt history. */
+  historyExcludedMessageIds?: readonly string[];
   userMessageAt?: number;
   enableTimeAwareness: boolean;
   contextLimit: number;
@@ -45,6 +47,8 @@ export function buildDirectChatHistoryContext(input: {
   characterName: string;
   userName: string;
   requestTime?: Date;
+  /** Compact style preserves the historical regeneration time-log contract. */
+  timeLogStyle?: "segmented" | "compact";
 }): {
   finalMessages: Message[];
   recentMessages: Message[];
@@ -60,9 +64,11 @@ export function buildDirectChatHistoryContext(input: {
   input.messages.forEach((message) => { if (message) uniqueMessages.set(message.id, message); });
   const finalMessages = Array.from(uniqueMessages.values()).sort((left, right) => left.timestamp - right.timestamp);
   const latestMessage = finalMessages[finalMessages.length - 1];
-  const messagesForHistory = input.userMessageId && latestMessage?.id === input.userMessageId
-    ? finalMessages.slice(0, -1)
-    : finalMessages;
+  const excludedIds = new Set(input.historyExcludedMessageIds || []);
+  const messagesForHistory = finalMessages.filter((message) => {
+    if (excludedIds.has(message.id)) return false;
+    return !(input.userMessageId && latestMessage?.id === input.userMessageId && message.id === input.userMessageId);
+  });
   const isCrossDayNewSession = shouldUseCrossDayHistoryBoundary({
     enableTimeAwareness: input.enableTimeAwareness,
     currentMessageAt: input.userMessageAt,
@@ -102,7 +108,20 @@ export function buildDirectChatHistoryContext(input: {
     text: input.enableTimeAwareness ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime) : turn.text,
   })));
   const timeLogString = input.enableTimeAwareness
-    ? recentMessages.reduce((lines, message) => {
+    ? input.timeLogStyle === "compact"
+      ? recentMessages.map((message) => {
+        const date = new Date(message.timestamp);
+        const timeStr = date.toLocaleString("zh-CN", {
+          month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+        });
+        const sender = message.sender === "user" ? "用户" : input.characterName;
+        let snippet = serializeMessageContentForPrompt(message, {
+          mode: "history", userName: input.userName, characterName: input.characterName, includeCallTranscript: false,
+        });
+        if (snippet.length > 80) snippet = `${snippet.slice(0, 80)}...`;
+        return `- ${sender}: "${snippet}" (发送于: ${timeStr}${describeHistoricalRelativeTime(message.content, message.timestamp, requestTime)})`;
+      }).join("\n")
+      : recentMessages.reduce((lines, message) => {
       const date = new Date(message.timestamp);
       const day = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")}`;
       if (lines.lastDay !== day) {

@@ -34,7 +34,7 @@ import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoi
 import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallMessage";
 import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
 import { completeVoiceCall } from "../features/chat/services/voiceCallCompletion";
-import { buildDirectChatHistoryContext } from "../features/chat/services/directChatHistoryContext";
+import { buildDirectChatContextSnapshot } from "../features/chat/services/directChatContextSnapshotBuilder";
 import { useProactiveCallScheduler } from "../features/chat/hooks/useProactiveCallScheduler";
 import { useChatPaymentState } from "../features/chat/hooks/useChatPaymentState";
 import { useChatProfileState } from "../features/chat/hooks/useChatProfileState";
@@ -2024,7 +2024,7 @@ export default function AppChat({
       const immediateCharacterPhoneProxyMessage = userMsg && sourceMsgs.length > 1
         ? sourceMsgs[sourceMsgs.length - 2]
         : undefined;
-      const historyContext = buildDirectChatHistoryContext({
+      const historyContext = buildDirectChatContextSnapshot({
         messages: sourceMsgs,
         userMessageId: userMsg?.id,
         userMessageAt: userMsg?.timestamp,
@@ -3326,9 +3326,9 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     activeChatCharId, activeCharacter, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
     activeRelationship, listCharacterEventsByRelation, buildRelationshipCognitiveProjection, buildCharacterCognitiveContext,
     createDirectChatKnowledgeBoundary, resolveChatRoutine, buildCharacterRoutine, resolveChatTurnSettings, setIsTyping,
-    latestActiveCharacterRef, settings, serializeMessageContentForPrompt, shouldUseCrossDayHistoryBoundary,
-    activeAttachModal, callingStatus, callTranscript, detectCallTopicShift, partitionDirectChatHistoryByCurrentDay,
-    formatHistoricalMessageForPrompt, describeHistoricalRelativeTime, serializeMessageToPromptTurns, buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt,
+    latestActiveCharacterRef, settings, serializeMessageContentForPrompt,
+    activeAttachModal, callingStatus, callTranscript, detectCallTopicShift, buildDirectChatMainPrompt,
+    buildDirectChatContextSnapshot,
     projectCharacterPrompt, recallSettings, memories, retrieveTruthForPrivatePrompt,
     loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatUserKnowledgeBoundary,
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { buildComposedAiChatRequest } from "../src/features/chat/controllers/chatGenerationController";
-import { buildDirectChatHistoryContext } from "../src/features/chat/services/directChatHistoryContext";
+import { buildDirectChatContextSnapshot } from "../src/features/chat/services/directChatContextSnapshotBuilder";
 import { PromptComposer } from "../src/domain/prompt/PromptComposer";
 import type { Message, UserSettings } from "../src/types";
 
@@ -19,7 +19,7 @@ const messages = [
   { id: "current", characterId: "character-1", sender: "user", content: "当前输入", timestamp: currentMessageAt },
 ] as Message[];
 
-const historySnapshot = buildDirectChatHistoryContext({
+const historySnapshot = buildDirectChatContextSnapshot({
   messages,
   userMessageId: "current",
   userMessageAt: currentMessageAt,
@@ -87,5 +87,23 @@ const composed = PromptComposer.compose({
 assert.deepEqual(composed.history[0], { role: "system", text: "[World Book at history depth 1 / 世界书指定深度]\nWorldBook" });
 assert.deepEqual(composed.history.slice(1), promptInput.history);
 assert.equal(composed.systemInstruction, commonBlocks);
+
+const regenerateSnapshot = buildDirectChatContextSnapshot({
+  messages,
+  userMessageId: "current",
+  historyExcludedMessageIds: ["current"],
+  userMessageAt: currentMessageAt,
+  enableTimeAwareness: true,
+  contextLimit: 10,
+  historyCharacterLimit: Number.MAX_SAFE_INTEGER,
+  historicalReferenceCharacterLimit: Number.MAX_SAFE_INTEGER,
+  characterName: "角色",
+  userName: "用户",
+  requestTime: new Date("2026-08-12T14:20:00+08:00"),
+  timeLogStyle: "compact",
+});
+assert.deepEqual(regenerateSnapshot.messagesForHistory.map((message) => message.id), ["old", "recent-user"]);
+assert.deepEqual(regenerateSnapshot.recentMessages.map((message) => message.id), ["recent-user"]);
+assert.doesNotMatch(regenerateSnapshot.timeLogString, /居中分割时间标签/);
 
 console.log("Direct chat prompt/context equivalence guards: history, cross-day, time, WorldBook insertion, shared PromptComposer boundary passed");

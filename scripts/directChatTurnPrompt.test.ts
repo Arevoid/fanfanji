@@ -126,8 +126,9 @@ assert.equal((chatRuntimeSource.match(/if \(forumContext\) assembledInstructions
 assert.equal((chatRuntimeSource.match(/if \(diaryContext\) assembledInstructions\.push\(diaryContext\)/g) || []).length, 2);
 assert.equal((chatRuntimeSource.match(/NEW_DAY_CONVERSATION_BOUNDARY_PROMPT/g) || []).length >= 3, true);
 assert.equal((chatRuntimeSource.match(/assembledInstructions\.push\(DIRECT_CHAT_SINGLE_SPEAKER_RULE\)/g) || []).length, 2);
-assert.equal((chatRuntimeSource.match(/shouldUseCrossDayHistoryBoundary\(\{/g) || []).length, 2, "send and regeneration must share cross-day history routing");
-assert.equal((chatRuntimeSource.match(/partitionDirectChatHistoryByCurrentDay\(\{/g) || []).length, 2, "send and regeneration must remove old live-scene turns from current-day history");
+assert.equal((chatRuntimeSource.match(/buildDirectChatContextSnapshot\(\{/g) || []).length, 2, "send and regeneration must share the direct-chat context snapshot builder");
+assert.equal((chatRuntimeSource.match(/shouldUseCrossDayHistoryBoundary\(\{/g) || []).length, 1, "cross-day routing must be owned by the shared context snapshot builder");
+assert.equal((chatRuntimeSource.match(/partitionDirectChatHistoryByCurrentDay\(\{/g) || []).length, 1, "history partitioning must be owned by the shared context snapshot builder");
 assert.equal((chatRuntimeSource.match(/&& !isCrossDayNewSession/g) || []).length, 0, "cross-day routing must not disable relation and offline memory retrieval");
 assert.equal((chatRuntimeSource.match(/buildVoiceCallPrompts\(callTopicShiftDetected\)/g) || []).length, 2);
 
