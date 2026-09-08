@@ -103,6 +103,10 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
     apiEndpoint: input.settings.apiEndpoint,
     apiTemperature: input.settings.apiTemperature,
     streamCompatible: input.settings.streamCompatible,
+    purpose: "inner_voice",
+    characterId: input.character.id,
+    relationId,
+    conversationId,
   });
   const parsed = parseInnerVoice(response.text);
   if (!parsed) return null;

@@ -197,7 +197,7 @@ const validateBatch = (input: {
   return { events: valid };
 };
 
-const defaultAiCall = (input: Parameters<NonNullable<ForumActivityPlanInput["aiCall"]>>[0]) => apiChat({ ...input, ...PromptComposer.compose({ scenario: "forum-activity", message: input.message, history: [], systemInstruction: input.systemInstruction }) });
+const defaultAiCall = (input: Parameters<NonNullable<ForumActivityPlanInput["aiCall"]>>[0]) => apiChat({ ...input, ...PromptComposer.compose({ scenario: "forum-activity", message: input.message, history: [], systemInstruction: input.systemInstruction }), purpose: "forum_generate" });
 
 const buildPublicActivityPromptSupplements = (
   input: ForumActivityPlanInput,

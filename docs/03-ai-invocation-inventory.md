@@ -21,7 +21,6 @@
 `moment_generate`、`moment_comment`、`moment_reply`、`diary_generate`、
 `character_phone_generate`、`forum_generate`、`forum_story_generate`、
 `reading_generate`、`cinema_generate`、`image_generate`、`tts`、`api_test`、
-`model_list`。
+`image_analyze`、`model_list`。
 
 用途只用于可观测性，不会选择 Provider、改变 Prompt 或触发新的请求。
-

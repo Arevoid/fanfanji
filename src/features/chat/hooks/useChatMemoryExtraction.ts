@@ -139,6 +139,9 @@ export function useChatMemoryExtraction({
             apiKey: settings.apiKey,
             model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
             apiEndpoint: settings.apiEndpoint,
+            purpose: "memory_extract",
+            characterId: activeChatCharId,
+            conversationId: `group:${activeChatCharId}`,
           });
           const summaryText = summary.text.trim();
           if (!summaryText) return -1;

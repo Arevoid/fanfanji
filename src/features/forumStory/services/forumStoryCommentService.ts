@@ -81,7 +81,7 @@ export interface ForumStoryCommentGenerationResult {
 
 const makeId = (prefix: string): string => createApplicationId(prefix);
 
-const defaultAiCall: ForumStoryCommentAiCall = (request) => apiChat({ ...request, ...PromptComposer.compose({ scenario: "forum-story-comment", message: request.message, history: [], systemInstruction: request.systemInstruction }) });
+const defaultAiCall: ForumStoryCommentAiCall = (request) => apiChat({ ...request, ...PromptComposer.compose({ scenario: "forum-story-comment", message: request.message, history: [], systemInstruction: request.systemInstruction }), purpose: "forum_story_generate" });
 
 const ensureWrite = (result: StorageWriteResult, label: string): void => {
   if (!result.success) throw new Error(`ForumStory ${label} save failed`);

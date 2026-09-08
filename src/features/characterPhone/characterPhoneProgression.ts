@@ -807,6 +807,9 @@ export async function advanceCharacterPhoneWithResult(
       apiEndpoint: input.settings.apiEndpoint,
       apiTemperature: input.settings.apiTemperature,
       streamCompatible: input.settings.streamCompatible,
+      purpose: "character_phone_generate",
+      characterId: input.character.id,
+      conversationId: input.phone.id,
     });
   } catch {
     return { phone: base, status: "no_change", reason: "provider_error", createdCount: 0 };

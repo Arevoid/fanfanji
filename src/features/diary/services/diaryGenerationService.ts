@@ -89,7 +89,18 @@ export const generateDiaryEntry = async (input: { relation: CharacterRelationshi
       systemInstruction: "只输出符合要求的 JSON。",
       historyInjections: diaryWorldBook.at_depth,
     });
-    const response = await call({ ...composedPrompt, apiKey: input.settings.apiKey || "", model: input.settings.selectedModel, apiEndpoint: input.settings.apiEndpoint, apiTemperature: input.settings.apiTemperature, streamCompatible: input.settings.streamCompatible });
+    const response = await call({
+      ...composedPrompt,
+      apiKey: input.settings.apiKey || "",
+      model: input.settings.selectedModel,
+      apiEndpoint: input.settings.apiEndpoint,
+      apiTemperature: input.settings.apiTemperature,
+      streamCompatible: input.settings.streamCompatible,
+      purpose: "diary_generate",
+      characterId: input.relation.characterId,
+      relationId: input.relation.id,
+      conversationId: input.relation.conversationId,
+    });
     const parsed = validateGeneratedDiaryContent(JSON.parse(response.text.replace(/^```json\s*|```$/g, "")));
     if (!parsed) return { task: { ...task, status: "failed", updatedAt: Date.now() } };
     return { entry: { id: createDiaryId(), ownerIdentityId: input.ownerIdentityId, authorType: "character", characterId: input.relation.characterId, relationId: input.relation.id, conversationId: input.relation.conversationId, authorNameSnapshot: input.character.remark || input.character.name, ...(input.character.avatar ? { authorAvatarSnapshot: input.character.avatar } : {}), ...parsed, occurredAt, createdAt: now, updatedAt: now, source: input.trigger === "manual" ? "ai-manual" : "ai-auto", isFavorite: false }, task: { ...task, status: "completed", updatedAt: Date.now() } };

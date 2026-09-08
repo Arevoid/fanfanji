@@ -72,7 +72,7 @@ const requireTextAiConfig = (settings: ForumStoryGenerationSettings): void => {
   }
 };
 
-const defaultAiCall: ForumStoryAiCall = (request) => apiChat({ ...request, ...PromptComposer.compose({ scenario: "forum-story-initial", message: request.message, history: [], systemInstruction: request.systemInstruction }) });
+const defaultAiCall: ForumStoryAiCall = (request) => apiChat({ ...request, ...PromptComposer.compose({ scenario: "forum-story-initial", message: request.message, history: [], systemInstruction: request.systemInstruction }), purpose: "forum_story_generate" });
 
 const generateInitialCandidate = async (input: {
   prompt: { systemInstruction: string; message: string };

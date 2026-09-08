@@ -18,6 +18,7 @@ import {
   detectAliasIdentityBoundaryViolation,
   type AliasIdentityResponseGuardContext,
 } from "../../../domain/prompt/aliasIdentityResponseGuard";
+import { createAiActionId } from "../../../core/monitoring/aiRequestLedger";
 
 type PromptInput = Pick<PromptContext, "scenario" | "message" | "history" | "systemInstruction" | "imageDataUrl" | "historyInjections">;
 type RequestAi = typeof apiChat;
@@ -120,6 +121,7 @@ const requestDirectChatResponse = async (input: {
     systemInstruction: [input.request.systemInstruction, CHAT_RESPONSE_FORMAT_RETRY_INSTRUCTION]
       .filter(Boolean)
       .join("\n\n"),
+    retryReasons: ["response format validation"],
   });
   const retry = normalizeDirectChatResponse(retryRaw, true);
   if (!retry.formatIssue && retry.text.trim()) return retry;
@@ -139,7 +141,10 @@ const requestDirectChatResponseWithContextRecovery = async (input: {
       if (index > 0) {
         console.warn(`[chat-context-recovery] retrying with request-local context reduction (${index}/${requests.length - 1})`);
       }
-      return await requestDirectChatResponse({ ...input, request: requests[index] });
+      return await requestDirectChatResponse({
+        ...input,
+        request: index > 0 ? { ...requests[index], retryReasons: ["context-too-large recovery"] } : requests[index],
+      });
     } catch (error) {
       if (!isContextLengthError(error)) throw error;
       lastContextError = error;
@@ -158,7 +163,12 @@ export async function requestDirectChatTurn(input: {
   aliasIdentityGuard?: AliasIdentityResponseGuardContext;
 }): Promise<ParsedAiChatResponse> {
   const requestAi = input.requestAi || apiChat;
-  const request = { ...buildComposedAiChatRequest(input.prompt, input.settings), signal: input.signal };
+  const request = {
+    ...buildComposedAiChatRequest(input.prompt, input.settings),
+    signal: input.signal,
+    purpose: "chat_reply" as const,
+    parentActionId: createAiActionId(),
+  };
   let response = await requestDirectChatResponseWithContextRecovery({ requestAi, request, includeInnerVoice: input.includeInnerVoice });
   if (isDegenerateDirectReply(input.prompt.message, response.text, request.history)) {
     const retryHistory = removeDegenerateReplyPattern(request.history, response.text);
@@ -168,6 +178,7 @@ export async function requestDirectChatTurn(input: {
         ...request,
         history: retryHistory,
         systemInstruction: [request.systemInstruction, CHAT_DEGENERATE_RETRY_INSTRUCTION].filter(Boolean).join("\n\n"),
+        retryReasons: ["degenerate response correction"],
       },
       includeInnerVoice: input.includeInnerVoice,
     });
@@ -193,6 +204,7 @@ export async function requestDirectChatTurn(input: {
       systemInstruction: [request.systemInstruction, buildAliasIdentityCorrectionPrompt(aliasGuard, violation)]
         .filter(Boolean)
         .join("\n\n"),
+      retryReasons: ["alias identity boundary correction"],
     },
     includeInnerVoice: input.includeInnerVoice,
   });
@@ -209,7 +221,12 @@ export function generateGroupChatTurn(input: {
 }) {
   return generateGroupReplyCandidates({
     requestAi: input.requestAi || apiChat,
-    request: { ...buildComposedAiChatRequest(input.prompt, input.settings), signal: input.signal },
+    request: {
+      ...buildComposedAiChatRequest(input.prompt, input.settings),
+      signal: input.signal,
+      purpose: "group_chat_reply" as const,
+      parentActionId: createAiActionId(),
+    },
     members: input.members,
     groupId: input.groupId,
     disableBracketActions: input.disableBracketActions,
@@ -223,7 +240,11 @@ export async function generateRegeneratedChatTurn(input: {
   aliasIdentityGuard?: AliasIdentityResponseGuardContext;
 }) {
   const requestAi = input.requestAi || apiChat;
-  const request = buildComposedAiChatRequest(input.prompt, input.settings);
+  const request = {
+    ...buildComposedAiChatRequest(input.prompt, input.settings),
+    purpose: "regenerate" as const,
+    parentActionId: createAiActionId(),
+  };
   let data = await requestAiReply(requestAi, request);
   const violation = input.aliasIdentityGuard
     ? detectAliasIdentityBoundaryViolation(data.text, input.aliasIdentityGuard)
@@ -235,6 +256,7 @@ export async function generateRegeneratedChatTurn(input: {
       systemInstruction: [request.systemInstruction, buildAliasIdentityCorrectionPrompt(input.aliasIdentityGuard!, violation)]
         .filter(Boolean)
         .join("\n\n"),
+      retryReasons: ["alias identity boundary correction"],
     });
     if (corrected.text.trim()) data = corrected;
   }
@@ -249,7 +271,11 @@ export function generateProactiveChatTurn(input: {
 }) {
   return generateProactiveReplyCandidates({
     requestAi: input.requestAi || apiChat,
-    request: buildComposedAiChatRequest(input.prompt, input.settings),
+    request: {
+      ...buildComposedAiChatRequest(input.prompt, input.settings),
+      purpose: "proactive_message" as const,
+      parentActionId: createAiActionId(),
+    },
     characterId: input.characterId,
     disableBracketActions: input.disableBracketActions,
     keepPeriods: input.keepPeriods,

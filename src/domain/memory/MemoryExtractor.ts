@@ -59,6 +59,9 @@ export async function extractMemories(
     model: context.model,
     apiEndpoint: context.apiEndpoint,
     templateType: context.templateType,
+    characterId: context.characterId,
+    relationId: context.relationId,
+    conversationId: context.conversationId,
     ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
   });
 

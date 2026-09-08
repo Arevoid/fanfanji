@@ -8,7 +8,7 @@ import { ReadingCoStoryPolicyError, validateReadingStoryAiAction } from "./readi
 export interface ReadingCoStoryGenerationSettings { apiKey: string; selectedModel: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean; }
 export interface ReadingCoStoryAiRequest { message: string; systemInstruction: string; apiKey: string; model: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean; }
 export type ReadingCoStoryAiCall = (request: ReadingCoStoryAiRequest) => Promise<{ text: string }>;
-const defaultAiCall: ReadingCoStoryAiCall = (request) => apiChat({ ...request, history: [] });
+const defaultAiCall: ReadingCoStoryAiCall = (request) => apiChat({ ...request, history: [], purpose: "reading_generate" });
 
 const parseJson = (raw: string): unknown => {
   const trimmed = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();

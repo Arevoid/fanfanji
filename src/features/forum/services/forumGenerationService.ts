@@ -115,7 +115,7 @@ type ForumReplyAuthor =
   | { kind: "virtual"; profile: ForumVirtualProfile }
   | { kind: "community-npc"; npc: ForumCommunityNpc; profile: ForumVirtualProfile; publicAuthor: ForumPublicAuthor };
 
-const defaultAiCall: ForumAiCall = (params) => apiChat({ ...params, ...PromptComposer.compose({ scenario: "forum-thread", message: params.message, history: [], systemInstruction: params.systemInstruction }) });
+const defaultAiCall: ForumAiCall = (params) => apiChat({ ...params, ...PromptComposer.compose({ scenario: "forum-thread", message: params.message, history: [], systemInstruction: params.systemInstruction }), purpose: "forum_generate" });
 
 const id = (prefix: string): string => createApplicationId(prefix);
 

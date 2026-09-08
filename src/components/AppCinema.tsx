@@ -398,6 +398,10 @@ export default function AppCinema({
         apiEndpoint: settings.apiEndpoint,
         apiTemperature: 0.2,
         imageDataUrl: frame || undefined,
+        purpose: "cinema_generate",
+        characterId: selectedCharacter.id,
+        relationId: selectedRoom.relationId,
+        conversationId: selectedRoom.conversationId,
       });
       const nextSummary = cleanCharacterReply(response.text);
       persistStore(mergeStore(storeRef.current, { rooms: storeRef.current.rooms.map((room) => room.id === selectedRoom.id ? { ...room, plotSummary: nextSummary, lastPlotSummaryAt: positionMs, updatedAt: Date.now() } : room) }));
@@ -450,6 +454,10 @@ export default function AppCinema({
         apiTemperature: settings.apiTemperature,
         streamCompatible: settings.streamCompatible,
         imageDataUrl: effectiveFrameDataUrl || undefined,
+        purpose: "cinema_generate",
+        characterId: selectedCharacter.id,
+        relationId: selectedRoom.relationId,
+        conversationId: selectedRoom.conversationId,
       });
       const characterText = cleanCharacterReply(response.text);
       persistStore(mergeStore(storeRef.current, { discussions: storeRef.current.discussions.map((discussion) => discussion.id === discussionId ? { ...discussion, characterText } : discussion) }));

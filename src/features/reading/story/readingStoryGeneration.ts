@@ -32,7 +32,7 @@ export type ReadingStoryAiCall = (
   request: ReadingStoryAiRequest,
 ) => Promise<{ text: string }>;
 const defaultAiCall: ReadingStoryAiCall = (request) =>
-  apiChat({ ...request, history: [] });
+  apiChat({ ...request, history: [], purpose: "reading_generate" });
 
 const parseJson = (raw: string): unknown => {
   const trimmed = raw

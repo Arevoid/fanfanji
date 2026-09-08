@@ -100,6 +100,8 @@ export async function generateCharacterPhoneContactReply(
       apiEndpoint: settings.apiEndpoint,
       apiTemperature: settings.apiTemperature ?? 0.78,
       streamCompatible: settings.streamCompatible,
+      purpose: "character_phone_generate",
+      characterId: input.character.id,
     });
     return normalizeCharacterPhoneContactReply(response.text);
   } catch {

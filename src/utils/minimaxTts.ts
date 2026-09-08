@@ -1,5 +1,6 @@
 import { audioDb } from "./audioDb";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./fetchWithTimeout";
+import { withAiRequestLedger } from "../core/monitoring/aiRequestLedger";
 
 /**
  * Filter out dialogue actions in brackets / parentheticals or asterisks.
@@ -87,7 +88,7 @@ export interface TtsOptions {
 /**
  * Perform a single segment TTS synthesis
  */
-export async function fetchSingleTtsSegment(
+async function fetchSingleTtsSegmentImpl(
   text: string,
   options: TtsOptions
 ): Promise<Blob> {
@@ -216,6 +217,28 @@ export async function fetchSingleTtsSegment(
     // The proxy endpoint returns binary audio (audio/mpeg)
     return await response.blob();
   }
+}
+
+export async function fetchSingleTtsSegment(
+  text: string,
+  options: TtsOptions,
+): Promise<Blob> {
+  return withAiRequestLedger({
+    purpose: "tts",
+    model: options.model,
+    endpoint: options.forceDirectTts ? "https://api.minimax.chat/v1/t2a_v2" : (options.proxyUrl || "/api/minimax-tts"),
+    transport: options.forceDirectTts ? "browser_direct" : "backend_proxy",
+    inputCharacters: text.length,
+    estimatedInputTokens: Math.ceil(text.length / 4),
+  }, async (ledger) => {
+    ledger.markAttempt({
+      provider: options.provider === "mossland" ? "mossland" : "minimax",
+      model: options.model,
+      endpoint: options.forceDirectTts ? "https://api.minimax.chat/v1/t2a_v2" : (options.proxyUrl || "/api/minimax-tts"),
+      transport: options.forceDirectTts ? "browser_direct" : "backend_proxy",
+    });
+    return fetchSingleTtsSegmentImpl(text, options);
+  });
 }
 
 /**

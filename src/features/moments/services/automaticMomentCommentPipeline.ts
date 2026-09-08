@@ -84,6 +84,8 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(input.charac
       model: input.settings.selectedModel || "gemini-3.5-flash",
       apiEndpoint: input.settings.apiEndpoint,
       apiTemperature: input.settings.apiTemperature,
+      purpose: "moment_comment",
+      characterId: input.character.id,
     },
     character: input.character,
     cleanText: input.cleanText,

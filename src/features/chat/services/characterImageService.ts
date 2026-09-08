@@ -6,6 +6,7 @@ import { assertImageGenerationTrigger } from "./imageGenerationIntent";
 import { assertReferenceImageCapability, inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "./imageProtocol";
 import { imageAssetDb } from "../../../utils/imageAssetDb";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../../../utils/fetchWithTimeout";
+import { withAiRequestLedger } from "../../../core/monitoring/aiRequestLedger";
 
 export type ImageScope =
   | { kind: "direct"; relationId: string; conversationId: string }
@@ -95,13 +96,14 @@ function dataUrlToBlob(value: string): Blob {
 }
 
 /** Shared image request boundary for chat messages and other visual features. */
-export async function requestCharacterImageData(input: {
+async function requestCharacterImageDataImpl(input: {
   settings: UserSettings;
   character: Character;
   trigger: "manual" | "explicit-user-text";
   userText: string;
   prompt: string;
   signal?: AbortSignal;
+  scope?: ImageScope;
 }): Promise<{ dataUrl: string; imageBlob: Blob }> {
   const preset = assertImageGenerationConfiguration(input.settings, input.character);
   const reference = input.character.imageReferenceAssetId
@@ -137,6 +139,35 @@ export async function requestCharacterImageData(input: {
   return { dataUrl: data.dataUrl, imageBlob: dataUrlToBlob(data.dataUrl) };
 }
 
+export async function requestCharacterImageData(input: {
+  settings: UserSettings;
+  character: Character;
+  trigger: "manual" | "explicit-user-text";
+  userText: string;
+  prompt: string;
+  signal?: AbortSignal;
+  scope?: ImageScope;
+}): Promise<{ dataUrl: string; imageBlob: Blob }> {
+  return withAiRequestLedger({
+    purpose: "image_generate",
+    model: activePreset(input.settings)?.selectedModel,
+    endpoint: "/api/image/generate",
+    transport: "backend_proxy",
+    characterId: input.character.id,
+    ...(input.scope?.kind === "direct" ? { relationId: input.scope.relationId, conversationId: input.scope.conversationId } : input.scope?.kind === "group" ? { conversationId: input.scope.conversationId } : {}),
+    inputCharacters: input.prompt.length + input.userText.length,
+    estimatedInputTokens: Math.ceil((input.prompt.length + input.userText.length) / 4),
+  }, async (ledger) => {
+    ledger.markAttempt({
+      provider: "server-proxy",
+      model: activePreset(input.settings)?.selectedModel,
+      endpoint: "/api/image/generate",
+      transport: "backend_proxy",
+    });
+    return requestCharacterImageDataImpl(input);
+  });
+}
+
 export async function generateCharacterImage(input: {
   settings: UserSettings;
   character: Character;
@@ -156,6 +187,7 @@ export async function generateCharacterImage(input: {
     userText: input.userText,
     prompt: buildCharacterImagePrompt({ ...input, userRequest: input.userText }),
     signal: input.signal,
+    scope: input.scope,
   });
 
   const messageId = input.createId();

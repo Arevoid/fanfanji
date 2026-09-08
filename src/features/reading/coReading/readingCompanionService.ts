@@ -67,6 +67,10 @@ export async function requestReadingCompanionResponse(input: ReadingCompanionReq
         apiEndpoint: input.settings.apiEndpoint,
         apiTemperature: input.settings.apiTemperature,
         streamCompatible: input.settings.streamCompatible,
+        purpose: "reading_generate",
+        characterId: input.character.id,
+        relationId: input.relationship.id,
+        conversationId: input.room.id,
       });
       if (input.autonomous && /^\s*SKIP[。.!！]?\s*$/i.test(response.text)) return undefined;
       const validation = validateReadingAiResponse(parseJsonObject(response.text), { scope: input.room, projection: aiContext, kind: input.kind });

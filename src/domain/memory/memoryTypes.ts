@@ -60,6 +60,10 @@ export interface MemoryExtractionApiParams {
   apiEndpoint?: string;
   templateType?: Character["archiveTemplateType"];
   scenario?: "offline";
+  characterId?: string;
+  relationId?: string;
+  conversationId?: string;
+  parentActionId?: string;
 }
 
 export interface MemoryExtractionApiResult {

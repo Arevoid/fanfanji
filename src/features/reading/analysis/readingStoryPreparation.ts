@@ -145,6 +145,7 @@ export async function prepareReadingStorySource(input: {
         apiEndpoint: input.settings.apiEndpoint,
         apiTemperature: input.settings.apiTemperature,
         streamCompatible: input.settings.streamCompatible,
+        purpose: "reading_generate",
       });
       const validated = validateReadingChapterAnalysisResponse(
         parseJson(response.text),

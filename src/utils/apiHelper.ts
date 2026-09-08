@@ -9,20 +9,59 @@ import {
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "../domain/prompt/promptTransport";
 import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError, readResponseTextWithTimeout } from "./fetchWithTimeout";
 import { recordApiUsage, type ApiUsageOperation } from "../core/monitoring/apiUsageMetrics";
+import {
+  withAiRequestLedger,
+  type AiPurpose,
+  type AiRequestLedgerInput,
+  type AiRequestLedgerSession,
+} from "../core/monitoring/aiRequestLedger";
 import { emptyTextApiErrorDetails, parseTextApiErrorPayload, type TextApiErrorCode } from "./textApiError";
 
-async function trackApiUsage<T>(operation: ApiUsageOperation, inputCharacters: number, request: () => Promise<T>): Promise<T> {
-  try {
-    const result = await request();
-    const output = typeof result === "object" && result !== null && "text" in result
-      ? String((result as { text?: unknown }).text || "").length
-      : 0;
-    recordApiUsage({ operation, succeeded: true, inputCharacters, outputCharacters: output });
-    return result;
-  } catch (error) {
-    recordApiUsage({ operation, succeeded: false, inputCharacters });
-    throw error;
-  }
+type AiRequestMetadata = {
+  purpose?: AiPurpose;
+  parentActionId?: string;
+  characterId?: string;
+  relationId?: string;
+  conversationId?: string;
+  retryReasons?: readonly string[];
+  fallbackReasons?: readonly string[];
+  estimatedOutputTokens?: number;
+};
+
+function buildLedgerInput(defaultPurpose: AiPurpose, inputCharacters: number, metadata?: AiRequestMetadata): AiRequestLedgerInput {
+  return {
+    purpose: metadata?.purpose || defaultPurpose,
+    parentActionId: metadata?.parentActionId,
+    characterId: metadata?.characterId,
+    relationId: metadata?.relationId,
+    conversationId: metadata?.conversationId,
+    inputCharacters,
+    estimatedInputTokens: Math.ceil(Math.max(0, inputCharacters) / 4),
+    estimatedOutputTokens: metadata?.estimatedOutputTokens,
+    retryReasons: metadata?.retryReasons,
+    fallbackReasons: metadata?.fallbackReasons,
+  };
+}
+
+async function trackApiUsage<T>(
+  operation: ApiUsageOperation,
+  inputCharacters: number,
+  ledgerInput: AiRequestLedgerInput,
+  request: (ledger: AiRequestLedgerSession) => Promise<T>,
+): Promise<T> {
+  return withAiRequestLedger(ledgerInput, async (ledger) => {
+    try {
+      const result = await request(ledger);
+      const output = typeof result === "object" && result !== null && "text" in result
+        ? String((result as { text?: unknown }).text || "").length
+        : 0;
+      recordApiUsage({ operation, succeeded: true, inputCharacters, outputCharacters: output });
+      return result;
+    } catch (error) {
+      recordApiUsage({ operation, succeeded: false, inputCharacters });
+      throw error;
+    }
+  });
 }
 
 export class ApiChatError extends Error {
@@ -78,7 +117,7 @@ export const parseModels = (data: any): string[] | null => {
 // 1. Direct Client-side Fallbacks
 
 // Direct Chat
-async function directClientChat(params: {
+async function directClientChatImpl(params: {
   message: string;
   history: any[];
   systemInstruction?: string;
@@ -277,8 +316,24 @@ async function directClientChat(params: {
   }
 }
 
+async function directClientChat(params: Parameters<typeof directClientChatImpl>[0] & { ledger?: AiRequestLedgerSession }): Promise<{ text: string }> {
+  const { ledger, ...request } = params;
+  ledger?.markAttempt({
+    provider: request.apiEndpoint?.trim() ? "custom-openai-compatible" : "google-gemini",
+    model: request.model,
+    endpoint: request.apiEndpoint?.trim() || "https://generativelanguage.googleapis.com/v1beta",
+    transport: "browser_direct",
+  });
+  return directClientChatImpl(request);
+}
+
 // Direct Models list fetch
-async function directClientFetchModels(apiKey: string, apiEndpoint?: string): Promise<string[]> {
+async function directClientFetchModels(apiKey: string, apiEndpoint?: string, ledger?: AiRequestLedgerSession): Promise<string[]> {
+  ledger?.markAttempt({
+    provider: apiEndpoint?.trim() ? "custom-openai-compatible" : "google-gemini",
+    endpoint: apiEndpoint?.trim() || "https://generativelanguage.googleapis.com/v1beta/models",
+    transport: "browser_direct",
+  });
   if (apiEndpoint && apiEndpoint.trim()) {
     let baseUrl = apiEndpoint.trim().replace(/\/+$/, "");
     baseUrl = baseUrl.replace(/\/chat\/completions$/, "");
@@ -310,8 +365,7 @@ async function directClientFetchModels(apiKey: string, apiEndpoint?: string): Pr
 
 // 2. Exported Wrapper Functions that try Backend first, then Fallback
 
-// chat wrapper
-async function apiChatImpl(params: {
+export type ApiChatParams = {
   message: string;
   history: any[];
   systemInstruction?: string;
@@ -324,13 +378,25 @@ async function apiChatImpl(params: {
   maxOutputTokens?: number;
   imageDataUrl?: string;
   signal?: AbortSignal;
-}): Promise<{ text: string }> {
-  const { signal, timeoutMs, ...requestBody } = params;
+  purpose?: AiPurpose;
+  parentActionId?: string;
+  characterId?: string;
+  relationId?: string;
+  conversationId?: string;
+  retryReasons?: readonly string[];
+  fallbackReasons?: readonly string[];
+  estimatedOutputTokens?: number;
+};
+
+// chat wrapper
+async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSession }): Promise<{ text: string }> {
+  const { signal, timeoutMs, ledger, purpose, parentActionId, characterId, relationId, conversationId, retryReasons, fallbackReasons, estimatedOutputTokens, ...requestBody } = params;
   const backendRequestBody = typeof timeoutMs === "number"
     ? { ...requestBody, timeoutMs }
     : requestBody;
   let res: Response | null = null;
   try {
+    ledger?.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/chat", transport: "backend_proxy" });
     res = await fetchWithTimeout("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -343,8 +409,9 @@ async function apiChatImpl(params: {
     // sends the same rejected prompt twice and hides the original status/body.
     if (!isApiRequestError(err, "network")) throw apiRequestError(err, "聊天 API");
     console.warn("apiChat backend network request failed, trying client direct fallback:", err);
+    ledger?.markFallback("backend network failure -> browser direct");
     try {
-      return await directClientChat(params);
+      return await directClientChat({ ...params, ledger });
     } catch (fallbackError) {
       if (fallbackError instanceof ApiChatError) throw fallbackError;
       if (isApiRequestError(fallbackError)) throw apiRequestError(fallbackError, "聊天 API");
@@ -360,8 +427,9 @@ async function apiChatImpl(params: {
     || (routeMissingStatus && !responseText.trim());
   if (looksLikeStaticHostFallback) {
     console.warn("apiChat backend route is unavailable on this host, trying client direct fallback");
+    ledger?.markFallback("backend route missing/static host -> browser direct");
     try {
-      return await directClientChat(params);
+      return await directClientChat({ ...params, ledger });
     } catch (fallbackError) {
       if (fallbackError instanceof ApiChatError) throw fallbackError;
       if (isApiRequestError(fallbackError)) throw apiRequestError(fallbackError, "聊天 API");
@@ -388,8 +456,12 @@ async function apiChatImpl(params: {
   throw new ApiChatError("聊天 API 返回成功状态，但没有有效的文本响应。", { status: 502, code: "provider_empty" });
 }
 
-export async function apiChat(params: Parameters<typeof apiChatImpl>[0]): Promise<{ text: string }> {
-  return trackApiUsage("chat", params.message.length + params.history.reduce((total, entry) => total + String(entry?.text || entry?.content || "").length, 0), () => apiChatImpl(params));
+export async function apiChat(params: ApiChatParams): Promise<{ text: string }> {
+  const inputCharacters = params.message.length + params.history.reduce((total, entry) => total + String(entry?.text || entry?.content || "").length, 0);
+  return trackApiUsage("chat", inputCharacters, buildLedgerInput("chat_reply", inputCharacters, {
+    ...params,
+    estimatedOutputTokens: typeof params.maxOutputTokens === "number" ? params.maxOutputTokens : undefined,
+  }), (ledger) => apiChatImpl({ ...params, ledger }));
 }
 
 // test key wrapper
@@ -398,7 +470,14 @@ export async function apiTestKey(params: {
   model: string;
   apiEndpoint?: string;
 }): Promise<{ success: boolean; message: string }> {
-  try {
+  return withAiRequestLedger({
+    purpose: "api_test",
+    model: params.model,
+    endpoint: "/api/test-key",
+    transport: "backend_proxy",
+  }, async (ledger) => {
+    try {
+      ledger.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/test-key", transport: "backend_proxy" });
     const res = await fetchWithTimeout("/api/test-key", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -418,6 +497,7 @@ export async function apiTestKey(params: {
       return { success: false, message: describeApiRequestError(err, "连接测试") };
     }
     console.warn("apiTestKey backend failed, trying client direct fallback:", err);
+    ledger.markFallback("backend test-key failure -> browser direct");
     try {
       if (params.apiEndpoint && params.apiEndpoint.trim()) {
         const result = await directClientChat({
@@ -427,6 +507,7 @@ export async function apiTestKey(params: {
           model: params.model,
           apiEndpoint: params.apiEndpoint,
           apiTemperature: 0.1,
+          ledger,
         });
         if (result.text) {
           return { success: true, message: "自定义API接口连通成功！有效握手。" };
@@ -438,6 +519,7 @@ export async function apiTestKey(params: {
           apiKey: params.apiKey,
           model: params.model || "gemini-1.5-flash",
           apiTemperature: 0.1,
+          ledger,
         });
         if (result.text) {
           return { success: true, message: "连接成功！您的 Gemini API Key 有效且畅通。" };
@@ -449,7 +531,8 @@ export async function apiTestKey(params: {
         ? describeApiRequestError(fallbackErr, "连接测试")
         : fallbackErr.message || "直连也失败，请检查网络和 API 配置。" };
     }
-  }
+    }
+  });
 }
 
 // models wrapper
@@ -457,7 +540,13 @@ export async function apiFetchModels(params: {
   apiKey: string;
   apiEndpoint?: string;
 }): Promise<string[]> {
-  try {
+  return withAiRequestLedger({
+    purpose: "model_list",
+    endpoint: "/api/models",
+    transport: "backend_proxy",
+  }, async (ledger) => {
+    try {
+      ledger.markAttempt({ provider: "server-proxy", endpoint: "/api/models", transport: "backend_proxy" });
     const res = await fetchWithTimeout("/api/models", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -475,13 +564,15 @@ export async function apiFetchModels(params: {
       throw new Error(describeApiRequestError(err, "模型列表 API"));
     }
     console.warn("apiFetchModels backend failed, trying client direct fallback:", err);
+    ledger.markFallback("backend model-list failure -> browser direct");
     try {
-      return await directClientFetchModels(params.apiKey, params.apiEndpoint);
+      return await directClientFetchModels(params.apiKey, params.apiEndpoint, ledger);
     } catch (fallbackErr) {
       if (isApiRequestError(fallbackErr)) throw new Error(describeApiRequestError(fallbackErr, "模型列表 API"));
       throw fallbackErr;
     }
-  }
+    }
+  });
 }
 
 /** Image endpoints intentionally have no browser-direct fallback: keys and
@@ -569,12 +660,20 @@ async function apiExtractMemoriesImpl(params: {
   templateType?: "refined" | "delicate";
   /** Offline continuations need factual handoff summaries, not screenplay prose. */
   scenario?: "offline";
+  characterId?: string;
+  relationId?: string;
+  conversationId?: string;
+  parentActionId?: string;
+  purpose?: AiPurpose;
+  ledger?: AiRequestLedgerSession;
 }): Promise<{ text: string; items: ExtractedKnowledgeCandidatePayload[]; candidates?: ExtractedKnowledgeCandidatePayload[]; error?: string }> {
+  const { ledger, purpose, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
   try {
+    ledger?.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/extract-memories", transport: "backend_proxy" });
     const res = await fetchWithTimeout("/api/extract-memories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+      body: JSON.stringify(requestBody),
     }, API_REQUEST_TIMEOUTS.memoryTask);
     let data: any = undefined;
     try {
@@ -604,6 +703,7 @@ async function apiExtractMemoriesImpl(params: {
       return { text: "", items: [], error: describeApiRequestError(err, "记忆提取") };
     }
     console.warn("apiExtractMemories backend failed, trying client direct fallback:", err);
+    ledger?.markFallback("backend memory extraction failure -> browser direct");
     try {
       const prompt = buildKnowledgeExtractionPrompt({
         characterName: params.characterName,
@@ -620,6 +720,7 @@ async function apiExtractMemoriesImpl(params: {
         model: params.model,
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.5,
+        ledger,
         systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
           ? "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供精确 sourceMessageIds 和原文 evidenceQuote。"
           : undefined
@@ -637,6 +738,7 @@ async function apiExtractMemoriesImpl(params: {
           model: params.model,
           apiEndpoint: params.apiEndpoint,
           apiTemperature: 0.2,
+          ledger,
           systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
             ? "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。"
             : undefined,
@@ -657,7 +759,8 @@ async function apiExtractMemoriesImpl(params: {
 }
 
 export async function apiExtractMemories(params: Parameters<typeof apiExtractMemoriesImpl>[0]): Promise<Awaited<ReturnType<typeof apiExtractMemoriesImpl>>> {
-  return trackApiUsage("memory-extraction", params.history.reduce((total, entry) => total + String(entry.text || "").length, 0), () => apiExtractMemoriesImpl(params));
+  const inputCharacters = params.history.reduce((total, entry) => total + String(entry.text || "").length, 0);
+  return trackApiUsage("memory-extraction", inputCharacters, buildLedgerInput("memory_extract", inputCharacters, params), (ledger) => apiExtractMemoriesImpl({ ...params, ledger }));
 }
 
 // summarize personality wrapper
@@ -666,12 +769,20 @@ async function apiSummarizePersonalityImpl(params: {
   apiKey: string;
   model: string;
   apiEndpoint?: string;
+  purpose?: AiPurpose;
+  parentActionId?: string;
+  characterId?: string;
+  relationId?: string;
+  conversationId?: string;
+  ledger?: AiRequestLedgerSession;
 }): Promise<{ text: string }> {
+  const { ledger, purpose, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
   try {
+    ledger?.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/summarize-personality", transport: "backend_proxy" });
     const res = await fetchWithTimeout("/api/summarize-personality", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+      body: JSON.stringify(requestBody),
     }, API_REQUEST_TIMEOUTS.memoryTask);
     if (res.ok) {
       const data = await res.json();
@@ -685,6 +796,7 @@ async function apiSummarizePersonalityImpl(params: {
       throw new Error(describeApiRequestError(err, "人设总结"));
     }
     console.warn("apiSummarizePersonality backend failed, trying client direct fallback:", err);
+    ledger?.markFallback("backend personality summary failure -> browser direct");
     try {
       const referencesText = params.references
         .map((ref, idx) => `[参考卡片 ${idx + 1}: ${ref.title}]\n${ref.content}`)
@@ -708,6 +820,7 @@ ${referencesText}
         model: params.model,
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.5,
+        ledger,
         systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
           ? "你是一个大语言模型提示词工程设定专家，直接给提炼的人设，不带任何废话解释。"
           : undefined
@@ -725,7 +838,7 @@ ${referencesText}
 
 export async function apiSummarizePersonality(params: Parameters<typeof apiSummarizePersonalityImpl>[0]): Promise<{ text: string }> {
   const inputCharacters = params.references.reduce((total, reference) => total + String(reference?.title || "").length + String(reference?.content || "").length, 0);
-  return trackApiUsage("personality", inputCharacters, () => apiSummarizePersonalityImpl(params));
+  return trackApiUsage("personality", inputCharacters, buildLedgerInput("personality_summary", inputCharacters, params), (ledger) => apiSummarizePersonalityImpl({ ...params, ledger }));
 }
 
 // translate wrapper
@@ -738,13 +851,21 @@ async function apiTranslateImpl(params: {
   targetLanguage?: string;
   /** Forum translations must never fall back to a browser-to-provider request. */
   proxyOnly?: boolean;
+  purpose?: AiPurpose;
+  parentActionId?: string;
+  characterId?: string;
+  relationId?: string;
+  conversationId?: string;
+  ledger?: AiRequestLedgerSession;
 }): Promise<{ text: string }> {
+  const { ledger, purpose, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
   let res: Response;
   try {
+    ledger?.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/translate", transport: "backend_proxy" });
     res = await fetchWithTimeout("/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+      body: JSON.stringify(requestBody),
     }, API_REQUEST_TIMEOUTS.textGeneration);
   } catch (err) {
     if (params.proxyOnly) {
@@ -754,6 +875,7 @@ async function apiTranslateImpl(params: {
       throw new Error(describeApiRequestError(err, "翻译"));
     }
     console.warn("apiTranslate backend failed, trying client direct fallback:", err);
+    ledger?.markFallback("backend translation failure -> browser direct");
   }
 
   if (res) {
@@ -775,6 +897,7 @@ async function apiTranslateImpl(params: {
     }
     if (params.proxyOnly) throw new Error("当前部署没有提供翻译代理路由。");
     console.warn("apiTranslate backend route is unavailable, trying client direct fallback");
+    ledger?.markFallback("translation route missing/static host -> browser direct");
   }
 
   try {
@@ -797,6 +920,7 @@ ${params.text}
         model: params.model,
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.3,
+        ledger,
         systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
           ? `你是翻译助手，直接输出目标语言 ${targetLanguage}，不要带任何解释。`
           : undefined
@@ -812,7 +936,7 @@ ${params.text}
 }
 
 export async function apiTranslate(params: Parameters<typeof apiTranslateImpl>[0]): Promise<{ text: string }> {
-  return trackApiUsage("translation", params.text.length, () => apiTranslateImpl(params));
+  return trackApiUsage("translation", params.text.length, buildLedgerInput(params.purpose || "translation", params.text.length, params), (ledger) => apiTranslateImpl({ ...params, ledger }));
 }
 
 type MemoryExtractionParams = Parameters<typeof apiExtractMemories>[0];
