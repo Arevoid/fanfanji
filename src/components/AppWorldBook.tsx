@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { WorldBookEntry, Character } from "../types";
-import { Plus, Trash2, Edit, Search, ChevronLeft, Save, BookOpen, Layers, Globe, User, X, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
+import { WorldBookEntry, Character, type WorldBookPosition } from "../types";
+import { Plus, Trash2, Edit, Search, ChevronLeft, BookOpen, Layers, Globe, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries, safeParseDocx } from "../utils/pngParser";
 import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
+import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
+import { parseStructuredCharacterDocument } from "../domain/import/structuredCharacterDocument";
+import { readString, writeJson } from "../core/storage/storageAdapter";
+import { createId } from "../core/id/createId";
+import { getWorldBookCharacterIds, isWorldBookEntryForCharacter, isWorldBookEntryGlobal } from "../domain/worldbook/worldBookVisibility";
 
 export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBookEntry | null => {
   if (!e || typeof e !== "object") return null;
@@ -46,31 +51,8 @@ export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBo
     triggerType = "constant";
   }
 
-  // Position Mapping (Requirement 4: author notes to approximate after character definition)
-  let position: "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history" = "after_char_def";
-  const rawPos = e.position;
-  if (typeof rawPos === "string") {
-    const lp = rawPos.toLowerCase();
-    if (lp.includes("system") || lp.includes("main") || lp.includes("first")) {
-      position = "after_main_prompt";
-    } else if (lp.includes("before_char")) {
-      position = "before_char_def";
-    } else if (lp.includes("after_char")) {
-      position = "after_char_def";
-    } else if (lp.includes("an") || lp.includes("author") || lp.includes("note")) {
-      position = "after_char_def";
-    } else if (lp.includes("history") || lp.includes("chat")) {
-      position = "before_chat_history";
-    }
-  } else if (typeof rawPos === "number") {
-    if (rawPos === 0) position = "before_char_def";
-    else if (rawPos === 1) position = "after_char_def";
-    else if (rawPos === 2 || rawPos === 3) position = "after_char_def";
-    else if (rawPos === 4) position = "before_chat_history";
-    else position = "after_main_prompt";
-  } else if (e.position) {
-    position = e.position;
-  }
+  // Author notes remain approximated as after-character-definition for compatibility.
+  const position = normalizeImportedWorldBookPosition(e.position);
 
   // Depth (1-15)
   let depth = 5;
@@ -95,12 +77,16 @@ export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBo
   }
 
   return {
-    id: "wb-import-" + Date.now() + "-" + Math.floor(Math.random() * 100000),
+      id: createId("wb-import"),
     title,
     category: "常规",
     content,
     timestamp: Date.now(),
     characterId,
+    ...(Array.isArray(e.characterIds) ? { characterIds: e.characterIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0) } : {}),
+    ...(e.scope && typeof e.scope === "object" ? { scope: e.scope } : {}),
+    ...(e.visibility === "public" || e.visibility === "private" ? { visibility: e.visibility } : {}),
+    ...(e.purpose === "world_canon" || e.purpose === "persona_rule" || e.purpose === "relationship_context" || e.purpose === "generation_rule" ? { purpose: e.purpose } : {}),
     triggerType,
     keywords,
     isActive,
@@ -165,7 +151,7 @@ export default function AppWorldBook({
   const [selectedBinding, setSelectedBinding] = useState<string | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>(() => {
     try {
-      const stored = localStorage.getItem("worldbook_collapsed_categories");
+      const stored = readString("worldbook_collapsed_categories").value;
       return stored ? JSON.parse(stored) : {};
     } catch {
       return {};
@@ -174,7 +160,7 @@ export default function AppWorldBook({
 
   useEffect(() => {
     try {
-      localStorage.setItem("worldbook_collapsed_categories", JSON.stringify(collapsedCategories));
+      writeJson("worldbook_collapsed_categories", collapsedCategories);
     } catch (e) {
       console.error(e);
     }
@@ -301,11 +287,11 @@ export default function AppWorldBook({
   const [category, setCategory] = useState("常规");
   const [content, setContent] = useState("");
   const [bindingType, setBindingType] = useState<"global" | "character">("global");
-  const [boundCharacterId, setBoundCharacterId] = useState<string>("");
+  const [boundCharacterIds, setBoundCharacterIds] = useState<string[]>([]);
   const [triggerType, setTriggerType] = useState<"keys" | "constant" | "vector">("keys");
   const [keywords, setKeywords] = useState("");
   const [isActive, setIsActive] = useState(true);
-  const [position, setPosition] = useState<"after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history">("after_char_def");
+  const [position, setPosition] = useState<WorldBookPosition>("after_char_def");
   const [depth, setDepth] = useState<number>(5);
   const [formError, setFormError] = useState("");
   const [isCreatingNewCategory, setIsCreatingNewCategory] = useState(false);
@@ -315,7 +301,7 @@ export default function AppWorldBook({
     setContent("");
     setCategory("常规");
     setBindingType("global");
-    setBoundCharacterId(characters[0]?.id || "");
+    setBoundCharacterIds(characters[0]?.id ? [characters[0].id] : []);
     setTriggerType("keys");
     setKeywords("");
     setIsActive(true);
@@ -332,12 +318,13 @@ export default function AppWorldBook({
     setTitle(entry.title);
     setCategory(entry.category || "常规");
     setContent(entry.content);
-    if (entry.characterId && entry.characterId !== "global") {
+    const entryCharacterIds = getWorldBookCharacterIds(entry);
+    if (entryCharacterIds.length > 0) {
       setBindingType("character");
-      setBoundCharacterId(entry.characterId);
+      setBoundCharacterIds(entryCharacterIds);
     } else {
       setBindingType("global");
-      setBoundCharacterId("");
+      setBoundCharacterIds([]);
     }
     setTriggerType(entry.triggerType || "keys");
     setKeywords(entry.keywords || "");
@@ -363,13 +350,25 @@ export default function AppWorldBook({
       return;
     }
 
+    if (bindingType === "character" && boundCharacterIds.length === 0) {
+      setFormError("特定角色专属词条至少需要选择一位角色");
+      return;
+    }
+
+    const selectedCharacterIds: string[] = Array.from(new Set<string>(boundCharacterIds))
+      .filter((id) => characterOptions.some((option) => option.id === id));
+
     const newEntry: WorldBookEntry = {
       id: editingId || Date.now().toString(),
       title: title.trim(),
       category: category.trim() || "常规",
       content: content.trim(),
       timestamp: Date.now(),
-      characterId: bindingType === "global" ? "global" : boundCharacterId,
+      characterId: bindingType === "global" ? "global" : selectedCharacterIds[0],
+      characterIds: bindingType === "global" ? undefined : selectedCharacterIds,
+      scope: bindingType === "global"
+        ? { kind: "global" }
+        : { kind: "characters", characterIds: selectedCharacterIds },
       triggerType,
       keywords: triggerType === "keys" ? keywords.trim() : "",
       isActive,
@@ -392,6 +391,14 @@ export default function AppWorldBook({
       const isDocx = file.name.toLowerCase().endsWith(".docx");
 
       let imported: WorldBookEntry[] = [];
+
+      const importStructuredTextWorldBook = (text: string): WorldBookEntry[] => {
+        const parsed = parseStructuredCharacterDocument(text, file.name);
+        if (parsed.worldBookEntries.length === 0) return parseTextToWorldBookEntries(text, file.name);
+        return parsed.worldBookEntries
+          .map((entry) => mapSillyTavernEntry(entry, "global"))
+          .filter(Boolean) as WorldBookEntry[];
+      };
 
       if (isPng) {
         const charaStr = await parsePngChunks(file);
@@ -446,7 +453,7 @@ export default function AppWorldBook({
           r.onerror = () => reject(new Error("读取 TXT 失败"));
           r.readAsText(file);
         });
-        imported = parseTextToWorldBookEntries(text, file.name);
+        imported = importStructuredTextWorldBook(text);
       } else if (isDocx) {
         const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
           const r = new FileReader();
@@ -455,7 +462,7 @@ export default function AppWorldBook({
           r.readAsArrayBuffer(file);
         });
         const text = await safeParseDocx(arrayBuffer);
-        imported = parseTextToWorldBookEntries(text, file.name);
+        imported = importStructuredTextWorldBook(text);
       } else {
         throw new Error("请上传 .json 配置文件、.png 角色卡、.txt 或 .docx 文档文件！");
       }
@@ -486,21 +493,21 @@ export default function AppWorldBook({
     // Binding matches
     let matchesBinding = true;
     if (selectedBinding === "global") {
-      matchesBinding = !entry.characterId || entry.characterId === "global";
+      matchesBinding = isWorldBookEntryGlobal(entry);
     } else if (selectedBinding) {
-      matchesBinding = entry.characterId === selectedBinding;
+      matchesBinding = isWorldBookEntryForCharacter(entry, selectedBinding) && !isWorldBookEntryGlobal(entry);
     }
 
     return matchesSearch && matchesBinding;
   });
 
   return (
-    <div className="flex flex-col h-full bg-stone-50 text-stone-800 font-sans">
+    <div data-theme-page="worldbook" className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0 relative">
         <button
           onClick={isEditing ? resetForm : onClose}
-          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors z-10 shrink-0"
+          className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
           id="worldbook_back_btn"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -515,7 +522,7 @@ export default function AppWorldBook({
             <div className="relative">
               <button
                 onClick={() => setShowAddMenu(!showAddMenu)}
-                className="w-8 h-8 bg-neutral-950 hover:bg-neutral-900 text-white rounded-full transition-colors shadow flex items-center justify-center"
+                className="app-nav-icon-button w-8 h-8 text-slate-800 transition-colors flex items-center justify-center"
                 id="worldbook_add_btn"
               >
                 <Plus className="w-4.5 h-4.5" />
@@ -567,7 +574,7 @@ export default function AppWorldBook({
                     }
                   );
                 }}
-                className="w-8 h-8 rounded-full bg-rose-50 flex items-center justify-center hover:bg-rose-100 border border-rose-100 transition-colors"
+                className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors"
                 title="删除词条"
               >
                 <Trash2 className="w-4 h-4 text-rose-600" />
@@ -580,7 +587,7 @@ export default function AppWorldBook({
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 pb-24">
         {isEditing ? (
-          <form onSubmit={handleSubmit} className="space-y-4 max-w-md mx-auto bg-white p-5 rounded-xl shadow-sm border border-stone-200/40 animate-fade-in">
+          <form onSubmit={handleSubmit} className="settings-panel-card space-y-4 max-w-md mx-auto p-5 animate-fade-in">
             {formError && (
               <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium animate-fade-in text-left">
                 ⚠️ {formError}
@@ -685,8 +692,8 @@ export default function AppWorldBook({
                       onClick={() => setBindingType("global")}
                       className={`py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
                         bindingType === "global"
-                          ? "bg-neutral-950 border-neutral-950 !text-white shadow-xs"
-                          : "bg-white border-stone-200 text-stone-500 hover:bg-stone-50"
+                          ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-xs"
+                          : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                       }`}
                     >
                       全局生效
@@ -695,14 +702,14 @@ export default function AppWorldBook({
                       type="button"
                       onClick={() => {
                         setBindingType("character");
-                        if (!boundCharacterId && characters.length > 0) {
-                          setBoundCharacterId(characters[0].id);
+                        if (boundCharacterIds.length === 0 && characterOptions.length > 0) {
+                          setBoundCharacterIds([characterOptions[0].id]);
                         }
                       }}
                       className={`py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
                         bindingType === "character"
-                          ? "bg-neutral-950 border-neutral-950 !text-white shadow-xs"
-                          : "bg-white border-stone-200 text-stone-500 hover:bg-stone-50"
+                          ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-xs"
+                          : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                       }`}
                     >
                       特定角色专属
@@ -711,23 +718,25 @@ export default function AppWorldBook({
 
                   {/* Target Character (conditional row) */}
                   {bindingType === "character" && characters.length > 0 && (
-                    <div className="rounded-xl border border-stone-200 bg-stone-50/30 p-2.5 space-y-1 animate-fade-in">
-                      <label className="text-[10px] font-extrabold text-stone-400">选择绑定的专属角色</label>
-                      <div className="relative">
-                        <select
-                          value={boundCharacterId}
-                          onChange={(e) => setBoundCharacterId(e.target.value)}
-                          className="w-full pl-3 pr-8 py-1.5 rounded-[8px] bg-white border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-semibold appearance-none cursor-pointer"
-                        >
-                          {characterOptions.map(({ id, label }) => (
-                            <option key={id} value={id}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-stone-400">
-                          <ChevronDown className="w-3.5 h-3.5" />
-                        </div>
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-2.5 space-y-1 animate-fade-in">
+                      <label className="text-[10px] font-extrabold text-[var(--text-secondary)]">选择绑定的专属角色（可多选）</label>
+                      <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                        {characterOptions.map(({ id, label }) => {
+                          const checked = boundCharacterIds.includes(id);
+                          return (
+                            <label key={id} className={`flex items-center gap-2.5 rounded-[10px] border px-3 py-2 cursor-pointer transition-colors ${checked ? "border-[var(--accent)] bg-[var(--surface-raised)]" : "border-[var(--border)] bg-[var(--input-bg)]"}`}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => setBoundCharacterIds((current) => checked
+                                  ? current.filter((characterId) => characterId !== id)
+                                  : [...current, id])}
+                                className="h-4 w-4 accent-[var(--accent)]"
+                              />
+                              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[var(--text-primary)]">{label}</span>
+                            </label>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -743,8 +752,8 @@ export default function AppWorldBook({
                     onClick={() => setTriggerType("keys")}
                     className={`py-2 rounded-xl text-xs font-extrabold border transition-all ${
                       triggerType === "keys"
-                        ? "bg-neutral-950 border-neutral-950 !text-white shadow-xs"
-                        : "bg-stone-50 border-stone-200 text-stone-500 hover:bg-stone-100"
+                        ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-xs"
+                        : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                     }`}
                   >
                     关键词
@@ -754,8 +763,8 @@ export default function AppWorldBook({
                     onClick={() => setTriggerType("constant")}
                     className={`py-2 rounded-xl text-xs font-extrabold border transition-all ${
                       triggerType === "constant"
-                        ? "bg-neutral-950 border-neutral-950 !text-white shadow-xs"
-                        : "bg-stone-50 border-stone-200 text-stone-500 hover:bg-stone-100"
+                        ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-xs"
+                        : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                     }`}
                   >
                     常驻
@@ -765,8 +774,8 @@ export default function AppWorldBook({
                     onClick={() => setTriggerType("vector")}
                     className={`py-2 rounded-xl text-xs font-extrabold border transition-all ${
                       triggerType === "vector"
-                        ? "bg-neutral-950 border-neutral-950 !text-white shadow-xs"
-                        : "bg-stone-50 border-stone-200 text-stone-500 hover:bg-stone-100"
+                        ? "bg-[var(--segmented-active-bg)] border-[var(--segmented-active-bg)] text-[var(--segmented-active-text)] shadow-xs"
+                        : "bg-[var(--segmented-inactive-bg)] border-[var(--border)] text-[var(--segmented-inactive-text)] hover:bg-[var(--surface-raised)]"
                     }`}
                   >
                     向量化
@@ -785,7 +794,7 @@ export default function AppWorldBook({
                     <div className="space-y-2">
                       <p>
                         <span className="text-neutral-900 font-bold">✨ 常驻设定：</span>
-                        只要角色配对正确，此设定都会100%强制在每次对话时装载，不受聊天内容影响。具有绝对、最高优先级别的逻辑引导。
+                        只要作用域匹配，此设定会在每次相关请求中装载，不依赖关键词；它用于补充角色与世界背景，但不会覆盖角色核心人设、已确认关系或用户当前消息。
                       </p>
                     </div>
                   )}
@@ -821,13 +830,14 @@ export default function AppWorldBook({
                 <div className="relative">
                   <select
                     value={position}
-                    onChange={(e) => setPosition(e.target.value as any)}
+                    onChange={(e) => setPosition(e.target.value as WorldBookPosition)}
                     className="w-full pl-3 pr-8 py-2 rounded-[8px] bg-stone-50/50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-xs font-extrabold text-stone-700 appearance-none cursor-pointer"
                   >
                     <option value="after_main_prompt">主提示词后 (System Prompt 之后)</option>
                     <option value="before_char_def">角色定义前 (人设 Profile 之前)</option>
                     <option value="after_char_def">角色定义后 (人设 Profile 之后)</option>
                     <option value="before_chat_history">聊天历史前 (聊天记录之上)</option>
+                    <option value="at_depth">指定深度 (插入聊天历史第 N 层)</option>
                   </select>
                   <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-stone-400">
                     <ChevronDown className="w-3.5 h-3.5" />
@@ -838,7 +848,7 @@ export default function AppWorldBook({
               {/* Depth Slider */}
               <div className="py-3.5 space-y-2 text-left">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-extrabold text-stone-600">拼接深度 (装载优先级)</label>
+                  <label className="text-xs font-extrabold text-stone-600">{position === "at_depth" ? "聊天历史深度" : "拼接深度（装载顺序）"}</label>
                   <span className="text-xs font-extrabold text-stone-700 bg-stone-100 px-2 py-0.5 rounded-md border border-stone-200">
                     深度 {depth}
                   </span>
@@ -877,25 +887,30 @@ export default function AppWorldBook({
                 <button
                   type="button"
                   onClick={() => setIsActive(!isActive)}
-                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    isActive ? "bg-emerald-500" : "bg-stone-300"
+                  aria-checked={isActive}
+                  role="switch"
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
+                    isActive
+                      ? "bg-[var(--toggle-mono-on-bg)] border-[var(--toggle-mono-border)]"
+                      : "bg-[var(--toggle-mono-off-bg)] border-[var(--toggle-mono-border)]"
                   }`}
                 >
                   <span
-                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
-                      isActive ? "translate-x-4" : "translate-x-0"
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full shadow-sm transition duration-200 ease-in-out ${
+                      isActive
+                        ? "translate-x-4 bg-[var(--toggle-mono-on-thumb)]"
+                        : "translate-x-0 bg-[var(--toggle-mono-off-thumb)]"
                     }`}
                   />
                 </button>
               </div>
             </div>
 
-            <div className="pt-3">
+            <div className="settings-wide-action-group pt-3">
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-neutral-950 hover:bg-neutral-900 text-white font-bold text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-sm"
+                className="settings-wide-action settings-wide-action-primary"
               >
-                <Save className="w-3.5 h-3.5" />
                 <span>保存设定</span>
               </button>
             </div>
@@ -1012,7 +1027,7 @@ export default function AppWorldBook({
                             <span className="text-xs font-extrabold text-stone-600 truncate">
                               {catName}
                             </span>
-                            <span className="text-[10px] text-stone-500 bg-stone-200/50 px-1.5 py-0.5 rounded-md font-bold shrink-0">
+                            <span className="text-[10px] text-[var(--badge-muted-text)] bg-[var(--badge-muted-bg)] px-1.5 py-0.5 rounded-md font-bold shrink-0">
                               {groupEntries.length}
                             </span>
                           </button>
@@ -1049,8 +1064,10 @@ export default function AppWorldBook({
                           <div className="space-y-2 animate-fade-in pl-0.5">
                             {groupEntries.map((entry) => {
                               // Find character bind info
-                              const isGlobal = !entry.characterId || entry.characterId === "global";
-                              const boundChar = !isGlobal ? characters.find((c) => c.id === entry.characterId) : null;
+                              const isGlobal = isWorldBookEntryGlobal(entry);
+                              const boundCharacters = getWorldBookCharacterIds(entry)
+                                .map((characterId) => characters.find((character) => character.id === characterId))
+                                .filter((character): character is Character => Boolean(character));
                               const isActive = entry.isActive !== false;
 
                               return (
@@ -1058,15 +1075,15 @@ export default function AppWorldBook({
                                   key={entry.id}
                                   className={`flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-2xl border transition-all ${
                                     isActive
-                                      ? "bg-white border-stone-200/60 shadow-sm hover:border-stone-300"
-                                      : "bg-stone-50/70 border-stone-200/40 opacity-75"
+                                      ? "bg-[var(--surface-raised)] border-[var(--border)] shadow-sm hover:border-[var(--border-strong)]"
+                                      : "bg-[var(--surface-muted)] border-[var(--border)]"
                                   }`}
                                 >
                                   {/* Left: Trigger Icon + Title */}
                                   <div className="flex items-center gap-3 min-w-0 flex-1">
                                     {/* 1. Trigger Condition Icon */}
                                     <div
-                                      className="w-8 h-8 flex items-center justify-center text-stone-400 shrink-0"
+                                      className={`w-8 h-8 flex items-center justify-center shrink-0 ${isActive ? "text-[var(--text-secondary)]" : "text-[var(--text-disabled)]"}`}
                                       title={
                                         entry.triggerType === "constant"
                                           ? "常驻无条件生效"
@@ -1086,8 +1103,8 @@ export default function AppWorldBook({
 
                                     {/* 2. Template Name */}
                                     <span
-                                      className={`text-xs md:text-sm font-bold text-stone-800 truncate select-none ${
-                                        !isActive ? "line-through text-stone-400" : ""
+                                      className={`text-xs md:text-sm font-bold truncate select-none ${
+                                        isActive ? "text-[var(--text-primary)]" : "line-through text-[var(--text-disabled)]"
                                       }`}
                                       title={entry.title}
                                     >
@@ -1098,10 +1115,10 @@ export default function AppWorldBook({
                                   {/* Right: Actions and Link */}
                                   <div className="flex items-center gap-2.5 shrink-0">
                                     {/* 3. Link Icon (Hide if global, show link icon only if bound) */}
-                                    {!isGlobal && boundChar && (
+                                    {!isGlobal && boundCharacters.length > 0 && (
                                       <div
-                                        className="w-8 h-8 flex items-center justify-center text-stone-400 shrink-0"
-                                        title={`绑定专属角色: ${boundChar.name}`}
+                                        className={`w-8 h-8 flex items-center justify-center shrink-0 ${isActive ? "text-[var(--text-secondary)]" : "text-[var(--text-disabled)]"}`}
+                                        title={`绑定专属角色: ${boundCharacters.map((character) => character.name).join("、")}`}
                                       >
                                         <Link2 className="w-3.5 h-3.5 shrink-0" />
                                       </div>
@@ -1111,7 +1128,7 @@ export default function AppWorldBook({
                                     <button
                                       type="button"
                                       onClick={() => handleEdit(entry)}
-                                      className="w-8 h-8 flex items-center justify-center text-stone-400 hover:text-stone-800 hover:bg-stone-100 rounded-full transition-colors shrink-0"
+                                      className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors shrink-0 ${isActive ? "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)]" : "text-[var(--text-disabled)] hover:bg-[var(--surface-raised)]"}`}
                                       title="编辑词条设定"
                                     >
                                       <Edit className="w-3.5 h-3.5 shrink-0" />
@@ -1121,14 +1138,20 @@ export default function AppWorldBook({
                                     <button
                                       type="button"
                                       onClick={() => onSaveEntry({ ...entry, isActive: !isActive })}
-                                      className={`relative inline-flex h-4 w-7.5 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none shrink-0 ${
-                                        isActive ? "bg-emerald-500" : "bg-stone-300"
+                                      aria-checked={isActive}
+                                      role="switch"
+                                      className={`relative inline-flex h-4 w-7.5 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] shrink-0 ${
+                                        isActive
+                                          ? "bg-[var(--toggle-mono-on-bg)] border-[var(--toggle-mono-border)]"
+                                          : "bg-[var(--toggle-mono-off-bg)] border-[var(--toggle-mono-border)]"
                                       }`}
                                       title={isActive ? "已启用此词条" : "已禁用此词条"}
                                     >
                                       <span
-                                        className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
-                                          isActive ? "translate-x-3.5" : "translate-x-0"
+                                        className={`pointer-events-none inline-block h-3 w-3 transform rounded-full shadow-sm transition duration-200 ease-in-out ${
+                                          isActive
+                                            ? "translate-x-3.5 bg-[var(--toggle-mono-on-thumb)]"
+                                            : "translate-x-0 bg-[var(--toggle-mono-off-thumb)]"
                                         }`}
                                       />
                                     </button>

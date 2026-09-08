@@ -43,7 +43,7 @@ export function BottomSheet({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[var(--z-sheet)] flex items-end justify-center bg-[var(--color-overlay)] px-[var(--space-4)] pb-[env(safe-area-inset-bottom)]"
+          className="app-viewport-overlay fixed inset-x-0 top-0 z-[var(--z-sheet)] flex items-end justify-center bg-[var(--color-overlay)] px-[var(--space-4)] pb-[env(safe-area-inset-bottom)]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -58,7 +58,8 @@ export function BottomSheet({
             aria-label={ariaLabel}
             aria-labelledby={title ? titleId : undefined}
             aria-describedby={description ? descriptionId : undefined}
-            className={`flex max-h-[55vh] w-[90vw] max-w-[400px] flex-col overflow-hidden rounded-[var(--radius-sheet)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-[var(--shadow-modal)] ${className}`}
+            className={`flex w-[90vw] max-w-[400px] flex-col overflow-hidden rounded-[var(--radius-sheet)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-[var(--shadow-modal)] ${className}`}
+            style={{ maxHeight: "min(55vh, calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom)))" }}
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}

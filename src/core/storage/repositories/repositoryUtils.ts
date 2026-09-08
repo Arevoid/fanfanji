@@ -12,6 +12,10 @@ export function readArray<T>(key: string, fallback: T[]): StorageResult<T[]> {
 }
 
 export function writeArray<T>(key: string, value: T[]): StorageWriteResult {
+  if (!Array.isArray(value)) {
+    console.warn(`[storage] Refused to write a non-array value to "${key}".`);
+    return { success: false, error: "validation" };
+  }
   return writeJson(key, value);
 }
 

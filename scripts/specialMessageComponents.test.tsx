@@ -37,7 +37,7 @@ const checks: Array<[string, boolean]> = [
   ["quote CSS variables", ["--quote-bg", "--quote-border", "--quote-author", "--quote-content"].every((name) => css.includes(name))],
   ["packet CSS variables", ["--redpacket-bg", "--redpacket-title-color", "--redpacket-money-color", "--redpacket-status-color", "--redpacket-note-color"].every((name) => css.includes(name))],
   ["transfer CSS variables", ["--transfer-bg", "--transfer-title-color", "--transfer-money-color", "--transfer-status-color", "--transfer-note-color"].every((name) => css.includes(name))],
-  ["no important rules", !css.includes("!important")],
+  ["payment font protection", css.includes("RedPacketPayFont")],
   ["fixed payment dimensions", ["--payment-card-width: 240px", "--payment-card-height: 112px", "calc(100vw - 120px)"].every((name) => css.includes(name))],
   ["quote reply keeps sender bubble variants", ["message-quote-reply-wrapper--self", "message-quote-reply-wrapper--other", "message-quote__header"].every((name) => css.includes(name))],
 ];

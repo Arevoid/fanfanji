@@ -1,0 +1,52 @@
+import assert from "node:assert/strict";
+import { isExplicitImageRequest, assertImageGenerationTrigger, getPendingExplicitImageRequest } from "../src/features/chat/services/imageGenerationIntent";
+import { createDirectReplyCandidates } from "../src/features/chat/services/directChatService";
+import { assertImageGenerationConfiguration, createGeneratedImageMessages, resolveCharacterImageContext } from "../src/features/chat/services/characterImageService";
+import type { Character, Message } from "../src/types";
+
+assert.equal(isExplicitImageRequest("给我发张你现在的照片"), true);
+assert.equal(isExplicitImageRequest("小狗小狗，给我发张你的照片"), true);
+assert.equal(isExplicitImageRequest("给我发一张自拍"), true);
+assert.equal(isExplicitImageRequest("发张照片给我"), true);
+assert.equal(isExplicitImageRequest("给我看看你的照片"), true);
+assert.equal(isExplicitImageRequest("来张自拍"), true);
+assert.equal(isExplicitImageRequest("拍张照片给我"), true);
+assert.equal(isExplicitImageRequest("生成一张你的照片"), true);
+assert.equal(isExplicitImageRequest("生成一张你在咖啡馆的图片"), true);
+assert.equal(isExplicitImageRequest("不要发照片，只和我聊天"), false);
+assert.equal(isExplicitImageRequest("我没让你生成图片"), false);
+assert.equal(isExplicitImageRequest("他说“给我发张照片”是什么意思？"), false);
+assert.equal(isExplicitImageRequest("今天天气不错"), false);
+const pendingThread = [{ id: "ask", characterId: "char", relationId: "rel-a", conversationId: "direct:rel-a", sender: "user" as const, content: "给我发张照片", timestamp: 1 }];
+assert.equal(getPendingExplicitImageRequest("现在？", pendingThread), "给我发张照片", "model changes may retry a pending explicit request");
+assert.equal(getPendingExplicitImageRequest("再试一次", pendingThread), "给我发张照片");
+assert.equal(getPendingExplicitImageRequest("现在？", [...pendingThread, { id: "image", characterId: "char", relationId: "rel-a", conversationId: "direct:rel-a", sender: "character" as const, content: "[图片]", imageSource: "generated" as const, imageAssetId: "asset", timestamp: 2 }]), null);
+assert.equal(getPendingExplicitImageRequest("现在？", [{ ...pendingThread[0], content: "我们聊聊天" }]), null);
+assert.doesNotThrow(() => assertImageGenerationTrigger("manual"));
+assert.doesNotThrow(() => assertImageGenerationTrigger("explicit-user-text", "给我看看图片"));
+assert.throws(() => assertImageGenerationTrigger("explicit-user-text", "普通聊天"));
+assert.throws(() => assertImageGenerationConfiguration({ enableImageGeneration: false } as any, { id: "char", name: "角色", avatar: "", personality: "", backstory: "", enableImageGeneration: true }));
+const fakeReply = createDirectReplyCandidates({ rawText: "（发送了一张自拍照片）", disableBracketActions: false, keepPeriods: false, characterId: "char", createId: () => "fake", currentTime: () => 1 });
+assert.equal(fakeReply.messages.length, 0, "failed generation must not leave a fake image text message");
+const actual = createGeneratedImageMessages({ messageId: "image-1", characterId: "char", imageAssetId: "asset-1", imageMimeType: "image/png", trigger: "explicit-user-text", scope: { kind: "direct", relationId: "rel-1", conversationId: "direct:rel-1" }, timestamp: 1 });
+assert.equal(actual.message.imageAssetId, "asset-1");
+assert.equal(actual.message.relationId, "rel-1");
+assert.equal(actual.message.conversationId, "direct:rel-1");
+const directCharacter = { id: "char", name: "角色", avatar: "", personality: "", backstory: "" } as Character;
+const directRelationship = { id: "rel-1", characterId: "char", userIdentityId: "identity-1", conversationId: "direct:rel-1" } as any;
+const directContext = resolveCharacterImageContext({
+  activeCharacter: directCharacter,
+  activeRelationship: directRelationship,
+  currentMessages: [{ id: "old", characterId: "other", relationId: "rel-2", sender: "user", content: "不属于当前关系", timestamp: 1 } as Message, { id: "current", characterId: "char", relationId: "rel-1", sender: "user", content: "当前关系", timestamp: 2 } as Message],
+  characters: [directCharacter],
+});
+assert.deepEqual(directContext?.recentMessages.map((message) => message.id), ["current"], "direct image context must stay relation-scoped");
+const groupCharacter = { id: "group", name: "群聊", avatar: "", personality: "", backstory: "", isGroupChat: true } as Character;
+const groupMember = { id: "member", name: "成员", avatar: "", personality: "", backstory: "" } as Character;
+const groupContext = resolveCharacterImageContext({
+  activeCharacter: groupCharacter,
+  currentMessages: [{ id: "reply", characterId: "group", sender: "character", senderId: "member", content: "刚才", timestamp: 1 } as Message],
+  characters: [groupCharacter, groupMember],
+});
+assert.equal(groupContext?.character.id, "member", "group image context should target the latest speaking member");
+console.log("imageGenerationIntent.test passed");

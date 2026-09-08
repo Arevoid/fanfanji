@@ -9,3 +9,7 @@ export function formatMemoriesForPrompt(memories: readonly MemoryItem[], prefix:
 export function formatExtractedMemorySummary(header: string, items: readonly string[]): string {
   return `${header}\n${items.map((item) => `- ${item}`).join("\n")}`;
 }
+
+export function formatDelicateMemoryDiary(header: string, items: readonly string[]): string {
+  return `${header}\n${items.join("\n\n")}`;
+}

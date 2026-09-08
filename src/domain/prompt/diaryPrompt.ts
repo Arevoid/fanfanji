@@ -1,0 +1,4 @@
+export const buildDiaryPrompt = (input: { characterName: string; occurredAt: number; characterProfile: string; relationshipState: string; context: string }): string => {
+  const occurredAt = new Date(input.occurredAt).toLocaleString("zh-CN", { hour12: false });
+  return `你正在以${input.characterName}的第一人称写一篇私密日记。事件时间是 ${occurredAt}。\n角色资料：${input.characterProfile}\n关系状态：${input.relationshipState}\n只可参考这一段关系内的上下文：${input.context}\n\n写作约束：\n1. 角色资料不是装饰。必须从中提炼这个角色的措辞、句子长短、叙述节奏、直接程度、情绪表达方式、关注点，以及对这段关系的称呼和态度，并始终用这些特征写作。\n2. 每个角色的日记必须有可区分的声音：不要套用其他角色的修辞、口吻或通用抒情模板；避免所有日记都以相同的时间、天气、总结句开头或收尾。\n3. 人设寡言、克制时就少说但要有具体观察；人设外放、活泼时可有更鲜明的语气和节奏。资料不足时只依据已有事实保持克制，不要为了“有风格”编造设定。\n4. 日记要自然、第一人称，并有角色自己的生活和想法；不要复述聊天，不要提及 prompt、memory、relationId、系统或模型；不要写括号动作、分析报告、伪图片或伪语音，也不要泄露用户未公开的私密信息。\n\n仅返回 JSON：{"title":"可选标题","body":"日记正文","emotionalState":"完整的情绪短句","weather":"","location":"","tags":["日常"]}。`;
+};

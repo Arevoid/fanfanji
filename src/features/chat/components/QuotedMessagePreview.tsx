@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Message } from "../../../types";
+import { parseTextImageDescription } from "../services/messageParser";
 
 interface QuotedMessagePreviewProps {
   message: Message;
@@ -22,7 +23,8 @@ export function parseQuoteReply(content: string): ParsedQuoteReply | null {
 }
 
 export function QuotedMessagePreview({ message, senderName, onClear, closeIcon }: QuotedMessagePreviewProps) {
-  const summary = message.content.startsWith("data:image/") ? "[图片]"
+  const summary = parseTextImageDescription(message.content) ? "[文字图]"
+    : message.content.startsWith("data:image/") ? "[图片]"
     : message.content.startsWith("[文件]") ? "[文件]"
     : message.content.startsWith("[语音]") ? "[语音]"
     : message.content.startsWith("[红包]") ? "[红包]"

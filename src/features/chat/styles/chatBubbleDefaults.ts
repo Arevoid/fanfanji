@@ -1,0 +1,5 @@
+export const CLASSIC_SELF_BUBBLE_BACKGROUND = "#18181b";
+export const CLASSIC_SELF_BUBBLE_TEXT = "#ffffff";
+export const CLASSIC_OTHER_BUBBLE_BACKGROUND = "#f4f4f5";
+export const CLASSIC_OTHER_BUBBLE_TEXT = "#18181b";
+export const CLASSIC_BUBBLE_OPACITY = 100;

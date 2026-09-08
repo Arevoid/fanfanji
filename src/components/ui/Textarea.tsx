@@ -28,7 +28,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
         resize(event.currentTarget);
         onChange?.(event);
       }}
-      className={`min-h-[96px] w-full resize-y rounded-[var(--radius-sm)] border bg-[var(--color-surface-secondary)] px-[var(--space-3)] py-[var(--space-2)] text-sm leading-5 text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] transition-[border-color,box-shadow] duration-150 ${error ? "border-[var(--color-danger)]" : "border-[var(--color-border)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--color-accent)_18%,transparent)]"} ${disabled ? "cursor-not-allowed opacity-55" : ""} ${className}`}
+      className={`min-h-[96px] w-full resize-y rounded-[var(--radius-sm)] border bg-[var(--input-bg)] px-[var(--space-3)] py-[var(--space-2)] text-sm leading-5 text-[var(--color-text-primary)] outline-none placeholder:text-[var(--input-placeholder)] transition-[border-color,box-shadow] duration-150 ${error ? "border-[var(--color-danger)]" : "border-[var(--color-border)] focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--focus-ring)]"} ${disabled ? "cursor-not-allowed opacity-55" : ""} ${className}`}
       {...props}
     />
   );

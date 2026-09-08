@@ -1,0 +1,111 @@
+/* Stage B2: legacy business-page utility classes, intentionally scoped to
+ * explicit page roots. Images, avatars, uploads, custom app-icon surfaces and
+ * inline user colours are excluded so appearance settings remain user-owned. */
+:root[data-theme="dark"] [data-theme-page] :is(.bg-white, .bg-slate-50, .bg-slate-100, .bg-stone-50, .bg-stone-100, .bg-gray-50, .bg-gray-100, .bg-neutral-50, .bg-neutral-100):not(.app-icon-surface):not(.transparent-custom-icon) {
+  background-color: var(--surface) !important;
+}
+
+:root[data-theme="dark"] [data-theme-page] :is(.bg-white\/20, .bg-white\/80, .bg-white\/90, .bg-slate-50\/25, .bg-slate-50\/50, .bg-slate-50\/60, .bg-stone-50\/50, .bg-stone-50\/80) {
+  background-color: var(--surface-raised) !important;
+}
+
+:root[data-theme="dark"] [data-theme-page] :is(.border, .border-slate-50, .border-slate-100, .border-slate-200, .border-slate-300, .border-stone-100, .border-stone-200, .border-gray-100, .border-gray-200, .border-neutral-100, .border-neutral-200, .divide-slate-100, .divide-stone-100) {
+  border-color: var(--border) !important;
+}
+
+:root[data-theme="dark"] [data-theme-page] :is(.text-black, .text-slate-900, .text-slate-800, .text-stone-900, .text-stone-850, .text-stone-800, .text-neutral-950, .text-neutral-900, .text-gray-900, .text-gray-800) {
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme="dark"] [data-theme-page] :is(.text-slate-700, .text-slate-600, .text-stone-700, .text-stone-600, .text-neutral-800, .text-neutral-700, .text-gray-700, .text-gray-600) {
+  color: var(--text-secondary) !important;
+}
+
+:root[data-theme="dark"] [data-theme-page] :is(.text-slate-500, .text-slate-400, .text-stone-500, .text-stone-400, .text-neutral-500, .text-gray-500, .text-gray-400) {
+  color: var(--text-tertiary) !important;
+}
+
+:root[data-theme="dark"] [data-theme-page] :is(input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]), textarea, select) {
+  background-color: var(--input-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border) !important;
+  color-scheme: dark;
+}
+
+:root[data-theme="dark"] [data-theme-page] :is(input, textarea)::placeholder {
+  color: var(--input-placeholder) !important;
+}
+
+/* Legacy page buttons that have not yet adopted Button use the same semantic
+ * primary/tab colours. The selector intentionally requires a page boundary. */
+:root[data-theme="dark"] [data-theme-page] button:is(.bg-neutral-950, .bg-slate-900, .bg-slate-800, .bg-black) {
+  background-color: var(--button-primary-bg) !important;
+  color: var(--button-primary-text) !important;
+}
+
+:root[data-theme="dark"] [data-theme-page] button:is(.bg-neutral-950, .bg-slate-900, .bg-slate-800, .bg-black) :is(svg, path) {
+  color: currentColor;
+  stroke: currentColor;
+}
+
+:root[data-theme="dark"] [data-theme-page] button:disabled {
+  background-color: var(--button-disabled-bg) !important;
+  border-color: var(--button-disabled-border) !important;
+  color: var(--button-disabled-text) !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme="dark"] [data-theme-page] :is(.bg-stone-100, .bg-slate-100) > button:is(.bg-neutral-950, .bg-slate-900, .bg-slate-800) {
+  background-color: var(--tab-active-bg) !important;
+  color: var(--tab-active-text) !important;
+}
+
+/* Text/image content remains intact; only its surrounding system card changes. */
+:root[data-theme="dark"] [data-theme-page="moments"] .moments-comment-list,
+:root[data-theme="dark"] [data-theme-page="forum"] .forum-quote,
+:root[data-theme="dark"] [data-theme-page="forum"] [data-forum-tombstone] {
+  background: var(--surface-raised);
+  border-color: var(--border);
+}
+
+/* Moment likes/comments are a WeChat-style shelf, not a light card in dark mode. */
+[data-theme-page="moments"] .moments-reaction-divider {
+  border-bottom: 1px solid var(--divider);
+}
+
+:root[data-theme="dark"] [data-theme-page="moments"] .moments-reaction-shelf {
+  background-color: var(--surface-raised) !important;
+  color: var(--text-primary);
+}
+
+:root[data-theme="dark"] [data-theme-page="moments"] .moments-reaction-divider,
+:root[data-theme="dark"] [data-theme-page="moments"] .moments-comment-item:not(:first-child) {
+  border-color: var(--divider) !important;
+}
+
+/* Main feed separators must not inherit Tailwind's light divide colour. */
+:root[data-theme="dark"] [data-theme-page="moments"] .divide-y > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--divider) !important;
+}
+
+/* The chat tab bar deliberately inverts its active state in dark mode: the
+ * current tab is subdued, while available destinations stay light. */
+:root[data-theme="dark"] .chat-tab-nav-item--active {
+  color: var(--text-tertiary) !important;
+}
+
+:root[data-theme="dark"] .chat-tab-nav-item--inactive {
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme="dark"] [data-theme-page="forum"] .forum-thread-feed {
+  border-color: var(--divider) !important;
+}
+
+:root[data-theme="dark"] [data-theme-page="offline"] {
+  --offline-page-bg: var(--app-bg);
+  --offline-card-bg: var(--surface);
+  --offline-text: var(--text-primary);
+  --offline-muted: var(--text-secondary);
+  --offline-border: var(--border);
+}

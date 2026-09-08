@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { validateForumGeneratedText } from "../src/domain/forum/forumContentSafety";
+const source = readFileSync(new URL("../src/features/forum/services/forumGenerationService.ts", import.meta.url), "utf8");
+assert.match(source, /情感|校园|都市怪谈|树洞|宠物/);
+assert.match(source, /禁止括号动作/);
+const sanitized = validateForumGeneratedText("（叹气）我发了一张图片");
+assert.equal(sanitized.text.includes("叹气"), false, "parenthetical action is removed before persistence");
+assert.equal(validateForumGeneratedText("[发送于: 12:00]").valid, false);
+assert.equal(validateForumGeneratedText("我朋友遇到一点麻烦，想听听大家意见。 ").valid, true);
+console.log("forum content variety tests passed");

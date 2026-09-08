@@ -1,4 +1,9 @@
 import { Character, WorldBookEntry } from "../types";
+import { normalizeImportedWorldBookPosition } from "../domain/worldbook/worldBookPosition";
+import * as JSZipModule from "jszip";
+import { createId } from "../core/id/createId";
+
+const JSZip = ((JSZipModule as typeof JSZipModule & { default?: typeof JSZipModule }).default ?? JSZipModule) as typeof import("jszip");
 
 // PNG Character Card text chunk parser
 export async function parsePngChunks(file: File): Promise<string | null> {
@@ -97,17 +102,19 @@ export const mapSillyTavernToCharacter = (json: any, defaultAvatar: string): Cha
   let bstory = data.creator_notes || data.creator || "";
   
   // Try mapping common fields
-  let ageNum: number | "" = "";
+  let ageNum: number | "" | "∞" = "";
   if (data.age !== undefined && data.age !== null && data.age !== "") {
-    const parsedAge = parseInt(String(data.age));
-    if (!isNaN(parsedAge)) {
-      ageNum = parsedAge;
+    const rawAge = String(data.age).trim();
+    if (/^(?:∞|无限|永恒)$/i.test(rawAge)) ageNum = "∞";
+    else {
+      const parsedAge = parseInt(rawAge);
+      if (!isNaN(parsedAge)) ageNum = parsedAge;
     }
   } else {
+    const infiniteAgeMatch = pDetails.match(/(?:年龄|Age|age|岁)[:：\s]*(∞|无限|永恒)/i);
     const ageMatch = pDetails.match(/(?:年龄|Age|age|岁)[:：\s]*(\d+)/i);
-    if (ageMatch) {
-      ageNum = parseInt(ageMatch[1]);
-    }
+    if (infiniteAgeMatch) ageNum = "∞";
+    else if (ageMatch) ageNum = parseInt(ageMatch[1]);
   }
 
   let genderStr = data.gender || "";
@@ -194,22 +201,7 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
     kwString = String(stEntry.keywords);
   }
 
-  let mappedPos: "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history" = "after_char_def";
-  const stPos = stEntry.position;
-  if (stPos !== undefined && stPos !== null) {
-    const pStr = String(stPos).toLowerCase();
-    if (pStr.includes("author") || pStr === "3") {
-      mappedPos = "after_char_def";
-    } else if (pStr.includes("before_char") || pStr.includes("before_body") || pStr === "0") {
-      mappedPos = "before_char_def";
-    } else if (pStr.includes("after_char") || pStr.includes("after_body") || pStr === "1") {
-      mappedPos = "after_char_def";
-    } else if (pStr.includes("chat") || pStr.includes("story") || pStr === "2") {
-      mappedPos = "before_chat_history";
-    } else if (pStr.includes("main") || pStr.includes("depth") || pStr === "4") {
-      mappedPos = "after_main_prompt";
-    }
-  }
+  const mappedPos = normalizeImportedWorldBookPosition(stEntry.position, "silly-tavern");
 
   let mappedDepth = 5;
   if (stEntry.insertion_order !== undefined && stEntry.insertion_order !== null) {
@@ -230,7 +222,7 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
   }
 
   return {
-    id: `wb-entry-${characterId}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    id: createId(`wb-entry-${characterId}`),
     title: String(title),
     category: "世界书",
     content: String(stEntry.content || ""),
@@ -250,99 +242,25 @@ export const parseTextToWorldBookEntries = (text: string, filename: string): Wor
   if (!trimmedText) return [];
   
   return [{
-    id: "wb-" + Date.now() + "-" + Math.floor(Math.random() * 1000000),
+    id: createId("wb"),
     title: nameWithoutExt,
     content: trimmedText,
     characterId: "global",
     category: "导入词条",
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    triggerType: "constant",
+    isActive: true,
+    position: "after_char_def",
+    depth: 5,
   }];
 };
-
-export function splitTextToOfflineSegments(text: string): { content: string; isNarration: boolean }[] {
-  if (!text) return [];
-  const segments: { content: string; isNarration: boolean }[] = [];
-  
-  // Normalize line breaks and remove duplicate spaces
-  let processedText = text.replace(/\r\n/g, "\n").trim();
-  
-  // Clean up any double empty parentheses or brackets if they happen to appear
-  processedText = processedText.replace(/\(\s*\)|（\s*）/g, "").trim();
-
-  const hasQuotes = /[“\"「『‘'”」』’']/.test(processedText);
-
-  // This regex matches:
-  // 1. Parenthesized/bracketed blocks: (...) or （...） or [...] or 【...】 or *...*
-  // 2. Quoted blocks: “...” or 「...」 or 『...』 or "..." or '...'
-  const regex = /(\([^)]+\)|（[^）]+）|\[[^\]]+\]|【[^】]+】|\*[^*]+\*|[“"「『‘'][^”"」』’']+[”"」』’'])/g;
-  
-  let match;
-  let lastIndex = 0;
-  
-  while ((match = regex.exec(processedText)) !== null) {
-    const matchText = match[0];
-    const matchIndex = match.index;
-    
-    // Process any text between the last match and the current match
-    if (matchIndex > lastIndex) {
-      const betweenText = processedText.substring(lastIndex, matchIndex).trim();
-      if (betweenText) {
-        // Clean up trailing colons or dialogue indicators
-        const cleanText = betweenText.replace(/^[a-zA-Z0-9_\u4e00-\u9fa5]+\s*[:：]\s*/, "").replace(/[:：]\s*$/, "").trim();
-        if (cleanText) {
-          // If there are quotes elsewhere in the response, plain text outside quotes is narration.
-          // Otherwise, plain text defaults to dialogue in a bubble!
-          segments.push({ content: cleanText, isNarration: hasQuotes });
-        }
-      }
-    }
-    
-    // Process the match itself
-    let trimmedMatch = matchText.trim();
-    const isParenthesized = (
-      (trimmedMatch.startsWith("(") && trimmedMatch.endsWith(")")) ||
-      (trimmedMatch.startsWith("（") && trimmedMatch.endsWith("）")) ||
-      (trimmedMatch.startsWith("[") && trimmedMatch.endsWith("]")) ||
-      (trimmedMatch.startsWith("【") && trimmedMatch.endsWith("】")) ||
-      (trimmedMatch.startsWith("*") && trimmedMatch.endsWith("*"))
-    );
-    
-    if (isParenthesized) {
-      // Strip the parentheses
-      const cleanContent = trimmedMatch.substring(1, trimmedMatch.length - 1).trim();
-      if (cleanContent) {
-        segments.push({ content: cleanContent, isNarration: true });
-      }
-    } else {
-      // It's a quoted block, strip quotes
-      const cleanContent = trimmedMatch.substring(1, trimmedMatch.length - 1).trim();
-      if (cleanContent) {
-        segments.push({ content: cleanContent, isNarration: false });
-      }
-    }
-    
-    lastIndex = regex.lastIndex;
-  }
-  
-  // Process any remaining text after the last match
-  if (lastIndex < processedText.length) {
-    const remainingText = processedText.substring(lastIndex).trim();
-    if (remainingText) {
-      const cleanText = remainingText.replace(/^[a-zA-Z0-9_\u4e00-\u9fa5]+\s*[:：]\s*/, "").replace(/[:：]\s*$/, "").trim();
-      if (cleanText) {
-        segments.push({ content: cleanText, isNarration: hasQuotes });
-      }
-    }
-  }
-  
-  return segments;
-}
 
 export function cleanOnlineMessage(text: string, disableBracketActions: boolean): string {
   if (!text) return "";
   
-  // Strip any accidental "[发送时间: ...]" prefixes from the model output
-  let processedText = text.replace(/\[\s*发送时间\s*:\s*[^\]]+\]/gi, "").trim();
+  // Strip accidental hidden date-time metadata, including model-shortened
+  // variants such as "[时间：2026-08-11 23:42]".
+  let processedText = text.replace(/\[\s*(?:历史发送时间|历史时间|当前时间|本地时间|现实时间|时间戳|消息时间|发送时间|时间)\s*[:：]\s*[^\]]*(?:\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}\s*[-/]\s*\d{1,2}\s*[-/]\s*\d{1,2})[^\]]*(?:\d{1,2}\s*[:：]\s*\d{2})[^\]]*\]/gi, "").trim();
   
   // Clean up any double empty parentheses or brackets if they happen to appear
   processedText = processedText.replace(/\(\s*\)|（\s*）/g, "").trim();
@@ -351,6 +269,13 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
   const hasQuotes = /[“「『”」』]/.test(processedText);
   
   if (hasQuotes) {
+    if (!disableBracketActions) {
+      // When filtering is off, preserve concise parenthesized actions that sit
+      // outside quoted dialogue (for example: （轻笑）“你来了”). The old
+      // quoted-text branch kept only dialogue and silently discarded them.
+      const tokens = processedText.match(/\([^)]*\)|（[^）]*）|\*[^*]+\*|[“「『][^”」』]+[”」』]/g);
+      if (tokens && tokens.length > 0) return tokens.join("\n").trim();
+    }
     // If there are quotes, we ONLY extract the content inside quotes as the dialogue,
     // and completely discard all narration/scenery/parentheses outside the quotes!
     const regex = /[“「『]([^”」』]+)[”」』]/g;
@@ -383,7 +308,10 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
   
   for (const line of lines) {
     let trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed) {
+      if (cleanedLines.length > 0 && cleanedLines[cleanedLines.length - 1] !== "") cleanedLines.push("");
+      continue;
+    }
     
     // Check if the entire line is wrapped in parentheses/brackets/asterisks (representing action/narration settings)
     const isActionOrNarrationLine = (
@@ -426,62 +354,98 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
     }
   }
   
-  return cleanedLines.join("\n").trim();
+  return cleanedLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-export function splitIntoWeChatBubbles(text: string, keepPeriods: boolean = false): string[] {
+export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = false): string[] {
   if (!text) return [];
-  
-  // Split by newlines first to ensure each paragraph/line break gets its own bubble
-  const lines = text.split(/\r?\n/);
+
+  // This is only a safety limit for an unbroken, very long answer. The model
+  // supplied blank lines remain the primary semantic bubble boundaries.
+  const MAX_BUBBLE_LENGTH = 120;
+  const isSpecialMessage = (line: string): boolean =>
+    line.startsWith("[红包]")
+    || line.startsWith("[转账]")
+    || line.startsWith("[系统]")
+    || line.startsWith("[语音")
+    || line.startsWith("[表情]|")
+    || line.startsWith("[语音通话]");
+  const isExplicitSpeakerLine = (line: string): boolean =>
+    !line.startsWith("[")
+    && !line.startsWith("【")
+    && /^[^：:\n]{1,24}\s*[：:](?=\s*\S)/u.test(line);
+  const isStructuredFieldLine = (line: string): boolean => /^【[^】\n]+】\s*[：:]/u.test(line);
+  const normalizeBubbleText = (value: string): string => value.trim();
   const results: string[] = [];
-  
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (!trimmedLine) continue;
-    
-    // Do not split special lines like red packets, voice, transfers, stickers, etc.
-    if (
-      trimmedLine.startsWith("[红包]") ||
-      trimmedLine.startsWith("[转账]") ||
-      trimmedLine.startsWith("[系统]") ||
-      trimmedLine.startsWith("[语音") ||
-      trimmedLine.startsWith("[表情]|") ||
-      trimmedLine.startsWith("[语音通话]")
-    ) {
-      results.push(trimmedLine);
+  let paragraph: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+
+    // Profile cards and other labelled lists are one semantic answer. Keep
+    // their line breaks visible instead of turning every field into a bubble.
+    if (paragraph.every(isStructuredFieldLine)) {
+      results.push(normalizeBubbleText(paragraph.join("\n")));
+      paragraph = [];
+      return;
+    }
+
+    const paragraphText = paragraph.join("\n").trim();
+    if (paragraphText.length <= MAX_BUBBLE_LENGTH) {
+      results.push(normalizeBubbleText(paragraphText));
+      paragraph = [];
+      return;
+    }
+
+    // If the model omitted semantic blank lines, only split an unusually
+    // long block at complete sentence boundaries. There is deliberately no
+    // fixed sentence-count rule here: two, four, or more short sentences can
+    // stay together when they form one coherent reply.
+    const segments = paragraph.flatMap((line) => line.match(/[^。！？!?]+[。！？!?]+|[^。！？!?]+$/gu) || [line])
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+    let bubble = "";
+    const flushBubble = () => {
+      if (!bubble) return;
+      results.push(normalizeBubbleText(bubble));
+      bubble = "";
+    };
+    for (const segment of segments) {
+      const candidate = bubble ? `${bubble}${segment}` : segment;
+      if (bubble && candidate.length > MAX_BUBBLE_LENGTH) flushBubble();
+      if (segment.length > MAX_BUBBLE_LENGTH) {
+        for (let index = 0; index < segment.length; index += MAX_BUBBLE_LENGTH) {
+          const chunk = segment.slice(index, index + MAX_BUBBLE_LENGTH);
+          if (index + MAX_BUBBLE_LENGTH < segment.length) results.push(chunk);
+          else bubble = chunk;
+        }
+      } else {
+        bubble += segment;
+      }
+    }
+    flushBubble();
+    paragraph = [];
+  };
+
+  // Ordinary content follows semantic boundaries supplied by the model.
+  // Blank lines, special messages, and speaker labels remain explicit boundaries.
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
       continue;
     }
-    
-    // Split the line by major sentence endings: 。！？!?
-    const regex = /[^。！？!?]+[。！？!?]*/g;
-    const matches = trimmedLine.match(regex);
-    if (!matches) {
-      let finalBubble = trimmedLine;
-      if (!keepPeriods && finalBubble.endsWith("。")) {
-        finalBubble = finalBubble.replace(/。+$/, "");
-      }
-      if (finalBubble.trim()) {
-        results.push(finalBubble.trim());
-      }
+    if (isSpecialMessage(line)) {
+      flushParagraph();
+      results.push(line);
       continue;
     }
-    
-    for (const match of matches) {
-      let bubbleText = match.trim();
-      if (!bubbleText) continue;
-      
-      if (!keepPeriods && bubbleText.endsWith("。")) {
-        bubbleText = bubbleText.replace(/。+$/, "");
-      }
-      
-      if (bubbleText.trim()) {
-        results.push(bubbleText.trim());
-      }
-    }
+    if (isExplicitSpeakerLine(line) && paragraph.length > 0) flushParagraph();
+    paragraph.push(line);
   }
-  
-  return results.length > 0 ? results : [text];
+  flushParagraph();
+
+  return results.length > 0 ? results : [text.trim()];
 }
 
 export function compressImage(file: File, maxWidth: number, maxHeight: number, quality: number = 0.7): Promise<string> {
@@ -528,28 +492,168 @@ export function compressImage(file: File, maxWidth: number, maxHeight: number, q
   });
 }
 
-// @ts-ignore
-import mammothCode from "mammoth/mammoth.browser.min.js?raw";
+/**
+ * Keeps transparent PNG uploads transparent while continuing to compress
+ * ordinary images as JPEG. A PNG data URL therefore also acts as persisted
+ * rendering metadata for frameless icons/widgets without a second store.
+ */
+export function compressImagePreservingTransparency(
+  file: File,
+  maxWidth: number,
+  maxHeight: number,
+  quality: number = 0.8,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const source = event.target?.result as string;
+      const image = new Image();
+      image.onload = () => {
+        let width = image.width;
+        let height = image.height;
+        if (width > maxWidth || height > maxHeight) {
+          const scale = Math.min(maxWidth / width, maxHeight / height);
+          width = Math.max(1, Math.round(width * scale));
+          height = Math.max(1, Math.round(height * scale));
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          resolve(source);
+          return;
+        }
+        context.clearRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+
+        let hasTransparency = false;
+        if (file.type.toLowerCase() === "image/png") {
+          const pixels = context.getImageData(0, 0, width, height).data;
+          for (let index = 3; index < pixels.length; index += 4) {
+            if (pixels[index] < 255) {
+              hasTransparency = true;
+              break;
+            }
+          }
+        }
+        resolve(hasTransparency
+          ? canvas.toDataURL("image/png")
+          : canvas.toDataURL("image/jpeg", quality));
+      };
+      image.onerror = reject;
+      image.src = source;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+export const isTransparencyPreservedImage = (value?: string | null): boolean =>
+  /^data:image\/png(?:;|,)/i.test(value || "");
+
+let mammothCodePromise: Promise<string> | null = null;
+
+const loadMammothCode = async (): Promise<string> => {
+  if (!mammothCodePromise) {
+    // Keep the large browser parser out of the initial bundle. It is only
+    // needed when a user imports a DOCX file; the OOXML path remains the
+    // immediate compatibility fallback if this optional chunk fails.
+    // @ts-ignore Vite resolves the ?raw asset at build time.
+    mammothCodePromise = import("mammoth/mammoth.browser.min.js?raw")
+      .then((module) => module.default);
+  }
+  return mammothCodePromise;
+};
+
+const decodeDocxXml = (value: string): string => value
+  .replace(/&lt;/g, "<")
+  .replace(/&gt;/g, ">")
+  .replace(/&quot;/g, '"')
+  .replace(/&apos;/g, "'")
+  .replace(/&amp;/g, "&")
+  .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+  .replace(/&#x([\da-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
+
+export const extractTextFromDocxXml = (xml: string): string => decodeDocxXml(xml
+  .replace(/<w:tab\b[^>]*\/?\s*>/gi, "\t")
+  .replace(/<w:(?:br|cr)\b[^>]*\/?\s*>/gi, "\n")
+  .replace(/<\/w:p>/gi, "\n")
+  .replace(/<(?:[\w.-]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?t>/gi, "$1")
+  .replace(/<[^>]+>/g, ""))
+  .replace(/[ \t]+\n/g, "\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+
+export async function extractSupplementalDocxText(arrayBuffer: ArrayBuffer): Promise<{ main: string; supplemental: string }> {
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const documentXml = await zip.file("word/document.xml")?.async("string") || "";
+  const main = extractTextFromDocxXml(documentXml);
+  const sections: string[] = [];
+  const supplementalFiles = Object.keys(zip.files)
+    .filter((name) => /^word\/(?:header\d+|footer\d+|comments|footnotes|endnotes)\.xml$/i.test(name))
+    .sort();
+  for (const name of supplementalFiles) {
+    const xml = await zip.file(name)?.async("string") || "";
+    const content = extractTextFromDocxXml(xml);
+    if (!content || sections.includes(content)) continue;
+    const label = /header/i.test(name)
+      ? "页眉"
+      : /footer/i.test(name)
+        ? "页脚"
+        : /footnotes/i.test(name)
+          ? "脚注"
+          : /endnotes/i.test(name)
+            ? "尾注"
+            : "批注";
+    sections.push(`【${label}】\n${content}`);
+  }
+  return { main, supplemental: sections.join("\n\n") };
+}
 
 export async function safeParseDocx(arrayBuffer: ArrayBuffer): Promise<string> {
+  // OOXML is the compatibility baseline. It does not require dynamic code
+  // execution, so restrictive and older mobile WebViews can still import the
+  // complete document when the Mammoth browser bundle cannot initialize.
+  const extracted = await extractSupplementalDocxText(arrayBuffer);
   const g = typeof window !== "undefined" ? window : globalThis;
   // @ts-ignore
   if (!g.mammoth) {
     try {
+      const mammothCode = await loadMammothCode();
       const fn = new Function("exports", "module", "define", mammothCode);
       fn(undefined, undefined, undefined);
     } catch (e) {
       console.error("Failed to load mammoth browser bundle", e);
+      if (extracted.main) {
+        return [extracted.main, extracted.supplemental].filter(Boolean).join("\n\n");
+      }
       throw new Error("初始化 DOCX 解析器失败");
     }
   }
   // @ts-ignore
   const mammothInstance = g.mammoth;
   if (!mammothInstance) {
+    if (extracted.main) {
+      return [extracted.main, extracted.supplemental].filter(Boolean).join("\n\n");
+    }
     throw new Error("DOCX 解析器未加载成功");
   }
-  const result = await mammothInstance.extractRawText({ arrayBuffer });
-  return result.value;
+  let mammothText = "";
+  try {
+    const result = await mammothInstance.extractRawText({ arrayBuffer });
+    mammothText = typeof result.value === "string" ? result.value : "";
+  } catch (error) {
+    console.warn("Mammoth DOCX extraction failed; using OOXML fallback.", error);
+  }
+  const compact = (value: string) => value.replace(/\s+/gu, "");
+  const rawCompact = compact(extracted.main);
+  const mammothCompact = compact(mammothText);
+  // Mammoth's paragraph spacing is preferred only when it contains every
+  // piece of OOXML body text. A simple length comparison can hide omissions.
+  const main = rawCompact && mammothCompact.includes(rawCompact) ? mammothText : extracted.main;
+  return [main, extracted.supplemental].filter((part) => part.trim()).join("\n\n");
 }
 
 

@@ -3,14 +3,17 @@ import { readObject } from "./repositoryUtils";
 import { writeJson } from "../storageAdapter";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 
-export type MomentGenerationTaskStatus = "generated" | "deleted";
+export type MomentGenerationTaskStatus = "generated" | "deleted" | "skipped" | "blocked";
 
 export interface MomentGenerationTask {
   taskKey: string;
   characterId: string;
+  /** Present for direct-chat Moments; omitted for legacy character-scoped tasks. */
+  relationId?: string;
   date: string;
   type: "character-moment";
   status: MomentGenerationTaskStatus;
+  blockedReason?: "prohibited-content";
   momentId?: string;
   updatedAt: number;
 }

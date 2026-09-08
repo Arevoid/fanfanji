@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { createOfflineStoryHandoffMemory, getOfflineMemorySourceMessages, hasUnsyncedOfflineMemoryProgress } from "../src/domain/memory/offlineMemorySync";
+import { createOfflineStoryHandoffMemory, getOfflineMemorySourceMessages, getOfflineStorySummaryMarker, hasOfflineStorySummary, hasUnsyncedOfflineMemoryProgress } from "../src/domain/memory/offlineMemorySync";
 import { MemoryService } from "../src/domain/memory/MemoryService";
-import type { Character, Message, OfflineStory } from "../src/types";
+import type { Character, MemoryItem, Message, OfflineStory } from "../src/types";
 
 const message = (id: string, content: string, extras: Partial<Message> = {}): Message => ({
   id, characterId: "a", sender: "user", content, timestamp: 1, ...extras,
@@ -10,6 +10,13 @@ const story = (messages: Message[], extras: Partial<OfflineStory> = {}): Offline
   id: "story-a", characterId: "a", title: "测试", createdAt: 1, updatedAt: 1, mode: "continue", messages, ...extras,
 });
 const character: Character = { id: "a", name: "A", avatar: "", personality: "", backstory: "" };
+const summaryMemory = (currentStory: OfflineStory): MemoryItem => ({
+  id: "summary-a",
+  characterId: currentStory.characterId,
+  relationId: currentStory.relationId,
+  content: `[${getOfflineStorySummaryMarker(currentStory)}]\n- summary`,
+  timestamp: 1,
+});
 const tests: Array<[string, () => void | Promise<void>]> = [
   ["A importedContext is excluded", () => assert.deepEqual(getOfflineMemorySourceMessages(story([message("old", "old", { isImportedContext: true }), message("new", "new")])).map((item) => item.id), ["new"])],
   ["B new plot is retained", () => assert.equal(getOfflineMemorySourceMessages(story([message("new", "约定明天见")])).length, 1)],
@@ -33,16 +40,54 @@ const tests: Array<[string, () => void | Promise<void>]> = [
   ["N legacy imported id is excluded", () => assert.equal(getOfflineMemorySourceMessages(story([message("offline-import-x", "old")])).length, 0)],
   ["O synchronization metadata does not change story messages", () => assert.equal(story([message("new", "x")], { syncedSourceMessageIds: ["new"] }).messages.length, 1)],
   ["P no progress means no automatic sync candidate", () => assert.equal(hasUnsyncedOfflineMemoryProgress(story([], { lastSyncedMessageCount: 0 })), false)],
-  ["Q fallback handoff keeps the online marker, current character, and a factual event summary", () => {
+  ["Q existing summary is recognized", () => {
+    const currentStory = story([message("new", "x")], { archivedAt: 1, lastSyncedMessageCount: 1, memorySyncStatus: "synced" });
+    assert.equal(hasOfflineStorySummary(currentStory, [summaryMemory(currentStory)]), true);
+  }],
+  ["R deleted summary is recognized as missing", () => {
+    const currentStory = story([message("new", "x")], { archivedAt: 1, lastSyncedMessageCount: 1, memorySyncStatus: "synced" });
+    assert.equal(hasOfflineStorySummary(currentStory, []), false);
+  }],
+  ["S fallback handoff keeps the online marker, current character, and a factual event summary", () => {
     const handoff = createOfflineStoryHandoffMemory({ story: story([message("new", "明天一起去看电影")]), sourceMessages: [message("new", "明天一起去看电影")], characterId: "a", id: "handoff", timestamp: 2 });
     assert.equal(handoff.characterId, "a");
     assert.ok(handoff.content.includes("offline-story:story-a:0-1"));
     assert.ok(handoff.content.includes("用户与当前角色曾讨论或约定一起看电影。"));
   }],
-  ["R fallback handoff is retrievable for the next online prompt", () => {
+  ["T fallback handoff is retrievable for the next online prompt", () => {
     const handoff = createOfflineStoryHandoffMemory({ story: story([message("new", "明天一起去看电影")]), sourceMessages: [message("new", "明天一起去看电影")], characterId: "a", id: "handoff", timestamp: 2 });
     const recalled = MemoryService.retrieveRelevantMemories({ characterId: "a", queryText: "刚才我们约好了什么", existingMemories: [handoff], limit: 5, scenario: "chat" });
     assert.equal(recalled[0]?.id, "handoff");
+  }],
+  ["U confirmed fallback uses the replaceable canonical summary marker", () => {
+    const currentStory = story([message("new", "明天一起去看电影")]);
+    const handoff = createOfflineStoryHandoffMemory({ story: currentStory, sourceMessages: currentStory.messages, characterId: "a", id: "handoff-summary", timestamp: 2, marker: "summary" });
+    assert.ok(handoff.content.includes(`offline-story:${currentStory.id}:summary`));
+    assert.equal(hasOfflineStorySummary(currentStory, [handoff]), true);
+  }],
+  ["V confirmed API fallback retains safe speaker-labelled source content", () => {
+    const sourceMessages = [
+      message("user-detail", "我把钥匙放在玄关的蓝色盒子里"),
+      message("character-detail", "知道了，我回去会先看蓝色盒子", { sender: "character" }),
+    ];
+    const currentStory = story(sourceMessages);
+    const handoff = createOfflineStoryHandoffMemory({
+      story: currentStory,
+      sourceMessages,
+      characterId: "a",
+      characterName: "A",
+      id: "safe-fallback",
+      timestamp: 2,
+      marker: "summary",
+      includeConfirmedExcerpts: true,
+    });
+    assert.ok(handoff.content.includes("用户在线下剧情中留下过可核对的表达：我把钥匙放在玄关的蓝色盒子里"));
+    assert.ok(handoff.content.includes("A在线下剧情中留下过可核对的回应：知道了，我回去会先看蓝色盒子"));
+  }],
+  ["W confirmed API fallback excludes graphic source excerpts", () => {
+    const currentStory = story([message("unsafe", "角色脱下内裤并继续动作")]);
+    const handoff = createOfflineStoryHandoffMemory({ story: currentStory, sourceMessages: currentStory.messages, characterId: "a", id: "safe-fallback", timestamp: 2, marker: "summary", includeConfirmedExcerpts: true });
+    assert.equal(handoff.content.includes("脱下内裤"), false);
   }],
 ];
 

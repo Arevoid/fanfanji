@@ -1,0 +1,83 @@
+import assert from "node:assert/strict";
+import { deriveProactiveOfflinePresenceEvidence } from "../src/features/chat/services/proactiveOfflineContext";
+import type { Message } from "../src/types";
+
+const message = (id: string, sender: Message["sender"], content: string, timestamp: number, isOffline = false): Message => ({
+  id,
+  sender,
+  content,
+  timestamp,
+  characterId: "char-1",
+  relationId: "relation-1",
+  isOffline,
+});
+
+const confirmed = deriveProactiveOfflinePresenceEvidence({
+  messages: [
+    message("u-1", "user", "我开门了，你到了吗？", 1),
+    message("c-1", "character", "我就在门口，进来吧。", 2),
+  ],
+});
+assert.equal(confirmed.state, "co_location_confirmed");
+assert.equal(confirmed.userConfirmedArrival, true);
+assert.equal(confirmed.userRequestedOffline, false);
+assert.equal(confirmed.characterClaimedArrival, true);
+
+const downstairsHandoff = deriveProactiveOfflinePresenceEvidence({
+  messages: [
+    message("u-3", "user", "我在楼下", 8),
+    message("c-4", "character", "好，哥下来了。", 9),
+    message("c-5", "character", "外面有点凉，你在楼门口等我就行。", 10),
+  ],
+});
+assert.equal(downstairsHandoff.state, "co_location_confirmed");
+
+const characterOnly = deriveProactiveOfflinePresenceEvidence({
+  messages: [message("c-2", "character", "我已经到你家门口了。", 3)],
+});
+assert.equal(characterOnly.state, "arrival_claimed");
+assert.equal(characterOnly.userConfirmedArrival, false);
+assert.equal(characterOnly.userRequestedOffline, false);
+
+const explicitHandoff = deriveProactiveOfflinePresenceEvidence({
+  messages: [
+    message("u-4", "user", "发起线下见面！", 11),
+    message("c-6", "character", "我就站在你面前，还要怎么发起？", 12),
+  ],
+});
+assert.equal(explicitHandoff.state, "arrival_claimed");
+assert.equal(explicitHandoff.userRequestedOffline, true);
+assert.equal(explicitHandoff.characterClaimedArrival, true);
+
+const screenshotNaturalLanguageHandoff = deriveProactiveOfflinePresenceEvidence({
+  messages: [
+    message("u-5", "user", "发起线下见面！", 13),
+    message("c-7", "character", "已经在门口了，我直接进来了。", 14),
+  ],
+});
+assert.equal(screenshotNaturalLanguageHandoff.userRequestedOffline, true);
+assert.equal(screenshotNaturalLanguageHandoff.characterClaimedArrival, true);
+assert.equal(screenshotNaturalLanguageHandoff.state, "arrival_claimed");
+
+const naturalArrivalWithoutPronoun = deriveProactiveOfflinePresenceEvidence({
+  messages: [message("c-8", "character", "已经到你家门口了", 15)],
+});
+assert.equal(naturalArrivalWithoutPronoun.characterClaimedArrival, true);
+
+const futurePlan = deriveProactiveOfflinePresenceEvidence({
+  messages: [
+    message("u-2", "user", "下次你来我家吧。", 4),
+    message("c-3", "character", "我会来找你的。", 5),
+  ],
+});
+assert.equal(futurePlan.state, "remote");
+
+const offlineDoesNotTrigger = deriveProactiveOfflinePresenceEvidence({
+  messages: [
+    message("offline-u", "user", "我在门口，开门了。", 6, true),
+    message("offline-c", "character", "我已经到了。", 7, true),
+  ],
+});
+assert.equal(offlineDoesNotTrigger.state, "remote");
+
+console.log("PASS proactive offline presence requires concrete present-tense evidence from both speakers");

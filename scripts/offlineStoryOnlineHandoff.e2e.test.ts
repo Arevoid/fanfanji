@@ -56,6 +56,7 @@ const tests: Array<[string, () => void]> = [
   ["Q the final mock API request contains the dinner fact", () => assert.ok(finalMockApiRequest.systemInstruction.includes("当前角色邀请用户吃饭。"))],
   ["R the final mock API request excludes the invented balcony", () => assert.equal(finalMockApiRequest.systemInstruction.includes("阳台"), false)],
   ["S prompt block requires factual uncertainty instead of invention", () => assert.ok(finalMockApiRequest.systemInstruction.includes("Do not invent missing scenes"))],
+  ["S2 prompt block forbids denying confirmed offline facts", () => assert.ok(finalMockApiRequest.systemInstruction.includes("Never deny, forget, or contradict them"))],
   ["T one user question produces one final mock request", () => assert.equal([finalMockApiRequest].length, 1)],
 ];
 
