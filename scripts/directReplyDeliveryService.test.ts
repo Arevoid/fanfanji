@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { deliverDirectReplyCandidates } from "../src/features/chat/services/directReplyDeliveryService";
+import { deliverDirectReplyCandidates, DirectReplyDeliveryError } from "../src/features/chat/services/directReplyDeliveryService";
 import type { Message } from "../src/types";
 
 const message = (id: string, content: string): Message => ({ id, characterId: "character", sender: "character", content, timestamp: 0 });
@@ -30,4 +30,25 @@ const cancelled = await deliverDirectReplyCandidates({
   wait: async () => undefined,
 });
 assert.deepEqual(cancelled.map((value) => value.id), ["first"], "call cancellation stops unsent bubbles");
+
+const partialFailureSent: Message[] = [];
+await assert.rejects(
+  () => deliverDirectReplyCandidates({
+    candidates: { messages: [message("delivered", "已发送"), message("failing", "失败")], bubbleTexts: ["已发送", "失败"] },
+    shouldCancel: () => false,
+    onTyping: () => undefined,
+    onSendMessage: (value) => {
+      partialFailureSent.push(value);
+      if (value.id === "failing") throw new Error("second bubble failed");
+    },
+    wait: async () => undefined,
+  }),
+  (error: unknown) => {
+    assert.ok(error instanceof DirectReplyDeliveryError);
+    assert.deepEqual(error.deliveredMessages.map((value) => value.id), ["delivered"]);
+    assert.match(error.message, /second bubble failed/);
+    return true;
+  },
+);
+assert.deepEqual(partialFailureSent.map((value) => value.id), ["delivered", "failing"]);
 console.log("Direct reply delivery service: timing and cancellation boundaries passed");

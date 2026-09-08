@@ -31,7 +31,8 @@ const pipelineEnd = appChat.indexOf("const chatReplyController", pipelineStart);
 assert.ok(pipelineStart >= 0 && pipelineEnd > pipelineStart, "direct reply pipeline must remain a single explicit boundary");
 const pipeline = appChat.slice(pipelineStart, pipelineEnd);
 assert.match(pipeline, /requestDirectChatTurn\(/, "normal direct reply must keep the existing request service");
-assert.match(pipeline, /deliverDirectReplyCandidates\(/, "normal direct reply must keep the existing delivery service");
+assert.match(pipeline, /executeDirectReplyTurn\(/, "normal direct reply must route through the thin turn executor");
+assert.match(pipeline, /createDirectReplyTurnDelivery\(/, "the caller must bind existing delivery to the captured scope");
 assert.match(pipeline, /postReplyCoordinator\.schedule\(/, "post-reply work must remain behind the coordinator");
 assert.match(pipeline, /finally\s*\{[\s\S]*setIsTyping\(false\)/, "typing state must always be restored");
 
