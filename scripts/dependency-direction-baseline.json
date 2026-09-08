@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "violationCounts": {
     "core-to-concrete-feature": 2,
     "domain-to-feature-or-ui": 9,
@@ -9,5 +9,532 @@
     "src/domain/characterKnowledge/characterKnowledgeTypes.ts <-> src/domain/memory/memoryModel.ts",
     "src/domain/forum/forumStoryArc.ts <-> src/types.ts",
     "src/features/characterCognitive/promptAdapters/forumStoryCommentPromptAdapter.ts <-> src/features/characterCognitive/promptAdapters/forumStoryPromptAdapter.ts <-> src/features/characterCognitive/promptAdapters/forumStoryUpdatePromptAdapter.ts <-> src/features/forumStory/validators/forumStoryOutputValidator.ts"
+  ],
+  "edges": [
+    {
+      "rule": "core-to-concrete-feature",
+      "from": "src/core/storage/repositories/musicPlaybackHistoryRepository.ts",
+      "to": "src/features/music/services/musicTrackModel.ts"
+    },
+    {
+      "rule": "core-to-concrete-feature",
+      "from": "src/core/storage/repositories/musicRemoteLibraryRepository.ts",
+      "to": "src/features/music/services/musicTrackModel.ts"
+    },
+    {
+      "rule": "domain-to-feature-or-ui",
+      "from": "src/domain/memory/MemoryExtractor.ts",
+      "to": "src/features/characterKnowledge/services/knowledgeExtractionProtocol.ts"
+    },
+    {
+      "rule": "domain-to-feature-or-ui",
+      "from": "src/domain/memory/MemoryExtractor.ts",
+      "to": "src/features/chat/prompts/messagePromptSerializer.ts"
+    },
+    {
+      "rule": "domain-to-feature-or-ui",
+      "from": "src/domain/memory/memoryTypes.ts",
+      "to": "src/features/characterKnowledge/services/knowledgeExtractionProtocol.ts"
+    },
+    {
+      "rule": "domain-to-feature-or-ui",
+      "from": "src/domain/memory/offlineMemorySync.ts",
+      "to": "src/features/chat/prompts/messagePromptSerializer.ts"
+    },
+    {
+      "rule": "domain-to-feature-or-ui",
+      "from": "src/domain/offlineStory/offlineHandoffContext.ts",
+      "to": "src/features/chat/prompts/messagePromptSerializer.ts"
+    },
+    {
+      "rule": "domain-to-feature-or-ui",
+      "from": "src/domain/prompt/characterImagePrompt.ts",
+      "to": "src/features/chat/prompts/messagePromptSerializer.ts"
+    },
+    {
+      "rule": "domain-to-feature-or-ui",
+      "from": "src/domain/prompt/innerVoicePrompt.ts",
+      "to": "src/features/chat/prompts/messagePromptSerializer.ts"
+    },
+    {
+      "rule": "domain-to-feature-or-ui",
+      "from": "src/domain/prompt/proactiveConversationContext.ts",
+      "to": "src/features/chat/prompts/messagePromptSerializer.ts"
+    },
+    {
+      "rule": "domain-to-feature-or-ui",
+      "from": "src/domain/schedule/proactiveAppointmentFactory.ts",
+      "to": "src/features/chat/services/proactiveOfflineInvitationProtocol.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/characterPhoneOneTimeCleanup.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/contentStorageFlags.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/contentStorageRuntimeLock.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/offlineStoryDb.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/behaviorCorrectionRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/characterEventRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/characterKnowledgeRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/characterPhoneRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/characterRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/conversationSummaryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/diaryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/forumRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/imageGenerationRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/innerVoiceRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/memoryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/messageRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/momentRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/momentTopicRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/musicPlaybackHistoryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/musicWidgetRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/offlineRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/presetRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/proactiveTopicRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkChatLinkRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkNpcAutomationRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkPendingMomentRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/relationshipRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/repositoryUtils.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/scheduleRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/settingsRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/repositories/worldBookRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/App.tsx",
+      "to": "src/core/storage/storageAdapter.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppArchives.tsx",
+      "to": "src/core/storage/storageAdapter.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppCharacterPhone.tsx",
+      "to": "src/core/storage/rebuildableCache.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppCharacterPhone.tsx",
+      "to": "src/core/storage/repositories/characterPhoneRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/behaviorCorrectionRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/characterEventRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/characterKnowledgeRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/characterPhoneRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/conversationSummaryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/diaryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/forumRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/imageGenerationRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/innerVoiceRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/momentTopicRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/proactiveTopicRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkChatLinkRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkInteractionRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkPendingInteractionRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/repositories/repositoryUtils.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppChat.tsx",
+      "to": "src/core/storage/storageAdapter.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppCinema.tsx",
+      "to": "src/core/storage/cinemaAssetDb.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppCinema.tsx",
+      "to": "src/core/storage/repositories/characterKnowledgeRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppCinema.tsx",
+      "to": "src/core/storage/repositories/cinemaRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppDiary.tsx",
+      "to": "src/core/storage/repositories/characterEventRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppDiary.tsx",
+      "to": "src/core/storage/repositories/diaryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppForum.tsx",
+      "to": "src/core/storage/repositories/forumCommunityNpcRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppForum.tsx",
+      "to": "src/core/storage/repositories/forumRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppForum.tsx",
+      "to": "src/core/storage/repositories/forumTranslationRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppMemory.tsx",
+      "to": "src/core/storage/repositories/behaviorCorrectionRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppMemory.tsx",
+      "to": "src/core/storage/repositories/characterKnowledgeRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppMemory.tsx",
+      "to": "src/core/storage/repositories/conversationSummaryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppNotes.tsx",
+      "to": "src/core/storage/repositories/repositoryUtils.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppNotes.tsx",
+      "to": "src/core/storage/storageAdapter.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppOffline.tsx",
+      "to": "src/core/storage/repositories/characterKnowledgeRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppOffline.tsx",
+      "to": "src/core/storage/repositories/messageRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppOffline.tsx",
+      "to": "src/core/storage/storageAdapter.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppReading.tsx",
+      "to": "src/core/storage/readingAssetDb.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppReading.tsx",
+      "to": "src/core/storage/repositories/characterKnowledgeRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppReading.tsx",
+      "to": "src/core/storage/repositories/readingAnalysisRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppReading.tsx",
+      "to": "src/core/storage/repositories/readingCoReadingRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppReading.tsx",
+      "to": "src/core/storage/repositories/readingCoStoryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppReading.tsx",
+      "to": "src/core/storage/repositories/readingRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppReading.tsx",
+      "to": "src/core/storage/repositories/readingStoryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppRelationshipNetwork.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkChatLinkRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppRelationshipNetwork.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkInteractionRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppRelationshipNetwork.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkNpcAutomationRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppRelationshipNetwork.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkPendingMomentRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppRelationshipNetwork.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppRelationshipNetwork.tsx",
+      "to": "src/core/storage/repositories/relationshipNetworkSocialLinkRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppSettings.tsx",
+      "to": "src/core/storage/storageKeys.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/AppWorldBook.tsx",
+      "to": "src/core/storage/storageAdapter.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/HomeScreenWidgets.tsx",
+      "to": "src/core/storage/repositories/readingCoReadingRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/HomeScreenWidgets.tsx",
+      "to": "src/core/storage/repositories/readingRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/HomeScreenWidgets.tsx",
+      "to": "src/core/storage/repositories/repositoryUtils.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/HomeScreenWidgets.tsx",
+      "to": "src/core/storage/storageAdapter.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/music/MusicLibraryPanel.tsx",
+      "to": "src/core/storage/repositories/musicRemoteLibraryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/reading/ReadingBookCover.tsx",
+      "to": "src/core/storage/readingAssetDb.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/reading/ReadingCoStoryView.tsx",
+      "to": "src/core/storage/repositories/readingCoStoryRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/reading/ReadingReader.tsx",
+      "to": "src/core/storage/repositories/readingCoReadingRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/reading/ReadingStoryView.tsx",
+      "to": "src/core/storage/repositories/readingAnalysisRepository.ts"
+    },
+    {
+      "rule": "ui-to-storage-or-provider",
+      "from": "src/components/reading/ReadingStoryView.tsx",
+      "to": "src/core/storage/repositories/readingStoryRepository.ts"
+    }
   ]
 }

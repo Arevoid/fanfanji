@@ -120,6 +120,8 @@ function stronglyConnectedComponents(graph: Map<string, string[]>): string[][] {
 
 function cycleKey(component: string[]): string { return [...component].sort().join(" <-> "); }
 
+function edgeKey(edge: Edge): string { return `${edge.rule}|${edge.from}|${edge.to}`; }
+
 const { edges, graph } = collectGraph();
 const cycles = stronglyConnectedComponents(graph).map(cycleKey);
 const violationCounts = edges.reduce<Partial<Record<Rule, number>>>((counts, edge) => {
@@ -131,7 +133,15 @@ if (!existsSync(baselinePath)) {
   throw new Error(`Missing ${baselinePath}; capture the reviewed baseline before running this gate.`);
 }
 
-const baseline = JSON.parse(readFileSync(baselinePath, "utf8")) as { violationCounts?: Partial<Record<Rule, number>>; cycles?: string[] };
+const baseline = JSON.parse(readFileSync(baselinePath, "utf8")) as {
+  violationCounts?: Partial<Record<Rule, number>>;
+  edges?: Edge[];
+  cycles?: string[];
+};
+assert.ok(Array.isArray(baseline.edges), `Missing concrete dependency edges in ${baselinePath}; capture the reviewed baseline before running this gate.`);
+const baselineEdgeKeys = new Set(baseline.edges!.map(edgeKey));
+const newEdges = edges.filter((edge) => !baselineEdgeKeys.has(edgeKey(edge)));
+assert.deepEqual(newEdges, [], `Dependency direction gained ${newEdges.length} unallowlisted edge(s): ${newEdges.map(edgeKey).join(", ")}`);
 for (const rule of new Set(edges.map((edge) => edge.rule))) {
   const currentCount = violationCounts[rule] || 0;
   const baselineCount = baseline.violationCounts?.[rule] || 0;

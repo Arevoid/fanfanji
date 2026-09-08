@@ -20,9 +20,17 @@ UI/page -> feature use case -> domain policy/port -> adapter/provider
 
 ## 当前 allowlist
 
-本轮基线文件 `scripts/dependency-direction-baseline.json` 保存当前违规边和
-三组已知循环。它不是永久豁免：修改历史边时必须先更新 RFC/测试并由评审确认。
-门禁要求现有边不增加，循环不增加；本轮不以“强行清零”为目标。
+本轮基线文件 `scripts/dependency-direction-baseline.json` 保存每条违规边的
+`rule`、`from`、`to` 和三组已知循环。门禁按具体 edge 比较：删除历史边允许，
+新增 edge 直接失败，因此“删除一条旧边再加入一条新边”不会因为数量不变而绕过。
+它不是永久豁免：修改历史边时必须先更新 RFC/测试并由评审确认；本轮不以“强行
+清零”为目标。
+
+当前解析范围是 `src/` 下的 TypeScript/TSX 文件、相对路径的静态
+`import`/`export ... from` 和相对路径动态 `import()`，并解析 `.ts/.tsx/.js/.jsx`
+及 `index` 文件。当前未引入 path-alias 配置读取，也未做 barrel re-export 的
+跨层语义展开；这类非相对路径或未解析目标不会被本门禁计入，后续如需覆盖应先
+单独设计解析器与测试，不通过扩大本轮范围解决。
 
 ## 循环基线
 
@@ -36,4 +44,3 @@ UI/page -> feature use case -> domain policy/port -> adapter/provider
 
 门禁失败时停止后续修改，报告新增边/循环和触发文件。不得删除测试、跳过
 检查、把导入改成动态绕过规则，或借机迁移业务目录。
-
