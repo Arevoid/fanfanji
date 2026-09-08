@@ -230,7 +230,8 @@ import type {
   RelationshipNetworkNpc,
 } from "../domain/relationshipNetwork/relationshipNetworkTypes";
 import { analyzeMomentPhoto } from "../features/moments/services/momentPhotoAnalysisService";
-import { createDirectReplyTurnDelivery, executeDirectReplyTurn } from "../features/chat/services/directReplyTurnExecutor";
+import { createDirectReplyTurnDelivery } from "../features/chat/services/directReplyTurnExecutor";
+import { executeDirectReplyUseCase } from "../features/chat/services/directReplyUseCase";
 import { buildProactiveCognitiveContext } from "../features/chat/services/proactiveCognitiveContext";
 import { useChatCustomCss } from "../features/chat/hooks/useChatCustomCss";
 import { useChatCssTemplateCopy } from "../features/chat/hooks/useChatCssTemplateCopy";
@@ -2598,125 +2599,138 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         return buildOutcome(newMsgs.length > 0 ? "delivered" : "no_response");
       }
 
-      const turnResult = await executeDirectReplyTurn({
-        request: directTurnRequest,
-        normalizeResponse: normalizeDirectReplyResponse,
-        hasReplyText: (prepared) => Boolean(prepared.data.text),
-        createCandidateContext: (prepared) => {
+      const useCaseResult = await executeDirectReplyUseCase({
+        lifecycle,
+        turn: {
+          request: directTurnRequest,
+          normalizeResponse: normalizeDirectReplyResponse,
+          hasReplyText: (prepared) => Boolean(prepared.data.text),
+          createCandidateContext: (prepared) => {
+            const data = prepared.data;
+            const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+            return {
+              rawText: data.text,
+              disableBracketActions: turnSettings.disableBracketActions,
+              keepPeriods,
+              context: replyContext,
+              characterName: activeCharacter?.name,
+              userName: activeIdentityName,
+              allowEmoji: mayCharacterUseEmoji({
+                latestUserMessage: userMsg?.content,
+                recentCharacterMessages: currentChatMessages
+                  .filter((message) => message.sender === "character" && message.characterId === activeChatCharId)
+                  .map((message) => message.content),
+              }),
+              createId: () => createId("online"),
+              currentTime: () => Date.now(),
+              translationText: data.translation,
+              transformBubble: (bubbleText, idx) => {
+                const isVoice = activeAttachModal !== "calling" && canConvertBubbleToVoice(turnCharacter, userMsg, messages, idx, bubbleText, replyContext);
+                if (!isVoice) return bubbleText;
+                const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
+                return `[语音]|${secs}|${bubbleText}`;
+              },
+            };
+          },
+          deliver: createDirectReplyTurnDelivery({
+            onTyping: setIsTyping,
+            onSendMessage: isConnectedVoiceCall ? onSendMessage : onSendMessageRaw,
+          }),
+        },
+        postReply: ({ response: prepared, deliveredMessages: createdMessages }) => {
           const data = prepared.data;
-          const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
+          const inlineRelationship = turnRelationship
+            || (replyContext.relationId ? relationships.find((relation) => relation.id === replyContext.relationId) : undefined);
+          if (data.innerVoice && inlineRelationship) {
+            const triggerMessage = createdMessages[createdMessages.length - 1];
+            const latest = loadInnerVoiceRecords([]).value;
+            const scope = { kind: "direct" as const, relationId: inlineRelationship.id, messageId: triggerMessage.id };
+            if (!findInnerVoiceByMessage(latest, scope)) {
+              const record = createInlineInnerVoiceRecord({
+                character: turnCharacter,
+                triggerMessage,
+                relationId: inlineRelationship.id,
+                conversationId: inlineRelationship.conversationId || getConversationId(inlineRelationship.id),
+                payload: data.innerVoice,
+                settings,
+              });
+              saveInnerVoiceRecords([...latest, record]);
+              innerVoiceController.syncInlineRecord(record);
+            }
+          }
+          recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
+          if (prepared.proactiveOfflineResponseParse?.directive && pendingProactiveOfflineAppointment && userMsg) {
+            const updatedAppointment = applyProactiveOfflineResponse({
+              appointment: pendingProactiveOfflineAppointment,
+              directive: prepared.proactiveOfflineResponseParse.directive,
+              userMessageId: userMsg.id,
+              characterMessageId: createdMessages[0].id,
+              now: createdMessages[0].timestamp,
+            });
+            if (!updatedAppointment || !onSaveAppointment?.(updatedAppointment)) console.warn("Proactive offline response could not be persisted.");
+          }
+          if (prepared.proactiveOfflineParse?.directive && turnRelationship) {
+            const saved = persistProactiveOfflineInvitation({
+              relationship: turnRelationship,
+              directive: prepared.proactiveOfflineParse.directive,
+              sourceMessageId: createdMessages[0].id,
+              now: createdMessages[0].timestamp,
+            });
+            if (!saved) console.warn("Proactive offline invitation could not be persisted.");
+          }
+          if (turnRelationship && !replyContext.isGroup) {
+            maybeAutoStartOfflineFromPresence({
+              relationship: turnRelationship,
+              messages: [...sourceMsgs, ...createdMessages],
+              sourceMessage: createdMessages[createdMessages.length - 1],
+            });
+          }
+
+          postReplyResult = postReplyCoordinator.schedule({
+            mode: "send", policy: "normal_send",
+            sideEffects: { userMsg, currentChatMessages, createdMessages: [...createdMessages], activeCharacter, activeRelationship, relationships, isOffline: false, activeOfflineStoryId },
+            ...(createdMessages.length > 0 && turnRelationship && !replyContext.isGroup
+              ? { diary: { relation: turnRelationship, character: turnCharacter, ownerIdentityId: activeIdentityId, messages: [...sourceMsgs, ...createdMessages], worldBookEntries, settings } }
+              : {}),
+          });
           return {
-            rawText: data.text,
-            disableBracketActions: turnSettings.disableBracketActions,
-            keepPeriods,
-            context: replyContext,
-            characterName: activeCharacter?.name,
-            userName: activeIdentityName,
-            allowEmoji: mayCharacterUseEmoji({
-              latestUserMessage: userMsg?.content,
-              recentCharacterMessages: currentChatMessages
-                .filter((message) => message.sender === "character" && message.characterId === activeChatCharId)
-                .map((message) => message.content),
-            }),
-            createId: () => createId("online"),
-            currentTime: () => Date.now(),
-            translationText: data.translation,
-            transformBubble: (bubbleText, idx) => {
-              const isVoice = activeAttachModal !== "calling" && canConvertBubbleToVoice(turnCharacter, userMsg, messages, idx, bubbleText, replyContext);
-              if (!isVoice) return bubbleText;
-              const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
-              return `[语音]|${secs}|${bubbleText}`;
-            },
+            scheduled: postReplyResult.scheduled.length > 0,
+            failures: postReplyResult.failures,
           };
         },
-        deliver: createDirectReplyTurnDelivery({
-          onTyping: setIsTyping,
-          onSendMessage: isConnectedVoiceCall ? onSendMessage : onSendMessageRaw,
-        }),
       });
+      const turnResult = useCaseResult.turn;
       generatedCandidateIds = [...turnResult.generatedCandidateIds];
       deliveredMessageIds = [...turnResult.deliveredMessageIds];
-      if (turnResult.status === "cancelled") return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
+      if (turnResult.status === "cancelled") return useCaseResult.outcome;
       lifecyclePhase = turnResult.phase === "requesting" || turnResult.phase === "parsed" || turnResult.phase === "delivering"
         ? turnResult.phase
         : lifecyclePhase;
       if (turnResult.status === "failed") {
         if (turnResult.response && !turnResult.response.data.text) {
           publishReplyError(`⚠️ [系统出错]：${(turnResult.response.data as { error?: string }).error || "智能体未能理解该消息。"}`);
-          return buildOutcome("failed", "parsed", { kind: "parse", recoverable: true });
+          return useCaseResult.outcome;
         }
         if (turnResult.error) throw turnResult.error;
-        return buildOutcome("failed", lifecyclePhase, { kind: lifecyclePhase === "delivering" ? "delivery" : "parse", recoverable: true });
+        return useCaseResult.outcome;
       }
-      const prepared = turnResult.response;
+      if (turnResult.status === "no_response") {
+        const data = turnResult.response?.data;
+        if (isCancelledCallTurn()) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
+        publishReplyError(`⚠️ [系统出错]：${(data as { error?: string } | undefined)?.error || "智能体未能理解该消息。"}`);
+        return useCaseResult.outcome;
+      }
+      const prepared = useCaseResult.response;
       if (!prepared) return buildOutcome("failed", "parsed", { kind: "parse", recoverable: true });
-      const data = prepared.data;
-      const createdMessages = turnResult.deliveredMessageIds.map((id) =>
-        turnResult.candidates?.messages.find((message) => message.id === id)).filter((message): message is Message => Boolean(message));
+      const createdMessages = useCaseResult.deliveredMessages;
       if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
       if (createdMessages.length === 0) {
         if (isCancelledCallTurn()) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
-        publishReplyError(`⚠️ [系统出错]：${(data as { error?: string }).error || "智能体未能理解该消息。"}`);
-        return buildOutcome("failed", "parsed", { kind: "parse", recoverable: true });
+        publishReplyError(`⚠️ [系统出错]：智能体未能理解该消息。`);
+        return useCaseResult.outcome;
       }
       lifecyclePhase = "delivered";
-
-      const inlineRelationship = turnRelationship
-        || (replyContext.relationId ? relationships.find((relation) => relation.id === replyContext.relationId) : undefined);
-      if (data.innerVoice && inlineRelationship) {
-        const triggerMessage = createdMessages[createdMessages.length - 1];
-        const latest = loadInnerVoiceRecords([]).value;
-        const scope = { kind: "direct" as const, relationId: inlineRelationship.id, messageId: triggerMessage.id };
-        if (!findInnerVoiceByMessage(latest, scope)) {
-          const record = createInlineInnerVoiceRecord({
-            character: turnCharacter,
-            triggerMessage,
-            relationId: inlineRelationship.id,
-            conversationId: inlineRelationship.conversationId || getConversationId(inlineRelationship.id),
-            payload: data.innerVoice,
-            settings,
-          });
-          saveInnerVoiceRecords([...latest, record]);
-          innerVoiceController.syncInlineRecord(record);
-        }
-      }
-      recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
-      if (prepared.proactiveOfflineResponseParse?.directive && pendingProactiveOfflineAppointment && userMsg) {
-        const updatedAppointment = applyProactiveOfflineResponse({
-          appointment: pendingProactiveOfflineAppointment,
-          directive: prepared.proactiveOfflineResponseParse.directive,
-          userMessageId: userMsg.id,
-          characterMessageId: createdMessages[0].id,
-          now: createdMessages[0].timestamp,
-        });
-        if (!updatedAppointment || !onSaveAppointment?.(updatedAppointment)) console.warn("Proactive offline response could not be persisted.");
-      }
-      if (prepared.proactiveOfflineParse?.directive && turnRelationship) {
-        const saved = persistProactiveOfflineInvitation({
-          relationship: turnRelationship,
-          directive: prepared.proactiveOfflineParse.directive,
-          sourceMessageId: createdMessages[0].id,
-          now: createdMessages[0].timestamp,
-        });
-        if (!saved) console.warn("Proactive offline invitation could not be persisted.");
-      }
-      if (turnRelationship && !replyContext.isGroup) {
-        maybeAutoStartOfflineFromPresence({
-          relationship: turnRelationship,
-          messages: [...sourceMsgs, ...createdMessages],
-          sourceMessage: createdMessages[createdMessages.length - 1],
-        });
-      }
-
-      postReplyResult = postReplyCoordinator.schedule({
-        mode: "send", policy: "normal_send",
-        sideEffects: { userMsg, currentChatMessages, createdMessages, activeCharacter, activeRelationship, relationships, isOffline: false, activeOfflineStoryId },
-        ...(createdMessages.length > 0 && turnRelationship && !replyContext.isGroup
-          ? { diary: { relation: turnRelationship, character: turnCharacter, ownerIdentityId: activeIdentityId, messages: [...sourceMsgs, ...createdMessages], worldBookEntries, settings } }
-          : {}),
-      });
-      lifecyclePhase = "post_reply_scheduled";
-      return buildOutcome(createdMessages.length > 0 ? "delivered" : "no_response");
+      return useCaseResult.outcome;
     } catch (err: any) {
       if (isCancelledCallTurn() || signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
       const failedAtPhase = lifecyclePhase;

@@ -212,12 +212,14 @@ interface DirectReplyUseCaseDependencies {
 多个 feature 读取，`lifecycle` 与 cross-feature adapters 也没有完全归一。若实际
 注入仍需超过约 10–15 个 direct dependency，应停止迁移并先收敛 adapter。
 
-## Stage 3B-3 建议
+## Stage 3B-3 / 3B-4 结果
 
-第一项真正 orchestration 迁移应是**预构建 request 之后的 turn executor seam**：
+Stage 3B-3 已完成**预构建 request 之后的 turn executor seam**：
 把“request → response normalization → candidate creation → sequential delivery”
 作为一个只依赖既有 request/parser/candidate/delivery service 的小模块，输入已由
 当前 AppChat 生成的 prompt/context snapshot，输出 candidate/delivery/lifecycle
-metadata。第一步不移动 Context/Prompt、不接管 user-message persistence、不接管
-inline cross-feature side effects，也不接触 regenerate。这样可以先验证一个明确的
-application boundary，再决定是否继续收敛页面闭包。
+metadata。它没有移动 Context/Prompt、user-message persistence 或 inline cross-feature
+side effects，也没有接触 regenerate。Stage 3B-4 在此之上只增加了 normal-send 的
+`DirectReplyUseCase`：它接收既有 lifecycle input 与 prepared turn，调用该 executor，
+再通过 caller-owned adapter 调度已有 PostReplyCoordinator；没有把 38 项页面依赖
+整体搬入 service。

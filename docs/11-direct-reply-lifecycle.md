@@ -34,9 +34,10 @@ React setter、DOM、JSX、Provider、localStorage 和具体 storage implementat
 
 Outcome 只保存 ID 和分类，不保存 Prompt、response、异常正文或凭据。
 
-当前 `AppChat` 的完整 direct pipeline 仍由 Stage 3B 负责迁移到返回该 outcome
-的 executor；Stage 3A 先固定合同和 characterization seam，避免为了改返回值而
-顺手搬迁整条业务路径。
+Stage 3B-4 已把 normal direct send 的 prepared turn → delivery → post-reply
+调度包在 `DirectReplyUseCase` 中；Context/Prompt 组装、UI adapter、user-message
+persistence 与 regenerate 仍留在各自既有边界。该 outcome contract 继续作为
+页面/controller 的唯一结构化生命周期结果。
 
 ## Phases
 
