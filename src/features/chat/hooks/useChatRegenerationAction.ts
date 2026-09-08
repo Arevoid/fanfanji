@@ -13,7 +13,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     buildDirectChatMainPrompt,
     buildDirectChatContextSnapshot,
     buildDirectChatSystemInstruction,
-    projectCharacterPrompt, memories, retrieveTruthForPrivatePrompt,
+    projectCharacterPrompt, memories, contributeDirectReplyTruthContext,
     loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatUserKnowledgeBoundary,
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
     getPendingOfflineHandoff, buildPendingOfflineTimelineHandoff, isOfflineStoryHandoffMemory,
@@ -170,7 +170,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       // Recall memories
       const topK = resolveChatLongTermMemoryLimit(activeCharacter?.retrievalHistoryLimit);
       const truthRetrieval = activeRelationship
-        ? retrieveTruthForPrivatePrompt({
+        ? contributeDirectReplyTruthContext({
           scope: {
             relationId: activeRelationship.id,
             characterId: activeRelationship.characterId,

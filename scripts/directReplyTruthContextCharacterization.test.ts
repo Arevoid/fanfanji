@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { contributeDirectReplyTruthContext } from "../src/features/characterKnowledge/services/directReplyTruthContextContributor";
 import {
   countTruthRetrievalRecords,
   formatTruthRetrievalForPrompt,
@@ -125,6 +127,11 @@ const regenerateInput: TruthRetrievalInput = {
 
 const normalResult = retrieveTruthForPrivatePrompt(normalInput);
 const regenerateResult = retrieveTruthForPrivatePrompt(regenerateInput);
+const normalContributorResult = contributeDirectReplyTruthContext(normalInput);
+const regenerateContributorResult = contributeDirectReplyTruthContext(regenerateInput);
+
+assert.deepEqual(normalContributorResult, normalResult, "the contributor preserves the existing normal Truth result exactly");
+assert.deepEqual(regenerateContributorResult, regenerateResult, "the contributor preserves regenerate Truth semantics exactly");
 
 assert.deepEqual(normalResult.projection.confirmedFacts.map((claim) => claim.id), ["truth-a"]);
 assert.deepEqual(normalResult.projection.futurePlans.map((claim) => claim.id), ["truth-b"]);
@@ -190,5 +197,15 @@ assert.notDeepEqual(normalInput.alreadyPromptedMessageIds, regenerateInput.alrea
 assert.notDeepEqual(normalInput.alreadyPromptedTexts, regenerateInput.alreadyPromptedTexts);
 assert.deepEqual(normalResult, retrieveTruthForPrivatePrompt(normalInput), "normal Truth retrieval is deterministic");
 assert.deepEqual(regenerateResult, retrieveTruthForPrivatePrompt(regenerateInput), "regenerate Truth retrieval is deterministic");
+
+const contributorSource = readFileSync(new URL("../src/features/characterKnowledge/services/directReplyTruthContextContributor.ts", import.meta.url), "utf8");
+assert.match(contributorSource, /retrieveTruthForPrivatePrompt/);
+assert.doesNotMatch(contributorSource, /localStorage|indexedDB|React|apiChat|requestAi|memoryExtract|summar/u, "Truth contributor must stay provider-free and storage-free");
+
+const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
+assert.match(appChatSource, /contributeDirectReplyTruthContext/);
+assert.match(regenerationSource, /contributeDirectReplyTruthContext/);
+assert.doesNotMatch(regenerationSource, /retrieveTruthForPrivatePrompt/);
 
 console.log("PASS direct reply Truth characterization: scope, duplicate suppression, budget, summary/correction semantics, and formatting boundary");

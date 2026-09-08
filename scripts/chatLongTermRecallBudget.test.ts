@@ -9,7 +9,8 @@ const groupSource = readFileSync(new URL("../src/features/chat/prompts/groupMemb
 assert.match(chatSource, /retrieveTruthForPrivatePrompt/);
 assert.doesNotMatch(chatSource, /MemoryService\.retrieveRelevantMemories/);
 assert.match(chatSource, /maxFacts: 0/);
-assert.match(regenerationSource, /retrieveTruthForPrivatePrompt/);
+assert.match(regenerationSource, /contributeDirectReplyTruthContext/);
+assert.doesNotMatch(regenerationSource, /retrieveTruthForPrivatePrompt/);
 assert.doesNotMatch(regenerationSource, /MemoryService\.retrieveRelevantMemories/);
 assert.doesNotMatch(groupSource, /MemoryService\.retrieveRelevantMemories/);
 assert.match(groupSource, /formatTruthRetrievalForPrompt/);

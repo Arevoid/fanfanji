@@ -149,6 +149,7 @@ import { loadKnowledgeClaims } from "../core/storage/repositories/characterKnowl
 import { loadConversationSummaries, saveConversationSummaries } from "../core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections } from "../core/storage/repositories/behaviorCorrectionRepository";
 import { behaviorCorrectionRepository } from "../core/storage/repositories/behaviorCorrectionRepository";
+import { contributeDirectReplyTruthContext } from "../features/characterKnowledge/services/directReplyTruthContextContributor";
 import { formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../features/characterKnowledge/services/truthRetrievalService";
 import { createConversationSummaryRecord } from "../features/characterKnowledge/services/conversationSummaryService";
 import { createDeterministicArtifactClaim } from "../features/characterKnowledge/services/deterministicKnowledgeCapture";
@@ -1335,7 +1336,7 @@ export default function AppChat({
     const latestUserMessage = [...currentChatMessages].reverse().find((message) => message.sender === "user");
     const queryText = latestUserMessage?.content || "";
     const truthRetrieval = activeRelationship
-      ? retrieveTruthForPrivatePrompt({
+      ? contributeDirectReplyTruthContext({
         scope: {
           relationId: activeRelationship.id,
           characterId: activeRelationship.characterId,
@@ -2164,7 +2165,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       // Recall memories from Memory Vault
       const topK = resolveChatLongTermMemoryLimit(activeCharacter.retrievalHistoryLimit);
       const truthRetrieval = activeRelationship
-        ? retrieveTruthForPrivatePrompt({
+        ? contributeDirectReplyTruthContext({
           scope: {
             relationId: activeRelationship.id,
             characterId: activeRelationship.characterId,
@@ -3375,7 +3376,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     latestActiveCharacterRef, settings, serializeMessageContentForPrompt,
     activeAttachModal, callingStatus, callTranscript, detectCallTopicShift, buildDirectChatMainPrompt,
     buildDirectChatContextSnapshot,
-    projectCharacterPrompt, recallSettings, memories, retrieveTruthForPrivatePrompt,
+    projectCharacterPrompt, recallSettings, memories, contributeDirectReplyTruthContext,
     loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatUserKnowledgeBoundary,
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
     getPendingOfflineHandoff, buildPendingOfflineTimelineHandoff, isOfflineStoryHandoffMemory,
