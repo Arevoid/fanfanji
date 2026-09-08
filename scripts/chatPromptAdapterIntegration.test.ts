@@ -70,8 +70,10 @@ for (const prompt of [promptA, promptB]) {
 }
 
 const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const promptBuilderSource = readFileSync(new URL("../src/features/chat/prompts/directChatPromptBuilder.ts", import.meta.url), "utf8");
 assert.match(appChatSource, /buildChatPromptContext\(cognitiveContext/);
 assert.match(appChatSource, /formatChatPromptContext\(chatPromptContext\)/);
-assert.match(appChatSource, /assembledInstructions\.push\(cognitivePromptBlock\)/);
+assert.match(appChatSource, /cognitivePrompt: cognitivePromptBlock/);
+assert.match(promptBuilderSource, /input\.cognitivePrompt/);
 
 console.log("PASS chat prompt adapter integration, scope isolation, private-event exclusion, and legacy fallback");

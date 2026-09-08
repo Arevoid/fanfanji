@@ -7,9 +7,11 @@ import { CURRENT_SCENE_CONTINUITY_PROMPT } from "../src/features/chat/prompts/di
 
 const chatSource = fs.readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const regenerationSource = fs.readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
-const chatRuntimeSource = `${chatSource}\n${regenerationSource}`;
+const promptBuilderSource = fs.readFileSync(new URL("../src/features/chat/prompts/directChatPromptBuilder.ts", import.meta.url), "utf8");
+const chatRuntimeSource = `${chatSource}\n${regenerationSource}\n${promptBuilderSource}`;
 assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /\[CURRENT-SCENE CONTINUITY\]/);
-assert.equal((chatRuntimeSource.match(/assembledInstructions\.push\(CURRENT_SCENE_CONTINUITY_PROMPT\)/g) || []).length, 2);
+assert.equal((chatRuntimeSource.match(/buildDirectChatSystemInstruction\(\{/g) || []).length, 2);
+assert.match(promptBuilderSource, /CURRENT_SCENE_CONTINUITY_PROMPT/);
 assert.doesNotMatch(chatRuntimeSource, /sceneAnchorTranscript|Recent scene facts:/);
 
 assert.equal(isLowInformationUserEcho("老公我错了嘛", "我错了"), true);
