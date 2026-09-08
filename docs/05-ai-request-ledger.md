@@ -11,10 +11,24 @@
 
 ## 记录原则
 
-- 每次逻辑入口完成时写一条详细记录；`providerRequestCount` 统计实际尝试。
-- 网络回退、结构格式重试、别名/退化/上下文恢复等由调用方以 reason 标记。
+- 一条 Ledger record 对应一个逻辑 AI request；`providerRequestCount` 统计该逻辑请求内部的 provider attempts 总数。
+- backend → browser fallback 属于同一逻辑 request 的多个 attempts；format、alias、context retry 会产生新的逻辑 record，并通过相同 `parentActionId` 关联。
+- 当前没有逐 attempt 独立日志；provider/model/transport 表示该逻辑 record 的最后一次 attempt 状态。
+- retry/fallback reason 只允许写入受控 code。已知 code 包括：
+  `format_validation`、`context_too_large`、`degenerate_response`、`alias_identity`、
+  `backend_network`、`backend_route_missing`、`backend_test_key`、
+  `backend_model_list`、`backend_memory_extraction`、`backend_personality_summary`、
+  `backend_translation`、`translation_route_missing`；未知值会降级为
+  `unknown_retry` 或 `unknown_fallback`，不会保存原始异常文本。
 - 记录失败不能改变原有错误处理；storage 不可用时仅保留内存诊断并继续业务。
 - 只保存估算 token 或供应商明确返回的 usage；不得把字符数伪装成真实 token。
+
+## 持久化策略
+
+记录先进入有界内存队列，随后在短延迟内合并 flush；一次 flush 才会读取并整体写入
+localStorage。页面离开时做一次 best-effort flush。flush 写入前会重新读取当前存储并按
+`requestId` 合并，降低多标签页 last-write-wins 丢记录的概率。所有持久化失败都只保留
+内存诊断并告警，不会改变原始 AI 请求结果。
 
 ## 示例：普通聊天
 
@@ -45,4 +59,3 @@
 
 示例中的 ID、模型和端点是元数据；真实记录永远不应附带完整 prompt、聊天
 正文或凭据。
-

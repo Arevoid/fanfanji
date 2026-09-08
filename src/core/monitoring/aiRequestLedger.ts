@@ -4,6 +4,7 @@ import { readJson, writeJson } from "../storage/storageAdapter";
 export const AI_REQUEST_LEDGER_KEY = "fanfan_ai_request_ledger_v1";
 export const AI_REQUEST_LEDGER_RETENTION_DAYS = 30;
 export const AI_REQUEST_LEDGER_MAX_RECORDS = 300;
+const AI_REQUEST_LEDGER_FLUSH_DELAY_MS = 25;
 
 export const AI_PURPOSES = [
   "chat_reply",
@@ -114,7 +115,40 @@ export interface AiRequestLedgerSession {
   }): AiRequestEnvelope;
 }
 
+const RETRY_REASON_ALIASES: Record<string, string> = {
+  format_validation: "format_validation",
+  "response format validation": "format_validation",
+  context_too_large: "context_too_large",
+  "context-too-large recovery": "context_too_large",
+  degenerate_response: "degenerate_response",
+  "degenerate response correction": "degenerate_response",
+  alias_identity: "alias_identity",
+  "alias identity boundary correction": "alias_identity",
+};
+
+const FALLBACK_REASON_ALIASES: Record<string, string> = {
+  backend_network: "backend_network",
+  "backend network failure -> browser direct": "backend_network",
+  backend_route_missing: "backend_route_missing",
+  "backend route missing/static host -> browser direct": "backend_route_missing",
+  backend_test_key: "backend_test_key",
+  "backend test-key failure -> browser direct": "backend_test_key",
+  backend_model_list: "backend_model_list",
+  "backend model-list failure -> browser direct": "backend_model_list",
+  backend_memory_extraction: "backend_memory_extraction",
+  "backend memory extraction failure -> browser direct": "backend_memory_extraction",
+  backend_personality_summary: "backend_personality_summary",
+  "backend personality summary failure -> browser direct": "backend_personality_summary",
+  backend_translation: "backend_translation",
+  "backend translation failure -> browser direct": "backend_translation",
+  translation_route_missing: "translation_route_missing",
+  "translation route missing/static host -> browser direct": "translation_route_missing",
+};
+
 let memoryLedger: AiRequestEnvelope[] = [];
+let pendingLedgerRecords: AiRequestEnvelope[] = [];
+let ledgerFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let lifecycleFlushTarget: Window | null = null;
 
 export function createAiActionId(): string { return createId("ai-action"); }
 
@@ -123,8 +157,14 @@ function finiteNonNegative(value: unknown): number | undefined {
   return Math.max(0, Math.floor(value));
 }
 
-function boundedReasons(reasons: readonly string[]): string[] {
-  return reasons.map((reason) => String(reason || "").replace(/[\r\n]+/gu, " ").trim().slice(0, 180)).filter(Boolean).slice(0, 12);
+function normalizeReason(reason: unknown, kind: "retry" | "fallback"): string {
+  const raw = typeof reason === "string" ? reason.trim() : "";
+  const aliases = kind === "retry" ? RETRY_REASON_ALIASES : FALLBACK_REASON_ALIASES;
+  return aliases[raw] || (kind === "retry" ? "unknown_retry" : "unknown_fallback");
+}
+
+function boundedReasons(reasons: readonly unknown[], kind: "retry" | "fallback"): string[] {
+  return reasons.map((reason) => normalizeReason(reason, kind)).slice(0, 12);
 }
 
 export function redactAiEndpoint(value?: string): string | undefined {
@@ -190,36 +230,98 @@ function normalizeRecord(value: unknown): AiRequestEnvelope | null {
     ...(finiteNonNegative(candidate.inputCharacters) !== undefined ? { inputCharacters: finiteNonNegative(candidate.inputCharacters) } : {}),
     ...(finiteNonNegative(candidate.outputCharacters) !== undefined ? { outputCharacters: finiteNonNegative(candidate.outputCharacters) } : {}),
     retryCount: Math.max(0, Math.floor(Number(candidate.retryCount) || 0)),
-    retryReasons: boundedReasons(Array.isArray(candidate.retryReasons) ? candidate.retryReasons : []),
+    retryReasons: boundedReasons(Array.isArray(candidate.retryReasons) ? candidate.retryReasons : [], "retry"),
     fallbackCount: Math.max(0, Math.floor(Number(candidate.fallbackCount) || 0)),
-    fallbackReasons: boundedReasons(Array.isArray(candidate.fallbackReasons) ? candidate.fallbackReasons : []),
+    fallbackReasons: boundedReasons(Array.isArray(candidate.fallbackReasons) ? candidate.fallbackReasons : [], "fallback"),
     uncertainDelivery: Boolean(candidate.uncertainDelivery),
     recordedAt: Math.max(0, Number(candidate.recordedAt) || 0),
   };
 }
 
-export function loadAiRequestLedger(now = Date.now()): AiRequestEnvelope[] {
-  const raw = readJson<unknown>(AI_REQUEST_LEDGER_KEY, []);
-  const source = raw.valid && Array.isArray(raw.value) ? raw.value : memoryLedger;
+function retainLedgerRecords(records: readonly AiRequestEnvelope[], now: number): AiRequestEnvelope[] {
   const cutoff = now - AI_REQUEST_LEDGER_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  return source.map(normalizeRecord).filter((record): record is AiRequestEnvelope => Boolean(record))
+  return records
     .filter((record) => record.recordedAt >= cutoff)
+    .sort((left, right) => left.recordedAt - right.recordedAt)
     .slice(-AI_REQUEST_LEDGER_MAX_RECORDS);
 }
 
+function mergeLedgerRecords(...sources: readonly AiRequestEnvelope[][]): AiRequestEnvelope[] {
+  const records = new Map<string, AiRequestEnvelope>();
+  for (const source of sources) {
+    for (const record of source) records.set(record.requestId, record);
+  }
+  return [...records.values()];
+}
+
+function readStoredLedger(now: number): AiRequestEnvelope[] {
+  const raw = readJson<unknown>(AI_REQUEST_LEDGER_KEY, []);
+  if (!raw.valid || !Array.isArray(raw.value)) return [];
+  return retainLedgerRecords(
+    raw.value.map(normalizeRecord).filter((record): record is AiRequestEnvelope => Boolean(record)),
+    now,
+  );
+}
+
+function scheduleLedgerFlush(): void {
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function" && lifecycleFlushTarget !== window) {
+    window.addEventListener("pagehide", () => flushAiRequestLedger());
+    lifecycleFlushTarget = window;
+  }
+  if (ledgerFlushTimer !== null) return;
+  ledgerFlushTimer = setTimeout(() => flushAiRequestLedger(), AI_REQUEST_LEDGER_FLUSH_DELAY_MS);
+}
+
+export function loadAiRequestLedger(now = Date.now()): AiRequestEnvelope[] {
+  const merged = mergeLedgerRecords(readStoredLedger(now), memoryLedger, pendingLedgerRecords);
+  memoryLedger = retainLedgerRecords(merged, now);
+  return memoryLedger;
+}
+
 export function recordAiRequest(record: AiRequestEnvelope): void {
-  const normalized = normalizeRecord(record);
-  if (!normalized) return;
-  const records = [...loadAiRequestLedger(normalized.recordedAt), normalized].slice(-AI_REQUEST_LEDGER_MAX_RECORDS);
-  memoryLedger = records;
-  const result = writeJson(AI_REQUEST_LEDGER_KEY, records);
-  if (!result.success && result.error !== "unavailable") {
-    console.warn("[monitoring] AI request ledger could not be persisted.", result.error);
+  try {
+    const normalized = normalizeRecord(record);
+    if (!normalized) return;
+    memoryLedger = retainLedgerRecords(mergeLedgerRecords(memoryLedger, [normalized]), normalized.recordedAt);
+    pendingLedgerRecords = retainLedgerRecords(mergeLedgerRecords(pendingLedgerRecords, [normalized]), normalized.recordedAt);
+    scheduleLedgerFlush();
+  } catch (error) {
+    console.warn("[monitoring] AI request ledger recording failed; continuing without persistence.", error);
+  }
+}
+
+export function flushAiRequestLedger(now = Date.now()): void {
+  if (ledgerFlushTimer !== null) {
+    clearTimeout(ledgerFlushTimer);
+    ledgerFlushTimer = null;
+  }
+  if (pendingLedgerRecords.length === 0) return;
+
+  const pending = pendingLedgerRecords;
+  pendingLedgerRecords = [];
+  try {
+    const records = retainLedgerRecords(mergeLedgerRecords(readStoredLedger(now), memoryLedger, pending), now);
+    memoryLedger = records;
+    const result = writeJson(AI_REQUEST_LEDGER_KEY, records);
+    if (!result.success) {
+      pendingLedgerRecords = retainLedgerRecords(mergeLedgerRecords(pendingLedgerRecords, pending), now);
+      if (result.error !== "unavailable") {
+        console.warn("[monitoring] AI request ledger could not be persisted.", result.error);
+      }
+    }
+  } catch (error) {
+    pendingLedgerRecords = retainLedgerRecords(mergeLedgerRecords(pendingLedgerRecords, pending), now);
+    console.warn("[monitoring] AI request ledger flush failed; continuing without persistence.", error);
   }
 }
 
 export function clearInMemoryAiRequestLedgerForTests(): void {
   memoryLedger = [];
+  pendingLedgerRecords = [];
+  if (ledgerFlushTimer !== null) {
+    clearTimeout(ledgerFlushTimer);
+    ledgerFlushTimer = null;
+  }
 }
 
 export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiRequestLedgerSession {
@@ -262,9 +364,9 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
           errorCategory: result.succeeded ? "none" : errorCategory(result.error),
           providerRequestCount,
           retryCount: retryReasons.length,
-          retryReasons: boundedReasons(retryReasons),
+          retryReasons: boundedReasons(retryReasons, "retry"),
           fallbackCount: fallbackReasons.length,
-          fallbackReasons: boundedReasons(fallbackReasons),
+          fallbackReasons: boundedReasons(fallbackReasons, "fallback"),
           uncertainDelivery: !result.succeeded && isUncertainDelivery(errorCategory(result.error)),
           recordedAt: Date.now(),
         };
@@ -294,9 +396,9 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
         ...(finiteNonNegative(input.inputCharacters) !== undefined ? { inputCharacters: finiteNonNegative(input.inputCharacters) } : {}),
         ...(finiteNonNegative(result.outputCharacters) !== undefined ? { outputCharacters: finiteNonNegative(result.outputCharacters) } : {}),
         retryCount: retryReasons.length,
-        retryReasons: boundedReasons(retryReasons),
+        retryReasons: boundedReasons(retryReasons, "retry"),
         fallbackCount: fallbackReasons.length,
-        fallbackReasons: boundedReasons(fallbackReasons),
+        fallbackReasons: boundedReasons(fallbackReasons, "fallback"),
         uncertainDelivery: !result.succeeded && isUncertainDelivery(category),
         recordedAt: Date.now(),
       };

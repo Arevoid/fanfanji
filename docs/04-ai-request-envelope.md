@@ -27,9 +27,14 @@ Prompt、Context、Provider 选择或响应协议。调用方可以提供 `paren
 另有 `providerRequestCount`、`inputCharacters`、`outputCharacters` 供账本审计，
 不包含完整 Prompt、聊天记录、API key、Authorization 或原始响应体。
 
+一条 Envelope/账本记录对应一个逻辑 AI request。`providerRequestCount` 是该逻辑
+请求内部的 provider attempt 总数；backend → browser fallback 仍属于同一逻辑请求。
+format、alias、context retry 会创建新的逻辑记录，并用同一个 `parentActionId` 关联。
+当前不记录逐 attempt 明细，`provider`、`model`、`transport` 表示该记录最后一次
+attempt 的状态。
+
 ## 不变量
 
 - 包装前后的 Prompt、Context、Provider、retry/fallback 条件和输出协议相同。
 - Envelope 失败不得让原请求成功变失败；账本写入失败只告警，不阻塞业务。
 - 不能从 `endpoint` 中持久化 API key 或 query 参数。
-
