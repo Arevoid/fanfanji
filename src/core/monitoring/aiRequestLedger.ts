@@ -1,3 +1,4 @@
+import { createId } from "../id/createId";
 import { readJson, writeJson } from "../storage/storageAdapter";
 
 export const AI_REQUEST_LEDGER_KEY = "fanfan_ai_request_ledger_v1";
@@ -114,15 +115,6 @@ export interface AiRequestLedgerSession {
 }
 
 let memoryLedger: AiRequestEnvelope[] = [];
-
-function createId(prefix: string): string {
-  try {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return `${prefix}-${crypto.randomUUID()}`;
-  } catch {
-    // Fall through to the deterministic-enough local fallback for old browsers.
-  }
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
 
 export function createAiActionId(): string { return createId("ai-action"); }
 
