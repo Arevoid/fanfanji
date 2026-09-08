@@ -115,8 +115,11 @@ const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.met
 const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
 const historySource = readFileSync(new URL("../src/features/chat/services/directChatHistoryContext.ts", import.meta.url), "utf8");
 const contextBuilderSource = readFileSync(new URL("../src/features/chat/services/directChatContextSnapshotBuilder.ts", import.meta.url), "utf8");
+const preparationSource = readFileSync(new URL("../src/features/chat/services/directReplyPreparation.ts", import.meta.url), "utf8");
 const chatRuntimeSource = `${appChat}\n${regenerationSource}\n${historySource}`;
-assert.equal((`${appChat}\n${regenerationSource}`.match(/buildDirectChatContextSnapshot\(\{/g) || []).length, 2, "send and regeneration must share the context snapshot builder");
+assert.equal((appChat.match(/prepareDirectReplyContext\(\{/g) || []).length, 1, "normal send must use the preparation context boundary");
+assert.equal((regenerationSource.match(/buildDirectChatContextSnapshot\(\{/g) || []).length, 1, "regenerate must keep its existing context snapshot path");
+assert.match(preparationSource, /buildDirectChatContextSnapshot\(input\)/, "normal preparation must delegate to the shared context snapshot builder");
 assert.equal((historySource.match(/serializeMessageToPromptTurns\(/g) || []).length, 1, "the shared history service must own prompt-turn serialization");
 assert.match(contextBuilderSource, /buildDirectChatHistoryContext/);
 assert.equal((chatRuntimeSource.match(/mode: "current"/g) || []).length >= 2, true, "send and regeneration current messages must be serialized");

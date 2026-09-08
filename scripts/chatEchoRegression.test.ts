@@ -8,7 +8,8 @@ import { CURRENT_SCENE_CONTINUITY_PROMPT } from "../src/features/chat/prompts/di
 const chatSource = fs.readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const regenerationSource = fs.readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
 const promptBuilderSource = fs.readFileSync(new URL("../src/features/chat/prompts/directChatPromptBuilder.ts", import.meta.url), "utf8");
-const chatRuntimeSource = `${chatSource}\n${regenerationSource}\n${promptBuilderSource}`;
+const preparationSource = fs.readFileSync(new URL("../src/features/chat/services/directReplyPreparation.ts", import.meta.url), "utf8");
+const chatRuntimeSource = `${chatSource}\n${regenerationSource}\n${promptBuilderSource}\n${preparationSource}`;
 assert.match(CURRENT_SCENE_CONTINUITY_PROMPT, /\[CURRENT-SCENE CONTINUITY\]/);
 assert.equal((chatRuntimeSource.match(/buildDirectChatSystemInstruction\(\{/g) || []).length, 2);
 assert.match(promptBuilderSource, /CURRENT_SCENE_CONTINUITY_PROMPT/);

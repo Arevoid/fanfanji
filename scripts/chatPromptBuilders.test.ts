@@ -34,7 +34,8 @@ const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.met
 const groupChatService = readFileSync(new URL("../src/features/chat/services/groupChatService.ts", import.meta.url), "utf8");
 const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
 const promptBuilderSource = readFileSync(new URL("../src/features/chat/prompts/directChatPromptBuilder.ts", import.meta.url), "utf8");
-const chatRuntimeSource = `${appChat}\n${regenerationSource}\n${promptBuilderSource}`;
+const preparationSource = readFileSync(new URL("../src/features/chat/services/directReplyPreparation.ts", import.meta.url), "utf8");
+const chatRuntimeSource = `${appChat}\n${regenerationSource}\n${promptBuilderSource}\n${preparationSource}`;
 assert.match(groupChatService, /buildGroupChatSystemInstruction/);
 assert.match(groupChatService, /generateIsolatedGroupChatReplies/);
 assert.doesNotMatch(appChat, /buildGroupChatSystemInstruction/);
