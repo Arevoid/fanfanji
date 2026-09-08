@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "violationCounts": {
+    "core-to-concrete-feature": 2,
+    "domain-to-feature-or-ui": 9,
+    "ui-to-storage-or-provider": 94
+  },
+  "cycles": [
+    "src/domain/characterKnowledge/characterKnowledgeTypes.ts <-> src/domain/memory/memoryModel.ts",
+    "src/domain/forum/forumStoryArc.ts <-> src/types.ts",
+    "src/features/characterCognitive/promptAdapters/forumStoryCommentPromptAdapter.ts <-> src/features/characterCognitive/promptAdapters/forumStoryPromptAdapter.ts <-> src/features/characterCognitive/promptAdapters/forumStoryUpdatePromptAdapter.ts <-> src/features/forumStory/validators/forumStoryOutputValidator.ts"
+  ]
+}
