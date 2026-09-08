@@ -61,6 +61,7 @@ import { buildOfflineMemberKnowledgeSnapshots } from "../features/offline/servic
 import { buildOfflineHandoffFacts, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../domain/offlineStory/offlineHandoffContext";
 import { formatStructuralWorldBookSection } from "../features/chat/prompts/chatWorldBookPromptSections";
 import { buildProactiveChatSystemInstruction, finalizeCharacterChatSystemInstruction } from "../features/chat/prompts/chatPromptBuilders";
+import { buildDirectChatSystemInstruction } from "../features/chat/prompts/directChatPromptBuilder";
 import { buildProactiveOfflineInvitationPrompt } from "../features/chat/prompts/proactiveOfflineInvitationPrompt";
 import { buildProactiveOfflineResponsePrompt } from "../features/chat/prompts/proactiveOfflineResponsePrompt";
 import { parseProactiveOfflineInvitationDirective } from "../features/chat/services/proactiveOfflineInvitationProtocol";
@@ -2250,171 +2251,128 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         relationId: activeRelationship?.id,
       });
 
-      // Assemble system instruction blocks
-      let assembledInstructions: string[] = [];
-
-      // 0. Base living human prompt (hidden base system instruction)
-      assembledInstructions.push(LIVING_HUMAN_PROMPT);
-
-      // 1. Main Prompt
-      assembledInstructions.push(mainPromptText);
-      if (musicContext) assembledInstructions.push(musicContext);
-      if (forumContext) assembledInstructions.push(forumContext);
-      if (diaryContext) assembledInstructions.push(diaryContext);
-      if (userMemoContext) assembledInstructions.push(userMemoContext);
-
-      // 1.2 Red Packet Reaction Prompt
-      if (isRedPacket && userMsg) {
-        assembledInstructions.push(buildRedPacketReactionPrompt(userMsg.content, userMsg.authorNameSnapshot || promptUserName));
-      }
-
-      if (isCrossDayNewSession || historyPartition.hasCrossDayHistory) {
-        assembledInstructions.push(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT);
-      }
-
-      // 1.5 Time awareness prompt if enabled (default to true to ensure correct time perception)
-      if (turnSettings.enableTimeAwareness) {
-        assembledInstructions.push(buildTimeAwarenessPrompt(requestTime, timeLogString));
-      }
-
-      // Voice timing is only relevant to a voice-related turn. Including it on
-      // every ordinary text reply needlessly dilutes the role and relationship
-      // anchor in the prompt.
       const voiceIntervalPrompt = buildVoiceIntervalPrompt({
         characterName: activeCharacter.name,
         currentMessage: userMsg,
         recentMessages: slicedMsgs,
       });
-      if (voiceIntervalPrompt) {
-        assembledInstructions.push(voiceIntervalPrompt);
-      }
-
-      // 2. After Main Prompt entries
-      const afterMainWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_main_prompt");
-      if (afterMainWorldBook) assembledInstructions.push(afterMainWorldBook);
-
-      // 3. Before Character Definition entries
-      const beforeCharacterWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_char_def");
-      if (beforeCharacterWorldBook) assembledInstructions.push(beforeCharacterWorldBook);
-
-      // 4. Character definition and personality are independent, single-source blocks.
-      assembledInstructions.push(characterDescriptionText);
-      assembledInstructions.push(characterProjection.personality.content);
-      if (relationshipContext) assembledInstructions.push(relationshipContext);
-      if (characterBehaviorPrompt) assembledInstructions.push(characterBehaviorPrompt);
-      if (characterContextText.trim()) assembledInstructions.push(characterContextText);
-
-      // The adapter receives the relation-scoped cognitive snapshot and emits
-      // a redacted prompt-safe supplement. It intentionally does not replace
-      // the established persona, relationship, time, or Memory sections.
-      if (cognitivePromptBlock) assembledInstructions.push(cognitivePromptBlock);
-
-      // 5. After Character Definition entries
-      const afterCharacterWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_char_def");
-      if (afterCharacterWorldBook) assembledInstructions.push(afterCharacterWorldBook);
-
-      // 6. User Profile
-      assembledInstructions.push(userProfileText);
-      if (aliasIdentityBoundaryPrompt) assembledInstructions.push(aliasIdentityBoundaryPrompt);
-      assembledInstructions.push(userKnowledgeBoundary);
-      assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
-      assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);
-      assembledInstructions.push(`${INLINE_INNER_VOICE_INSTRUCTION}${activeCharacter.enableAutoTranslate ? "\n开启了全部翻译：必须同时提供 translation 字段，内容为 reply 的中文翻译，并保持相同段落/气泡结构。" : ""}`);
-
-      // Recent dialogue is already present in the role-correct history. Do not
-      // copy it into a system block: duplicate user wording encourages parroting
-      // and can swap first-person ownership on short replies.
-      assembledInstructions.push(CURRENT_SCENE_CONTINUITY_PROMPT);
-      assembledInstructions.push(CHINESE_SEMANTIC_CONTINUITY_PROMPT);
-
-      // 7. Before Chat History entries
-      const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
-      if (beforeHistoryWorldBook) assembledInstructions.push(beforeHistoryWorldBook);
-
-      // 8. WeChat Moments Context memory
       const momentsContext = getKnownMomentsContextString(allMoments, activeCharacter, activeIdentityId, promptUserName);
-      if (momentsContext && shouldLoadLongTermMemory) {
-        assembledInstructions.push(momentsContext);
-      }
-
-      // 8.5 Offline stories context memory
       const offlineStoriesContext = getOfflineStoriesContextForOnlineChat();
-      if (offlineStoriesContext && shouldLoadLongTermMemory) {
-        assembledInstructions.push(offlineStoriesContext);
-      }
-
-      assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
-      assembledInstructions.push(formatOnlineChatSpatialBoundary());
-      assembledInstructions.push(CHARACTER_MEDIA_USAGE_RULES);
-
-      // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
-      const allStickers1 = stickerGroups.flatMap(g => g.stickers);
-      if (activeAttachModal === "calling") {
-        assembledInstructions.push(...buildVoiceCallPrompts(callTopicShiftDetected));
-      } else if (allStickers1.length > 0) {
-        const userSentSticker = /^\[表情\]\|/.test(userMsg?.content || "");
-        const stickerListStr = allStickers1.map((sticker) =>
-          `- ${sticker.name}｜语义：${sticker.semanticDescription || `按名称“${sticker.name}”谨慎理解`}｜发送格式：[表情]|${sticker.name}|sticker://${sticker.id}`
-        ).join("\n");
-        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr, userSentSticker));
-      }
-
-      if (proactiveOfflineAllowedModes.length > 0) {
-        assembledInstructions.push(buildProactiveOfflineInvitationPrompt({
-          allowedModes: proactiveOfflineAllowedModes,
-          now: Date.now(),
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        }));
-      }
-      if (pendingProactiveOfflineAppointment) {
-        assembledInstructions.push(buildProactiveOfflineResponsePrompt({
-          appointment: pendingProactiveOfflineAppointment,
-          now: Date.now(),
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        }));
-      }
-      if (activeCharacter && !activeCharacter.isGroupChat && activeIdentityId === "identity-1") {
-        const aliasRelations = relationships.filter((relation) =>
-          relation.userIdentityId !== activeIdentityId
-          && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
-        );
-        const aliasEvents = aliasRelations.map((relation) => {
-          const alias = settings.identities?.find((identity) => identity.id === relation.userIdentityId);
-          const latestAliasMessage = messages
-            .filter((message) => message.relationId === relation.id)
-            .sort((left, right) => right.timestamp - left.timestamp)[0];
-          if (!alias || !latestAliasMessage) return null;
-          return `联系人“${alias.name}”最近与你有过互动，最近内容：${latestAliasMessage.content.slice(0, 180)}`;
-        }).filter((event): event is string => Boolean(event)).slice(0, 3);
-        if (aliasEvents.length > 0) {
-          assembledInstructions.push(`【其他联系人互动】
-${aliasEvents.join("\n")}
-这些是你与其他联系人之间发生的真实互动。你可以在与当前用户聊天时，根据性格和语境自然提及“最近有人联系过你”等内容，但不要说明这些联系人与当前用户属于同一系统账户，也不要声称你已经确认他们是同一个人。`);
-        }
-      }
-      if (characterPhone) {
-        const hiddenGalleryPasscode = resolveCharacterPhoneHiddenGalleryPasscode(turnCharacter, characterPhone);
-        assembledInstructions.push(`【角色手机密码事实】
-本轮回复前，系统已经先为这个角色的虚拟手机固定并保存了两组密码：解锁密码“${characterPhone.passcode}”、隐藏相册密码“${hiddenGalleryPasscode}”。这两组密码已经写入角色手机，是本轮对话开始前就存在的事实，不是让你临时生成的新密码。
-如果用户问的是解锁密码，回答解锁密码“${characterPhone.passcode}”；如果用户问的是隐藏相册密码，回答隐藏相册密码“${hiddenGalleryPasscode}”。不要把两组密码混用，也不要把隐藏相册密码说成用户生日、纪念日或其他未被明确提供的日期。
-只有当对话自然涉及手机密码、隐藏相册或解锁时，才可以按照角色语气透露对应的真实密码；不要把其他日期、金额、编号、用户猜测的数字或你临时编造的“生日”当成密码，也不要修改这两组密码。如果聊天历史中曾经说过其他数字，且没有明确的用户事实支持，那些只能视为猜测或说错了，不能覆盖这两条固定密码事实。`);
-      }
-      if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
       const characterPhoneProxyFinalInstruction = immediateCharacterPhoneProxyMessage?.sentFromCharacterPhone
-        ? `\n\n【最终归因规则·优先于风格演绎】
-本轮历史中标记为“角色手机代发消息”的内容不是${activeCharacter.name}说过的话，而是用户在${activeCharacter.name}的手机上输入后发给自己的消息。
-- 即使用户现在顺着这条消息说“分手？好啊分手就分手”，也不得假设${activeCharacter.name}自己提过分手、承认自己说过，或把它解释成“我刚刚只是开玩笑”。
-- 回复的第一句必须先对这条来源异常的消息表示疑问或否认，例如“分手？我什么时候说过这句？”或“等等，这不是我发的吧？”。不得先道歉、认领“我刚刚说的”、说成玩笑、或归咎“模型抽风/账号混淆”；不必主动向用户解释系统规则，也不必直接说“是你发的”，除非用户主动说明来源。
-- 这条规则只约束代发消息的作者归属，不限制你对用户当前这句“分手？好啊分手就分手”的情绪化回应；先澄清归属，再自然继续对话。`
+        ? "\n\n【最终归因规则·优先于风格演绎】\n本轮历史中标记为“角色手机代发消息”的内容不是" + activeCharacter.name + "说过的话，而是用户在" + activeCharacter.name + "的手机上输入后发给自己的消息。\n"
+          + "- 即使用户现在顺着这条消息说“分手？好啊分手就分手”，也不得假设" + activeCharacter.name + "自己提过分手、承认自己说过，或把它解释成“我刚刚只是开玩笑”。\n"
+          + "- 回复的第一句必须先对这条来源异常的消息表示疑问或否认，例如“分手？我什么时候说过这句？”或“等等，这不是我发的吧？”。不得先道歉、认领“我刚刚说的”、说成玩笑、或归咎“模型抽风/账号混淆”；不必主动向用户解释系统规则，也不必直接说“是你发的”，除非用户主动说明来源。\n"
+          + "- 这条规则只约束代发消息的作者归属，不限制你对用户当前这句“分手？好啊分手就分手”的情绪化回应；先澄清归属，再自然继续对话。"
         : "";
-      const systemInstruction = `${finalizeCharacterChatSystemInstruction({
-        instructions: assembledInstructions,
-        characterProjection,
+      const directChatSystemInstructionSuffix = [
+        "\n\n",
+        INLINE_INNER_VOICE_INSTRUCTION,
+        characterPhoneProxyFinalInstruction,
+      ].join("");
+
+      const stickerPrompt = activeAttachModal !== "calling"
+        ? (() => {
+          const allStickers = stickerGroups.flatMap((group) => group.stickers);
+          if (allStickers.length === 0) return undefined;
+          const stickerList = allStickers.map((sticker) =>
+            "- " + sticker.name + "｜语义：" + (sticker.semanticDescription || ("按名称“" + sticker.name + "”谨慎理解"))
+            + "｜发送格式：[表情]|" + sticker.name + "|sticker://" + sticker.id,
+          ).join("\n");
+          return buildStickerResponsePrompt(stickerList, /^\[表情\]\|/.test(userMsg?.content || ""));
+        })()
+        : undefined;
+
+      const systemInstruction = buildDirectChatSystemInstruction({
+        mainPromptText,
+        musicContext,
+        forumContext,
+        diaryContext,
+        userMemoContext,
+        redPacketReactionPrompt: isRedPacket && userMsg
+          ? buildRedPacketReactionPrompt(userMsg.content, userMsg.authorNameSnapshot || promptUserName)
+          : undefined,
+        newDayBoundaryPrompt: isCrossDayNewSession || historyPartition.hasCrossDayHistory
+          ? NEW_DAY_CONVERSATION_BOUNDARY_PROMPT
+          : undefined,
+        timeAwarenessPrompt: turnSettings.enableTimeAwareness
+          ? buildTimeAwarenessPrompt(requestTime, timeLogString)
+          : undefined,
+        voiceIntervalPrompt,
+        afterMainWorldBook: formatStructuralWorldBookSection(wbBlocks, "after_main_prompt") || undefined,
+        beforeCharacterWorldBook: formatStructuralWorldBookSection(wbBlocks, "before_char_def") || undefined,
         characterDescriptionText,
+        personalityText: characterProjection.personality.content,
+        relationshipContext,
+        characterBehaviorPrompt,
+        characterContextText,
+        cognitivePrompt: cognitivePromptBlock,
+        afterCharacterWorldBook: formatStructuralWorldBookSection(wbBlocks, "after_char_def") || undefined,
+        userProfileText,
+        aliasIdentityBoundaryPrompt: aliasIdentityBoundaryPrompt || undefined,
+        userKnowledgeBoundary,
+        innerVoiceInstruction: INLINE_INNER_VOICE_INSTRUCTION + (activeCharacter.enableAutoTranslate
+          ? "\n开启了全部翻译：必须同时提供 translation 字段，内容为 reply 的中文翻译，并保持相同段落/气泡结构。"
+          : ""),
+        beforeHistoryWorldBook: formatStructuralWorldBookSection(wbBlocks, "before_chat_history") || undefined,
+        momentsContext,
+        offlineStoriesContext,
+        includeLongTermMemory: shouldLoadLongTermMemory,
+        characterKnowledgeBoundary: formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }),
+        onlineChatSpatialBoundary: formatOnlineChatSpatialBoundary(),
+        voiceCallPrompts: activeAttachModal === "calling"
+          ? buildVoiceCallPrompts(callTopicShiftDetected)
+          : undefined,
+        stickerPrompt,
+        extraInstructions: [
+          ...(proactiveOfflineAllowedModes.length > 0
+            ? [buildProactiveOfflineInvitationPrompt({
+              allowedModes: proactiveOfflineAllowedModes,
+              now: Date.now(),
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            })]
+            : []),
+          ...(pendingProactiveOfflineAppointment
+            ? [buildProactiveOfflineResponsePrompt({
+              appointment: pendingProactiveOfflineAppointment,
+              now: Date.now(),
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            })]
+            : []),
+          ...(activeCharacter && !activeCharacter.isGroupChat && activeIdentityId === "identity-1"
+            ? (() => {
+              const aliasRelations = relationships.filter((relation) =>
+                relation.userIdentityId !== activeIdentityId
+                && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
+              );
+              const aliasEvents = aliasRelations.map((relation) => {
+                const alias = settings.identities?.find((identity) => identity.id === relation.userIdentityId);
+                const latestAliasMessage = messages
+                  .filter((message) => message.relationId === relation.id)
+                  .sort((left, right) => right.timestamp - left.timestamp)[0];
+                if (!alias || !latestAliasMessage) return null;
+                return "联系人“" + alias.name + "”最近与你有过互动，最近内容：" + latestAliasMessage.content.slice(0, 180);
+              }).filter((event): event is string => Boolean(event)).slice(0, 3);
+              return aliasEvents.length > 0
+                ? ["【其他联系人互动】\n" + aliasEvents.join("\n") + "\n这些是你与其他联系人之间发生的真实互动。你可以在与当前用户聊天时，根据性格和语境自然提及“最近有人联系过你”等内容，但不要说明这些联系人与当前用户属于同一系统账户，也不要声称你已经确认他们是同一个人。"]
+                : [];
+            })()
+            : []),
+          ...(characterPhone
+            ? [(() => {
+              const hiddenGalleryPasscode = resolveCharacterPhoneHiddenGalleryPasscode(turnCharacter, characterPhone);
+              return "【角色手机密码事实】\n本轮回复前，系统已经先为这个角色的虚拟手机固定并保存了两组密码：解锁密码“"
+                + characterPhone.passcode + "”、隐藏相册密码“" + hiddenGalleryPasscode + "”。这两组密码已经写入角色手机，是本轮对话开始前就存在的事实，不是让你临时生成的新密码。\n"
+                + "如果用户问的是解锁密码，回答解锁密码“" + characterPhone.passcode + "”；如果用户问的是隐藏相册密码，回答隐藏相册密码“" + hiddenGalleryPasscode + "”。不要把两组密码混用，也不要把隐藏相册密码说成用户生日、纪念日或其他未被明确提供的日期。\n"
+                + "只有当对话自然涉及手机密码、隐藏相册或解锁时，才可以按照角色语气透露对应的真实密码；不要把其他日期、金额、编号、用户猜测的数字或你临时编造的“生日”当成密码，也不要修改这两组密码。如果聊天历史中曾经说过其他数字，且没有明确的用户事实支持，那些只能视为猜测或说错了，不能覆盖这两条固定密码事实。";
+            })()]
+            : []),
+        ],
+        worldBookContextPriority: wbBlocks.allTriggered.length > 0,
+        characterProjection,
         diagnosticLabel: "direct chat prompt",
         finalPersonaRules: wbBlocks.allTriggered
           .filter((entry) => entry.purpose === "persona_rule")
-          .map((entry) => `【${entry.title}】\n${entry.content}`),
+          .map((entry) => "【" + entry.title + "】\n" + entry.content),
         finalPriorityInstructions: aliasIdentityFinalGuardPrompt ? [aliasIdentityFinalGuardPrompt] : undefined,
         finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           activeCharacter,
@@ -2423,12 +2381,10 @@ ${aliasEvents.join("\n")}
             characterId: activeRelationship?.characterId || activeChatCharId || undefined,
             userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
             relationId: activeRelationship?.id,
-          }).map((entry) => `${entry.title}\n${entry.content}`),
+          }).map((entry) => entry.title + "\n" + entry.content),
         )),
-      })}
-
-${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
-
+        finalSystemInstructionSuffix: directChatSystemInstructionSuffix,
+      });
       // Custom tool/attachment format descriptions for character context
       const promptMessage = userMsg
         ? `${serializeMessageContentForPrompt(userMsg, {
@@ -3343,6 +3299,7 @@ ${INLINE_INNER_VOICE_INSTRUCTION}${characterPhoneProxyFinalInstruction}`;
     NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, buildTimeAwarenessPrompt, buildVoiceIntervalPrompt,
     formatStructuralWorldBookSection, buildVoiceCallPrompts, stickerGroups, isRedPacketMarkup,
     buildStickerResponsePrompt, WORLD_BOOK_CONTEXT_PRIORITY, finalizeCharacterChatSystemInstruction,
+    buildDirectChatSystemInstruction,
     formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage, getVisibleWorldBookEntries,
     formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary, CHARACTER_MEDIA_USAGE_RULES,
     DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, CURRENT_SCENE_CONTINUITY_PROMPT,

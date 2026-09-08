@@ -111,21 +111,23 @@ assert.match(buildVoiceCallPrompts(true).join("\n"), /available because the user
 const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
 const historySource = readFileSync(new URL("../src/features/chat/services/directChatHistoryContext.ts", import.meta.url), "utf8");
-const chatRuntimeSource = `${appChatSource}\n${regenerationSource}\n${historySource}`;
+const promptBuilderSource = readFileSync(new URL("../src/features/chat/prompts/directChatPromptBuilder.ts", import.meta.url), "utf8");
+const chatRuntimeSource = `${appChatSource}\n${regenerationSource}\n${historySource}\n${promptBuilderSource}`;
 for (const pattern of [
   /buildDirectChatMainPrompt\(/g,
   /buildTimeAwarenessPrompt\(/g,
   /buildVoiceIntervalPrompt\(/g,
-  /assembledInstructions\.push\(CURRENT_SCENE_CONTINUITY_PROMPT\)/g,
-  /assembledInstructions\.push\(CHINESE_SEMANTIC_CONTINUITY_PROMPT\)/g,
+  /buildDirectChatSystemInstruction\(\{/g,
 ]) {
   assert.equal((chatRuntimeSource.match(pattern) || []).length, 2, `${pattern} must be shared by send and regeneration`);
 }
-assert.equal((chatRuntimeSource.match(/if \(musicContext\) assembledInstructions\.push\(musicContext\)/g) || []).length, 2);
-assert.equal((chatRuntimeSource.match(/if \(forumContext\) assembledInstructions\.push\(forumContext\)/g) || []).length, 2);
-assert.equal((chatRuntimeSource.match(/if \(diaryContext\) assembledInstructions\.push\(diaryContext\)/g) || []).length, 2);
+assert.equal((promptBuilderSource.match(/input\.musicContext/g) || []).length >= 1, true);
+assert.equal((promptBuilderSource.match(/input\.forumContext/g) || []).length >= 1, true);
+assert.equal((promptBuilderSource.match(/input\.diaryContext/g) || []).length >= 1, true);
 assert.equal((chatRuntimeSource.match(/NEW_DAY_CONVERSATION_BOUNDARY_PROMPT/g) || []).length >= 3, true);
-assert.equal((chatRuntimeSource.match(/assembledInstructions\.push\(DIRECT_CHAT_SINGLE_SPEAKER_RULE\)/g) || []).length, 2);
+assert.equal((promptBuilderSource.match(/DIRECT_CHAT_SINGLE_SPEAKER_RULE/g) || []).length >= 1, true);
+assert.equal((promptBuilderSource.match(/CURRENT_SCENE_CONTINUITY_PROMPT/g) || []).length >= 1, true);
+assert.equal((promptBuilderSource.match(/CHINESE_SEMANTIC_CONTINUITY_PROMPT/g) || []).length >= 1, true);
 assert.equal((chatRuntimeSource.match(/buildDirectChatContextSnapshot\(\{/g) || []).length, 2, "send and regeneration must share the direct-chat context snapshot builder");
 assert.equal((chatRuntimeSource.match(/shouldUseCrossDayHistoryBoundary\(\{/g) || []).length, 1, "cross-day routing must be owned by the shared context snapshot builder");
 assert.equal((chatRuntimeSource.match(/partitionDirectChatHistoryByCurrentDay\(\{/g) || []).length, 1, "history partitioning must be owned by the shared context snapshot builder");

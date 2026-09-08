@@ -12,6 +12,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     activeAttachModal, callingStatus, callTranscript, detectCallTopicShift,
     buildDirectChatMainPrompt,
     buildDirectChatContextSnapshot,
+    buildDirectChatSystemInstruction,
     projectCharacterPrompt, memories, retrieveTruthForPrivatePrompt,
     loadKnowledgeClaims, loadConversationSummaries, loadBehaviorCorrections, formatUserKnowledgeBoundary,
     formatTruthRetrievalForPrompt, getInterveningOfflineHandoff, selectFreshOfflineHandoffMemory,
@@ -302,116 +303,77 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         relationId: activeRelationship?.id,
       });
 
-      // Assemble system instruction blocks
-      let assembledInstructions: string[] = [];
-
-      // 0. Base living human prompt
-      assembledInstructions.push(LIVING_HUMAN_PROMPT);
-
-      // 1. Main Prompt
-      assembledInstructions.push(mainPromptText);
-      if (musicContext) assembledInstructions.push(musicContext);
-      if (forumContext) assembledInstructions.push(forumContext);
-      if (diaryContext) assembledInstructions.push(diaryContext);
-      if (userMemoContext) assembledInstructions.push(userMemoContext);
-
-      if (isRedPacketMarkup(lastUserMsg.content)) {
-        assembledInstructions.push(buildRedPacketReactionPrompt(lastUserMsg.content, lastUserMsg.authorNameSnapshot || promptUserName));
-      }
-
-      if (isCrossDayNewSession || historyPartition.hasCrossDayHistory) {
-        assembledInstructions.push(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT);
-      }
-
-      // 1.5 Time awareness prompt if enabled
-      if (turnSettings.enableTimeAwareness) {
-        assembledInstructions.push(buildTimeAwarenessPrompt(requestTime, timeLogString));
-      }
-
       const voiceIntervalPrompt = buildVoiceIntervalPrompt({
         characterName: activeCharacter.name,
         currentMessage: lastUserMsg,
         recentMessages: slicedMsgs,
       });
-      if (voiceIntervalPrompt) assembledInstructions.push(voiceIntervalPrompt);
 
-      // 2. After Main Prompt entries
-      const afterMainWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_main_prompt");
-      if (afterMainWorldBook) assembledInstructions.push(afterMainWorldBook);
-
-      // 3. Before Character Definition entries
-      const beforeCharacterWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_char_def");
-      if (beforeCharacterWorldBook) assembledInstructions.push(beforeCharacterWorldBook);
-
-      // 4. Character definition and personality are independent, single-source blocks.
-      assembledInstructions.push(characterDescriptionText);
-      assembledInstructions.push(characterProjection.personality.content);
-      if (relationshipContext) assembledInstructions.push(relationshipContext);
-      if (characterBehaviorPrompt) assembledInstructions.push(characterBehaviorPrompt);
-      if (characterContextText.trim()) assembledInstructions.push(characterContextText);
-
-      if (regenerationCognitiveContext) {
-        const cognitivePrompt = formatChatPromptContext(buildChatPromptContext(regenerationCognitiveContext, {
+      const cognitivePrompt = regenerationCognitiveContext
+        ? formatChatPromptContext(buildChatPromptContext(regenerationCognitiveContext, {
           maxFacts: 0,
           relevantMemoryIds: [],
           hasConfirmedClaim: Boolean(truthRetrieval?.projection.confirmedFacts.length),
           hasDerivedSummary: Boolean(truthRetrieval?.summaries.length),
-        }));
-        if (cognitivePrompt) assembledInstructions.push(cognitivePrompt);
-      }
+        }))
+        : "";
 
-      // 5. After Character Definition entries
-      const afterCharacterWorldBook = formatStructuralWorldBookSection(wbBlocks, "after_char_def");
-      if (afterCharacterWorldBook) assembledInstructions.push(afterCharacterWorldBook);
+      const stickerPrompt = activeAttachModal !== "calling"
+        ? (() => {
+          const allStickers = stickerGroups.flatMap((group) => group.stickers);
+          if (allStickers.length === 0) return undefined;
+          const stickerList = allStickers.map((sticker) =>
+            "- " + sticker.name + "｜语义：" + (sticker.semanticDescription || ("按名称“" + sticker.name + "”谨慎理解"))
+            + "｜发送格式：[表情]|" + sticker.name + "|sticker://" + sticker.id,
+          ).join("\n");
+          return buildStickerResponsePrompt(stickerList, /^\[表情\]\|/.test(lastUserMsg.content));
+        })()
+        : undefined;
 
-      // 6. User Profile
-      assembledInstructions.push(userProfileText);
-      if (aliasIdentityBoundaryPrompt) assembledInstructions.push(aliasIdentityBoundaryPrompt);
-      assembledInstructions.push(userKnowledgeBoundary);
-      assembledInstructions.push(DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES);
-      assembledInstructions.push(DIRECT_CHAT_SINGLE_SPEAKER_RULE);
-      assembledInstructions.push(CURRENT_SCENE_CONTINUITY_PROMPT);
-      assembledInstructions.push(CHINESE_SEMANTIC_CONTINUITY_PROMPT);
-
-      // 7. Before Chat History entries
-      const beforeHistoryWorldBook = formatStructuralWorldBookSection(wbBlocks, "before_chat_history");
-      if (beforeHistoryWorldBook) assembledInstructions.push(beforeHistoryWorldBook);
-
-      // 8. WeChat Moments Context memory
-      if (momentsContextRegen && shouldLoadLongTermMemory) {
-        assembledInstructions.push(momentsContextRegen);
-      }
-
-      // 8.5 Offline stories context memory
-      if (offlineStoriesContextRegen && shouldLoadLongTermMemory) {
-        assembledInstructions.push(offlineStoriesContextRegen);
-      }
-
-      assembledInstructions.push(formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }));
-      assembledInstructions.push(formatOnlineChatSpatialBoundary());
-      assembledInstructions.push(CHARACTER_MEDIA_USAGE_RULES);
-
-      // 8.8 Custom Sticker Pack availability for Character response (对方使用我的表情包)
-      const allStickers2 = stickerGroups.flatMap(g => g.stickers);
-      if (activeAttachModal === "calling") {
-        assembledInstructions.push(...buildVoiceCallPrompts(callTopicShiftDetected));
-      } else if (allStickers2.length > 0) {
-        const userSentSticker = /^\[表情\]\|/.test(lastUserMsg.content);
-        const stickerListStr = allStickers2.map((sticker) =>
-          `- ${sticker.name}｜语义：${sticker.semanticDescription || `按名称“${sticker.name}”谨慎理解`}｜发送格式：[表情]|${sticker.name}|sticker://${sticker.id}`
-        ).join("\n");
-        assembledInstructions.push(buildStickerResponsePrompt(stickerListStr, userSentSticker));
-      }
-
-      if (wbBlocks.allTriggered.length > 0) assembledInstructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
-      const systemInstruction = finalizeCharacterChatSystemInstruction({
-        instructions: assembledInstructions,
-        characterProjection,
+      const systemInstruction = buildDirectChatSystemInstruction({
+        mainPromptText,
+        musicContext,
+        forumContext,
+        diaryContext,
+        userMemoContext,
+        redPacketReactionPrompt: isRedPacketMarkup(lastUserMsg.content)
+          ? buildRedPacketReactionPrompt(lastUserMsg.content, lastUserMsg.authorNameSnapshot || promptUserName)
+          : undefined,
+        newDayBoundaryPrompt: isCrossDayNewSession || historyPartition.hasCrossDayHistory
+          ? NEW_DAY_CONVERSATION_BOUNDARY_PROMPT
+          : undefined,
+        timeAwarenessPrompt: turnSettings.enableTimeAwareness
+          ? buildTimeAwarenessPrompt(requestTime, timeLogString)
+          : undefined,
+        voiceIntervalPrompt,
+        afterMainWorldBook: formatStructuralWorldBookSection(wbBlocks, "after_main_prompt") || undefined,
+        beforeCharacterWorldBook: formatStructuralWorldBookSection(wbBlocks, "before_char_def") || undefined,
         characterDescriptionText,
+        personalityText: characterProjection.personality.content,
+        relationshipContext,
+        characterBehaviorPrompt,
+        characterContextText,
+        cognitivePrompt,
+        afterCharacterWorldBook: formatStructuralWorldBookSection(wbBlocks, "after_char_def") || undefined,
+        userProfileText,
+        aliasIdentityBoundaryPrompt: aliasIdentityBoundaryPrompt || undefined,
+        userKnowledgeBoundary,
+        beforeHistoryWorldBook: formatStructuralWorldBookSection(wbBlocks, "before_chat_history") || undefined,
+        momentsContext: momentsContextRegen,
+        offlineStoriesContext: offlineStoriesContextRegen,
+        includeLongTermMemory: shouldLoadLongTermMemory,
+        characterKnowledgeBoundary: formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }),
+        onlineChatSpatialBoundary: formatOnlineChatSpatialBoundary(),
+        voiceCallPrompts: activeAttachModal === "calling"
+          ? buildVoiceCallPrompts(callTopicShiftDetected)
+          : undefined,
+        stickerPrompt,
+        worldBookContextPriority: wbBlocks.allTriggered.length > 0,
+        characterProjection,
         diagnosticLabel: "regenerate prompt",
         finalPersonaRules: wbBlocks.allTriggered
           .filter((entry) => entry.purpose === "persona_rule")
-          .map((entry) => `【${entry.title}】\n${entry.content}`),
+          .map((entry) => "【" + entry.title + "】\n" + entry.content),
         finalPriorityInstructions: aliasIdentityFinalGuardPrompt ? [aliasIdentityFinalGuardPrompt] : undefined,
         finalLanguageInstruction: formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(
           activeCharacter,
@@ -420,10 +382,9 @@ Please read the feedback carefully and rewrite your response to perfectly match 
             characterId: activeRelationship?.characterId || activeChatCharId || undefined,
             userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
             relationId: activeRelationship?.id,
-          }).map((entry) => `${entry.title}\n${entry.content}`),
+          }).map((entry) => entry.title + "\n" + entry.content),
         )),
       });
-
       const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
       const promptMessage = serializeMessageContentForPrompt(lastUserMsg, {
         mode: "current",
