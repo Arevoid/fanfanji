@@ -58,7 +58,7 @@ try {
   assert.equal(networkCalls, 2, "network fallback must preserve the existing two-request behavior");
   assert.equal(ledger[0].providerRequestCount, 2);
   assert.equal(ledger[0].fallbackCount, 1);
-  assert.match(ledger[0].fallbackReasons[0], /browser direct/);
+  assert.equal(ledger[0].fallbackReasons[0], "backend_network");
   assert.equal(ledger[0].transport, "browser_direct");
 
   resetLedger();
@@ -88,7 +88,7 @@ try {
   assert.equal(ledger.length, 2, "format recovery records each existing provider request separately");
   assert.equal(ledger[0].parentActionId, ledger[1].parentActionId);
   assert.equal(ledger[1].retryCount, 1);
-  assert.match(ledger[1].retryReasons[0], /format/);
+  assert.equal(ledger[1].retryReasons[0], "format_validation");
 
   resetLedger();
   let aliasCalls = 0;
@@ -110,7 +110,7 @@ try {
   assert.equal(aliasRecovered.text, "你找步随影有什么事？我们好像还不熟。");
   ledger = records();
   assert.equal(aliasCalls, 2);
-  assert.match(ledger[1].retryReasons[0], /alias/);
+  assert.equal(ledger[1].retryReasons[0], "alias_identity");
 
   resetLedger();
   let contextCalls = 0;
@@ -124,7 +124,7 @@ try {
   assert.equal(recovered.text, "上下文恢复后的回复");
   ledger = records();
   assert.ok(contextCalls >= 2);
-  assert.ok(ledger.some((entry) => entry.retryCount > 0 && entry.retryReasons.some((reason) => /context/iu.test(reason))));
+  assert.ok(ledger.some((entry) => entry.retryCount > 0 && entry.retryReasons.includes("context_too_large")));
 
   resetLedger();
   globalThis.fetch = (async () => Response.json({ candidates: [{ statement: "事实" }] })) as typeof fetch;
