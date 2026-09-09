@@ -37,6 +37,7 @@ export interface MemoryProjectionJob {
 
 export type MemoryProjectionTransition =
   | { type: "start"; ownerId: string; leaseUntil: number }
+  | { type: "reclaim"; ownerId: string; leaseUntil: number }
   | { type: "complete" }
   | { type: "fail"; errorCode: MemoryProjectionErrorCode }
   | { type: "retry" };
@@ -113,8 +114,12 @@ export function transitionMemoryProjectionJob(
     throw new Error("memory_projection_transition_invalid");
   }
   const base = { ...job, updatedAt: now, version: job.version + 1 };
-  if (transition.type === "start") {
-    if (job.status !== "pending" || !canAcquireMemoryProjectionLease(job, transition.ownerId, now)
+  if (transition.type === "start" || transition.type === "reclaim") {
+    const reclaimable = transition.type === "reclaim"
+      && job.status === "running"
+      && Boolean(job.lease && job.lease.leaseUntil <= now);
+    const startable = transition.type === "start" && job.status === "pending";
+    if ((!startable && !reclaimable) || !canAcquireMemoryProjectionLease(job, transition.ownerId, now)
       || !Number.isFinite(transition.leaseUntil) || transition.leaseUntil <= now) {
       throw new Error("memory_projection_transition_invalid");
     }

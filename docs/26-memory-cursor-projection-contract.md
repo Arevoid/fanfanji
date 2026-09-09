@@ -110,6 +110,7 @@ Allowed transitions:
 pending --start(owner, lease)--> running --complete--> completed
                                   |
                                   +--fail(errorCode)--> failed --retry--> pending
+                                  +--reclaim(expired lease, new owner)--> running
 ```
 
 - `attemptCount` increments only when `pending → running`.
@@ -117,6 +118,7 @@ pending --start(owner, lease)--> running --complete--> completed
 - `lastErrorCode` is set only on failure and cleared on retry/start/complete.
 - `completedAt` is set only on completion.
 - `completed` is terminal for this job identity; a new canonical revision creates a new job.
+- An expired running lease may be reclaimed by a new owner through a versioned transition; the old owner cannot complete the stale version.
 - Illegal transitions include `pending → failed`, `pending → completed`, `running → pending`, `failed → completed`, and any transition out of `completed`.
 
 The bounded error code set is `CANONICAL_MISSING`, `SUMMARY_WRITE_FAILED`, `LEGACY_MIRROR_FAILED`, `SCOPE_MISMATCH`, `LEASE_CONFLICT`, and `UNKNOWN`. Unknown runtime errors normalize to `UNKNOWN`; no exception body or stack is persisted.
