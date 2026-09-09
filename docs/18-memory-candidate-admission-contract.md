@@ -43,7 +43,7 @@ producer -> MemoryCandidate -> pure admission decision -> (future projection)
 - `scope`：必须有 `characterId`、`relationId`、`userIdentityId`；`conversationId` 可选，
   但缺失不是跨会话 wildcard。
 - `provenance`：producer、source type、authorship、可选 app、source message/event/
-  record IDs 和 source conversation ID。
+  record IDs、source conversation ID，以及在可知时的 canonical `actorId`/`targetId`。
 - `evidence`：source IDs 和稳定 `evidenceKey`；不接受 prompt、response、API key、
   Authorization 或异常正文作为证据字段。
 - `temporal`：复用 `past | present | future | timeless | unknown`，并携带
@@ -102,7 +102,8 @@ record scope conversation ID。
 `buildMemoryCandidateIdempotencyKey` 是 deterministic source-based key，使用：
 
 ```text
-scope + candidateKind + producer + sourceType + authorship + source conversation
+scope + candidateKind + producer + sourceType + authorship + actor/target
++ source conversation
 + normalized source message/event/record references + evidenceKey
 ```
 

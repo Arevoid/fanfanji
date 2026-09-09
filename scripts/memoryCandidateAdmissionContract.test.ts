@@ -24,6 +24,8 @@ const baseCandidate = (overrides: Partial<MemoryCandidate> = {}): MemoryCandidat
     producer: "direct_chat",
     sourceType: "user_message",
     authorship: "user",
+    actorId: "identity-1",
+    targetId: "character-1",
     app: "chat",
     sourceMessageIds: ["message-1"],
     conversationId: "conversation-1",
@@ -169,6 +171,11 @@ assert.notEqual(
   buildMemoryCandidateIdempotencyKey(baseCandidate()),
   buildMemoryCandidateIdempotencyKey(baseCandidate({ provenance: { ...baseCandidate().provenance, sourceMessageIds: ["message-2"] }, evidence: { sourceMessageIds: ["message-2"], evidenceKey: "message-2:coffee" } })),
   "different source references are not semantic duplicates",
+);
+assert.notEqual(
+  buildMemoryCandidateIdempotencyKey(baseCandidate()),
+  buildMemoryCandidateIdempotencyKey(baseCandidate({ provenance: { ...baseCandidate().provenance, actorId: "character-1" } })),
+  "different known actors are not silently collapsed",
 );
 
 const duplicateKey = buildMemoryCandidateIdempotencyKey(baseCandidate());

@@ -63,6 +63,9 @@ export interface MemoryCandidateProvenance {
   producer: MemoryCandidateProducer;
   sourceType: MemoryCandidateSourceType;
   authorship: KnowledgeSourceAuthorship;
+  /** Canonical actor/target IDs when the source can identify them. */
+  actorId?: string;
+  targetId?: string;
   app?: MemorySourceApp;
   sourceMessageIds?: readonly string[];
   sourceEventIds?: readonly string[];
@@ -151,6 +154,8 @@ export function buildMemoryCandidateIdempotencyKey(candidate: MemoryCandidate): 
     provenance.producer,
     provenance.sourceType,
     provenance.authorship,
+    provenance.actorId || "",
+    provenance.targetId || "",
     provenance.conversationId || "",
     provenance.app || "",
     sourceReferences(candidate).join(","),
