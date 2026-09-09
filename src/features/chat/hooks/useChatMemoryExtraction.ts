@@ -11,8 +11,11 @@ import { createConversationSummaryRecord } from "../../characterKnowledge/servic
 import { evaluateKnowledgeWrite } from "../../../domain/characterKnowledge/knowledgeWritePolicy";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "../../../domain/memory/MemoryService";
 import { commitMemoryWriteBundle } from "../../../domain/memory/memoryWriteCoordinator";
-import { deriveCanonicalClaimSetRevision } from "../../../domain/memory/memoryCanonicalRevision";
-import { enqueueConversationSummaryProjection, type MemoryProjectionEnqueueResult } from "../../../core/memory/memoryProjectionEnqueue";
+import { buildCanonicalMemoryCommitSnapshot, type CanonicalMemoryCommitSnapshot } from "../../../domain/memory/canonicalMemoryCommitSnapshot";
+import {
+  enqueueConversationSummaryProjection,
+  type MemoryProjectionEnqueueResult,
+} from "../../../core/memory/memoryProjectionEnqueue";
 import { compareConversationSummaryProjectionEquivalence } from "../../../core/memory/conversationSummaryProjectionEquivalence";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "../../../utils/apiHelper";
 
@@ -254,25 +257,22 @@ export function useChatMemoryExtraction({
         }
         let finalCanonicalClaims = result.acceptedClaims;
         let canonicalStateResolved = false;
+        let finalCanonicalSnapshot: CanonicalMemoryCommitSnapshot | undefined;
         let extractedSummary: ConversationSummaryRecord | undefined;
         let enqueueResult: MemoryProjectionEnqueueResult | undefined;
         const write = await commitMemoryWriteBundle({
           claims: result.acceptedClaims,
           buildSummary: () => {
-            const canonicalRevision = canonicalStateResolved
-              ? deriveCanonicalClaimSetRevision({ scope: extractionScope, claims: finalCanonicalClaims }).revision
-              : undefined;
+            const canonicalSnapshot = finalCanonicalSnapshot;
             extractedSummary = createConversationSummaryRecord({
               scope: extractionScope,
-              // Preserve the existing synchronous batch semantics; the
-              // durable projection intentionally receives the final canonical
-              // scope and is compared during this shadow phase.
-              claims: result.acceptedClaims,
-              sourceMessageIds: messagesToCompress.map((message) => message.id),
-              canonicalRevision,
+              // Normal automatic Direct Chat uses the same exact-scope final
+              // canonical snapshot as the durable projection. Manual archive
+              // remains on its historical batch-local path.
+              claims: canonicalSnapshot?.activeClaims || result.acceptedClaims,
+              sourceMessageIds: canonicalSnapshot?.sourceMessageIds || messagesToCompress.map((message) => message.id),
+              ...(canonicalSnapshot ? { canonicalRevision: canonicalSnapshot.canonicalRevision } : {}),
               generatedAt: Date.now(),
-              rangeStartAt: messagesToCompress[0]?.timestamp,
-              rangeEndAt: messagesToCompress[messagesToCompress.length - 1]?.timestamp,
             });
             return extractedSummary;
           },
@@ -290,9 +290,13 @@ export function useChatMemoryExtraction({
             }
             finalCanonicalClaims = loaded.value;
             canonicalStateResolved = true;
-            enqueueResult = await enqueueConversationSummaryProjection({
+            finalCanonicalSnapshot = buildCanonicalMemoryCommitSnapshot({
               scope: extractionScope,
               claims: finalCanonicalClaims,
+            });
+            enqueueResult = await enqueueConversationSummaryProjection({
+              scope: extractionScope,
+              snapshot: finalCanonicalSnapshot,
               canonicalStateResolved: true,
             });
           } } : {}),
@@ -308,18 +312,16 @@ export function useChatMemoryExtraction({
           console.error("Conversation summary cache could not be persisted:", write.summaryError);
           return -1;
         }
-        if (canonicalStateResolved && extractedSummary
+        if (canonicalStateResolved && finalCanonicalSnapshot && extractedSummary
           && enqueueResult && (enqueueResult.kind === "inserted" || enqueueResult.kind === "exists")) {
           const backgroundSummary = createConversationSummaryRecord({
             id: `conversation-summary:${enqueueResult.job.jobId}`,
             scope: extractionScope,
-            claims: finalCanonicalClaims,
-            sourceMessageIds: messagesToCompress.map((message) => message.id),
+            claims: finalCanonicalSnapshot.activeClaims,
+            sourceMessageIds: finalCanonicalSnapshot.sourceMessageIds,
             canonicalRevision: enqueueResult.job.canonicalRevision,
             generatedAt: extractedSummary.generatedAt,
             generator: "memory-projection.conversation-summary.v1",
-            rangeStartAt: messagesToCompress[0]?.timestamp,
-            rangeEndAt: messagesToCompress[messagesToCompress.length - 1]?.timestamp,
           });
           if (backgroundSummary) {
             const equivalence = compareConversationSummaryProjectionEquivalence(extractedSummary, backgroundSummary);

@@ -12,10 +12,12 @@ The enqueue result (`inserted` or `exists`) schedules one coalesced, zero-delay,
 fire-and-forget drain. There is no polling and no per-job timer. The drain keeps
 the Stage 4C-13 cap of five jobs and does not retry failed jobs automatically.
 
-The existing synchronous batch Summary remains produced by the existing builder
-and still uses the extracted batch claims. It now carries the final canonical
-revision when the post-append claim read succeeds; this is additive metadata and
-requires no migration. The durable projection uses the final canonical scope.
+At the end of the Stage 4C-14 shadow phase the existing synchronous Summary
+still used the extracted batch claims, while the durable projection used the
+final canonical scope. Stage 4C-15 resolves that specific input mismatch for
+ordinary automatic Direct Chat: after the canonical append, one final exact-
+scope snapshot is shared by the synchronous Summary, enqueue metadata and the
+shadow preview. Manual archive remains on its historical batch-local path.
 The pure equivalence comparator checks exact scope, normalized Summary text,
 source IDs, status, projection version, canonical revision and schema version.
 Generator names are compared by Summary semantic family, IDs are intentionally
@@ -31,10 +33,13 @@ for group/offline/manual UI flows; AppMemory is a manual management reader;
 Offline, migration and deletion code have separate maintenance reads. This
 stage does not change any of those readers.
 
-Consequently the shadow phase is not a cutover approval. Existing batch Summary
-and full-canonical background projection can differ in source scope, so runtime
-mismatch metadata remains possible and must be resolved/characterized before a
-future Normal Direct Chat cutover. The future policy recommendation is:
+This convergence is still not a final background cutover approval. The
+synchronous write, cursor behavior and fail-open IndexedDB boundary remain in
+place; the durable projection can still be unavailable and startup
+reconciliation remains recovery. The exact contract and evidence are recorded
+in `docs/31-direct-chat-summary-canonical-convergence.md`.
+
+The recovery policy remains:
 
 ```text
 try durable enqueue

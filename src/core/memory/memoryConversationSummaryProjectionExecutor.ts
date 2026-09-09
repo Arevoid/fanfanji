@@ -1,8 +1,8 @@
 import { isExactTruthScope } from "../../domain/characterKnowledge/knowledgeConflictPolicy";
 import type { ConversationSummaryRecord, KnowledgeClaim } from "../../domain/characterKnowledge/characterKnowledgeTypes";
 import { createConversationSummaryRecord } from "../../domain/characterKnowledge/conversationSummaryProjection";
-import { deriveCanonicalClaimSetRevision } from "../../domain/memory/memoryCanonicalRevision";
 import type { MemoryProjectionErrorCode, MemoryProjectionJob } from "../../domain/memory/memoryProjectionJob";
+import { buildCanonicalMemoryCommitSnapshot } from "../../domain/memory/canonicalMemoryCommitSnapshot";
 
 type WriteResult = { success: boolean } | boolean | void;
 
@@ -41,7 +41,7 @@ const findCurrentSummary = (
 
 function validateCanonicalSnapshot(job: MemoryProjectionJob, claims: readonly KnowledgeClaim[]):
   | { kind: "failed"; errorCode: MemoryProjectionErrorCode }
-  | { kind: "valid"; activeClaims: KnowledgeClaim[]; activeClaimIds: string[] } {
+  | { kind: "valid"; activeClaims: KnowledgeClaim[]; activeClaimIds: string[]; sourceMessageIds: readonly string[] } {
   const jobRefs = new Set(job.canonicalRefs);
   const referencedClaims = claims.filter((claim) => jobRefs.has(claim.id));
   if (referencedClaims.some((claim) => !isExactTruthScope(claim, job.scope))) {
@@ -50,18 +50,18 @@ function validateCanonicalSnapshot(job: MemoryProjectionJob, claims: readonly Kn
   if (referencedClaims.length !== jobRefs.size) {
     return { kind: "failed", errorCode: "CANONICAL_MISSING" };
   }
-  const canonical = deriveCanonicalClaimSetRevision({ scope: job.scope, claims });
-  if (canonical.activeClaimIds.length === 0) {
+  const snapshot = buildCanonicalMemoryCommitSnapshot({ scope: job.scope, claims });
+  if (snapshot.activeClaimIds.length === 0) {
     return { kind: "failed", errorCode: "CANONICAL_REVISION_CHANGED" };
   }
-  if (canonical.revision !== job.canonicalRevision || !sameRefs(canonical.activeClaimIds, job.canonicalRefs)) {
+  if (snapshot.canonicalRevision !== job.canonicalRevision || !sameRefs(snapshot.activeClaimIds, job.canonicalRefs)) {
     return { kind: "failed", errorCode: "CANONICAL_REVISION_CHANGED" };
   }
-  const activeClaims = claims.filter((claim) => claim.status === "active" && jobRefs.has(claim.id));
-  if (activeClaims.length !== jobRefs.size) {
+  const activeClaims = snapshot.activeClaims.filter((claim) => jobRefs.has(claim.id));
+  if (activeClaims.length !== jobRefs.size || activeClaims.length !== snapshot.activeClaimIds.length) {
     return { kind: "failed", errorCode: "CANONICAL_MISSING" };
   }
-  return { kind: "valid", activeClaims, activeClaimIds: [...canonical.activeClaimIds] };
+  return { kind: "valid", activeClaims, activeClaimIds: [...snapshot.activeClaimIds], sourceMessageIds: snapshot.sourceMessageIds };
 }
 
 /** Executes one local, provider-free ConversationSummary projection after lease acquisition. */
@@ -73,7 +73,7 @@ export async function executeConversationSummaryProjection(
   if (validation.kind === "failed") return validation;
   const existing = findCurrentSummary(input.summaries, input.job, validation.activeClaimIds);
   if (existing) return { kind: "current", summary: existing };
-  const sourceMessageIds = Array.from(new Set(validation.activeClaims.flatMap((claim) => claim.source.messageIds || []).filter(Boolean))).sort();
+  const sourceMessageIds = validation.sourceMessageIds;
   if (sourceMessageIds.length === 0) return { kind: "failed", errorCode: "CANONICAL_MISSING" };
   const summary = createConversationSummaryRecord({
     id: `conversation-summary:${input.job.jobId}`,

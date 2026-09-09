@@ -54,6 +54,8 @@ if (inserted.kind !== "inserted") throw new Error("expected inserted job");
 const revisionA = deriveCanonicalClaimSetRevision({ scope, claims });
 assert.equal(inserted.job.canonicalRevision, revisionA.revision);
 assert.deepEqual(inserted.job.canonicalRefs, revisionA.activeClaimIds);
+assert.deepEqual(inserted.snapshot.activeClaimIds, revisionA.activeClaimIds);
+assert.deepEqual(inserted.snapshot.sourceMessageIds, ["message-claim-a"]);
 assert.doesNotMatch(JSON.stringify(inserted.job), /statement|message-claim-a/u, "job metadata contains no claim body or message body");
 
 const duplicate = await enqueueConversationSummaryProjection({
