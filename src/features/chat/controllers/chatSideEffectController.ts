@@ -1,5 +1,6 @@
 import type { Character, Message, OfflineStory } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
+import { evaluateMemoryExtractionCheapFilter } from "../../../domain/memory/memoryExtractionCheapFilter";
 
 export interface ChatReplySideEffectInput {
   userMsg: Message | null;
@@ -91,6 +92,29 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
 
         if (eligibleMessages.length >= triggerCount) {
           const summaryScopeKey = input.activeRelationship?.id || input.activeCharacter.id;
+          // Normal Direct Chat is the only production consumer in this stage.
+          // Group, Offline, and relationship-less paths keep their existing
+          // extraction lifecycle unchanged.
+          if (!autoSummaryInFlight.has(summaryScopeKey)
+            && !input.activeCharacter.isGroupChat && input.activeRelationship) {
+            let cheapFilter: ReturnType<typeof evaluateMemoryExtractionCheapFilter>;
+            try {
+              cheapFilter = evaluateMemoryExtractionCheapFilter(eligibleMessages);
+            } catch {
+              // A filter defect must never become a memory false negative.
+              cheapFilter = { decision: "extract", reason: "uncertain" };
+            }
+            if (cheapFilter.decision === "skip") {
+              const lastMessage = eligibleMessages[eligibleMessages.length - 1];
+              autoSummaryCooldownUntil.delete(summaryScopeKey);
+              if (lastMessage) {
+                saveRelationships(input.relationships, (previous) => previous.map((relation) => relation.id === input.activeRelationship?.id
+                  ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: now() }
+                  : relation));
+              }
+              return;
+            }
+          }
           const currentTime = now();
           const cooldownUntil = autoSummaryCooldownUntil.get(summaryScopeKey) || 0;
           if (!autoSummaryInFlight.has(summaryScopeKey) && currentTime >= cooldownUntil) {
