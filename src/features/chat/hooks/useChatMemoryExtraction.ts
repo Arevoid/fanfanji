@@ -30,6 +30,8 @@ export type MemoryExtractionPersistenceMode = "production_equivalent_write" | "o
 
 export interface MemoryExtractionRunOptions {
   persistenceMode?: MemoryExtractionPersistenceMode;
+  /** Dev-only characterization may opt into the additive V2 prompt. */
+  enableV2Metadata?: boolean;
 }
 
 export interface MemoryExtractionRunDiagnostics {
@@ -314,7 +316,9 @@ export function useChatMemoryExtraction({
           scenario: "chat",
           // The controller supplies an explicit eligible batch for automatic
           // Direct Chat extraction; manual archive actions leave this off.
-          ...(manualMessagesOverride !== undefined ? { enableMemoryExtractionV2Shadow: true } : {}),
+          ...(manualMessagesOverride !== undefined || runOptions.enableV2Metadata
+            ? { enableMemoryExtractionV2Shadow: true }
+            : {}),
           // Stage 4D-2 observation derives a V2 candidate from this same
           // response without changing the extraction Prompt or Provider call.
           ...(manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled()

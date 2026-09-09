@@ -17,6 +17,7 @@ assert.match(appChat, /DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL/);
 assert.match(appChat, /activeDirectScope/);
 assert.match(appChat, /extractNow: async/);
 assert.match(appChat, /persistenceMode: "observation_only"/);
+assert.match(appChat, /enableV2Metadata: true/);
 assert.match(appChat, /ACTIVE_DIRECT_SCOPE_UNAVAILABLE/);
 assert.match(appChat, /delete runtime\[DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL\]/);
 

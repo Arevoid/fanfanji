@@ -212,15 +212,19 @@ ${(input.characterProfile || "未提供额外资料").slice(0, 6000)}
   const v2ShadowRules = input.includeV2Shadow && input.scenario !== "offline" ? `
 【Memory V2 shadow 分类（仅本次普通 Direct Chat，不能改变旧写入）】
 同一条 JSON 可附加一个不重复正文的 "v2" 对象；它复用外层 statement、temporalStatus、sourceMessageIds、evidenceQuote，不复制这些长字段。
-v2 可使用：{"schemaVersion":2,"kind":"fact|plan|belief|event|episodic|relationship_signal|scene_only|subjective_reflection|unknown","semanticFacet":"preference|hypothesis|relationship_signal|scene_only|subjective_reflection","durability":"stable|temporary|unknown","relationshipSignalKind":"affection|trust|conflict|promise|boundary|commitment","actorRole":"user|character|relationship|other","targetRole":"user|character|relationship|other"}
-1. stable preference 使用 fact + preference + stable；temporary 或无法判断稳定性使用 temporary/unknown，不得猜成永久事实。
+v2 可使用：{"schemaVersion":2,"kind":"fact|plan|belief|event|episodic|relationship_signal|scene_only|subjective_reflection|unknown","semanticFacet":"preference|hypothesis|relationship_signal|scene_only|subjective_reflection","epistemicStatus":"objective|subjective|uncertain|unknown","planLifecycle":"active|cancelled|uncertain|completed|unknown","durability":"stable|temporary|unknown","authorityRole":"durable_candidate|scene_only|relationship_signal|non_objective|transient|unknown","relationshipSignalKind":"affection|trust|conflict|promise|boundary|commitment","actorRole":"user|character|relationship|other","targetRole":"user|character|relationship|other"}
+1. preference 使用 fact + preference；durability 按第 6 条填写。
 2. 推测、猜测或角色主观看法使用 belief + hypothesis；不得赋予 Truth authority。
 3. event 是“发生了什么”，episodic 是“值得长期记住的一段经历”；relationship_signal 只描述信号，scene_only 表示短暂场景，subjective_reflection 表示未验证的主观感受或判断。
-4. 只有旧字段能够安全兼容时才填写 legacy kind/subject；不要把 event、episodic、relationship_signal、scene_only 或 subjective_reflection 降级成 fact。v2 不得输出 authoritative、trusted、canonical ID、characterId、relationId、userIdentityId、actorId 或 targetId。
-5. v2 只是 shadow metadata，不决定写入、不改变旧 acceptedClaims、不触发额外请求；无法判断时可省略。` : "";
+4. epistemicStatus：objective=事实陈述；subjective=感受/看法；uncertain=可能、未确认或证据不足；unknown=无法判断。坚定语气不等于 objective。
+5. planLifecycle 只用于 plan：active=未来仍有效；cancelled=明确取消；uncertain=可能但未决定；completed=已完成；unknown=无法判断。future 不等于 active。
+6. durability 只用于 preference：stable=长期持续；temporary=当前/短期/一次性；unknown=证据不足。单次表达不等于 stable。
+7. authorityRole 只是语义提议，不是写入权；最终由 runtime/policy 决定。
+8. 只有旧字段能够安全兼容时才填写 legacy kind/subject；不要把 event、episodic、relationship_signal、scene_only 或 subjective_reflection 降级成 fact。v2 不得输出 authoritative、trusted、canonical ID、characterId、relationId、userIdentityId、actorId 或 targetId。
+9. v2 只是 shadow metadata，不决定写入、不改变旧 acceptedClaims、不触发额外请求；无法判断时可省略。` : "";
   const sourceReferenceExample = usesLocalSourceRefs ? "M1" : "精确消息ID";
   const outputShape = input.includeV2Shadow && input.scenario !== "offline"
-    ? `{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis（仅旧兼容候选需要）","subject":"user|character|relationship|other（仅旧兼容候选需要）","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["${sourceReferenceExample}"],"evidenceQuote":"源消息中的连续原文","v2":{"schemaVersion":2,"kind":"fact|plan|belief|event|episodic|relationship_signal|scene_only|subjective_reflection|unknown"}}`
+    ? `{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis（仅旧兼容候选需要）","subject":"user|character|relationship|other（仅旧兼容候选需要）","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["${sourceReferenceExample}"],"evidenceQuote":"源消息中的连续原文","v2":{"schemaVersion":2,"kind":"fact|plan|belief|event|episodic|relationship_signal|scene_only|subjective_reflection|unknown","epistemicStatus":"objective|subjective|uncertain|unknown","planLifecycle":"active|cancelled|uncertain|completed|unknown","durability":"stable|temporary|unknown","authorityRole":"durable_candidate|scene_only|relationship_signal|non_objective|transient|unknown"}}`
     : `{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis","subject":"user|character|relationship|other","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["${sourceReferenceExample}"],"evidenceQuote":"源消息中的连续原文"}`;
   return `你是长期知识候选提取器。${sourceReferenceRule}
 

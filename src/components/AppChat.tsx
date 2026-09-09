@@ -3423,7 +3423,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         // bounded in memory and never becomes a production default or sink.
         configureDirectChatMemoryAdmissionShadowEvidence({ enabled: true });
         try {
-          const extractedCount = await handleExtractMemories(undefined, { persistenceMode: "observation_only" });
+          const extractedCount = await handleExtractMemories(undefined, {
+            persistenceMode: "observation_only",
+            enableV2Metadata: true,
+          });
           const diagnostics = getLastMemoryExtractionRunDiagnostics();
           const shadowObservationCountAfter = getDirectChatMemoryAdmissionShadowEvidence().length;
           return {

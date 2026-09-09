@@ -72,6 +72,36 @@ assert.deepEqual(parsed.structuredCandidatesV2[9]?.sourceMessageIds, [sourceMess
 assert.equal("characterId" in (parsed.structuredCandidatesV2[9] || {}), false, "canonical IDs are not accepted from AI metadata");
 assert.equal("authoritative" in (parsed.structuredCandidatesV2[9] || {}), false, "authority fields are ignored");
 
+const metadataValues = parseKnowledgeExtractionOutputWithV2(JSON.stringify(base({
+  kind: "plan",
+  statement: "用户取消了周五的计划。",
+  temporalStatus: "future",
+  v2: v2({
+    kind: "plan",
+    semanticFacet: undefined,
+    epistemicStatus: "uncertain",
+    planLifecycle: "cancelled",
+    durability: undefined,
+    authorityRole: "durable_candidate",
+  }),
+})), allowedMessageIds);
+assert.equal(metadataValues.structuredCandidatesV2[0]?.epistemicStatus, "uncertain");
+assert.equal(metadataValues.structuredCandidatesV2[0]?.planLifecycle, "cancelled");
+assert.equal(metadataValues.structuredCandidatesV2[0]?.authorityRole, "durable_candidate");
+
+const malformedMetadata = parseKnowledgeExtractionOutputWithV2(JSON.stringify(base({
+  v2: v2({
+    epistemicStatus: "certain",
+    planLifecycle: "pending",
+    durability: "permanent",
+    authorityRole: "canonical",
+  }),
+})), allowedMessageIds);
+assert.equal(malformedMetadata.structuredCandidatesV2[0]?.epistemicStatus, "unknown");
+assert.equal(malformedMetadata.structuredCandidatesV2[0]?.planLifecycle, "unknown");
+assert.equal(malformedMetadata.structuredCandidatesV2[0]?.durability, "unknown");
+assert.equal(malformedMetadata.structuredCandidatesV2[0]?.authorityRole, "unknown");
+
 const partial = parseKnowledgeExtractionOutputWithV2(JSON.stringify(base({ v2: { schemaVersion: 2, kind: "event" } })), allowedMessageIds);
 assert.equal(partial.candidates.length, 1);
 assert.equal(partial.structuredCandidatesV2.length, 1, "optional V2 fields may be absent safely");
@@ -135,6 +165,14 @@ const promptOverhead = v2Prompt.length - legacyPrompt.length;
 assert.ok(promptOverhead > 0 && promptOverhead < 3000, `V2 instruction overhead should remain bounded: ${promptOverhead}`);
 assert.match(v2Prompt, /Memory V2 shadow/);
 assert.match(v2Prompt, /relationship_signal/);
+assert.match(v2Prompt, /epistemicStatus/);
+assert.match(v2Prompt, /planLifecycle/);
+assert.match(v2Prompt, /durability/);
+assert.match(v2Prompt, /坚定语气不等于 objective/);
+assert.match(v2Prompt, /future 不等于 active/);
+assert.match(v2Prompt, /单次表达不等于 stable/);
+assert.match(v2Prompt, /authorityRole 只是语义提议，不是写入权/);
+assert.doesNotMatch(legacyPrompt, /epistemicStatus/);
 assert.doesNotMatch(offlinePrompt, /Memory V2 shadow/, "normal Direct Chat producer flag does not leak to Offline");
 console.log(`V2 producer prompt overhead: ${promptOverhead} characters (approximately ${Math.ceil(promptOverhead / 4)} tokens)`);
 
