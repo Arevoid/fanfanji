@@ -98,15 +98,17 @@ assert.equal(JSON.stringify(adapted).includes("我周末喜欢喝咖啡"), false
 const stablePreference = evaluateMemoryCandidate(adapted.candidates[0]!);
 assert.deepEqual(
   { state: stablePreference.state, target: stablePreference.target, reason: stablePreference.reason },
-  { state: "accepted", target: "truth", reason: "accepted_fact" },
+  { state: "needs_review", target: undefined, reason: "stable_preference_requires_review" },
 );
 const temporaryPreference = evaluateMemoryCandidate({
   ...adapted.candidates[0]!,
   candidateId: "temporary-preference",
   durability: "temporary",
+  proposedAuthorityRole: "transient",
+  resolvedAuthorityRole: "transient",
 });
 assert.equal(temporaryPreference.state, "needs_review");
-assert.equal(temporaryPreference.reason, "temporary_preference_requires_review");
+assert.equal(temporaryPreference.reason, "temporary_preference_not_durable");
 assert.notEqual(
   buildMemoryCandidateIdempotencyKey(adapted.candidates[0]!),
   buildMemoryCandidateIdempotencyKey({ ...adapted.candidates[0]!, candidateId: "temporary-key", durability: "temporary" }),
@@ -115,6 +117,9 @@ assert.notEqual(
 const unknownHypothesis = evaluateMemoryCandidate({
   ...adapted.candidates[1]!,
   candidateId: "unknown-hypothesis",
+  epistemicStatus: "uncertain",
+  proposedAuthorityRole: "durable_candidate",
+  resolvedAuthorityRole: "durable_candidate",
   provenance: { ...adapted.candidates[1]!.provenance, actorId: undefined, targetId: undefined },
 });
 assert.equal(unknownHypothesis.state, "needs_review");

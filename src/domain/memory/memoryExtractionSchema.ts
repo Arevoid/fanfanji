@@ -1,7 +1,10 @@
 import type { TemporalStatus } from "../characterKnowledge/characterKnowledgeTypes";
 import type {
   MemoryCandidateDurability,
+  MemoryCandidateAuthorityRole,
+  MemoryCandidateEpistemicStatus,
   MemoryCandidateKind,
+  MemoryCandidatePlanLifecycle,
   MemoryCandidateRelationshipSignalKind,
   MemoryCandidateSemanticFacet,
 } from "./memoryCandidate";
@@ -10,6 +13,9 @@ export const MEMORY_EXTRACTION_SCHEMA_V2 = 2 as const;
 
 export type MemoryExtractionSemanticFacet = MemoryCandidateSemanticFacet;
 export type MemoryExtractionDurability = MemoryCandidateDurability;
+export type MemoryExtractionEpistemicStatus = MemoryCandidateEpistemicStatus;
+export type MemoryExtractionPlanLifecycle = MemoryCandidatePlanLifecycle;
+export type MemoryExtractionAuthorityRole = MemoryCandidateAuthorityRole;
 export type MemoryExtractionRole = "user" | "character" | "relationship" | "other";
 export type MemoryRelationshipSignalKind = MemoryCandidateRelationshipSignalKind;
 export type MemoryExtractionRejectionStage = "parser" | "knowledge_gate" | "admission";
@@ -34,6 +40,10 @@ export interface MemoryExtractionCandidateV2Metadata {
   kind: MemoryCandidateKind;
   semanticFacet?: MemoryExtractionSemanticFacet;
   durability?: MemoryExtractionDurability;
+  /** Model proposal only; runtime resolves the trusted policy role. */
+  epistemicStatus?: MemoryExtractionEpistemicStatus;
+  planLifecycle?: MemoryExtractionPlanLifecycle;
+  authorityRole?: MemoryExtractionAuthorityRole;
   relationshipSignalKind?: MemoryRelationshipSignalKind;
   occurredAt?: number;
   validFrom?: number;
@@ -67,6 +77,9 @@ const KINDS = new Set<MemoryCandidateKind>([
 ]);
 const FACETS = new Set<MemoryExtractionSemanticFacet>(["preference", "hypothesis", "relationship_signal", "scene_only", "subjective_reflection"]);
 const DURABILITIES = new Set<MemoryExtractionDurability>(["stable", "temporary", "unknown"]);
+const EPISTEMIC_STATUSES = new Set<MemoryExtractionEpistemicStatus>(["objective", "subjective", "uncertain", "unknown"]);
+const PLAN_LIFECYCLES = new Set<MemoryExtractionPlanLifecycle>(["active", "cancelled", "uncertain", "completed", "unknown"]);
+const AUTHORITY_ROLES = new Set<MemoryExtractionAuthorityRole>(["durable_candidate", "scene_only", "relationship_signal", "non_objective", "transient", "unknown"]);
 const ROLES = new Set<MemoryExtractionRole>(["user", "character", "relationship", "other"]);
 const SIGNALS = new Set<MemoryRelationshipSignalKind>(["promise", "trust", "conflict", "affection", "boundary", "commitment"]);
 const TEMPORAL = new Set<TemporalStatus>(["past", "present", "future", "timeless", "unknown"]);
@@ -111,6 +124,18 @@ export function normalizeMemoryExtractionCandidateV2(
   const durability = DURABILITIES.has(rawDurability as MemoryExtractionDurability)
     ? rawDurability as MemoryExtractionDurability
     : rawDurability === undefined ? undefined : "unknown";
+  const rawEpistemicStatus = value.epistemicStatus;
+  const epistemicStatus = EPISTEMIC_STATUSES.has(rawEpistemicStatus as MemoryExtractionEpistemicStatus)
+    ? rawEpistemicStatus as MemoryExtractionEpistemicStatus
+    : rawEpistemicStatus === undefined ? undefined : "unknown";
+  const rawPlanLifecycle = value.planLifecycle;
+  const planLifecycle = PLAN_LIFECYCLES.has(rawPlanLifecycle as MemoryExtractionPlanLifecycle)
+    ? rawPlanLifecycle as MemoryExtractionPlanLifecycle
+    : rawPlanLifecycle === undefined ? undefined : "unknown";
+  const rawAuthorityRole = value.authorityRole;
+  const authorityRole = AUTHORITY_ROLES.has(rawAuthorityRole as MemoryExtractionAuthorityRole)
+    ? rawAuthorityRole as MemoryExtractionAuthorityRole
+    : rawAuthorityRole === undefined ? undefined : "unknown";
   const relationshipSignalKind = SIGNALS.has(value.relationshipSignalKind as MemoryRelationshipSignalKind)
     ? value.relationshipSignalKind as MemoryRelationshipSignalKind
     : undefined;
@@ -126,6 +151,9 @@ export function normalizeMemoryExtractionCandidateV2(
     kind: kindFacetConflict ? "unknown" : kind,
     ...(semanticFacet && !kindFacetConflict ? { semanticFacet } : {}),
     ...(durability ? { durability } : {}),
+    ...(epistemicStatus ? { epistemicStatus } : {}),
+    ...(planLifecycle ? { planLifecycle } : {}),
+    ...(authorityRole ? { authorityRole } : {}),
     ...(relationshipSignalKind && semanticFacet === "relationship_signal" ? { relationshipSignalKind } : {}),
     statement: value.statement.trim(),
     temporalStatus: value.temporalStatus as TemporalStatus,

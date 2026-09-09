@@ -19,7 +19,7 @@ export interface DirectChatMemoryAdmissionShadowEvidenceRecord {
   observedAt: number;
   evidenceOrigin: DirectChatMemoryShadowEvidenceOrigin;
   sessionScopeHash: string;
-  producerVersion: "admission-v2-shadow.v1";
+  producerVersion: "admission-v2-shadow.v2";
   candidateKind: DirectChatMemoryShadowObservation["candidateKind"];
   legacyDecision: DirectChatMemoryShadowObservation["legacyDecision"];
   legacyReasonCode: string;
@@ -30,6 +30,11 @@ export interface DirectChatMemoryAdmissionShadowEvidenceRecord {
   provenancePresent: boolean;
   evidenceTraceable: boolean;
   temporalStatus: DirectChatMemoryShadowObservation["temporalStatus"];
+  metadataSource?: DirectChatMemoryShadowObservation["metadataSource"];
+  epistemicStatus?: DirectChatMemoryShadowObservation["epistemicStatus"];
+  planLifecycle?: DirectChatMemoryShadowObservation["planLifecycle"];
+  proposedAuthorityRole?: DirectChatMemoryShadowObservation["proposedAuthorityRole"];
+  resolvedAuthorityRole?: DirectChatMemoryShadowObservation["resolvedAuthorityRole"];
   duplicateDetected: boolean;
   sourceCount: number;
   sourceFingerprint: string;
@@ -131,7 +136,7 @@ function sanitizeObservation(
     observedAt: Date.now(),
     evidenceOrigin,
     sessionScopeHash: safeScopeHash(scope),
-    producerVersion: "admission-v2-shadow.v1",
+    producerVersion: "admission-v2-shadow.v2",
     candidateKind: observation.candidateKind,
     legacyDecision: observation.legacyDecision,
     legacyReasonCode: observation.legacyReasonCode,
@@ -142,6 +147,11 @@ function sanitizeObservation(
     provenancePresent: observation.provenancePresent,
     evidenceTraceable: observation.evidenceTraceable,
     temporalStatus: observation.temporalStatus,
+    ...(observation.metadataSource ? { metadataSource: observation.metadataSource } : {}),
+    ...(observation.epistemicStatus ? { epistemicStatus: observation.epistemicStatus } : {}),
+    ...(observation.planLifecycle ? { planLifecycle: observation.planLifecycle } : {}),
+    ...(observation.proposedAuthorityRole ? { proposedAuthorityRole: observation.proposedAuthorityRole } : {}),
+    ...(observation.resolvedAuthorityRole ? { resolvedAuthorityRole: observation.resolvedAuthorityRole } : {}),
     duplicateDetected: observation.duplicateDetected,
     sourceCount: observation.sourceCount,
     sourceFingerprint: sessionFingerprint(observation.sourceFingerprint),
@@ -241,7 +251,7 @@ export function recordDirectChatMemoryAdmissionShadowFailure(): void {
 export function exportDirectChatMemoryAdmissionShadowJson(): string {
   const records = getDirectChatMemoryAdmissionShadowEvidence();
   return JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     evidenceOrigin: records.length > 0 && records.every((record) => record.evidenceOrigin === "real_runtime")
       ? "real_runtime"
       : records.length > 0 && records.every((record) => record.evidenceOrigin === "synthetic")

@@ -34,6 +34,16 @@ export type MemoryCandidateSemanticFacet =
   | "scene_only"
   | "subjective_reflection";
 export type MemoryCandidateDurability = "stable" | "temporary" | "unknown";
+export type MemoryCandidateEpistemicStatus = "objective" | "subjective" | "uncertain" | "unknown";
+export type MemoryCandidatePlanLifecycle = "active" | "cancelled" | "uncertain" | "completed" | "unknown";
+export type MemoryCandidateAuthorityRole =
+  | "durable_candidate"
+  | "scene_only"
+  | "relationship_signal"
+  | "non_objective"
+  | "transient"
+  | "unknown";
+export type MemoryCandidateMetadataSource = "legacy" | "v2";
 export type MemoryCandidateRelationshipSignalKind =
   | "promise"
   | "trust"
@@ -121,6 +131,16 @@ export interface MemoryCandidate {
   /** Producer-issued opaque identity; generation is outside this contract. */
   candidateId: string;
   candidateKind: MemoryCandidateKind;
+  /** The parser projection that supplied additive metadata, when present. */
+  metadataSource?: MemoryCandidateMetadataSource;
+  /** Model-proposed epistemic classification; missing/unknown is conservative. */
+  epistemicStatus?: MemoryCandidateEpistemicStatus;
+  /** Additive lifecycle metadata for plan candidates. */
+  planLifecycle?: MemoryCandidatePlanLifecycle;
+  /** Model-proposed role; never grants write authority. */
+  proposedAuthorityRole?: MemoryCandidateAuthorityRole;
+  /** Runtime/policy-resolved role; never supplied by the Provider. */
+  resolvedAuthorityRole?: MemoryCandidateAuthorityRole;
   /** Optional extraction metadata; admission remains the authority. */
   semanticFacet?: MemoryCandidateSemanticFacet;
   durability?: MemoryCandidateDurability;
@@ -185,6 +205,11 @@ export function buildMemoryCandidateIdempotencyKey(candidate: MemoryCandidate): 
     provenance.targetId || "",
     provenance.conversationId || "",
     provenance.app || "",
+    candidate.metadataSource || "",
+    candidate.epistemicStatus || "",
+    candidate.planLifecycle || "",
+    candidate.proposedAuthorityRole || "",
+    candidate.resolvedAuthorityRole || "",
     sourceReferences(candidate).join(","),
     candidate.evidence.evidenceKey || "",
   ];

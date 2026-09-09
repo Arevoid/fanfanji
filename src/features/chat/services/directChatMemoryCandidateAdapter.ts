@@ -14,6 +14,7 @@ import {
   resolveDirectChatMemoryActorTarget,
   type DirectChatMemorySourceBinding,
 } from "./directChatMemorySourceBinding";
+import { resolveMemoryCandidateAuthorityRole } from "../../../domain/memory/memoryAdmission";
 
 export interface DirectChatMemoryCandidateAdapterScope {
   /** These IDs must come from the canonical Direct Chat runtime, never text. */
@@ -136,6 +137,7 @@ function adaptV2Candidate(
   input: DirectChatMemoryCandidateAdapterInput,
   createCandidateId: () => string,
   binding?: DirectChatMemorySourceBinding,
+  metadataSource: "legacy" | "v2" = "v2",
 ): MemoryCandidate {
   const refs = binding ? binding.trustedSourceMessageIds : candidate.sourceMessageIds;
   const sourceConversationId = normalize(input.scope.conversationId);
@@ -150,10 +152,16 @@ function adaptV2Candidate(
   const lineage = input.lineage && (input.lineage.parentActionId || input.lineage.producerActionId || input.lineage.sourceRequestId)
     ? input.lineage
     : undefined;
-  return {
+  const metadataCandidate: MemoryCandidate = {
     schemaVersion: 1,
     candidateId: createCandidateId(),
     candidateKind: candidate.kind,
+    metadataSource,
+    ...(metadataSource === "v2" ? {
+      epistemicStatus: candidate.epistemicStatus || "unknown",
+      ...(candidate.kind === "plan" ? { planLifecycle: candidate.planLifecycle || "unknown" } : {}),
+      proposedAuthorityRole: candidate.authorityRole || "unknown",
+    } : {}),
     ...(candidate.semanticFacet ? { semanticFacet: candidate.semanticFacet } : {}),
     ...(candidate.durability ? { durability: candidate.durability } : {}),
     ...(candidate.relationshipSignalKind ? { relationshipSignalKind: candidate.relationshipSignalKind } : {}),
@@ -187,6 +195,10 @@ function adaptV2Candidate(
     ...(candidate.importance !== undefined ? { importance: candidate.importance } : {}),
     ...(lineage ? { lineage } : {}),
   };
+  if (metadataSource === "v2") {
+    metadataCandidate.resolvedAuthorityRole = resolveMemoryCandidateAuthorityRole(metadataCandidate).role;
+  }
+  return metadataCandidate;
 }
 
 /**
@@ -199,7 +211,8 @@ export function adaptDirectChatMemoryExtractionToCandidates(
   const sourceEnvelope = input.sourceEnvelope || input.extraction.sourceEnvelope;
   const runtimeInput = sourceEnvelope && !input.sourceEnvelope ? { ...input, sourceEnvelope } : input;
   const createCandidateId = runtimeInput.createCandidateId || (() => createId("memory-candidate"));
-  const structuredCandidates = runtimeInput.extraction.structuredCandidatesV2?.length
+  const hasStructuredV2 = Boolean(runtimeInput.extraction.structuredCandidatesV2?.length);
+  const structuredCandidates = hasStructuredV2
     ? runtimeInput.extraction.structuredCandidatesV2
     : runtimeInput.extraction.shadowCandidatesV2;
   if (structuredCandidates?.length) {
@@ -226,7 +239,7 @@ export function adaptDirectChatMemoryExtractionToCandidates(
         if (!binding.scopeMatches) scopeMismatchCount += 1;
         if (binding.status === "valid") canonicalBindingSuccessCount += 1;
       }
-      const adapted = adaptV2Candidate(candidate, runtimeInput, createCandidateId, binding);
+      const adapted = adaptV2Candidate(candidate, runtimeInput, createCandidateId, binding, hasStructuredV2 ? "v2" : "legacy");
       if (!adapted.provenance.sourceMessageIds?.length) missingSourceReferenceCount += 1;
       return adapted;
     });

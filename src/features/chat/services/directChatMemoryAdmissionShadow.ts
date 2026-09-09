@@ -36,6 +36,11 @@ export interface DirectChatMemoryShadowObservation {
   scopeComplete: boolean;
   provenancePresent: boolean;
   temporalStatus: MemoryCandidate["temporal"]["status"];
+  metadataSource?: MemoryCandidate["metadataSource"];
+  epistemicStatus?: MemoryCandidate["epistemicStatus"];
+  planLifecycle?: MemoryCandidate["planLifecycle"];
+  proposedAuthorityRole?: MemoryCandidate["proposedAuthorityRole"];
+  resolvedAuthorityRole?: MemoryCandidate["resolvedAuthorityRole"];
   mismatch: DirectChatMemoryMismatchCategory;
   legacyDecision: MemoryExtractionCandidateDecision;
   legacyReasonCode: string;
@@ -152,7 +157,12 @@ function severityFor(input: {
 }): DirectChatMemoryShadowSeverity {
   if (!input.scopeExact || !input.provenancePresent || !input.evidenceTraceable) return "P0";
   if (input.decision.reason === "scene_only"
+    || input.decision.reason === "scene_only_not_truth"
     || input.decision.reason === "subjective_reflection_not_truth"
+    || input.decision.reason === "subjective_not_objective_truth"
+    || input.decision.reason === "cancelled_plan_not_active"
+    || input.decision.reason === "completed_plan_not_active"
+    || input.decision.reason === "metadata_conflict"
     || input.decision.reason === "invalid_temporal"
     || input.mismatch === "old_reject_new_accept") return "P1";
   if (input.mismatch === "old_allow_new_reject" || input.mismatch === "old_allow_new_review") return "P2";
@@ -267,6 +277,11 @@ export function observeDirectChatMemoryAdmissionShadow(
         scopeComplete: Boolean(candidate.scope.characterId && candidate.scope.relationId && candidate.scope.userIdentityId),
         provenancePresent: Boolean(candidate.provenance.producer && candidate.provenance.sourceType && candidate.provenance.authorship),
         temporalStatus: candidate.temporal.status,
+        ...(candidate.metadataSource ? { metadataSource: candidate.metadataSource } : {}),
+        ...(candidate.epistemicStatus ? { epistemicStatus: candidate.epistemicStatus } : {}),
+        ...(candidate.planLifecycle ? { planLifecycle: candidate.planLifecycle } : {}),
+        ...(candidate.proposedAuthorityRole ? { proposedAuthorityRole: candidate.proposedAuthorityRole } : {}),
+        ...(candidate.resolvedAuthorityRole ? { resolvedAuthorityRole: candidate.resolvedAuthorityRole } : {}),
         mismatch,
         legacyDecision: legacyDiagnostic?.decision || "incomparable",
         legacyReasonCode: legacyDiagnostic?.reason || "legacy_candidate_unavailable",

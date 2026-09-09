@@ -83,6 +83,8 @@ const shadowCandidateFromPayload = (
   kind: candidateKindForLegacyKind(payload.kind),
   ...(payload.kind === "preference" ? { semanticFacet: "preference", durability: "unknown" as const } : {}),
   ...(payload.kind === "hypothesis" ? { semanticFacet: "hypothesis" } : {}),
+  epistemicStatus: payload.kind === "belief" || payload.kind === "hypothesis" ? "uncertain" : "unknown",
+  ...(payload.kind === "plan" ? { planLifecycle: "unknown" as const } : {}),
   statement: payload.statement,
   temporalStatus: payload.temporalStatus,
   sourceMessageIds: payload.sourceMessageIds,

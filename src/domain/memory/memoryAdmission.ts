@@ -5,6 +5,7 @@ import {
   isValidMemoryCandidateImportance,
   MEMORY_CANDIDATE_SCHEMA_VERSION,
   type MemoryCandidate,
+  type MemoryCandidateAuthorityRole,
   type MemoryCandidateKind,
   type MemoryCandidateProducer,
 } from "./memoryCandidate";
@@ -28,14 +29,25 @@ export type MemoryAdmissionRejectionReason =
   | "unsupported_kind"
   | "producer_not_permitted"
   | "scene_only"
-  | "subjective_reflection_not_truth";
+  | "subjective_reflection_not_truth"
+  | "subjective_not_objective_truth"
+  | "scene_only_not_truth"
+  | "cancelled_plan_not_active"
+  | "completed_plan_not_active"
+  | "unsafe_authority_role"
+  | "metadata_conflict";
 
 export type MemoryAdmissionReviewReason =
   | "duplicate_source"
   | "relationship_signal_requires_review"
   | "temporary_preference_requires_review"
   | "unknown_preference_durability"
-  | "hypothesis_missing_subject";
+  | "hypothesis_missing_subject"
+  | "uncertain_plan_requires_review"
+  | "active_plan_requires_review"
+  | "temporary_preference_not_durable"
+  | "stable_preference_requires_review"
+  | "missing_epistemic_status";
 
 export type MemoryAdmissionReason =
   | MemoryAdmissionAcceptedReason
@@ -88,6 +100,45 @@ export const MEMORY_PRODUCER_PERMISSIONS: Readonly<Record<MemoryCandidateProduce
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
 const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+export interface MemoryCandidateAuthorityResolution {
+  role: MemoryCandidateAuthorityRole;
+  conflict: boolean;
+}
+
+/**
+ * Resolve policy authority from model proposals and orthogonal metadata. The
+ * returned role is runtime-derived; a Provider proposal never grants write
+ * authority by itself.
+ */
+export function resolveMemoryCandidateAuthorityRole(candidate: MemoryCandidate): MemoryCandidateAuthorityResolution {
+  const proposed = candidate.proposedAuthorityRole;
+  const semanticRole = candidate.semanticFacet === "scene_only" || candidate.candidateKind === "scene_only"
+    ? "scene_only" as const
+    : candidate.semanticFacet === "relationship_signal" || candidate.candidateKind === "relationship_signal"
+      ? "relationship_signal" as const
+      : candidate.semanticFacet === "subjective_reflection" || candidate.candidateKind === "subjective_reflection"
+        || candidate.epistemicStatus === "subjective"
+        ? "non_objective" as const
+        : candidate.semanticFacet === "preference" && candidate.durability === "temporary"
+          ? "transient" as const
+          : undefined;
+  const role = semanticRole
+    || (proposed && proposed !== "unknown" ? proposed : undefined)
+    || (candidate.epistemicStatus === "objective" && candidate.candidateKind !== "unknown" ? "durable_candidate" : "unknown");
+  const proposalConflict = Boolean(
+    proposed
+    && proposed !== "unknown"
+    && semanticRole
+    && proposed !== semanticRole,
+  );
+  const subjectiveDurableConflict = proposed === "durable_candidate" && candidate.epistemicStatus === "subjective";
+  const resolvedConflict = Boolean(
+    candidate.resolvedAuthorityRole
+    && candidate.resolvedAuthorityRole !== role,
+  );
+  return { role, conflict: proposalConflict || subjectiveDurableConflict || resolvedConflict };
+}
 
 function hasExactScope(candidate: MemoryCandidate): boolean {
   return isNonEmptyString(candidate.scope.characterId)
@@ -155,6 +206,43 @@ export function evaluateMemoryCandidate(candidate: MemoryCandidate, context: Mem
   }
 
   if (candidate.candidateKind === "unknown") return baseDecision(candidate, "rejected", "unsupported_kind", idempotencyKey);
+  if (candidate.metadataSource === "v2") {
+    const authority = resolveMemoryCandidateAuthorityRole(candidate);
+    if (authority.conflict) return baseDecision(candidate, "rejected", "metadata_conflict", idempotencyKey);
+    if (authority.role === "scene_only") return baseDecision(candidate, "rejected", "scene_only_not_truth", idempotencyKey);
+    if (authority.role === "relationship_signal") {
+      return baseDecision(candidate, "needs_review", "relationship_signal_requires_review", idempotencyKey);
+    }
+    if (authority.role === "non_objective") {
+      return baseDecision(candidate, "rejected", "subjective_not_objective_truth", idempotencyKey);
+    }
+    if (candidate.candidateKind === "plan") {
+      const lifecycle = candidate.planLifecycle || "unknown";
+      if (lifecycle === "cancelled") return baseDecision(candidate, "rejected", "cancelled_plan_not_active", idempotencyKey);
+      if (lifecycle === "completed") return baseDecision(candidate, "rejected", "completed_plan_not_active", idempotencyKey);
+      if (lifecycle === "uncertain" || lifecycle === "unknown") {
+        return baseDecision(candidate, "needs_review", "uncertain_plan_requires_review", idempotencyKey);
+      }
+      return baseDecision(candidate, "needs_review", "active_plan_requires_review", idempotencyKey);
+    }
+    if (candidate.semanticFacet === "preference") {
+      if (candidate.durability === "temporary") {
+        return baseDecision(candidate, "needs_review", "temporary_preference_not_durable", idempotencyKey);
+      }
+      if (candidate.durability === "unknown") {
+        return baseDecision(candidate, "needs_review", "unknown_preference_durability", idempotencyKey);
+      }
+      if (candidate.durability === "stable") {
+        return baseDecision(candidate, "needs_review", "stable_preference_requires_review", idempotencyKey);
+      }
+    }
+    if (!candidate.epistemicStatus || candidate.epistemicStatus === "unknown") {
+      return baseDecision(candidate, "needs_review", "missing_epistemic_status", idempotencyKey);
+    }
+    if (candidate.proposedAuthorityRole === "unknown") {
+      return baseDecision(candidate, "needs_review", "unsafe_authority_role", idempotencyKey);
+    }
+  }
   const permission = MEMORY_PRODUCER_PERMISSIONS[candidate.provenance.producer];
   if (!permission || !permission.allowedKinds.includes(candidate.candidateKind)) {
     return baseDecision(candidate, "rejected", "producer_not_permitted", idempotencyKey);
