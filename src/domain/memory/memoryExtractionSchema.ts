@@ -23,16 +23,12 @@ export interface MemoryExtractionRejectionDiagnostic {
 }
 
 /** AI-facing roles are descriptive only; the adapter resolves canonical IDs. */
-export interface MemoryExtractionCandidateV2 {
+export interface MemoryExtractionCandidateV2Metadata {
   schemaVersion: typeof MEMORY_EXTRACTION_SCHEMA_V2;
   kind: MemoryCandidateKind;
   semanticFacet?: MemoryExtractionSemanticFacet;
   durability?: MemoryExtractionDurability;
   relationshipSignalKind?: MemoryRelationshipSignalKind;
-  statement: string;
-  temporalStatus: TemporalStatus;
-  sourceMessageIds: readonly string[];
-  evidenceQuote: string;
   occurredAt?: number;
   validFrom?: number;
   validTo?: number;
@@ -40,6 +36,14 @@ export interface MemoryExtractionCandidateV2 {
   importance?: number;
   actorRole?: MemoryExtractionRole;
   targetRole?: MemoryExtractionRole;
+}
+
+/** Full V2 candidate used by the standalone additive API response field. */
+export interface MemoryExtractionCandidateV2 extends MemoryExtractionCandidateV2Metadata {
+  statement: string;
+  temporalStatus: TemporalStatus;
+  sourceMessageIds: readonly string[];
+  evidenceQuote: string;
 }
 
 const KINDS = new Set<MemoryCandidateKind>([
@@ -113,4 +117,27 @@ export function normalizeMemoryExtractionCandidateV2(
     ...(optionalRole(value.actorRole) ? { actorRole: optionalRole(value.actorRole) } : {}),
     ...(optionalRole(value.targetRole) ? { targetRole: optionalRole(value.targetRole) } : {}),
   };
+}
+
+/**
+ * Read V2 metadata embedded in one legacy candidate object. The legacy
+ * statement, temporal fields, source references and evidence remain the
+ * single copy; metadata cannot replace those runtime-validated values.
+ */
+export function normalizeEmbeddedMemoryExtractionCandidateV2(
+  value: unknown,
+  allowedMessageIds: ReadonlySet<string>,
+): MemoryExtractionCandidateV2 | undefined {
+  if (!isRecord(value) || !isRecord(value.v2)) return undefined;
+  const metadata = value.v2;
+  return normalizeMemoryExtractionCandidateV2({
+    ...metadata,
+    statement: value.statement,
+    temporalStatus: value.temporalStatus,
+    sourceMessageIds: value.sourceMessageIds,
+    evidenceQuote: value.evidenceQuote,
+    ...(metadata.occurredAt === undefined && value.occurredAt !== undefined ? { occurredAt: value.occurredAt } : {}),
+    ...(metadata.validFrom === undefined && value.validFrom !== undefined ? { validFrom: value.validFrom } : {}),
+    ...(metadata.validTo === undefined && value.validTo !== undefined ? { validTo: value.validTo } : {}),
+  }, allowedMessageIds);
 }

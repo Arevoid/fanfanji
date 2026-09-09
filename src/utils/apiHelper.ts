@@ -665,6 +665,7 @@ async function apiExtractMemoriesImpl(params: {
   relationId?: string;
   conversationId?: string;
   parentActionId?: string;
+  enableV2Shadow?: boolean;
   purpose?: AiPurpose;
   ledger?: AiRequestLedgerSession;
 }): Promise<{
@@ -672,6 +673,7 @@ async function apiExtractMemoriesImpl(params: {
   items: ExtractedKnowledgeCandidatePayload[];
   candidates?: ExtractedKnowledgeCandidatePayload[];
   structuredCandidatesV2?: import("../domain/memory/memoryExtractionSchema").MemoryExtractionCandidateV2[];
+  v2MetadataPresent?: boolean;
   error?: string;
 }> {
   const { ledger, purpose, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
@@ -694,12 +696,13 @@ async function apiExtractMemoriesImpl(params: {
         new Set(params.history.map((item) => item.id)),
       )
       : undefined;
-    if (res.ok && (Array.isArray(data?.candidates) || structuredCandidatesV2?.length)) {
+    if (res.ok && (Array.isArray(data?.candidates) || structuredCandidatesV2?.length || data?.v2MetadataPresent === true)) {
       return {
         text: typeof data.text === "string" ? data.text : "",
         items: Array.isArray(data.candidates) ? data.candidates : [],
         ...(Array.isArray(data.candidates) ? { candidates: data.candidates } : {}),
         ...(structuredCandidatesV2?.length ? { structuredCandidatesV2 } : {}),
+        ...(data.v2MetadataPresent === true ? { v2MetadataPresent: true } : {}),
         ...(typeof data.error === "string" && data.error.trim() ? { error: data.error.trim() } : {}),
       };
     }
@@ -725,6 +728,7 @@ async function apiExtractMemoriesImpl(params: {
         history: params.history,
         templateType: params.templateType,
         scenario: params.scenario,
+        includeV2Shadow: params.enableV2Shadow,
       });
 
       const result = await directClientChat({
@@ -758,7 +762,13 @@ async function apiExtractMemoriesImpl(params: {
             : undefined,
         })).text || "",
       });
-      return { text: repaired.text, items: repaired.candidates, candidates: repaired.candidates };
+      return {
+        text: repaired.text,
+        items: repaired.candidates,
+        candidates: repaired.candidates,
+        ...(repaired.structuredCandidatesV2.length ? { structuredCandidatesV2: repaired.structuredCandidatesV2 } : {}),
+        ...(repaired.v2MetadataPresent ? { v2MetadataPresent: true } : {}),
+      };
     } catch (fallbackErr) {
       console.error("Direct extract memories fallback failed:", fallbackErr);
       return {
@@ -957,7 +967,10 @@ type MemoryExtractionParams = Parameters<typeof apiExtractMemories>[0];
 type MemoryExtractionResponse = Awaited<ReturnType<typeof apiExtractMemories>>;
 
 function normalizeMemoryExtractionResponse(response: MemoryExtractionResponse): MemoryExtractionResponse {
-  const hasStructuredItems = (response.items?.length || 0) > 0 || (response.candidates?.length || 0) > 0;
+  const hasStructuredItems = (response.items?.length || 0) > 0
+    || (response.candidates?.length || 0) > 0
+    || (response.structuredCandidatesV2?.length || 0) > 0
+    || response.v2MetadataPresent === true;
   if (response.error || hasStructuredItems || !response.text?.trim()) return response;
   return {
     ...response,

@@ -62,6 +62,7 @@ export async function extractMemories(
     characterId: context.characterId,
     relationId: context.relationId,
     conversationId: context.conversationId,
+    ...(context.enableMemoryExtractionV2Shadow ? { enableV2Shadow: true } : {}),
     ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
   });
   const structuredCandidatesV2 = Array.isArray(data.structuredCandidatesV2) && data.structuredCandidatesV2.length > 0

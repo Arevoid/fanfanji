@@ -432,7 +432,7 @@ ${historyText}
   // API Route: Extract individual memories
   app.post("/api/extract-memories", async (req, res) => {
     try {
-      const { history, characterName, characterProfile, apiKey, model, apiEndpoint, templateType, scenario } = req.body;
+      const { history, characterName, characterProfile, apiKey, model, apiEndpoint, templateType, scenario, enableV2Shadow } = req.body;
       const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
       if (!apiKeyValue) {
         return res.status(400).json({
@@ -456,6 +456,7 @@ ${historyText}
         history: safeHistory,
         templateType: templateType === "delicate" ? "delicate" : "refined",
         scenario,
+        includeV2Shadow: enableV2Shadow === true && scenario !== "offline",
       });
 
       const generateExtractionText = async (promptText: string, temperature: number): Promise<string> => {
@@ -477,7 +478,14 @@ ${historyText}
         originalPrompt: prompt,
         repair: (repairPrompt) => generateExtractionText(repairPrompt, 0.2),
       });
-      res.json({ text: repaired.text, items: repaired.candidates, candidates: repaired.candidates, repaired: repaired.repaired });
+      res.json({
+        text: repaired.text,
+        items: repaired.candidates,
+        candidates: repaired.candidates,
+        structuredCandidatesV2: repaired.structuredCandidatesV2,
+        v2MetadataPresent: repaired.v2MetadataPresent,
+        repaired: repaired.repaired,
+      });
     } catch (error: any) {
       console.error("Extract Memories Error:", error);
       const normalized = normalizeTextApiError(error, "提取记忆发生异常，请稍后再试。");

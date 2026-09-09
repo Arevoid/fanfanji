@@ -231,6 +231,9 @@ export function useChatMemoryExtraction({
           recentMessages: messagesToCompress,
           existingMemories: [],
           scenario: "chat",
+          // The controller supplies an explicit eligible batch for automatic
+          // Direct Chat extraction; manual archive actions leave this off.
+          ...(manualMessagesOverride !== undefined ? { enableMemoryExtractionV2Shadow: true } : {}),
           apiKey: settings.apiKey,
           model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
           apiEndpoint: settings.apiEndpoint,

@@ -1,5 +1,6 @@
 import type { KnowledgeKind, KnowledgeSubject, TemporalStatus } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import {
+  normalizeEmbeddedMemoryExtractionCandidateV2,
   normalizeMemoryExtractionCandidateV2,
   type MemoryExtractionCandidateV2,
 } from "../../../domain/memory/memoryExtractionSchema";
@@ -68,8 +69,36 @@ export function parseMemoryExtractionCandidateV2Output(
   allowedMessageIds: ReadonlySet<string>,
 ): MemoryExtractionCandidateV2[] {
   return parseRawValues(rawText)
-    .map((value) => normalizeMemoryExtractionCandidateV2(value, allowedMessageIds))
+    .map((value) => normalizeEmbeddedMemoryExtractionCandidateV2(value, allowedMessageIds)
+      || normalizeMemoryExtractionCandidateV2(value, allowedMessageIds))
     .filter((value): value is MemoryExtractionCandidateV2 => value !== undefined);
+}
+
+export interface ParsedKnowledgeExtractionOutput {
+  candidates: ExtractedKnowledgeCandidatePayload[];
+  structuredCandidatesV2: MemoryExtractionCandidateV2[];
+  /** A JSON candidate carried V2 metadata, even when that metadata was invalid. */
+  v2MetadataPresent: boolean;
+}
+
+/** Parse both projections from one response without duplicating candidate text. */
+export function parseKnowledgeExtractionOutputWithV2(
+  rawText: string,
+  allowedMessageIds: ReadonlySet<string>,
+): ParsedKnowledgeExtractionOutput {
+  const rawValues = parseRawValues(rawText);
+  const structuredCandidatesV2 = rawValues
+    .map((value) => normalizeEmbeddedMemoryExtractionCandidateV2(value, allowedMessageIds)
+      || normalizeMemoryExtractionCandidateV2(value, allowedMessageIds))
+    .filter((value): value is MemoryExtractionCandidateV2 => value !== undefined);
+  return {
+    candidates: rawValues
+      .map((value) => normalizeExtractedKnowledgeCandidate(value, allowedMessageIds))
+      .filter((value): value is ExtractedKnowledgeCandidatePayload => value !== undefined),
+    structuredCandidatesV2,
+    v2MetadataPresent: rawValues.some((value) => Boolean(value && typeof value === "object" && !Array.isArray(value)
+      && ("v2" in value || "schemaVersion" in value))),
+  };
 }
 
 function parseRawValues(rawText: string): unknown[] {
@@ -117,20 +146,17 @@ export async function parseOrRepairKnowledgeExtractionOutput(input: {
   allowedMessageIds: ReadonlySet<string>;
   originalPrompt: string;
   repair: (repairPrompt: string) => Promise<string>;
-}): Promise<{ text: string; candidates: ExtractedKnowledgeCandidatePayload[]; repaired: boolean }> {
-  const candidates = parseKnowledgeExtractionOutput(input.rawText, input.allowedMessageIds);
-  if (candidates.length > 0 || !input.rawText.trim()) {
-    return { text: input.rawText, candidates, repaired: false };
+}): Promise<ParsedKnowledgeExtractionOutput & { text: string; repaired: boolean }> {
+  const parsed = parseKnowledgeExtractionOutputWithV2(input.rawText, input.allowedMessageIds);
+  if (parsed.candidates.length > 0 || parsed.structuredCandidatesV2.length > 0
+    || parsed.v2MetadataPresent || !input.rawText.trim()) {
+    return { text: input.rawText, ...parsed, repaired: false };
   }
   const repairedText = await input.repair(buildKnowledgeExtractionRepairPrompt({
     originalPrompt: input.originalPrompt,
     invalidOutput: input.rawText,
   }));
-  return {
-    text: repairedText,
-    candidates: parseKnowledgeExtractionOutput(repairedText, input.allowedMessageIds),
-    repaired: true,
-  };
+  return { text: repairedText, ...parseKnowledgeExtractionOutputWithV2(repairedText, input.allowedMessageIds), repaired: true };
 }
 
 export function buildKnowledgeExtractionPrompt(input: {
@@ -139,6 +165,7 @@ export function buildKnowledgeExtractionPrompt(input: {
   history: readonly KnowledgeExtractionHistoryItem[];
   templateType?: "refined" | "delicate";
   scenario?: "offline";
+  includeV2Shadow?: boolean;
 }): string {
   const history = input.history.map((item) =>
     `[messageId=${JSON.stringify(item.id)}][${item.role === "user" ? "user" : "character"}] ${item.text}`,
@@ -165,13 +192,25 @@ ${(input.characterProfile || "未提供额外资料").slice(0, 6000)}
 </character_profile>` : `
 【精炼版展示文本】
 不要输出 memoryText；只输出第三人称、主体明确、条理清晰的客观事件 statement。`;
+  const v2ShadowRules = input.includeV2Shadow && input.scenario !== "offline" ? `
+【Memory V2 shadow 分类（仅本次普通 Direct Chat，不能改变旧写入）】
+同一条 JSON 可附加一个不重复正文的 "v2" 对象；它复用外层 statement、temporalStatus、sourceMessageIds、evidenceQuote，不复制这些长字段。
+v2 可使用：{"schemaVersion":2,"kind":"fact|plan|belief|event|episodic|relationship_signal|scene_only|subjective_reflection|unknown","semanticFacet":"preference|hypothesis|relationship_signal|scene_only|subjective_reflection","durability":"stable|temporary|unknown","relationshipSignalKind":"affection|trust|conflict|promise|boundary|commitment","actorRole":"user|character|relationship|other","targetRole":"user|character|relationship|other"}
+1. stable preference 使用 fact + preference + stable；temporary 或无法判断稳定性使用 temporary/unknown，不得猜成永久事实。
+2. 推测、猜测或角色主观看法使用 belief + hypothesis；不得赋予 Truth authority。
+3. event 是“发生了什么”，episodic 是“值得长期记住的一段经历”；relationship_signal 只描述信号，scene_only 表示短暂场景，subjective_reflection 表示未验证的主观感受或判断。
+4. 只有旧字段能够安全兼容时才填写 legacy kind/subject；不要把 event、episodic、relationship_signal、scene_only 或 subjective_reflection 降级成 fact。v2 不得输出 authoritative、trusted、canonical ID、characterId、relationId、userIdentityId、actorId 或 targetId。
+5. v2 只是 shadow metadata，不决定写入、不改变旧 acceptedClaims、不触发额外请求；无法判断时可省略。` : "";
+  const outputShape = input.includeV2Shadow && input.scenario !== "offline"
+    ? `{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis（仅旧兼容候选需要）","subject":"user|character|relationship|other（仅旧兼容候选需要）","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["精确消息ID"],"evidenceQuote":"源消息中的连续原文","v2":{"schemaVersion":2,"kind":"fact|plan|belief|event|episodic|relationship_signal|scene_only|subjective_reflection|unknown"}}`
+    : `{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis","subject":"user|character|relationship|other","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["精确消息ID"],"evidenceQuote":"源消息中的连续原文"}`;
   return `你是长期知识候选提取器。你只能从带 messageId 的原始消息中提出候选，不能补写或猜测。
 
 对话：
 ${history}
 
 逐行输出 JSON（JSONL），不要 Markdown、标题或解释。每行格式：
-{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis","subject":"user|character|relationship|other","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["精确消息ID"],"evidenceQuote":"源消息中的连续原文"}
+${outputShape}
 
 规则：
 1. evidenceQuote 必须逐字出现在所引用的一条消息中；找不到原文就不要输出。
@@ -181,5 +220,6 @@ ${history}
 5. 一条候选只表达一个命题；普通聊天最多 5 条；没有可靠候选时输出空文本。
 6. statement 可以规范表达，但不能超出 evidenceQuote 与所引用 sourceMessageIds 原文共同支持的含义。
 ${offlineRules}
-${delicateRules}`;
+${delicateRules}
+${v2ShadowRules}`;
 }

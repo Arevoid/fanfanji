@@ -39,6 +39,8 @@ export interface MemoryExtractionContext {
   recentMessages: readonly Message[];
   existingMemories: readonly MemoryItem[];
   scenario: "chat" | "offline" | "manual-summary" | "immediate-summary";
+  /** Normal Direct Chat only; enables additive V2 producer shadow output. */
+  enableMemoryExtractionV2Shadow?: boolean;
   apiKey: string;
   model: string;
   apiEndpoint?: string;
@@ -68,6 +70,8 @@ export interface MemoryExtractionApiParams {
   relationId?: string;
   conversationId?: string;
   parentActionId?: string;
+  /** Internal producer flag; never changes legacy write authority. */
+  enableV2Shadow?: boolean;
 }
 
 export interface MemoryExtractionApiResult {
@@ -75,6 +79,8 @@ export interface MemoryExtractionApiResult {
   candidates?: ExtractedKnowledgeCandidatePayload[];
   /** Additive V2 metadata; old API responses continue to use candidates. */
   structuredCandidatesV2?: MemoryExtractionCandidateV2[];
+  /** True when a response attempted V2 metadata, even if it was malformed. */
+  v2MetadataPresent?: boolean;
   error?: string;
 }
 
