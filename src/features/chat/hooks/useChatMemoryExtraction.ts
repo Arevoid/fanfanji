@@ -12,11 +12,11 @@ import { evaluateKnowledgeWrite } from "../../../domain/characterKnowledge/knowl
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "../../../domain/memory/MemoryService";
 import { commitMemoryWriteBundle } from "../../../domain/memory/memoryWriteCoordinator";
 import { buildCanonicalMemoryCommitSnapshot, type CanonicalMemoryCommitSnapshot } from "../../../domain/memory/canonicalMemoryCommitSnapshot";
+import { resolveDirectChatSummaryCutover, type DirectChatSummaryCutoverDecision } from "../../../domain/memory/directChatSummaryCutoverPolicy";
 import {
   enqueueConversationSummaryProjection,
   type MemoryProjectionEnqueueResult,
 } from "../../../core/memory/memoryProjectionEnqueue";
-import { compareConversationSummaryProjectionEquivalence } from "../../../core/memory/conversationSummaryProjectionEquivalence";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "../../../utils/apiHelper";
 
 type DirectScope = { characterId: string; relationId: string; userIdentityId: string; conversationId: string };
@@ -256,13 +256,20 @@ export function useChatMemoryExtraction({
           return -1;
         }
         let finalCanonicalClaims = result.acceptedClaims;
-        let canonicalStateResolved = false;
+        const isAutomaticDirectChat = manualMessagesOverride === undefined;
+        let canonicalSnapshotAvailable = false;
         let finalCanonicalSnapshot: CanonicalMemoryCommitSnapshot | undefined;
         let extractedSummary: ConversationSummaryRecord | undefined;
         let enqueueResult: MemoryProjectionEnqueueResult | undefined;
+        let cutoverDecision: DirectChatSummaryCutoverDecision | undefined = isAutomaticDirectChat && result.acceptedClaims.length === 0
+          ? resolveDirectChatSummaryCutover({ automatic: true, canonicalSnapshotAvailable: true, zeroCandidates: true })
+          : undefined;
         const write = await commitMemoryWriteBundle({
           claims: result.acceptedClaims,
           buildSummary: () => {
+            if (isAutomaticDirectChat && (!cutoverDecision || !cutoverDecision.writeSynchronousSummary)) {
+              return undefined;
+            }
             const canonicalSnapshot = finalCanonicalSnapshot;
             extractedSummary = createConversationSummaryRecord({
               scope: extractionScope,
@@ -278,57 +285,71 @@ export function useChatMemoryExtraction({
           },
           appendClaims: appendKnowledgeClaims,
           appendSummaries: (summaries) => conversationSummaryRepository.appendMany(summaries),
-          ...(manualMessagesOverride === undefined ? { afterCanonicalWrite: async () => {
+          ...(isAutomaticDirectChat ? { afterCanonicalWrite: async () => {
             const loaded = loadKnowledgeClaims();
             if (!loaded.valid) {
-              enqueueResult = await enqueueConversationSummaryProjection({
-                scope: extractionScope,
-                claims: finalCanonicalClaims,
-                canonicalStateResolved: false,
+              canonicalSnapshotAvailable = false;
+              enqueueResult = { kind: "unavailable", error: loaded.error };
+              cutoverDecision = resolveDirectChatSummaryCutover({
+                automatic: true,
+                canonicalSnapshotAvailable: false,
+                enqueueKind: enqueueResult.kind,
               });
               return;
             }
             finalCanonicalClaims = loaded.value;
-            canonicalStateResolved = true;
             finalCanonicalSnapshot = buildCanonicalMemoryCommitSnapshot({
               scope: extractionScope,
               claims: finalCanonicalClaims,
             });
-            enqueueResult = await enqueueConversationSummaryProjection({
-              scope: extractionScope,
-              snapshot: finalCanonicalSnapshot,
-              canonicalStateResolved: true,
+            canonicalSnapshotAvailable = true;
+            try {
+              enqueueResult = await enqueueConversationSummaryProjection({
+                scope: extractionScope,
+                snapshot: finalCanonicalSnapshot,
+                canonicalStateResolved: true,
+              });
+            } catch (error) {
+              enqueueResult = { kind: "unavailable", error };
+            }
+            cutoverDecision = resolveDirectChatSummaryCutover({
+              automatic: true,
+              canonicalSnapshotAvailable,
+              enqueueKind: enqueueResult.kind,
             });
+            if (cutoverDecision.outcome === "DURABLE_PROJECTION_UNAVAILABLE_SYNC_FALLBACK") {
+              console.warn("[memory-projection] Durable projection unavailable; using synchronous canonical Summary fallback.");
+            }
           } } : {}),
         });
         if (!write.canonicalWritten) {
           console.error("Knowledge claims could not be persisted.", write.error);
           return -1;
         }
-        if (!write.summaryWritten) {
+        const fallbackSummaryWritten = Boolean(
+          write.summaryWritten
+          && finalCanonicalSnapshot
+          && (finalCanonicalSnapshot.activeClaims.length === 0 || extractedSummary),
+        );
+        const finalCutoverDecision = isAutomaticDirectChat
+          ? resolveDirectChatSummaryCutover({
+            automatic: true,
+            canonicalSnapshotAvailable,
+            enqueueKind: enqueueResult?.kind,
+            zeroCandidates: result.acceptedClaims.length === 0,
+            fallbackSummaryWritten,
+          })
+          : resolveDirectChatSummaryCutover({ automatic: false, canonicalSnapshotAvailable: true });
+        if (!write.summaryWritten && (!isAutomaticDirectChat || finalCutoverDecision.requiresSynchronousFallback)) {
           // Do not move the archive marker past a batch whose derived summary
           // did not persist. A later retry can safely rebuild the canonical
           // summary without deleting the original chat history.
           console.error("Conversation summary cache could not be persisted:", write.summaryError);
           return -1;
         }
-        if (canonicalStateResolved && finalCanonicalSnapshot && extractedSummary
-          && enqueueResult && (enqueueResult.kind === "inserted" || enqueueResult.kind === "exists")) {
-          const backgroundSummary = createConversationSummaryRecord({
-            id: `conversation-summary:${enqueueResult.job.jobId}`,
-            scope: extractionScope,
-            claims: finalCanonicalSnapshot.activeClaims,
-            sourceMessageIds: finalCanonicalSnapshot.sourceMessageIds,
-            canonicalRevision: enqueueResult.job.canonicalRevision,
-            generatedAt: extractedSummary.generatedAt,
-            generator: "memory-projection.conversation-summary.v1",
-          });
-          if (backgroundSummary) {
-            const equivalence = compareConversationSummaryProjectionEquivalence(extractedSummary, backgroundSummary);
-            if (!equivalence.equivalent) {
-              console.warn("[memory-projection] Direct Chat Summary shadow mismatch:", equivalence.mismatchFields);
-            }
-          }
+        if (isAutomaticDirectChat && !finalCutoverDecision.canAdvanceCursor) {
+          console.error("[memory-projection] Direct Chat archive cursor held:", finalCutoverDecision.outcome);
+          return -1;
         }
         archiveStats.acceptedTruthCount += result.acceptedClaims.length;
         archiveStats.summaryCount += write.summaryWritten ? 1 : 0;

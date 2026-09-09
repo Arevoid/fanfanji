@@ -90,9 +90,8 @@ across follow-up background work remains a documented future gap.
 
 ## Cutover decision
 
-The normal Direct Chat synchronous and background Summary production inputs are
-now equivalent when the final canonical read succeeds. The durable projection
-is still best-effort and can be pending/unavailable; the next stage may design
-the normal Direct Chat background cutover only after separately approving its
-cursor/read-switch and operational failure contract. This stage itself stops
-here and does not execute that cutover.
+The normal Direct Chat synchronous and background Summary production inputs were
+made equivalent here when the final canonical read succeeds. Stage 4C-16 then
+applies the separately approved automatic Direct Chat background cutover; its
+cursor and fallback contract is recorded in
+`docs/32-direct-chat-summary-background-cutover.md`.
