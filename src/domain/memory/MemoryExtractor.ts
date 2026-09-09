@@ -10,6 +10,11 @@ import {
   buildMemoryExtractionLocalSourceRefTable,
   resolveMemoryExtractionSourceRefs,
 } from "./memoryExtractionLocalSourceRefs";
+import type {
+  MemoryExtractionCandidateV2,
+  MemoryExtractionRejectionDiagnostic,
+} from "./memoryExtractionSchema";
+import { buildMemoryShadowCorrelationKey } from "./memoryShadowCorrelation";
 
 const hasTruthScope = (context: MemoryExtractionContext): boolean => Boolean(
   context.relationId?.trim()
@@ -39,6 +44,60 @@ const containsEvidence = (source: string, quote: string): boolean => {
   const normalizedQuote = normalizeEvidenceText(quote);
   return Boolean(normalizedQuote) && normalizedSource.includes(normalizedQuote);
 };
+
+/**
+ * Correlation is based on source references and temporal status, never array position or
+ * statement text. The token is opaque to shadow consumers and is not exported.
+ */
+const candidateCorrelationKey = (input: {
+  sourceMessageIds: readonly string[];
+  temporalStatus: string;
+}): string | undefined => {
+  return buildMemoryShadowCorrelationKey(input.sourceMessageIds, input.temporalStatus);
+};
+
+const candidateKindForLegacyKind = (
+  kind: KnowledgeWriteCandidate["kind"],
+): MemoryExtractionCandidateV2["kind"] => {
+  switch (kind) {
+    case "fact": return "fact";
+    case "plan": return "plan";
+    case "belief": return "belief";
+    case "preference": return "fact";
+    case "hypothesis": return "belief";
+    default: return "unknown";
+  }
+};
+
+const shadowCandidateFromPayload = (
+  payload: {
+    statement: string;
+    kind: KnowledgeWriteCandidate["kind"];
+    subject: KnowledgeWriteCandidate["subject"];
+    temporalStatus: KnowledgeWriteCandidate["temporalStatus"];
+    sourceMessageIds: readonly string[];
+    evidenceQuote: string;
+  },
+): MemoryExtractionCandidateV2 => ({
+  schemaVersion: 2,
+  kind: candidateKindForLegacyKind(payload.kind),
+  ...(payload.kind === "preference" ? { semanticFacet: "preference", durability: "unknown" as const } : {}),
+  ...(payload.kind === "hypothesis" ? { semanticFacet: "hypothesis" } : {}),
+  statement: payload.statement,
+  temporalStatus: payload.temporalStatus,
+  sourceMessageIds: payload.sourceMessageIds,
+  evidenceQuote: payload.evidenceQuote,
+  actorRole: payload.subject === "user" || payload.subject === "character" || payload.subject === "relationship" || payload.subject === "other"
+    ? payload.subject
+    : undefined,
+});
+
+const diagnostic = (input: Omit<MemoryExtractionRejectionDiagnostic, "decision"> & {
+  decision: MemoryExtractionRejectionDiagnostic["decision"];
+}): MemoryExtractionRejectionDiagnostic => ({
+  ...input,
+  ...(input.correlationKey ? { correlationKey: input.correlationKey } : {}),
+});
 
 export async function extractMemories(
   context: MemoryExtractionContext,
@@ -108,6 +167,7 @@ export async function extractMemories(
       extractedMemories: [],
       acceptedClaims: [],
       rejectedCandidateCount: 0,
+      rejectedCandidates: [],
       apiError: data.error,
     });
   }
@@ -119,6 +179,7 @@ export async function extractMemories(
       acceptedClaims: [],
       rejectedCandidateCount: 0,
       ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
+      rejectedCandidates: [],
       ...(structuredCandidatesV2 ? {} : { apiError: data.error || "提炼失败，未提取到有效记忆或API请求出错" }),
     });
   }
@@ -128,6 +189,7 @@ export async function extractMemories(
       ? resolveModelSourceRefs(item as { sourceMessageIds?: readonly string[] } & Record<string, unknown>)
       : item)
     : rawItems;
+  const collectDiagnostics = context.enableAdmissionShadowObservation === true;
 
   // A memory without a complete relationship scope cannot be attributed to a
   // specific user's relationship. Keep the result visible to the caller as a
@@ -135,30 +197,70 @@ export async function extractMemories(
   // This closes the old characterId-only fallback that could leak facts across
   // identities or conversations.
   if (!hasTruthScope(context)) {
+    const rejectedCandidates = collectDiagnostics ? rawItems.map((item) => {
+      const sourceMessageIds = item && typeof item === "object" && !Array.isArray(item)
+        && Array.isArray((item as Record<string, unknown>).sourceMessageIds)
+        ? ((item as Record<string, unknown>).sourceMessageIds as unknown[]).filter((id): id is string => typeof id === "string")
+        : [];
+      return diagnostic({
+        decision: "rejected",
+        stage: "knowledge_gate",
+        reason: "insufficient_scope",
+        sourceMessageCount: sourceMessageIds.length,
+      });
+    }) : undefined;
     return withSourceEnvelope({
       extractedMemories: [],
       acceptedClaims: [],
       rejectedCandidateCount: rawItems.length,
       ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
+      ...(rejectedCandidates ? { rejectedCandidates } : {}),
     });
   }
 
   const allowedMessageIds = new Set(context.recentMessages.map((message) => message.id));
-  const payloads = resolvedRawItems
-    .map((item) => normalizeExtractedKnowledgeCandidate(item, allowedMessageIds))
-    .filter((item): item is NonNullable<typeof item> => item !== undefined)
+  const parserDiagnostics: MemoryExtractionRejectionDiagnostic[] = [];
+  const payloadEntries = resolvedRawItems
+    .map((item, index) => ({ item, index, payload: normalizeExtractedKnowledgeCandidate(item, allowedMessageIds) }))
+    .filter((entry): entry is typeof entry & { payload: NonNullable<typeof entry.payload> } => {
+      if (entry.payload) return true;
+      const sourceMessageIds = entry.item && typeof entry.item === "object" && !Array.isArray(entry.item)
+        && Array.isArray((entry.item as Record<string, unknown>).sourceMessageIds)
+        ? ((entry.item as Record<string, unknown>).sourceMessageIds as unknown[]).filter((id): id is string => typeof id === "string")
+        : [];
+      if (collectDiagnostics) parserDiagnostics.push(diagnostic({
+        decision: "incomparable",
+        stage: "parser",
+        reason: "candidate_unavailable",
+        sourceMessageCount: sourceMessageIds.length,
+      }));
+      return false;
+    })
     .slice(0, context.scenario === "offline" ? 8 : 5);
+  const payloads = payloadEntries.map((entry) => entry.payload);
   const filteredStatements = context.filterItems
     ? new Set(context.filterItems(payloads.map((item) => item.statement)))
     : undefined;
   const baseId = context.createId();
   const acceptedClaims: KnowledgeClaim[] = [];
   const displayTextByClaimId = new Map<string, string>();
+  const legacyDiagnostics: MemoryExtractionRejectionDiagnostic[] = [...parserDiagnostics];
   let rejectedCandidateCount = rawItems.length - payloads.length;
 
-  payloads.forEach((payload, index) => {
+  payloadEntries.forEach(({ payload, index }) => {
+    const correlationKey = candidateCorrelationKey(payload);
+    const sourceMessageCount = payload.sourceMessageIds.length;
     if (filteredStatements && !filteredStatements.has(payload.statement)) {
       rejectedCandidateCount += 1;
+      if (collectDiagnostics) legacyDiagnostics.push(diagnostic({
+        decision: "rejected",
+        stage: "knowledge_gate",
+        reason: "filtered",
+        candidateKind: candidateKindForLegacyKind(payload.kind),
+        sourceMessageCount,
+        temporalStatus: payload.temporalStatus,
+        correlationKey,
+      }));
       return;
     }
     const sourceMessages = payload.sourceMessageIds
@@ -172,6 +274,15 @@ export async function extractMemories(
       }), payload.evidenceQuote));
     if (!quotedMessage) {
       rejectedCandidateCount += 1;
+      if (collectDiagnostics) legacyDiagnostics.push(diagnostic({
+        decision: "rejected",
+        stage: "knowledge_gate",
+        reason: "evidence_not_found",
+        candidateKind: candidateKindForLegacyKind(payload.kind),
+        sourceMessageCount,
+        temporalStatus: payload.temporalStatus,
+        correlationKey,
+      }));
       return;
     }
     const isVerifiedUserEvidence = Boolean(quotedMessage
@@ -187,6 +298,15 @@ export async function extractMemories(
       : isVerifiedUserEvidence ? payload.evidenceQuote : payload.statement;
     if (context.filterItems && context.filterItems([statement]).length === 0) {
       rejectedCandidateCount += 1;
+      if (collectDiagnostics) legacyDiagnostics.push(diagnostic({
+        decision: "rejected",
+        stage: "knowledge_gate",
+        reason: "filtered",
+        candidateKind: candidateKindForLegacyKind(payload.kind),
+        sourceMessageCount,
+        temporalStatus: payload.temporalStatus,
+        correlationKey,
+      }));
       return;
     }
     const sourceKind = context.scenario === "offline" ? "offline_story" as const : "user_message" as const;
@@ -216,15 +336,38 @@ export async function extractMemories(
     const decision = evaluateKnowledgeWrite(writeCandidate);
     if (decision.accepted) {
       acceptedClaims.push(decision.claim);
+      if (collectDiagnostics) legacyDiagnostics.push(diagnostic({
+        decision: "accepted",
+        stage: "knowledge_gate",
+        reason: "accepted",
+        candidateKind: candidateKindForLegacyKind(payload.kind),
+        sourceMessageCount,
+        temporalStatus: payload.temporalStatus,
+        correlationKey,
+      }));
       displayTextByClaimId.set(
         decision.claim.id,
         context.templateType === "delicate" && payload.memoryText
           ? payload.memoryText
           : decision.claim.statement,
       );
+    } else {
+      rejectedCandidateCount += 1;
+      if (collectDiagnostics) legacyDiagnostics.push(diagnostic({
+        decision: "rejected",
+        stage: "knowledge_gate",
+        reason: `knowledge_write_${"reason" in decision ? decision.reason : "rejected"}`,
+        candidateKind: candidateKindForLegacyKind(payload.kind),
+        sourceMessageCount,
+        temporalStatus: payload.temporalStatus,
+        correlationKey,
+      }));
     }
-    else rejectedCandidateCount += 1;
   });
+
+  const shadowCandidatesV2 = context.enableAdmissionShadowObservation
+    ? payloads.map(shadowCandidateFromPayload)
+    : undefined;
 
   // The old Memory UI remains a compatibility view. Only trusted user or
   // deterministic claims may be dual-written; inferred AI output stays solely
@@ -238,6 +381,8 @@ export async function extractMemories(
       acceptedClaims,
       rejectedCandidateCount,
       ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
+      ...(shadowCandidatesV2 ? { shadowCandidatesV2 } : {}),
+      ...(collectDiagnostics ? { rejectedCandidates: legacyDiagnostics } : {}),
     });
   }
 
@@ -262,11 +407,15 @@ export async function extractMemories(
       acceptedClaims,
       rejectedCandidateCount,
       ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
+      ...(shadowCandidatesV2 ? { shadowCandidatesV2 } : {}),
+      ...(collectDiagnostics ? { rejectedCandidates: legacyDiagnostics } : {}),
     })
     : withSourceEnvelope({
       extractedMemories: [candidate],
       acceptedClaims,
       rejectedCandidateCount,
       ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
+      ...(shadowCandidatesV2 ? { shadowCandidatesV2 } : {}),
+      ...(collectDiagnostics ? { rejectedCandidates: legacyDiagnostics } : {}),
     });
 }

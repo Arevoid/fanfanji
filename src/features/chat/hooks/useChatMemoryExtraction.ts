@@ -18,6 +18,11 @@ import {
   type MemoryProjectionEnqueueResult,
 } from "../../../core/memory/memoryProjectionEnqueue";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "../../../utils/apiHelper";
+import { observeDirectChatMemoryAdmissionShadow } from "../services/directChatMemoryAdmissionShadow";
+import {
+  isDirectChatMemoryAdmissionShadowEvidenceEnabled,
+  recordDirectChatMemoryAdmissionShadowEvidence,
+} from "../services/directChatMemoryAdmissionShadowTelemetry";
 
 type DirectScope = { characterId: string; relationId: string; userIdentityId: string; conversationId: string };
 
@@ -241,6 +246,11 @@ export function useChatMemoryExtraction({
           // The controller supplies an explicit eligible batch for automatic
           // Direct Chat extraction; manual archive actions leave this off.
           ...(manualMessagesOverride !== undefined ? { enableMemoryExtractionV2Shadow: true } : {}),
+          // Stage 4D-2 observation derives a V2 candidate from this same
+          // response without changing the extraction Prompt or Provider call.
+          ...(manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled()
+            ? { enableAdmissionShadowObservation: true }
+            : {}),
           apiKey: settings.apiKey,
           model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
           apiEndpoint: settings.apiEndpoint,
@@ -254,6 +264,28 @@ export function useChatMemoryExtraction({
         if (result.apiError) {
           console.error("Extract memory API error:", result.apiError);
           return -1;
+        }
+        if (manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled()) {
+          try {
+            const shadowResult = observeDirectChatMemoryAdmissionShadow({
+              extraction: result,
+              scope: extractionScope,
+              lineage: {
+                ...(result.sourceEnvelope?.parentActionId ? { parentActionId: result.sourceEnvelope.parentActionId } : {}),
+                ...(result.sourceEnvelope?.extractionActionId ? { producerActionId: result.sourceEnvelope.extractionActionId } : {}),
+              },
+              sourceEnvelope: result.sourceEnvelope,
+              recordedAt: Date.now(),
+            });
+            recordDirectChatMemoryAdmissionShadowEvidence({
+              scope: extractionScope,
+              result: shadowResult,
+              evidenceOrigin: "real_runtime",
+            });
+          } catch {
+            // Admission shadow evidence is fail-open and cannot affect the
+            // established canonical write or archive cursor.
+          }
         }
         let finalCanonicalClaims = result.acceptedClaims;
         const isAutomaticDirectChat = manualMessagesOverride === undefined;

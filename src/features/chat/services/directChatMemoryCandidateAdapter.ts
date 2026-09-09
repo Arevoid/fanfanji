@@ -199,7 +199,9 @@ export function adaptDirectChatMemoryExtractionToCandidates(
   const sourceEnvelope = input.sourceEnvelope || input.extraction.sourceEnvelope;
   const runtimeInput = sourceEnvelope && !input.sourceEnvelope ? { ...input, sourceEnvelope } : input;
   const createCandidateId = runtimeInput.createCandidateId || (() => createId("memory-candidate"));
-  const structuredCandidates = runtimeInput.extraction.structuredCandidatesV2;
+  const structuredCandidates = runtimeInput.extraction.structuredCandidatesV2?.length
+    ? runtimeInput.extraction.structuredCandidatesV2
+    : runtimeInput.extraction.shadowCandidatesV2;
   if (structuredCandidates?.length) {
     let unsupportedKindCount = 0;
     let invalidSourceReferenceCount = 0;

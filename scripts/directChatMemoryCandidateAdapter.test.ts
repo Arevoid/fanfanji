@@ -120,10 +120,10 @@ assert.equal(missingScope.missingScopeCount, 1);
 assert.equal(missingScope.rejectedByReason.insufficient_scope, 1);
 
 const compared = observeDirectChatMemoryAdmissionShadow(input(extraction([
-  claim("fact"),
-  claim("belief"),
-  claim("preference", { id: "old-preference" }),
-  claim("hypothesis", { id: "old-hypothesis" }),
+  claim("fact", { source: { ...claim("fact").source, messageIds: ["message-1"], evidenceKey: "message-1:fact" } }),
+  claim("belief", { source: { ...claim("belief").source, messageIds: ["message-2"], evidenceKey: "message-2:belief" } }),
+  claim("preference", { id: "old-preference", source: { ...claim("preference").source, messageIds: ["message-3"], evidenceKey: "message-3:preference" } }),
+  claim("hypothesis", { id: "old-hypothesis", source: { ...claim("hypothesis").source, messageIds: ["message-4"], evidenceKey: "message-4:hypothesis" } }),
 ], 2)));
 assert.equal(compared.candidateCount, 4);
 assert.equal(compared.decisionCounts.accepted, 2);
@@ -132,9 +132,16 @@ assert.equal(compared.acceptedByTarget.truth, 1);
 assert.equal(compared.acceptedByTarget.belief, 1);
 assert.equal(compared.mismatchCounts.both_allow, 2);
 assert.equal(compared.mismatchCounts.old_allow_new_reject, 2, "old Knowledge gate vs new intake gap is visible, not auto-fixed");
-assert.equal(compared.mismatchCounts.incomparable, 2, "legacy rejected count has no per-candidate reason in the existing result");
+assert.equal(compared.mismatchCounts.incomparable, 2, "aggregate legacy rejected count remains incomparable when no per-candidate diagnostics exist");
 assert.equal(compared.observations[0]?.sourceMessageCount, 1);
 assert.equal(JSON.stringify(compared).includes("用户喜欢周末喝咖啡"), false, "shadow diagnostics do not retain statement bodies");
+
+const ambiguous = observeDirectChatMemoryAdmissionShadow(input(extraction([
+  claim("fact", { id: "ambiguous-fact" }),
+  claim("belief", { id: "ambiguous-belief" }),
+])));
+assert.equal(ambiguous.mismatchCounts.both_allow, 0, "duplicate source correlation never falls back to array position");
+assert.equal(ambiguous.mismatchCounts.incomparable >= 2, true, "ambiguous source matches remain incomparable");
 
 const firstKey = compared.observations[0]?.idempotencyKey;
 assert.ok(firstKey);
@@ -155,6 +162,9 @@ const adapterSource = readFileSync(new URL("../src/features/chat/services/direct
 const shadowSource = readFileSync(new URL("../src/features/chat/services/directChatMemoryAdmissionShadow.ts", import.meta.url), "utf8");
 assert.doesNotMatch(adapterSource, /apiChat|apiExtract|localStorage|indexedDB|MemoryWriteCoordinator|PromptComposer|Repository/iu);
 assert.doesNotMatch(shadowSource, /apiChat|apiExtract|localStorage|indexedDB|MemoryWriteCoordinator|PromptComposer|Repository/iu);
-assert.doesNotMatch(readFileSync(new URL("../src/features/chat/hooks/useChatMemoryExtraction.ts", import.meta.url), "utf8"), /directChatMemoryCandidateAdapter|directChatMemoryAdmissionShadow/u, "no production runtime shadow wiring is enabled");
+const hookSource = readFileSync(new URL("../src/features/chat/hooks/useChatMemoryExtraction.ts", import.meta.url), "utf8");
+assert.match(hookSource, /observeDirectChatMemoryAdmissionShadow/u, "normal Direct Chat has a metadata-only observation seam");
+assert.match(hookSource, /isDirectChatMemoryAdmissionShadowEvidenceEnabled/u, "observation remains explicitly gated");
+assert.match(hookSource, /enableAdmissionShadowObservation/u, "shadow candidates are derived without enabling the V2 Prompt");
 
 console.log("PASS Direct Chat memory candidate adapter, shadow admission, mismatch and fail-open characterization");

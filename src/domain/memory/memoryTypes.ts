@@ -42,6 +42,8 @@ export interface MemoryExtractionContext {
   scenario: "chat" | "offline" | "manual-summary" | "immediate-summary";
   /** Normal Direct Chat only; enables additive V2 producer shadow output. */
   enableMemoryExtractionV2Shadow?: boolean;
+  /** Dev-only observation; derives shadow candidates from this request without changing its Prompt. */
+  enableAdmissionShadowObservation?: boolean;
   /** Optional lineage supplied by the owning runtime; never model-authored. */
   parentActionId?: string;
   extractionActionId?: string;
@@ -96,9 +98,11 @@ export interface MemoryExtractionResult {
   rejectedCandidateCount: number;
   /** Optional V2 metadata for compatibility adapters; not a write signal. */
   structuredCandidatesV2?: MemoryExtractionCandidateV2[];
+  /** Classification-only candidates derived from the same legacy payload; never a write signal. */
+  shadowCandidatesV2?: MemoryExtractionCandidateV2[];
   /** Runtime-owned source universe for additive provenance shadow consumers. */
   sourceEnvelope?: MemoryExtractionSourceEnvelope;
-  /** Classification-only diagnostics; never includes statement/evidence bodies. */
+  /** Per-candidate legacy classification; never includes statement/evidence bodies. */
   rejectedCandidates?: MemoryExtractionRejectionDiagnostic[];
   apiError?: string;
 }

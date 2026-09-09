@@ -13,13 +13,19 @@ export type MemoryExtractionDurability = MemoryCandidateDurability;
 export type MemoryExtractionRole = "user" | "character" | "relationship" | "other";
 export type MemoryRelationshipSignalKind = MemoryCandidateRelationshipSignalKind;
 export type MemoryExtractionRejectionStage = "parser" | "knowledge_gate" | "admission";
+export type MemoryExtractionCandidateDecision = "accepted" | "rejected" | "incomparable";
 
 /** Diagnostics carry classification only; candidate bodies and quotes stay out. */
 export interface MemoryExtractionRejectionDiagnostic {
+  /** Classification of the legacy candidate before any V2 shadow comparison. */
+  decision: MemoryExtractionCandidateDecision;
   stage: MemoryExtractionRejectionStage;
   reason: string;
   candidateKind?: MemoryCandidateKind;
   sourceMessageCount?: number;
+  temporalStatus?: TemporalStatus;
+  /** Opaque source/evidence correlation token; never a raw source ID. */
+  correlationKey?: string;
 }
 
 /** AI-facing roles are descriptive only; the adapter resolves canonical IDs. */
