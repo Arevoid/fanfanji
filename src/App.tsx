@@ -35,6 +35,7 @@ import { loadPresets, savePresets } from "./core/storage/repositories/presetRepo
 import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
 import { commitMemoryWriteBundle } from "./domain/memory/memoryWriteCoordinator";
+import { reconcileMemoryProjectionJobsOnStartup } from "./core/memory/memoryProjectionStartupReconciliation";
 import { migrateLegacyCharacterIdentityData, resolveCanonicalCharacterId } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
@@ -802,6 +803,27 @@ export default function App() {
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => hydrateRelationshipNetworkRelationships(loadRelationships([]).value));
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let active = true;
+    const schedule = window.setTimeout(() => {
+      void reconcileMemoryProjectionJobsOnStartup({
+        relationships,
+        characters,
+        activeIdentityId: settings.activeIdentityId || DEFAULT_IDENTITY_ID,
+        identities: settings.identities || [],
+      }).then((diagnostics) => {
+        if (active && !diagnostics.databaseAvailable) {
+          console.warn("[memory-projection] Durable reconciliation unavailable; existing Memory behavior remains active.");
+        }
+      });
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(schedule);
+    };
+  }, [characters, relationships, settings.activeIdentityId, settings.identities]);
 
   // Do not download/mount the large chat application when another app is
   // opened first. Once chat is active, keep it mounted while navigating to a
