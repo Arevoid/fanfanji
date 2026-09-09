@@ -1,8 +1,9 @@
 # Memory Extraction Schema V2 — compatibility foundation
 
-Status: Stage 4C-4 design and additive compatibility only. This document does
-not authorize a production Admission switch, a Memory write/read migration, or
-any change to the existing extraction Prompt.
+Status: Stage 4C-4 design and additive compatibility baseline. Stage 4C-5 adds
+an opt-in shadow producer for automatic normal Direct Chat only; see
+`docs/21-memory-extraction-v2-producer-shadow.md`. Neither stage authorizes a
+production Admission switch or a Memory write/read migration.
 
 ## 1. Current contract audit
 
@@ -95,9 +96,10 @@ quotes are used only during extraction validation and are not copied into a
 
 The backend API helper accepts an additive `structuredCandidatesV2` response
 field and validates its source IDs before passing it through. The browser
-fallback still uses the unchanged legacy Prompt and parser. There are no extra
-Provider calls: normal extraction remains one request, and the existing repair
-behavior is unchanged.
+fallback uses the same additive Prompt only when the automatic Direct Chat flag
+is present; all other callers retain the legacy Prompt and parser. There are no
+extra Provider calls: normal extraction remains one request, and the existing
+repair behavior is unchanged.
 
 ## 5. Rejection and privacy contract
 
@@ -114,10 +116,9 @@ Old responses continue to parse. Missing V2 metadata is safe and selects the
 legacy path. Unknown optional fields are ignored, while malformed optional
 values fail safe. Existing Prompt wording, block order, WorldBook/Truth/
 Memory selection, Provider transport, retry/fallback policy, storage schema,
-and user data are unchanged. The V2 field is not requested by the current
-production Prompt, so current production extraction continues to populate only
-the legacy result unless a future producer explicitly supplies validated V2
-metadata.
+and user data are unchanged. At the Stage 4C-4 baseline the production Prompt
+did not request V2. Stage 4C-5 adds an explicit automatic-Direct-Chat-only
+flag; other callers and the legacy production write path remain unchanged.
 
 No candidate persistence, queue, worker, semantic deduplication, embedding,
 Offline V2 cutover, Relationship/Scene mutation, or dashboard/telemetry path is
@@ -130,4 +131,4 @@ Focused tests cover legacy parsing, V2 normalization, source-ID boundaries,
 unknown-field/unknown-facet handling, adapter mapping, controlled reason
 semantics, and evidence-body non-retention. The full repository suite, lint,
 build, AI accounting, extraction fallback tests, and dependency gate remain
-required before Stage 4C-4 acceptance.
+required for Stage 4C-4 and Stage 4C-5 acceptance.
