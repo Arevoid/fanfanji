@@ -166,6 +166,9 @@ function sourceReferences(candidate: MemoryCandidate): string[] {
 export function buildMemoryCandidateIdempotencyKey(candidate: MemoryCandidate): string {
   const scope = candidate.scope;
   const provenance = candidate.provenance;
+  const semanticParts = candidate.semanticFacet || candidate.durability || candidate.relationshipSignalKind
+    ? [candidate.semanticFacet || "", candidate.durability || "", candidate.relationshipSignalKind || ""]
+    : [];
   const parts = [
     "memory-candidate",
     String(MEMORY_CANDIDATE_SCHEMA_VERSION),
@@ -174,9 +177,7 @@ export function buildMemoryCandidateIdempotencyKey(candidate: MemoryCandidate): 
     scope.userIdentityId,
     scope.conversationId || "",
     candidate.candidateKind,
-    candidate.semanticFacet || "",
-    candidate.durability || "",
-    candidate.relationshipSignalKind || "",
+    ...semanticParts,
     provenance.producer,
     provenance.sourceType,
     provenance.authorship,

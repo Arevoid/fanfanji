@@ -4,6 +4,7 @@ import {
   parseMemoryExtractionCandidateV2Output,
 } from "../src/features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { evaluateMemoryCandidate } from "../src/domain/memory/memoryAdmission";
+import { buildMemoryCandidateIdempotencyKey } from "../src/domain/memory/memoryCandidate";
 import type { MemoryExtractionResult } from "../src/domain/memory/memoryTypes";
 import {
   adaptDirectChatMemoryExtractionToCandidates,
@@ -106,6 +107,11 @@ const temporaryPreference = evaluateMemoryCandidate({
 });
 assert.equal(temporaryPreference.state, "needs_review");
 assert.equal(temporaryPreference.reason, "temporary_preference_requires_review");
+assert.notEqual(
+  buildMemoryCandidateIdempotencyKey(adapted.candidates[0]!),
+  buildMemoryCandidateIdempotencyKey({ ...adapted.candidates[0]!, candidateId: "temporary-key", durability: "temporary" }),
+  "V2 semantic metadata separates otherwise identical source keys",
+);
 const unknownHypothesis = evaluateMemoryCandidate({
   ...adapted.candidates[1]!,
   candidateId: "unknown-hypothesis",
