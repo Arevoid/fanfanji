@@ -1,15 +1,19 @@
 import { Character, Message, UserSettings } from "../../../types";
 import type { MemoryArchiveStats } from "../../../types";
+import type { ConversationSummaryRecord } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import { useRef } from "react";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { findRelationshipForCanonicalCharacter } from "../../../domain/relationship/characterRelationship";
 import { createId } from "../../../core/id/createId";
-import { appendMany as appendKnowledgeClaims } from "../../../core/storage/repositories/characterKnowledgeRepository";
+import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims } from "../../../core/storage/repositories/characterKnowledgeRepository";
 import { conversationSummaryRepository } from "../../../core/storage/repositories/conversationSummaryRepository";
 import { createConversationSummaryRecord } from "../../characterKnowledge/services/conversationSummaryService";
 import { evaluateKnowledgeWrite } from "../../../domain/characterKnowledge/knowledgeWritePolicy";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "../../../domain/memory/MemoryService";
 import { commitMemoryWriteBundle } from "../../../domain/memory/memoryWriteCoordinator";
+import { deriveCanonicalClaimSetRevision } from "../../../domain/memory/memoryCanonicalRevision";
+import { enqueueConversationSummaryProjection, type MemoryProjectionEnqueueResult } from "../../../core/memory/memoryProjectionEnqueue";
+import { compareConversationSummaryProjectionEquivalence } from "../../../core/memory/conversationSummaryProjectionEquivalence";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "../../../utils/apiHelper";
 
 type DirectScope = { characterId: string; relationId: string; userIdentityId: string; conversationId: string };
@@ -248,19 +252,50 @@ export function useChatMemoryExtraction({
           console.error("Extract memory API error:", result.apiError);
           return -1;
         }
-        const extractedSummary = createConversationSummaryRecord({
-          scope: extractionScope,
-          claims: result.acceptedClaims,
-          sourceMessageIds: messagesToCompress.map((message) => message.id),
-          generatedAt: Date.now(),
-          rangeStartAt: messagesToCompress[0]?.timestamp,
-          rangeEndAt: messagesToCompress[messagesToCompress.length - 1]?.timestamp,
-        });
+        let finalCanonicalClaims = result.acceptedClaims;
+        let canonicalStateResolved = false;
+        let extractedSummary: ConversationSummaryRecord | undefined;
+        let enqueueResult: MemoryProjectionEnqueueResult | undefined;
         const write = await commitMemoryWriteBundle({
           claims: result.acceptedClaims,
-          summary: extractedSummary,
+          buildSummary: () => {
+            const canonicalRevision = canonicalStateResolved
+              ? deriveCanonicalClaimSetRevision({ scope: extractionScope, claims: finalCanonicalClaims }).revision
+              : undefined;
+            extractedSummary = createConversationSummaryRecord({
+              scope: extractionScope,
+              // Preserve the existing synchronous batch semantics; the
+              // durable projection intentionally receives the final canonical
+              // scope and is compared during this shadow phase.
+              claims: result.acceptedClaims,
+              sourceMessageIds: messagesToCompress.map((message) => message.id),
+              canonicalRevision,
+              generatedAt: Date.now(),
+              rangeStartAt: messagesToCompress[0]?.timestamp,
+              rangeEndAt: messagesToCompress[messagesToCompress.length - 1]?.timestamp,
+            });
+            return extractedSummary;
+          },
           appendClaims: appendKnowledgeClaims,
           appendSummaries: (summaries) => conversationSummaryRepository.appendMany(summaries),
+          ...(manualMessagesOverride === undefined ? { afterCanonicalWrite: async () => {
+            const loaded = loadKnowledgeClaims();
+            if (!loaded.valid) {
+              enqueueResult = await enqueueConversationSummaryProjection({
+                scope: extractionScope,
+                claims: finalCanonicalClaims,
+                canonicalStateResolved: false,
+              });
+              return;
+            }
+            finalCanonicalClaims = loaded.value;
+            canonicalStateResolved = true;
+            enqueueResult = await enqueueConversationSummaryProjection({
+              scope: extractionScope,
+              claims: finalCanonicalClaims,
+              canonicalStateResolved: true,
+            });
+          } } : {}),
         });
         if (!write.canonicalWritten) {
           console.error("Knowledge claims could not be persisted.", write.error);
@@ -272,6 +307,26 @@ export function useChatMemoryExtraction({
           // summary without deleting the original chat history.
           console.error("Conversation summary cache could not be persisted:", write.summaryError);
           return -1;
+        }
+        if (canonicalStateResolved && extractedSummary
+          && enqueueResult && (enqueueResult.kind === "inserted" || enqueueResult.kind === "exists")) {
+          const backgroundSummary = createConversationSummaryRecord({
+            id: `conversation-summary:${enqueueResult.job.jobId}`,
+            scope: extractionScope,
+            claims: finalCanonicalClaims,
+            sourceMessageIds: messagesToCompress.map((message) => message.id),
+            canonicalRevision: enqueueResult.job.canonicalRevision,
+            generatedAt: extractedSummary.generatedAt,
+            generator: "memory-projection.conversation-summary.v1",
+            rangeStartAt: messagesToCompress[0]?.timestamp,
+            rangeEndAt: messagesToCompress[messagesToCompress.length - 1]?.timestamp,
+          });
+          if (backgroundSummary) {
+            const equivalence = compareConversationSummaryProjectionEquivalence(extractedSummary, backgroundSummary);
+            if (!equivalence.equivalent) {
+              console.warn("[memory-projection] Direct Chat Summary shadow mismatch:", equivalence.mismatchFields);
+            }
+          }
         }
         archiveStats.acceptedTruthCount += result.acceptedClaims.length;
         archiveStats.summaryCount += write.summaryWritten ? 1 : 0;

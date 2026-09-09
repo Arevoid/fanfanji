@@ -19,6 +19,10 @@ export type MemoryWriteCallback<T> = (
 export interface MemoryWriteBundleInput {
   claims?: readonly KnowledgeClaim[];
   summary?: ConversationSummaryRecord;
+  /** Build the existing synchronous projection after canonical claims commit. */
+  buildSummary?: () => ConversationSummaryRecord | undefined;
+  /** Best-effort side effect between canonical commit and derived writes. */
+  afterCanonicalWrite?: () => void | Promise<void>;
   summaries?: readonly ConversationSummaryRecord[];
   /** A complete, already-merged compatibility snapshot. */
   memories?: readonly MemoryItem[];
@@ -67,10 +71,6 @@ export async function commitMemoryWriteBundle(
   input: MemoryWriteBundleInput,
 ): Promise<MemoryWriteBundleResult> {
   const claims = input.claims || [];
-  const summaries = [
-    ...(input.summary ? [input.summary] : []),
-    ...(input.summaries || []),
-  ];
 
   if (claims.length > 0) {
     const writeClaims = input.writeClaims || input.appendClaims;
@@ -106,6 +106,21 @@ export async function commitMemoryWriteBundle(
   }
 
   const canonicalWritten = true;
+  if (claims.length > 0 && input.afterCanonicalWrite) {
+    try {
+      await input.afterCanonicalWrite();
+    } catch (error) {
+      // Durable background projection is deliberately best-effort. The
+      // canonical write and existing synchronous projection must retain their
+      // historical success semantics when this side effect is unavailable.
+      console.warn("[memory-projection] Real-time enqueue failed open:", error);
+    }
+  }
+  const summaries = [
+    ...(input.summary ? [input.summary] : []),
+    ...(input.buildSummary ? [input.buildSummary()].filter((summary): summary is ConversationSummaryRecord => Boolean(summary)) : []),
+    ...(input.summaries || []),
+  ];
   let summaryWritten = summaries.length === 0;
   let summaryError: unknown;
   if (summaries.length > 0) {

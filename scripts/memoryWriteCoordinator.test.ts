@@ -164,4 +164,27 @@ const specialized = await commitMemoryWriteBundle({
 assert.deepEqual(specializedCalls, ["supersede", "memories"], "specialized canonical edits must keep the same commit boundary");
 assert.equal(specialized.complete, true);
 
+const seamCalls: string[] = [];
+const seamSummary = await commitMemoryWriteBundle({
+  claims: [claim],
+  buildSummary: () => {
+    seamCalls.push("summary-build");
+    return summary;
+  },
+  afterCanonicalWrite: async () => {
+    seamCalls.push("enqueue");
+    throw new Error("indexeddb unavailable");
+  },
+  appendClaims: () => {
+    seamCalls.push("claims");
+    return { success: true };
+  },
+  appendSummaries: () => {
+    seamCalls.push("summary-write");
+    return { success: true };
+  },
+});
+assert.deepEqual(seamCalls, ["claims", "enqueue", "summary-build", "summary-write"], "real-time enqueue stays between canonical and synchronous summary writes");
+assert.equal(seamSummary.complete, true, "enqueue failure is fail-open for the existing bundle");
+
 console.log("Memory write coordinator: ordering, failure boundaries and memory-only writes passed");

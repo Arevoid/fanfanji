@@ -35,7 +35,7 @@ Failures are persisted through versioned `markFailed`; a failed job is not autom
 
 ## Production integration and overlap boundary
 
-The existing App startup seam schedules reconciliation, then a short-delayed one-shot drain. It does not block the first screen, show a spinner/toast, or expose projection failures to users. New claims created during an already-open session may wait until a later startup reconciliation; Direct Chat enqueue and write lifecycle are deliberately unchanged.
+The existing App startup seam schedules reconciliation, then a short-delayed one-shot drain. It does not block the first screen, show a spinner/toast, or expose projection failures to users. At the Stage 4C-13 boundary, new claims created during an already-open session could wait until a later startup reconciliation. Stage 4C-14 adds the separate Direct Chat real-time enqueue seam; this document remains the executor baseline, while its shadow/cutover rules are recorded in `docs/30-direct-chat-summary-cutover-shadow.md`.
 
 During this overlap period, synchronous Summary creation and a durable background job may both exist. Idempotent metadata-aware writes make that safe. `MemoryWriteCoordinator`, Direct Chat cursor behavior, Offline behavior, Admission, Prompt and Provider paths are unchanged.
 
