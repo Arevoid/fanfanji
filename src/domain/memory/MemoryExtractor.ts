@@ -64,6 +64,9 @@ export async function extractMemories(
     conversationId: context.conversationId,
     ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
   });
+  const structuredCandidatesV2 = Array.isArray(data.structuredCandidatesV2) && data.structuredCandidatesV2.length > 0
+    ? data.structuredCandidatesV2
+    : undefined;
 
   // API adapters return an empty array alongside their error so callers can
   // keep a stable response shape. Preserve the error before interpreting that
@@ -83,7 +86,8 @@ export async function extractMemories(
       extractedMemories: [],
       acceptedClaims: [],
       rejectedCandidateCount: 0,
-      apiError: data.error || "提炼失败，未提取到有效记忆或API请求出错",
+      ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
+      ...(structuredCandidatesV2 ? {} : { apiError: data.error || "提炼失败，未提取到有效记忆或API请求出错" }),
     };
   }
 
@@ -97,6 +101,7 @@ export async function extractMemories(
       extractedMemories: [],
       acceptedClaims: [],
       rejectedCandidateCount: rawItems.length,
+      ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
     };
   }
 
@@ -189,7 +194,14 @@ export async function extractMemories(
   const trustedClaims = acceptedClaims.filter((claim) =>
     claim.truthStatus === "asserted" || claim.truthStatus === "confirmed",
   );
-  if (trustedClaims.length === 0) return { extractedMemories: [], acceptedClaims, rejectedCandidateCount };
+  if (trustedClaims.length === 0) {
+    return {
+      extractedMemories: [],
+      acceptedClaims,
+      rejectedCandidateCount,
+      ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
+    };
+  }
 
   const candidate: MemoryItem = {
     id: baseId,
@@ -207,6 +219,16 @@ export async function extractMemories(
     sourceKnowledgeClaimIds: trustedClaims.map((claim) => claim.id),
   };
   return isDuplicateMemory(context.existingMemories, candidate)
-    ? { extractedMemories: [], acceptedClaims, rejectedCandidateCount }
-    : { extractedMemories: [candidate], acceptedClaims, rejectedCandidateCount };
+    ? {
+      extractedMemories: [],
+      acceptedClaims,
+      rejectedCandidateCount,
+      ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
+    }
+    : {
+      extractedMemories: [candidate],
+      acceptedClaims,
+      rejectedCandidateCount,
+      ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
+    };
 }

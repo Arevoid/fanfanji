@@ -6,6 +6,7 @@ import type {
   KnowledgeSubject,
 } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import type { MemoryCandidate, MemoryCandidateKind, MemoryCandidateSourceType } from "../../../domain/memory/memoryCandidate";
+import type { MemoryExtractionCandidateV2 } from "../../../domain/memory/memoryExtractionSchema";
 import type { MemoryExtractionResult } from "../../../domain/memory/memoryTypes";
 
 export interface DirectChatMemoryCandidateAdapterScope {
@@ -30,6 +31,8 @@ export interface DirectChatMemoryCandidateAdapterInput {
   createCandidateId?: () => string;
   /** Test/debug-only known keys; no storage scan is performed. */
   knownIdempotencyKeys?: ReadonlySet<string>;
+  /** Runtime recording time for additive V2 metadata; AI does not provide it. */
+  recordedAt?: number;
 }
 
 export interface DirectChatMemoryCandidateAdapterResult {
@@ -86,6 +89,85 @@ function sourceRefs(claim: KnowledgeClaim): {
   };
 }
 
+function roleId(
+  role: MemoryExtractionCandidateV2["actorRole"],
+  scope: DirectChatMemoryCandidateAdapterScope,
+): string | undefined {
+  if (role === "user") return normalize(scope.userIdentityId);
+  if (role === "character") return normalize(scope.characterId);
+  if (role === "relationship") return normalize(scope.relationId);
+  return undefined;
+}
+
+function actorTargetForV2(
+  candidate: MemoryExtractionCandidateV2,
+  scope: DirectChatMemoryCandidateAdapterScope,
+): { actorId?: string; targetId?: string } {
+  const actorId = roleId(candidate.actorRole, scope);
+  const targetId = roleId(candidate.targetRole, scope);
+  return {
+    ...(actorId ? { actorId } : {}),
+    ...(targetId ? { targetId } : {}),
+  };
+}
+
+function subjectForV2(candidate: MemoryExtractionCandidateV2): KnowledgeSubject | undefined {
+  return candidate.actorRole === "user" || candidate.actorRole === "character"
+    || candidate.actorRole === "relationship" || candidate.actorRole === "other"
+    ? candidate.actorRole
+    : undefined;
+}
+
+function adaptV2Candidate(
+  candidate: MemoryExtractionCandidateV2,
+  input: DirectChatMemoryCandidateAdapterInput,
+  createCandidateId: () => string,
+): MemoryCandidate {
+  const refs = candidate.sourceMessageIds;
+  const sourceConversationId = normalize(input.scope.conversationId);
+  const actorTarget = actorTargetForV2(candidate, input.scope);
+  const lineage = input.lineage && (input.lineage.parentActionId || input.lineage.producerActionId || input.lineage.sourceRequestId)
+    ? input.lineage
+    : undefined;
+  return {
+    schemaVersion: 1,
+    candidateId: createCandidateId(),
+    candidateKind: candidate.kind,
+    ...(candidate.semanticFacet ? { semanticFacet: candidate.semanticFacet } : {}),
+    ...(candidate.durability ? { durability: candidate.durability } : {}),
+    ...(candidate.relationshipSignalKind ? { relationshipSignalKind: candidate.relationshipSignalKind } : {}),
+    statement: candidate.statement,
+    ...(subjectForV2(candidate) ? { subject: subjectForV2(candidate) } : {}),
+    scope: {
+      characterId: normalize(input.scope.characterId) || "",
+      relationId: normalize(input.scope.relationId) || "",
+      userIdentityId: normalize(input.scope.userIdentityId) || "",
+      ...(sourceConversationId ? { conversationId: sourceConversationId } : {}),
+    },
+    provenance: {
+      producer: "direct_chat",
+      sourceType: "user_message",
+      // AI metadata describes content; it cannot assert who authored it.
+      authorship: "unknown",
+      ...actorTarget,
+      app: "chat",
+      sourceMessageIds: refs,
+      ...(sourceConversationId ? { conversationId: sourceConversationId } : {}),
+    },
+    evidence: { sourceMessageIds: refs },
+    temporal: {
+      status: candidate.temporalStatus,
+      ...(candidate.occurredAt !== undefined ? { occurredAt: candidate.occurredAt } : {}),
+      recordedAt: input.recordedAt ?? 0,
+      ...(candidate.validFrom !== undefined ? { validFrom: candidate.validFrom } : {}),
+      ...(candidate.validTo !== undefined ? { validTo: candidate.validTo } : {}),
+    },
+    ...(candidate.confidence !== undefined ? { confidence: candidate.confidence } : {}),
+    ...(candidate.importance !== undefined ? { importance: candidate.importance } : {}),
+    ...(lineage ? { lineage } : {}),
+  };
+}
+
 /**
  * Map the already-validated normal-chat extraction result to candidates. This
  * function does not parse messages, call AI, read storage, or write memory.
@@ -94,6 +176,21 @@ export function adaptDirectChatMemoryExtractionToCandidates(
   input: DirectChatMemoryCandidateAdapterInput,
 ): DirectChatMemoryCandidateAdapterResult {
   const createCandidateId = input.createCandidateId || (() => createId("memory-candidate"));
+  const structuredCandidates = input.extraction.structuredCandidatesV2;
+  if (structuredCandidates?.length) {
+    let unsupportedKindCount = 0;
+    const candidates = structuredCandidates.map((candidate) => {
+      if (candidate.kind === "unknown") unsupportedKindCount += 1;
+      return adaptV2Candidate(candidate, input, createCandidateId);
+    });
+    return {
+      candidates,
+      unsupportedKindCount,
+      missingSourceReferenceCount: candidates.filter((candidate) => !candidate.provenance.sourceMessageIds?.length).length,
+      // V2 has an explicit kind/facet channel, including scene_only.
+      sceneClassificationUnavailableCount: 0,
+    };
+  }
   let unsupportedKindCount = 0;
   let missingSourceReferenceCount = 0;
   const candidates = input.extraction.acceptedClaims.map((claim) => {

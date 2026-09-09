@@ -3,6 +3,7 @@
 import {
   buildKnowledgeExtractionPrompt,
   parseOrRepairKnowledgeExtractionOutput,
+  parseMemoryExtractionCandidateV2Output,
   type ExtractedKnowledgeCandidatePayload,
   type KnowledgeExtractionHistoryItem,
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
@@ -666,7 +667,13 @@ async function apiExtractMemoriesImpl(params: {
   parentActionId?: string;
   purpose?: AiPurpose;
   ledger?: AiRequestLedgerSession;
-}): Promise<{ text: string; items: ExtractedKnowledgeCandidatePayload[]; candidates?: ExtractedKnowledgeCandidatePayload[]; error?: string }> {
+}): Promise<{
+  text: string;
+  items: ExtractedKnowledgeCandidatePayload[];
+  candidates?: ExtractedKnowledgeCandidatePayload[];
+  structuredCandidatesV2?: import("../domain/memory/memoryExtractionSchema").MemoryExtractionCandidateV2[];
+  error?: string;
+}> {
   const { ledger, purpose, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
   try {
     ledger?.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/extract-memories", transport: "backend_proxy" });
@@ -681,11 +688,18 @@ async function apiExtractMemoriesImpl(params: {
     } catch {
       data = undefined;
     }
-    if (res.ok && Array.isArray(data?.candidates)) {
+    const structuredCandidatesV2 = Array.isArray(data?.structuredCandidatesV2)
+      ? parseMemoryExtractionCandidateV2Output(
+        JSON.stringify(data.structuredCandidatesV2),
+        new Set(params.history.map((item) => item.id)),
+      )
+      : undefined;
+    if (res.ok && (Array.isArray(data?.candidates) || structuredCandidatesV2?.length)) {
       return {
         text: typeof data.text === "string" ? data.text : "",
-        items: data.candidates,
-        candidates: data.candidates,
+        items: Array.isArray(data.candidates) ? data.candidates : [],
+        ...(Array.isArray(data.candidates) ? { candidates: data.candidates } : {}),
+        ...(structuredCandidatesV2?.length ? { structuredCandidatesV2 } : {}),
         ...(typeof data.error === "string" && data.error.trim() ? { error: data.error.trim() } : {}),
       };
     }

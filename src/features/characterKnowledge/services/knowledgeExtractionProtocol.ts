@@ -1,4 +1,8 @@
 import type { KnowledgeKind, KnowledgeSubject, TemporalStatus } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
+import {
+  normalizeMemoryExtractionCandidateV2,
+  type MemoryExtractionCandidateV2,
+} from "../../../domain/memory/memoryExtractionSchema";
 
 export interface KnowledgeExtractionHistoryItem {
   id: string;
@@ -50,6 +54,25 @@ export function parseKnowledgeExtractionOutput(
   rawText: string,
   allowedMessageIds: ReadonlySet<string>,
 ): ExtractedKnowledgeCandidatePayload[] {
+  return parseRawValues(rawText)
+    .map((value) => normalizeExtractedKnowledgeCandidate(value, allowedMessageIds))
+    .filter((value): value is ExtractedKnowledgeCandidatePayload => value !== undefined);
+}
+
+/**
+ * Parse additive schema V2 metadata without changing the legacy extraction
+ * parser.  The same JSON/JSONL framing is accepted for both contracts.
+ */
+export function parseMemoryExtractionCandidateV2Output(
+  rawText: string,
+  allowedMessageIds: ReadonlySet<string>,
+): MemoryExtractionCandidateV2[] {
+  return parseRawValues(rawText)
+    .map((value) => normalizeMemoryExtractionCandidateV2(value, allowedMessageIds))
+    .filter((value): value is MemoryExtractionCandidateV2 => value !== undefined);
+}
+
+function parseRawValues(rawText: string): unknown[] {
   const text = rawText.trim().replace(/^```(?:json|jsonl)?\s*/iu, "").replace(/\s*```$/u, "");
   if (!text) return [];
   const rawValues: unknown[] = [];
@@ -65,9 +88,7 @@ export function parseKnowledgeExtractionOutput(
       }
     }
   }
-  return rawValues
-    .map((value) => normalizeExtractedKnowledgeCandidate(value, allowedMessageIds))
-    .filter((value): value is ExtractedKnowledgeCandidatePayload => value !== undefined);
+  return rawValues;
 }
 
 export function buildKnowledgeExtractionRepairPrompt(input: {
