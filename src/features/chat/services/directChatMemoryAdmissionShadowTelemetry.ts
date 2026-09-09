@@ -4,6 +4,10 @@ import type {
   DirectChatMemoryShadowObservation,
   DirectChatMemoryShadowSeverity,
 } from "./directChatMemoryAdmissionShadow";
+import type {
+  MemoryAdmissionComparisonMismatchClass,
+  MemoryAdmissionComparisonSemantics,
+} from "./directChatMemoryAdmissionComparison";
 
 export type DirectChatMemoryShadowEvidenceOrigin = "real_runtime" | "synthetic";
 
@@ -45,6 +49,9 @@ export interface DirectChatMemoryAdmissionShadowEvidenceRecord {
   provenanceMismatch: boolean;
   severity: DirectChatMemoryShadowSeverity;
   mismatch: DirectChatMemoryShadowObservation["mismatch"];
+  mismatchClass: DirectChatMemoryShadowObservation["mismatchClass"];
+  legacyComparison?: MemoryAdmissionComparisonSemantics;
+  v2Comparison: MemoryAdmissionComparisonSemantics;
 }
 
 export interface DirectChatMemoryAdmissionShadowMetrics {
@@ -62,6 +69,7 @@ export interface DirectChatMemoryAdmissionShadowMetrics {
   duplicateMismatch: number;
   failedOpenCount: number;
   severityCounts: Record<DirectChatMemoryShadowSeverity, number>;
+  comparisonMismatchCounts: Record<MemoryAdmissionComparisonMismatchClass, number>;
 }
 
 export interface DirectChatMemoryAdmissionShadowDebugConfiguration {
@@ -162,6 +170,9 @@ function sanitizeObservation(
     provenanceMismatch: observation.provenanceMismatch,
     severity: observation.severity,
     mismatch: observation.mismatch,
+    mismatchClass: observation.mismatchClass,
+    ...(observation.legacyComparison ? { legacyComparison: observation.legacyComparison } : {}),
+    v2Comparison: observation.v2Comparison,
   };
 }
 
@@ -194,6 +205,14 @@ export function aggregateDirectChatMemoryAdmissionShadowEvidence(
   failedOpenCount = 0,
 ): DirectChatMemoryAdmissionShadowMetrics {
   const severityCounts: Record<DirectChatMemoryShadowSeverity, number> = { P0: 0, P1: 0, P2: 0, P3: 0, P4: 0 };
+  const comparisonMismatchCounts: Record<MemoryAdmissionComparisonMismatchClass, number> = {
+    none: 0,
+    safe_semantic_divergence: 0,
+    authority_escalation: 0,
+    destination_divergence: 0,
+    write_eligibility_divergence: 0,
+    incomparable: 0,
+  };
   const metrics: DirectChatMemoryAdmissionShadowMetrics = {
     totalObservations: records.length,
     comparable: 0,
@@ -209,6 +228,7 @@ export function aggregateDirectChatMemoryAdmissionShadowEvidence(
     duplicateMismatch: 0,
     failedOpenCount,
     severityCounts,
+    comparisonMismatchCounts,
   };
   records.forEach((record) => {
     if (record.mismatch === "incomparable") metrics.incomparable += 1;
@@ -222,6 +242,7 @@ export function aggregateDirectChatMemoryAdmissionShadowEvidence(
     if (record.provenanceMismatch) metrics.provenanceMismatch += 1;
     if (record.temporalMismatch) metrics.temporalMismatch += 1;
     if (record.duplicateDetected) metrics.duplicateMismatch += 1;
+    comparisonMismatchCounts[record.mismatchClass] += 1;
     severityCounts[record.severity] += 1;
   });
   return metrics;

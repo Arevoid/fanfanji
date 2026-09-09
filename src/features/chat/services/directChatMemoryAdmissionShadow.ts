@@ -13,6 +13,14 @@ import {
   adaptDirectChatMemoryExtractionToCandidates,
   type DirectChatMemoryCandidateAdapterInput,
 } from "./directChatMemoryCandidateAdapter";
+import {
+  classifyAdmissionComparisonMismatch,
+  classifyLegacyAdmissionSemantics,
+  classifyV2AdmissionSemantics,
+  legacyClaimMatchesDiagnostic,
+  type MemoryAdmissionComparisonMismatchClass,
+  type MemoryAdmissionComparisonSemantics,
+} from "./directChatMemoryAdmissionComparison";
 export type DirectChatMemoryMismatchCategory =
   | "both_allow"
   | "old_allow_new_reject"
@@ -42,6 +50,9 @@ export interface DirectChatMemoryShadowObservation {
   proposedAuthorityRole?: MemoryCandidate["proposedAuthorityRole"];
   resolvedAuthorityRole?: MemoryCandidate["resolvedAuthorityRole"];
   mismatch: DirectChatMemoryMismatchCategory;
+  mismatchClass: MemoryAdmissionComparisonMismatchClass;
+  legacyComparison?: MemoryAdmissionComparisonSemantics;
+  v2Comparison: MemoryAdmissionComparisonSemantics;
   legacyDecision: MemoryExtractionCandidateDecision;
   legacyReasonCode: string;
   v2State: MemoryAdmissionState;
@@ -79,6 +90,7 @@ export interface DirectChatMemoryAdmissionShadowResult {
   missingTemporalCount: number;
   sceneClassificationUnavailableCount: number;
   mismatchCounts: Record<DirectChatMemoryMismatchCategory, number>;
+  comparisonMismatchCounts: Record<MemoryAdmissionComparisonMismatchClass, number>;
   severityCounts: Record<DirectChatMemoryShadowSeverity, number>;
   observations: readonly DirectChatMemoryShadowObservation[];
 }
@@ -98,6 +110,14 @@ const emptyMismatches = (): Record<DirectChatMemoryMismatchCategory, number> => 
   old_allow_new_review: 0,
   old_reject_new_accept: 0,
   both_reject: 0,
+  incomparable: 0,
+});
+const emptyComparisonMismatches = (): Record<MemoryAdmissionComparisonMismatchClass, number> => ({
+  none: 0,
+  safe_semantic_divergence: 0,
+  authority_escalation: 0,
+  destination_divergence: 0,
+  write_eligibility_divergence: 0,
   incomparable: 0,
 });
 const emptySeverities = (): Record<DirectChatMemoryShadowSeverity, number> => ({ P0: 0, P1: 0, P2: 0, P3: 0, P4: 0 });
@@ -122,6 +142,18 @@ const candidateCorrelationKey = (candidate: MemoryCandidate): string | undefined
     ...(candidate.evidence.sourceRecordIds || []),
   ].filter(Boolean).sort();
   return buildMemoryShadowCorrelationKey(sourceIds, candidate.temporal.status);
+};
+
+const claimCorrelationKey = (claim: KnowledgeClaim): string | undefined => {
+  const sourceIds = [
+    ...(claim.source.messageIds || []),
+    claim.source.eventId,
+    claim.source.sourceRecordId,
+    claim.source.storyId,
+  ].filter((value): value is string => Boolean(value)).sort();
+  return sourceIds.length > 0
+    ? buildMemoryShadowCorrelationKey(sourceIds, claim.temporalStatus)
+    : undefined;
 };
 
 function fallbackLegacyDiagnostics(input: DirectChatMemoryCandidateAdapterInput): MemoryExtractionRejectionDiagnostic[] {
@@ -150,22 +182,25 @@ function mismatchFor(oldAllowed: boolean, decision: MemoryAdmissionDecision): Di
 
 function severityFor(input: {
   mismatch: DirectChatMemoryMismatchCategory;
+  mismatchClass: MemoryAdmissionComparisonMismatchClass;
   decision: MemoryAdmissionDecision;
+  legacyComparison?: MemoryAdmissionComparisonSemantics;
   scopeExact: boolean;
   provenancePresent: boolean;
   evidenceTraceable: boolean;
 }): DirectChatMemoryShadowSeverity {
   if (!input.scopeExact || !input.provenancePresent || !input.evidenceTraceable) return "P0";
-  if (input.decision.reason === "scene_only"
-    || input.decision.reason === "scene_only_not_truth"
-    || input.decision.reason === "subjective_reflection_not_truth"
-    || input.decision.reason === "subjective_not_objective_truth"
-    || input.decision.reason === "cancelled_plan_not_active"
-    || input.decision.reason === "completed_plan_not_active"
-    || input.decision.reason === "metadata_conflict"
-    || input.decision.reason === "invalid_temporal"
-    || input.mismatch === "old_reject_new_accept") return "P1";
-  if (input.mismatch === "old_allow_new_reject" || input.mismatch === "old_allow_new_review") return "P2";
+  if (input.mismatchClass === "authority_escalation"
+    || input.mismatch === "old_reject_new_accept"
+    || (input.decision.reason === "cancelled_plan_not_active"
+      && input.legacyComparison?.destinationClass === "future_plan")) return "P1";
+  if (input.decision.reason === "invalid_temporal"
+    || input.decision.reason === "metadata_conflict") return "P1";
+  if (input.mismatchClass === "safe_semantic_divergence"
+    || input.mismatchClass === "destination_divergence"
+    || input.mismatchClass === "write_eligibility_divergence"
+    || input.mismatch === "old_allow_new_reject"
+    || input.mismatch === "old_allow_new_review") return "P2";
   if (input.mismatch === "incomparable" || input.decision.reason === "unsupported_kind") return "P3";
   return "P4";
 }
@@ -190,6 +225,7 @@ function failedOpenResult(): DirectChatMemoryAdmissionShadowResult {
     missingTemporalCount: 0,
     sceneClassificationUnavailableCount: 0,
     mismatchCounts: emptyMismatches(),
+    comparisonMismatchCounts: emptyComparisonMismatches(),
     severityCounts: emptySeverities(),
     observations: [],
   };
@@ -205,6 +241,7 @@ export function observeDirectChatMemoryAdmissionShadow(
     const rejectedByReason: Record<string, number> = {};
     const needsReviewByReason: Record<string, number> = {};
     const mismatchCounts = emptyMismatches();
+    const comparisonMismatchCounts = emptyComparisonMismatches();
     const severityCounts = emptySeverities();
     const observations: DirectChatMemoryShadowObservation[] = [];
     const diagnosticsProvided = Array.isArray(input.extraction.rejectedCandidates);
@@ -212,12 +249,21 @@ export function observeDirectChatMemoryAdmissionShadow(
       ? input.extraction.rejectedCandidates || []
       : fallbackLegacyDiagnostics(input);
     const usedLegacyDiagnostics = new Set<number>();
+    const usedLegacyClaims = new Set<string>();
     const diagnosticsByCorrelation = new Map<string, number[]>();
+    const claimsByCorrelation = new Map<string, KnowledgeClaim[]>();
     legacyDiagnostics.forEach((diagnostic, diagnosticIndex) => {
       if (!diagnostic.correlationKey) return;
       const existing = diagnosticsByCorrelation.get(diagnostic.correlationKey) || [];
       existing.push(diagnosticIndex);
       diagnosticsByCorrelation.set(diagnostic.correlationKey, existing);
+    });
+    input.extraction.acceptedClaims.forEach((claim) => {
+      const correlationKey = claimCorrelationKey(claim);
+      if (!correlationKey) return;
+      const existing = claimsByCorrelation.get(correlationKey) || [];
+      existing.push(claim);
+      claimsByCorrelation.set(correlationKey, existing);
     });
     let duplicateCount = 0;
     let missingScopeCount = 0;
@@ -244,10 +290,25 @@ export function observeDirectChatMemoryAdmissionShadow(
         ? legacyDiagnostics[availableDiagnosticIndexes[0]]
         : undefined;
       if (legacyDiagnostic && availableDiagnosticIndexes.length === 1) usedLegacyDiagnostics.add(availableDiagnosticIndexes[0]!);
+      const legacyClaims = correlationKey ? claimsByCorrelation.get(correlationKey) || [] : [];
+      const legacyClaim = legacyDiagnostic?.decision === "accepted"
+        ? legacyClaims.find((claim) => !usedLegacyClaims.has(claim.id)
+          && legacyClaimMatchesDiagnostic(claim, legacyDiagnostic.candidateKind))
+        : undefined;
+      if (legacyClaim) usedLegacyClaims.add(legacyClaim.id);
       const legacyAllowed = legacyDiagnostic?.decision === "accepted";
       const mismatch = legacyDiagnostic
         ? mismatchFor(Boolean(legacyAllowed), decision)
         : "incomparable";
+      const legacyComparison = legacyDiagnostic
+        ? classifyLegacyAdmissionSemantics({
+          decision: legacyDiagnostic.decision,
+          candidateKind: legacyDiagnostic.candidateKind,
+          truthStatus: legacyClaim?.truthStatus,
+        }, legacyClaim)
+        : undefined;
+      const v2Comparison = classifyV2AdmissionSemantics(candidate, decision);
+      const mismatchClass = classifyAdmissionComparisonMismatch(legacyComparison, v2Comparison);
       const scopeExact = Boolean(candidate.scope.characterId
         && candidate.scope.relationId
         && candidate.scope.userIdentityId
@@ -261,8 +322,17 @@ export function observeDirectChatMemoryAdmissionShadow(
         && candidate.provenance.sourceType
         && candidate.provenance.authorship);
       const evidenceTraceable = sourceReferences.length > 0;
-      const severity = severityFor({ mismatch, decision, scopeExact, provenancePresent, evidenceTraceable });
+      const severity = severityFor({
+        mismatch,
+        mismatchClass,
+        decision,
+        legacyComparison,
+        scopeExact,
+        provenancePresent,
+        evidenceTraceable,
+      });
       mismatchCounts[mismatch] += 1;
+      comparisonMismatchCounts[mismatchClass] += 1;
       severityCounts[severity] += 1;
       observations.push({
         candidateId: candidate.candidateId,
@@ -283,6 +353,9 @@ export function observeDirectChatMemoryAdmissionShadow(
         ...(candidate.proposedAuthorityRole ? { proposedAuthorityRole: candidate.proposedAuthorityRole } : {}),
         ...(candidate.resolvedAuthorityRole ? { resolvedAuthorityRole: candidate.resolvedAuthorityRole } : {}),
         mismatch,
+        mismatchClass,
+        ...(legacyComparison ? { legacyComparison } : {}),
+        v2Comparison,
         legacyDecision: legacyDiagnostic?.decision || "incomparable",
         legacyReasonCode: legacyDiagnostic?.reason || "legacy_candidate_unavailable",
         v2State: decision.state,
@@ -328,6 +401,7 @@ export function observeDirectChatMemoryAdmissionShadow(
       missingTemporalCount,
       sceneClassificationUnavailableCount: adapted.sceneClassificationUnavailableCount,
       mismatchCounts,
+      comparisonMismatchCounts,
       severityCounts,
       observations,
     };
