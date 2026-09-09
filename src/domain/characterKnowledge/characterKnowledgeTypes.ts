@@ -105,6 +105,8 @@ export interface ConversationSummaryRecord extends CharacterTruthScope {
   /** Original legacy record when this summary was created by migration. */
   sourceRecordId?: string;
   summary: string;
+  /** Additive canonical snapshot marker for durable background projections. */
+  canonicalRevision?: string;
   sourceMessageIds: string[];
   sourceClaimIds: string[];
   rangeStartAt?: number;

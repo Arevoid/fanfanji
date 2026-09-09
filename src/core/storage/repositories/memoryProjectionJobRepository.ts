@@ -152,7 +152,7 @@ export class MemoryProjectionJobIndexedDbRepository {
     return this.transition(jobId, expectedVersion, now, { type: "fail", errorCode });
   }
 
-  async reclaimExpired(now: number, ownerId: string, leaseUntil: number): Promise<MemoryProjectionJob[]> {
+  async reclaimExpired(now: number, ownerId: string, leaseUntil: number, projectionKind?: MemoryProjectionKind, limit = Number.MAX_SAFE_INTEGER): Promise<MemoryProjectionJob[]> {
     const transaction = (await this.db()).transaction(MEMORY_PROJECTION_JOB_STORE_NAME, "readwrite");
     const store = transaction.objectStore(MEMORY_PROJECTION_JOB_STORE_NAME);
     const reclaimed: MemoryProjectionJob[] = [];
@@ -162,7 +162,8 @@ export class MemoryProjectionJobIndexedDbRepository {
       const cursor = cursorRequest.result;
       if (!cursor) return;
       const current = fromMemoryProjectionJobRecord(cursor.value);
-      if (current?.lease && current.lease.leaseUntil <= now) {
+      if (reclaimed.length >= limit) return;
+      if (current?.lease && current.lease.leaseUntil <= now && (!projectionKind || current.projectionKind === projectionKind)) {
         try {
           const next = transitionMemoryProjectionJob(current, { type: "reclaim", ownerId, leaseUntil }, now);
           cursor.update(toMemoryProjectionJobRecord(next));

@@ -97,6 +97,7 @@ assert.equal(completed.status, "completed");
 assert.equal(completed.completedAt, 160);
 assert.throws(() => transitionMemoryProjectionJob(completed, { type: "retry" }, 170), /memory_projection_transition_invalid/);
 assert.equal(normalizeMemoryProjectionErrorCode("raw exception text"), "UNKNOWN");
+assert.equal(normalizeMemoryProjectionErrorCode("CANONICAL_REVISION_CHANGED"), "CANONICAL_REVISION_CHANGED");
 
 const serialized = JSON.stringify(firstJob);
 for (const forbidden of ["Prompt", "Authorization", "apiKey", "response body", "evidenceQuote"]) {

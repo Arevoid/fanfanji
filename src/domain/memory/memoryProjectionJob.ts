@@ -11,6 +11,7 @@ export type MemoryProjectionErrorCode =
   | "SUMMARY_WRITE_FAILED"
   | "LEGACY_MIRROR_FAILED"
   | "SCOPE_MISMATCH"
+  | "CANONICAL_REVISION_CHANGED"
   | "LEASE_CONFLICT"
   | "UNKNOWN";
 
@@ -51,6 +52,7 @@ export function normalizeMemoryProjectionErrorCode(value: unknown): MemoryProjec
     || value === "SUMMARY_WRITE_FAILED"
     || value === "LEGACY_MIRROR_FAILED"
     || value === "SCOPE_MISMATCH"
+    || value === "CANONICAL_REVISION_CHANGED"
     || value === "LEASE_CONFLICT"
     ? value
     : "UNKNOWN";

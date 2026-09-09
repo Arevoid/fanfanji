@@ -36,6 +36,7 @@ import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, load
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
 import { commitMemoryWriteBundle } from "./domain/memory/memoryWriteCoordinator";
 import { reconcileMemoryProjectionJobsOnStartup } from "./core/memory/memoryProjectionStartupReconciliation";
+import { runPendingConversationSummaryProjections } from "./core/memory/memoryProjectionRunner";
 import { migrateLegacyCharacterIdentityData, resolveCanonicalCharacterId } from "./domain/character/characterIdentity";
 import { migrateLegacyRelationshipData } from "./domain/relationship/relationshipMigration";
 import { removeCanonicalCharacterData } from "./domain/relationship/relationshipCleanup";
@@ -807,6 +808,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     let active = true;
+    let drainSchedule: number | undefined;
     const schedule = window.setTimeout(() => {
       void reconcileMemoryProjectionJobsOnStartup({
         relationships,
@@ -817,11 +819,21 @@ export default function App() {
         if (active && !diagnostics.databaseAvailable) {
           console.warn("[memory-projection] Durable reconciliation unavailable; existing Memory behavior remains active.");
         }
+        if (active) {
+          drainSchedule = window.setTimeout(() => {
+            void runPendingConversationSummaryProjections().then((runnerDiagnostics) => {
+              if (active && !runnerDiagnostics.databaseAvailable) {
+                console.warn("[memory-projection] Durable projection drain unavailable; existing Memory behavior remains active.");
+              }
+            });
+          }, 0);
+        }
       });
     }, 0);
     return () => {
       active = false;
       window.clearTimeout(schedule);
+      if (drainSchedule !== undefined) window.clearTimeout(drainSchedule);
     };
   }, [characters, relationships, settings.activeIdentityId, settings.identities]);
 

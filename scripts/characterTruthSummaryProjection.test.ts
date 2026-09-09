@@ -29,6 +29,7 @@ const summary = createConversationSummaryRecord({
   claims: [claim],
   sourceMessageIds: ["message-a", "message-b"],
   generatedAt: 20,
+  canonicalRevision: "claims:test:1",
   rangeStartAt: 10,
   rangeEndAt: 15,
 });
@@ -39,6 +40,7 @@ assert.equal(summary.rangeStartAt, 10);
 assert.equal(summary.rangeEndAt, 15);
 assert.equal(summary.projectionVersion, 2);
 assert.equal(summary.status, "active");
+assert.equal(summary.canonicalRevision, "claims:test:1");
 
 const crossIdentity = createConversationSummaryRecord({
   scope,

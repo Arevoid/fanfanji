@@ -28,6 +28,7 @@ export function normalizeConversationSummary(value: unknown): ConversationSummar
     || !sourceClaimIds
     || !isFiniteNumber(value.generatedAt)
     || !isNonEmpty(value.generator)
+    || (value.canonicalRevision !== undefined && !isNonEmpty(value.canonicalRevision))
     || !isFiniteNumber(value.projectionVersion)
     || !Number.isInteger(value.projectionVersion)
     || value.projectionVersion < 1
@@ -43,6 +44,7 @@ export function normalizeConversationSummary(value: unknown): ConversationSummar
     ...(isNonEmpty(value.conversationId) ? { conversationId: value.conversationId.trim() } : {}),
     ...(isNonEmpty(value.sourceRecordId) ? { sourceRecordId: value.sourceRecordId.trim() } : {}),
     summary: value.summary.trim(),
+    ...(isNonEmpty(value.canonicalRevision) ? { canonicalRevision: value.canonicalRevision.trim() } : {}),
     sourceMessageIds,
     sourceClaimIds,
     ...(isFiniteNumber(value.rangeStartAt) ? { rangeStartAt: value.rangeStartAt } : {}),
