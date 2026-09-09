@@ -234,5 +234,12 @@ const sameLegacyWithV2 = await MemoryService.extractMemories(context, async () =
 assert.deepEqual(sameLegacyWithV2.acceptedClaims, legacyOnly.acceptedClaims, "V2 shadow metadata does not alter legacy claims");
 assert.equal(sameLegacyWithV2.rejectedCandidateCount, legacyOnly.rejectedCandidateCount);
 assert.deepEqual(sameLegacyWithV2.extractedMemories, legacyOnly.extractedMemories);
+const v2OnlyResult = await MemoryService.extractMemories(context, async () => ({
+  items: [],
+  structuredCandidatesV2: [parsed.structuredCandidatesV2[3]!],
+}));
+assert.equal(v2OnlyResult.acceptedClaims.length, 0);
+assert.equal(v2OnlyResult.rejectedCandidateCount, 0, "V2-only shadow candidates do not inflate legacy rejection counts");
+assert.equal(v2OnlyResult.structuredCandidatesV2?.length, 1);
 
 console.log("PASS Direct Chat V2 producer shadow, same-response compatibility, fail-open repair accounting, and admission characterization");
