@@ -2,6 +2,7 @@ import type { KnowledgeKind, KnowledgeSubject, TemporalStatus } from "../../../d
 import {
   normalizeEmbeddedMemoryExtractionCandidateV2,
   normalizeMemoryExtractionCandidateV2,
+  type MemoryExtractionCandidateV2NormalizationOptions,
   type MemoryExtractionCandidateV2,
 } from "../../../domain/memory/memoryExtractionSchema";
 
@@ -67,10 +68,11 @@ export function parseKnowledgeExtractionOutput(
 export function parseMemoryExtractionCandidateV2Output(
   rawText: string,
   allowedMessageIds: ReadonlySet<string>,
+  options: MemoryExtractionCandidateV2NormalizationOptions = {},
 ): MemoryExtractionCandidateV2[] {
   return parseRawValues(rawText)
-    .map((value) => normalizeEmbeddedMemoryExtractionCandidateV2(value, allowedMessageIds)
-      || normalizeMemoryExtractionCandidateV2(value, allowedMessageIds))
+    .map((value) => normalizeEmbeddedMemoryExtractionCandidateV2(value, allowedMessageIds, options)
+      || normalizeMemoryExtractionCandidateV2(value, allowedMessageIds, options))
     .filter((value): value is MemoryExtractionCandidateV2 => value !== undefined);
 }
 
@@ -85,11 +87,12 @@ export interface ParsedKnowledgeExtractionOutput {
 export function parseKnowledgeExtractionOutputWithV2(
   rawText: string,
   allowedMessageIds: ReadonlySet<string>,
+  options: MemoryExtractionCandidateV2NormalizationOptions = {},
 ): ParsedKnowledgeExtractionOutput {
   const rawValues = parseRawValues(rawText);
   const structuredCandidatesV2 = rawValues
-    .map((value) => normalizeEmbeddedMemoryExtractionCandidateV2(value, allowedMessageIds)
-      || normalizeMemoryExtractionCandidateV2(value, allowedMessageIds))
+    .map((value) => normalizeEmbeddedMemoryExtractionCandidateV2(value, allowedMessageIds, options)
+      || normalizeMemoryExtractionCandidateV2(value, allowedMessageIds, options))
     .filter((value): value is MemoryExtractionCandidateV2 => value !== undefined);
   return {
     candidates: rawValues
@@ -146,8 +149,12 @@ export async function parseOrRepairKnowledgeExtractionOutput(input: {
   allowedMessageIds: ReadonlySet<string>;
   originalPrompt: string;
   repair: (repairPrompt: string) => Promise<string>;
+  preserveUnvalidatedSourceHints?: boolean;
 }): Promise<ParsedKnowledgeExtractionOutput & { text: string; repaired: boolean }> {
-  const parsed = parseKnowledgeExtractionOutputWithV2(input.rawText, input.allowedMessageIds);
+  const options = input.preserveUnvalidatedSourceHints
+    ? { preserveUnvalidatedSourceHints: true, allowMissingSourceHints: true }
+    : {};
+  const parsed = parseKnowledgeExtractionOutputWithV2(input.rawText, input.allowedMessageIds, options);
   if (parsed.candidates.length > 0 || parsed.structuredCandidatesV2.length > 0
     || parsed.v2MetadataPresent || !input.rawText.trim()) {
     return { text: input.rawText, ...parsed, repaired: false };
@@ -156,7 +163,7 @@ export async function parseOrRepairKnowledgeExtractionOutput(input: {
     originalPrompt: input.originalPrompt,
     invalidOutput: input.rawText,
   }));
-  return { text: repairedText, ...parseKnowledgeExtractionOutputWithV2(repairedText, input.allowedMessageIds), repaired: true };
+  return { text: repairedText, ...parseKnowledgeExtractionOutputWithV2(repairedText, input.allowedMessageIds, options), repaired: true };
 }
 
 export function buildKnowledgeExtractionPrompt(input: {

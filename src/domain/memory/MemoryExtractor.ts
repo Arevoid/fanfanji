@@ -5,6 +5,7 @@ import { normalizeExtractedKnowledgeCandidate } from "../../features/characterKn
 import { isDuplicateMemory } from "./MemoryDeduplicator";
 import type { MemoryExtractionApi, MemoryExtractionContext, MemoryExtractionResult } from "./memoryTypes";
 import { serializeMessageContentForPrompt } from "../../features/chat/prompts/messagePromptSerializer";
+import { buildMemoryExtractionSourceEnvelope } from "./memoryExtractionSourceEnvelope";
 
 const hasTruthScope = (context: MemoryExtractionContext): boolean => Boolean(
   context.relationId?.trim()
@@ -39,6 +40,19 @@ export async function extractMemories(
   context: MemoryExtractionContext,
   extractApi: MemoryExtractionApi,
 ): Promise<MemoryExtractionResult> {
+  const sourceEnvelope = buildMemoryExtractionSourceEnvelope({
+    characterId: context.characterId,
+    relationId: context.relationId,
+    userIdentityId: context.userIdentityId,
+    conversationId: context.conversationId,
+    recentMessages: context.recentMessages,
+    parentActionId: context.parentActionId,
+    extractionActionId: context.extractionActionId,
+  });
+  const withSourceEnvelope = (result: Omit<MemoryExtractionResult, "sourceEnvelope">): MemoryExtractionResult => ({
+    ...result,
+    sourceEnvelope,
+  });
   const history = context.recentMessages.map((message) => ({
     id: message.id,
     role: message.sender === "user" ? "user" as const : "model" as const,
@@ -62,6 +76,7 @@ export async function extractMemories(
     characterId: context.characterId,
     relationId: context.relationId,
     conversationId: context.conversationId,
+    parentActionId: context.parentActionId,
     ...(context.enableMemoryExtractionV2Shadow ? { enableV2Shadow: true } : {}),
     ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
   });
@@ -73,23 +88,23 @@ export async function extractMemories(
   // keep a stable response shape. Preserve the error before interpreting that
   // empty array as an honest "no durable facts" extraction.
   if (data.error) {
-    return {
+    return withSourceEnvelope({
       extractedMemories: [],
       acceptedClaims: [],
       rejectedCandidateCount: 0,
       apiError: data.error,
-    };
+    });
   }
 
   const rawItems = Array.isArray(data.candidates) ? data.candidates : data.items;
   if (!Array.isArray(rawItems)) {
-    return {
+    return withSourceEnvelope({
       extractedMemories: [],
       acceptedClaims: [],
       rejectedCandidateCount: 0,
       ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
       ...(structuredCandidatesV2 ? {} : { apiError: data.error || "提炼失败，未提取到有效记忆或API请求出错" }),
-    };
+    });
   }
 
   // A memory without a complete relationship scope cannot be attributed to a
@@ -98,12 +113,12 @@ export async function extractMemories(
   // This closes the old characterId-only fallback that could leak facts across
   // identities or conversations.
   if (!hasTruthScope(context)) {
-    return {
+    return withSourceEnvelope({
       extractedMemories: [],
       acceptedClaims: [],
       rejectedCandidateCount: rawItems.length,
       ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
-    };
+    });
   }
 
   const allowedMessageIds = new Set(context.recentMessages.map((message) => message.id));
@@ -196,12 +211,12 @@ export async function extractMemories(
     claim.truthStatus === "asserted" || claim.truthStatus === "confirmed",
   );
   if (trustedClaims.length === 0) {
-    return {
+    return withSourceEnvelope({
       extractedMemories: [],
       acceptedClaims,
       rejectedCandidateCount,
       ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
-    };
+    });
   }
 
   const candidate: MemoryItem = {
@@ -220,16 +235,16 @@ export async function extractMemories(
     sourceKnowledgeClaimIds: trustedClaims.map((claim) => claim.id),
   };
   return isDuplicateMemory(context.existingMemories, candidate)
-    ? {
+    ? withSourceEnvelope({
       extractedMemories: [],
       acceptedClaims,
       rejectedCandidateCount,
       ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
-    }
-    : {
+    })
+    : withSourceEnvelope({
       extractedMemories: [candidate],
       acceptedClaims,
       rejectedCandidateCount,
       ...(structuredCandidatesV2 ? { structuredCandidatesV2 } : {}),
-    };
+    });
 }

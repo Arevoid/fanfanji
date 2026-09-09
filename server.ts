@@ -476,6 +476,7 @@ ${historyText}
         rawText: aiText,
         allowedMessageIds: new Set(safeHistory.map((item) => item.id)),
         originalPrompt: prompt,
+        preserveUnvalidatedSourceHints: enableV2Shadow === true && scenario !== "offline",
         repair: (repairPrompt) => generateExtractionText(repairPrompt, 0.2),
       });
       res.json({

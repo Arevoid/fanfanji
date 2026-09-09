@@ -5,6 +5,7 @@ import type {
   MemoryExtractionCandidateV2,
   MemoryExtractionRejectionDiagnostic,
 } from "./memoryExtractionSchema";
+import type { MemoryExtractionSourceEnvelope } from "./memoryExtractionSourceEnvelope";
 
 export type MemoryScenario =
   | "chat"
@@ -41,6 +42,9 @@ export interface MemoryExtractionContext {
   scenario: "chat" | "offline" | "manual-summary" | "immediate-summary";
   /** Normal Direct Chat only; enables additive V2 producer shadow output. */
   enableMemoryExtractionV2Shadow?: boolean;
+  /** Optional lineage supplied by the owning runtime; never model-authored. */
+  parentActionId?: string;
+  extractionActionId?: string;
   apiKey: string;
   model: string;
   apiEndpoint?: string;
@@ -90,6 +94,8 @@ export interface MemoryExtractionResult {
   rejectedCandidateCount: number;
   /** Optional V2 metadata for compatibility adapters; not a write signal. */
   structuredCandidatesV2?: MemoryExtractionCandidateV2[];
+  /** Runtime-owned source universe for additive provenance shadow consumers. */
+  sourceEnvelope?: MemoryExtractionSourceEnvelope;
   /** Classification-only diagnostics; never includes statement/evidence bodies. */
   rejectedCandidates?: MemoryExtractionRejectionDiagnostic[];
   apiError?: string;

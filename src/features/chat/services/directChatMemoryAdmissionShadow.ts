@@ -46,6 +46,11 @@ export interface DirectChatMemoryAdmissionShadowResult {
   duplicateCount: number;
   missingScopeCount: number;
   missingProvenanceCount: number;
+  invalidSourceReferenceCount: number;
+  duplicateSourceReferenceCount: number;
+  partialSourceReferenceCount: number;
+  scopeMismatchCount: number;
+  canonicalBindingSuccessCount: number;
   unknownKindCount: number;
   missingTemporalCount: number;
   sceneClassificationUnavailableCount: number;
@@ -117,6 +122,11 @@ function failedOpenResult(): DirectChatMemoryAdmissionShadowResult {
     duplicateCount: 0,
     missingScopeCount: 0,
     missingProvenanceCount: 0,
+    invalidSourceReferenceCount: 0,
+    duplicateSourceReferenceCount: 0,
+    partialSourceReferenceCount: 0,
+    scopeMismatchCount: 0,
+    canonicalBindingSuccessCount: 0,
     unknownKindCount: 0,
     missingTemporalCount: 0,
     sceneClassificationUnavailableCount: 0,
@@ -187,6 +197,11 @@ export function observeDirectChatMemoryAdmissionShadow(
       duplicateCount,
       missingScopeCount,
       missingProvenanceCount,
+      invalidSourceReferenceCount: adapted.invalidSourceReferenceCount,
+      duplicateSourceReferenceCount: adapted.duplicateSourceReferenceCount,
+      partialSourceReferenceCount: adapted.partialSourceReferenceCount,
+      scopeMismatchCount: adapted.scopeMismatchCount,
+      canonicalBindingSuccessCount: adapted.canonicalBindingSuccessCount,
       unknownKindCount: adapted.unsupportedKindCount,
       missingTemporalCount,
       sceneClassificationUnavailableCount: adapted.sceneClassificationUnavailableCount,

@@ -694,6 +694,7 @@ async function apiExtractMemoriesImpl(params: {
       ? parseMemoryExtractionCandidateV2Output(
         JSON.stringify(data.structuredCandidatesV2),
         new Set(params.history.map((item) => item.id)),
+        params.enableV2Shadow ? { preserveUnvalidatedSourceHints: true, allowMissingSourceHints: true } : {},
       )
       : undefined;
     if (res.ok && (Array.isArray(data?.candidates) || structuredCandidatesV2?.length || data?.v2MetadataPresent === true)) {
@@ -749,6 +750,7 @@ async function apiExtractMemoriesImpl(params: {
         rawText: aiText,
         allowedMessageIds: new Set(params.history.map((item) => item.id)),
         originalPrompt: prompt,
+        preserveUnvalidatedSourceHints: params.enableV2Shadow,
         repair: async (repairPrompt) => (await directClientChat({
           message: repairPrompt,
           history: [],

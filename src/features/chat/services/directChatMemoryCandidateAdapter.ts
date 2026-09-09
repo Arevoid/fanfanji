@@ -7,7 +7,13 @@ import type {
 } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import type { MemoryCandidate, MemoryCandidateKind, MemoryCandidateSourceType } from "../../../domain/memory/memoryCandidate";
 import type { MemoryExtractionCandidateV2 } from "../../../domain/memory/memoryExtractionSchema";
+import type { MemoryExtractionSourceEnvelope } from "../../../domain/memory/memoryExtractionSourceEnvelope";
 import type { MemoryExtractionResult } from "../../../domain/memory/memoryTypes";
+import {
+  bindDirectChatMemorySourceHints,
+  resolveDirectChatMemoryActorTarget,
+  type DirectChatMemorySourceBinding,
+} from "./directChatMemorySourceBinding";
 
 export interface DirectChatMemoryCandidateAdapterScope {
   /** These IDs must come from the canonical Direct Chat runtime, never text. */
@@ -33,12 +39,19 @@ export interface DirectChatMemoryCandidateAdapterInput {
   knownIdempotencyKeys?: ReadonlySet<string>;
   /** Runtime recording time for additive V2 metadata; AI does not provide it. */
   recordedAt?: number;
+  /** Runtime-owned source universe; when present V2 hints are never trusted directly. */
+  sourceEnvelope?: MemoryExtractionSourceEnvelope;
 }
 
 export interface DirectChatMemoryCandidateAdapterResult {
   candidates: MemoryCandidate[];
   unsupportedKindCount: number;
   missingSourceReferenceCount: number;
+  invalidSourceReferenceCount: number;
+  duplicateSourceReferenceCount: number;
+  partialSourceReferenceCount: number;
+  scopeMismatchCount: number;
+  canonicalBindingSuccessCount: number;
   sceneClassificationUnavailableCount: number;
 }
 
@@ -122,10 +135,18 @@ function adaptV2Candidate(
   candidate: MemoryExtractionCandidateV2,
   input: DirectChatMemoryCandidateAdapterInput,
   createCandidateId: () => string,
+  binding?: DirectChatMemorySourceBinding,
 ): MemoryCandidate {
-  const refs = candidate.sourceMessageIds;
+  const refs = binding ? binding.trustedSourceMessageIds : candidate.sourceMessageIds;
   const sourceConversationId = normalize(input.scope.conversationId);
-  const actorTarget = actorTargetForV2(candidate, input.scope);
+  const actorTarget = input.sourceEnvelope
+    ? resolveDirectChatMemoryActorTarget({
+      actorRole: candidate.actorRole,
+      targetRole: candidate.targetRole,
+      envelope: input.sourceEnvelope,
+    })
+    : actorTargetForV2(candidate, input.scope);
+  const authorship = input.sourceEnvelope && binding ? binding.authorship : "unknown";
   const lineage = input.lineage && (input.lineage.parentActionId || input.lineage.producerActionId || input.lineage.sourceRequestId)
     ? input.lineage
     : undefined;
@@ -148,13 +169,13 @@ function adaptV2Candidate(
       producer: "direct_chat",
       sourceType: "user_message",
       // AI metadata describes content; it cannot assert who authored it.
-      authorship: "unknown",
+      authorship,
       ...actorTarget,
       app: "chat",
-      sourceMessageIds: refs,
+      ...(refs.length ? { sourceMessageIds: refs } : {}),
       ...(sourceConversationId ? { conversationId: sourceConversationId } : {}),
     },
-    evidence: { sourceMessageIds: refs },
+    evidence: refs.length ? { sourceMessageIds: refs } : {},
     temporal: {
       status: candidate.temporalStatus,
       ...(candidate.occurredAt !== undefined ? { occurredAt: candidate.occurredAt } : {}),
@@ -175,18 +196,47 @@ function adaptV2Candidate(
 export function adaptDirectChatMemoryExtractionToCandidates(
   input: DirectChatMemoryCandidateAdapterInput,
 ): DirectChatMemoryCandidateAdapterResult {
-  const createCandidateId = input.createCandidateId || (() => createId("memory-candidate"));
-  const structuredCandidates = input.extraction.structuredCandidatesV2;
+  const sourceEnvelope = input.sourceEnvelope || input.extraction.sourceEnvelope;
+  const runtimeInput = sourceEnvelope && !input.sourceEnvelope ? { ...input, sourceEnvelope } : input;
+  const createCandidateId = runtimeInput.createCandidateId || (() => createId("memory-candidate"));
+  const structuredCandidates = runtimeInput.extraction.structuredCandidatesV2;
   if (structuredCandidates?.length) {
     let unsupportedKindCount = 0;
+    let invalidSourceReferenceCount = 0;
+    let duplicateSourceReferenceCount = 0;
+    let partialSourceReferenceCount = 0;
+    let scopeMismatchCount = 0;
+    let canonicalBindingSuccessCount = 0;
+    let missingSourceReferenceCount = 0;
     const candidates = structuredCandidates.map((candidate) => {
       if (candidate.kind === "unknown") unsupportedKindCount += 1;
-      return adaptV2Candidate(candidate, input, createCandidateId);
+      const binding = runtimeInput.sourceEnvelope
+        ? bindDirectChatMemorySourceHints({
+          envelope: runtimeInput.sourceEnvelope,
+          modelSourceHints: candidate.sourceMessageIds,
+          expectedScope: runtimeInput.scope,
+        })
+        : undefined;
+      if (binding) {
+        invalidSourceReferenceCount += binding.invalidSourceMessageIds.length;
+        duplicateSourceReferenceCount += binding.duplicateSourceMessageIds.length;
+        if (binding.partialValid) partialSourceReferenceCount += 1;
+        if (!binding.scopeMatches) scopeMismatchCount += 1;
+        if (binding.status === "valid") canonicalBindingSuccessCount += 1;
+      }
+      const adapted = adaptV2Candidate(candidate, runtimeInput, createCandidateId, binding);
+      if (!adapted.provenance.sourceMessageIds?.length) missingSourceReferenceCount += 1;
+      return adapted;
     });
     return {
       candidates,
       unsupportedKindCount,
-      missingSourceReferenceCount: candidates.filter((candidate) => !candidate.provenance.sourceMessageIds?.length).length,
+      missingSourceReferenceCount,
+      invalidSourceReferenceCount,
+      duplicateSourceReferenceCount,
+      partialSourceReferenceCount,
+      scopeMismatchCount,
+      canonicalBindingSuccessCount,
       // V2 has an explicit kind/facet channel, including scene_only.
       sceneClassificationUnavailableCount: 0,
     };
@@ -253,6 +303,11 @@ export function adaptDirectChatMemoryExtractionToCandidates(
     candidates,
     unsupportedKindCount,
     missingSourceReferenceCount,
+    invalidSourceReferenceCount: 0,
+    duplicateSourceReferenceCount: 0,
+    partialSourceReferenceCount: 0,
+    scopeMismatchCount: 0,
+    canonicalBindingSuccessCount: 0,
     // The existing extraction schema has no scene classification field. Do not
     // infer it from statement text; expose the gap for the shadow report.
     sceneClassificationUnavailableCount: candidates.length,

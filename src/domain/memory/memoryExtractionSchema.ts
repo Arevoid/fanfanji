@@ -46,6 +46,16 @@ export interface MemoryExtractionCandidateV2 extends MemoryExtractionCandidateV2
   evidenceQuote: string;
 }
 
+export interface MemoryExtractionCandidateV2NormalizationOptions {
+  /**
+   * Shadow consumers can retain raw model hints so the runtime binding layer
+   * can count and reject out-of-batch IDs. Legacy parsing keeps validation on.
+   */
+  preserveUnvalidatedSourceHints?: boolean;
+  /** Shadow parsing can retain a candidate with no source hint for diagnostics. */
+  allowMissingSourceHints?: boolean;
+}
+
 const KINDS = new Set<MemoryCandidateKind>([
   "fact", "event", "plan", "belief", "episodic", "relationship_signal", "scene_only", "subjective_reflection", "unknown",
 ]);
@@ -69,15 +79,21 @@ function optionalRole(value: unknown): MemoryExtractionRole | undefined {
 export function normalizeMemoryExtractionCandidateV2(
   value: unknown,
   allowedMessageIds: ReadonlySet<string>,
+  options: MemoryExtractionCandidateV2NormalizationOptions = {},
 ): MemoryExtractionCandidateV2 | undefined {
+  const sourceMessageIds = Array.isArray(value && typeof value === "object" ? (value as Record<string, unknown>).sourceMessageIds : undefined)
+    ? ((value as Record<string, unknown>).sourceMessageIds as unknown[])
+    : undefined;
   if (!isRecord(value)
     || value.schemaVersion !== MEMORY_EXTRACTION_SCHEMA_V2
     || !nonEmpty(value.statement)
     || !KINDS.has(value.kind as MemoryCandidateKind)
     || !TEMPORAL.has(value.temporalStatus as TemporalStatus)
-    || !Array.isArray(value.sourceMessageIds)
-    || value.sourceMessageIds.length === 0
-    || value.sourceMessageIds.some((id) => !nonEmpty(id) || !allowedMessageIds.has(id.trim()))
+    || (!sourceMessageIds && !options.allowMissingSourceHints)
+    || (sourceMessageIds && sourceMessageIds.some((id) => !nonEmpty(id)
+      || (!options.preserveUnvalidatedSourceHints && !allowedMessageIds.has(id.trim())))
+    )
+    || (!options.allowMissingSourceHints && (sourceMessageIds?.length || 0) === 0)
     || !nonEmpty(value.evidenceQuote)) return undefined;
 
   const rawFacet = value.semanticFacet;
@@ -107,7 +123,9 @@ export function normalizeMemoryExtractionCandidateV2(
     ...(relationshipSignalKind && semanticFacet === "relationship_signal" ? { relationshipSignalKind } : {}),
     statement: value.statement.trim(),
     temporalStatus: value.temporalStatus as TemporalStatus,
-    sourceMessageIds: Array.from(new Set((value.sourceMessageIds as string[]).map((id) => id.trim()))),
+    sourceMessageIds: (options.preserveUnvalidatedSourceHints
+      ? (sourceMessageIds || []).map((id) => (id as string).trim())
+      : Array.from(new Set((sourceMessageIds || []).map((id) => (id as string).trim())))),
     evidenceQuote: value.evidenceQuote.trim(),
     ...(finite(value.occurredAt) && value.occurredAt >= 0 ? { occurredAt: value.occurredAt } : {}),
     ...(finite(value.validFrom) && value.validFrom >= 0 ? { validFrom: value.validFrom } : {}),
@@ -127,6 +145,7 @@ export function normalizeMemoryExtractionCandidateV2(
 export function normalizeEmbeddedMemoryExtractionCandidateV2(
   value: unknown,
   allowedMessageIds: ReadonlySet<string>,
+  options: MemoryExtractionCandidateV2NormalizationOptions = {},
 ): MemoryExtractionCandidateV2 | undefined {
   if (!isRecord(value) || !isRecord(value.v2)) return undefined;
   const metadata = value.v2;
@@ -139,5 +158,5 @@ export function normalizeEmbeddedMemoryExtractionCandidateV2(
     ...(metadata.occurredAt === undefined && value.occurredAt !== undefined ? { occurredAt: value.occurredAt } : {}),
     ...(metadata.validFrom === undefined && value.validFrom !== undefined ? { validFrom: value.validFrom } : {}),
     ...(metadata.validTo === undefined && value.validTo !== undefined ? { validTo: value.validTo } : {}),
-  }, allowedMessageIds);
+  }, allowedMessageIds, options);
 }
