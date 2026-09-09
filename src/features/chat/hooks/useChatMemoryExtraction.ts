@@ -26,6 +26,21 @@ import {
 
 type DirectScope = { characterId: string; relationId: string; userIdentityId: string; conversationId: string };
 
+export type MemoryExtractionPersistenceMode = "production_equivalent_write" | "observation_only";
+
+export interface MemoryExtractionRunOptions {
+  persistenceMode?: MemoryExtractionPersistenceMode;
+}
+
+export interface MemoryExtractionRunDiagnostics {
+  status: "completed" | "ACTIVE_DIRECT_SCOPE_UNAVAILABLE" | "NO_MESSAGES" | "FAILED";
+  scopeAvailable: boolean;
+  messageCount: number;
+  providerRequestObserved: boolean;
+  candidateCount: number;
+  persistenceMode: MemoryExtractionPersistenceMode;
+}
+
 /**
  * Selects only the part of a chat that has not crossed the last successful
  * archive marker. An explicit message list is used by the automatic pipeline
@@ -91,11 +106,42 @@ export function useChatMemoryExtraction({
   activeIdentityId,
 }: ChatMemoryExtractionOptions) {
   const lastArchiveFeedbackRef = useRef<MemoryArchiveStats | null>(null);
+  const lastRunDiagnosticsRef = useRef<MemoryExtractionRunDiagnostics>({
+    status: "NO_MESSAGES",
+    scopeAvailable: false,
+    messageCount: 0,
+    providerRequestObserved: false,
+    candidateCount: 0,
+    persistenceMode: "production_equivalent_write",
+  });
 
-  const handleExtractMemories = async (manualMessagesOverride?: Message[]) => {
-    if (!activeChatCharId || !activeCharacter) return 0;
+  const handleExtractMemories = async (
+    manualMessagesOverride?: Message[],
+    runOptions: MemoryExtractionRunOptions = {},
+  ) => {
+    const persistenceMode = runOptions.persistenceMode || "production_equivalent_write";
+    const scopeAvailable = Boolean(activeDirectScope && activeCharacter && !activeCharacter.isGroupChat);
+    if (!activeChatCharId || !activeCharacter) {
+      lastRunDiagnosticsRef.current = {
+        status: "ACTIVE_DIRECT_SCOPE_UNAVAILABLE",
+        scopeAvailable: false,
+        messageCount: 0,
+        providerRequestObserved: false,
+        candidateCount: 0,
+        persistenceMode,
+      };
+      return 0;
+    }
 
     lastArchiveFeedbackRef.current = null;
+    lastRunDiagnosticsRef.current = {
+      status: "NO_MESSAGES",
+      scopeAvailable,
+      messageCount: 0,
+      providerRequestObserved: false,
+      candidateCount: 0,
+      persistenceMode,
+    };
     setIsCompressingMemory(true);
     try {
       const activeRelationship = activeDirectScope
@@ -110,6 +156,14 @@ export function useChatMemoryExtraction({
         manualMessagesOverride,
       );
       if (unarchivedMessages.length === 0) {
+        lastRunDiagnosticsRef.current = {
+          status: "NO_MESSAGES",
+          scopeAvailable,
+          messageCount: 0,
+          providerRequestObserved: false,
+          candidateCount: 0,
+          persistenceMode,
+        };
         return 0;
       }
       const configuredBatchSize = Number.isFinite(activeCharacter.historyMemoryLimit)
@@ -227,13 +281,28 @@ export function useChatMemoryExtraction({
         return totalExtracted;
       }
 
-      if (!activeDirectScope) return 0;
+      if (!activeDirectScope) {
+        lastRunDiagnosticsRef.current = {
+          status: "ACTIVE_DIRECT_SCOPE_UNAVAILABLE",
+          scopeAvailable: false,
+          messageCount: unarchivedMessages.length,
+          providerRequestObserved: false,
+          candidateCount: 0,
+          persistenceMode,
+        };
+        return 0;
+      }
       const extractionScope = activeDirectScope;
 
       for (const messagesToCompress of archiveBatches) {
         archiveStats.sourceMessageCount += messagesToCompress.length;
         const isDelicate = activeCharacter.archiveTemplateType === "delicate";
         const headerLabel = isDelicate ? "【心境日记归档 (细腻版)】" : "【精炼归档事件日志 (精炼版)】";
+        lastRunDiagnosticsRef.current = {
+          ...lastRunDiagnosticsRef.current,
+          providerRequestObserved: true,
+          messageCount: unarchivedMessages.length,
+        };
         const result = await MemoryService.extractMemories({
           character: activeCharacter,
           characterId: activeChatCharId,
@@ -263,8 +332,19 @@ export function useChatMemoryExtraction({
         }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
         if (result.apiError) {
           console.error("Extract memory API error:", result.apiError);
+          lastRunDiagnosticsRef.current = {
+            ...lastRunDiagnosticsRef.current,
+            status: "FAILED",
+            messageCount: unarchivedMessages.length,
+          };
           return -1;
         }
+        lastRunDiagnosticsRef.current = {
+          ...lastRunDiagnosticsRef.current,
+          candidateCount: lastRunDiagnosticsRef.current.candidateCount
+            + (result.shadowCandidatesV2?.length ?? result.acceptedClaims.length + result.rejectedCandidateCount),
+          messageCount: unarchivedMessages.length,
+        };
         if (manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled()) {
           try {
             const shadowResult = observeDirectChatMemoryAdmissionShadow({
@@ -286,6 +366,15 @@ export function useChatMemoryExtraction({
             // Admission shadow evidence is fail-open and cannot affect the
             // established canonical write or archive cursor.
           }
+        }
+        if (persistenceMode === "observation_only") {
+          // The real Provider/parser/source-binding/Shadow path has completed,
+          // but this explicit dev run must not write canonical claims,
+          // summaries, projection jobs, or archive cursors.
+          archiveStats.acceptedTruthCount += result.acceptedClaims.length;
+          archiveStats.rejectedCandidateCount += result.rejectedCandidateCount;
+          totalExtracted += result.acceptedClaims.length;
+          continue;
         }
         let finalCanonicalClaims = result.acceptedClaims;
         const isAutomaticDirectChat = manualMessagesOverride === undefined;
@@ -390,9 +479,18 @@ export function useChatMemoryExtraction({
         await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
       }
       lastArchiveFeedbackRef.current = { ...archiveStats };
+      lastRunDiagnosticsRef.current = {
+        ...lastRunDiagnosticsRef.current,
+        status: "completed",
+        messageCount: unarchivedMessages.length,
+      };
       return totalExtracted;
     } catch (err: any) {
       console.error("Memory extraction error:", err);
+      lastRunDiagnosticsRef.current = {
+        ...lastRunDiagnosticsRef.current,
+        status: "FAILED",
+      };
     } finally {
       setIsCompressingMemory(false);
     }
@@ -402,5 +500,6 @@ export function useChatMemoryExtraction({
   return {
     handleExtractMemories,
     getLastArchiveFeedback: () => lastArchiveFeedbackRef.current,
+    getLastMemoryExtractionRunDiagnostics: () => lastRunDiagnosticsRef.current,
   };
 }

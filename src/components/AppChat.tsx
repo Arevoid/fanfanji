@@ -79,6 +79,16 @@ import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/
 import type { CharacterCognitiveContext, CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
 import { buildChatPromptContext, formatChatPromptContext } from "../features/characterCognitive/promptAdapters/chatPromptAdapter";
 import { getDirectChatMemoryShadowDiagnosticsInput } from "../features/chat/services/directChatMemoryShadowTelemetry";
+import {
+  configureDirectChatMemoryAdmissionShadowEvidence,
+  getDirectChatMemoryAdmissionShadowEvidence,
+} from "../features/chat/services/directChatMemoryAdmissionShadowTelemetry";
+import {
+  DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL,
+  isDirectChatMemoryAdmissionDevRuntime,
+  type DirectChatMemoryAdmissionTestApi,
+  type DirectChatMemoryAdmissionTestResult,
+} from "../features/chat/services/directChatMemoryAdmissionDevTrigger";
 import { buildRelationMusicContext } from "../domain/prompt/musicContext";
 import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
@@ -3351,7 +3361,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     }
   };
 
-  const { handleExtractMemories, getLastArchiveFeedback } = useChatMemoryExtraction({
+  const {
+    handleExtractMemories,
+    getLastArchiveFeedback,
+    getLastMemoryExtractionRunDiagnostics,
+  } = useChatMemoryExtraction({
     activeChatCharId,
     activeCharacter,
     activeDirectScope,
@@ -3370,6 +3384,89 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     relationships,
     activeIdentityId,
   });
+
+  useEffect(() => {
+    if (!isDirectChatMemoryAdmissionDevRuntime()) return undefined;
+    const runtime = globalThis as typeof globalThis & {
+      __fanfanjiMemoryAdmissionTest?: DirectChatMemoryAdmissionTestApi;
+    };
+    const api: DirectChatMemoryAdmissionTestApi = {
+      extractNow: async (): Promise<DirectChatMemoryAdmissionTestResult> => {
+        const shadowObservationCountBefore = getDirectChatMemoryAdmissionShadowEvidence().length;
+        const scopeAvailable = Boolean(activeDirectScope && activeCharacter && !activeCharacter.isGroupChat);
+        if (!scopeAvailable) {
+          return {
+            status: "ACTIVE_DIRECT_SCOPE_UNAVAILABLE",
+            scopeAvailable: false,
+            messageCount: 0,
+            providerRequestObserved: false,
+            candidateCount: 0,
+            shadowObservationCountBefore,
+            shadowObservationCountAfter: shadowObservationCountBefore,
+            persistenceMode: "observation_only",
+          };
+        }
+        if (currentChatMessages.length === 0) {
+          return {
+            status: "NO_MESSAGES",
+            scopeAvailable: true,
+            messageCount: 0,
+            providerRequestObserved: false,
+            candidateCount: 0,
+            shadowObservationCountBefore,
+            shadowObservationCountAfter: shadowObservationCountBefore,
+            persistenceMode: "observation_only",
+          };
+        }
+
+        // Enabling evidence is itself explicit and dev-only. The collection is
+        // bounded in memory and never becomes a production default or sink.
+        configureDirectChatMemoryAdmissionShadowEvidence({ enabled: true });
+        try {
+          const extractedCount = await handleExtractMemories(undefined, { persistenceMode: "observation_only" });
+          const diagnostics = getLastMemoryExtractionRunDiagnostics();
+          const shadowObservationCountAfter = getDirectChatMemoryAdmissionShadowEvidence().length;
+          return {
+            status: extractedCount >= 0 ? "completed" : "FAILED",
+            scopeAvailable: diagnostics.scopeAvailable,
+            messageCount: diagnostics.messageCount,
+            providerRequestObserved: diagnostics.providerRequestObserved,
+            candidateCount: diagnostics.candidateCount,
+            shadowObservationCountBefore,
+            shadowObservationCountAfter,
+            persistenceMode: "observation_only",
+          };
+        } catch {
+          const diagnostics = getLastMemoryExtractionRunDiagnostics();
+          return {
+            status: "FAILED",
+            scopeAvailable: diagnostics.scopeAvailable,
+            messageCount: diagnostics.messageCount,
+            providerRequestObserved: diagnostics.providerRequestObserved,
+            candidateCount: diagnostics.candidateCount,
+            shadowObservationCountBefore,
+            shadowObservationCountAfter: getDirectChatMemoryAdmissionShadowEvidence().length,
+            persistenceMode: "observation_only",
+          };
+        }
+      },
+    };
+    runtime[DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL] = api;
+    return () => {
+      if (runtime[DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL] === api) {
+        delete runtime[DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL];
+      }
+    };
+  }, [
+    activeCharacter?.id,
+    activeCharacter?.isGroupChat,
+    activeDirectScope?.characterId,
+    activeDirectScope?.relationId,
+    activeDirectScope?.conversationId,
+    currentChatMessages.length,
+    handleExtractMemories,
+    getLastMemoryExtractionRunDiagnostics,
+  ]);
   const { updateDraftChatIcon } = useChatDraftChatIcon(setDraftChatIcons);
   const { handleRegenerateResponse } = useChatRegenerationAction({
     activeChatCharId, activeCharacter, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
