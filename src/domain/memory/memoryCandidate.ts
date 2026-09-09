@@ -23,6 +23,25 @@ export type MemoryCandidateKind =
   | "subjective_reflection"
   | "unknown";
 
+/**
+ * Extraction-time semantic detail.  These fields describe a candidate's
+ * meaning; they do not grant write authority or choose a canonical store.
+ */
+export type MemoryCandidateSemanticFacet =
+  | "preference"
+  | "hypothesis"
+  | "relationship_signal"
+  | "scene_only"
+  | "subjective_reflection";
+export type MemoryCandidateDurability = "stable" | "temporary" | "unknown";
+export type MemoryCandidateRelationshipSignalKind =
+  | "promise"
+  | "trust"
+  | "conflict"
+  | "affection"
+  | "boundary"
+  | "commitment";
+
 export type MemoryCandidateProducer =
   | "direct_chat"
   | "group_chat"
@@ -102,6 +121,10 @@ export interface MemoryCandidate {
   /** Producer-issued opaque identity; generation is outside this contract. */
   candidateId: string;
   candidateKind: MemoryCandidateKind;
+  /** Optional extraction metadata; admission remains the authority. */
+  semanticFacet?: MemoryCandidateSemanticFacet;
+  durability?: MemoryCandidateDurability;
+  relationshipSignalKind?: MemoryCandidateRelationshipSignalKind;
   statement: string;
   subject?: KnowledgeSubject;
   scope: MemoryCandidateScope;
@@ -151,6 +174,9 @@ export function buildMemoryCandidateIdempotencyKey(candidate: MemoryCandidate): 
     scope.userIdentityId,
     scope.conversationId || "",
     candidate.candidateKind,
+    candidate.semanticFacet || "",
+    candidate.durability || "",
+    candidate.relationshipSignalKind || "",
     provenance.producer,
     provenance.sourceType,
     provenance.authorship,

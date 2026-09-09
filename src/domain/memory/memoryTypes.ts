@@ -1,6 +1,10 @@
 import type { Character, MemoryItem, Message } from "../../types";
 import type { KnowledgeClaim } from "../characterKnowledge/characterKnowledgeTypes";
 import type { ExtractedKnowledgeCandidatePayload } from "../../features/characterKnowledge/services/knowledgeExtractionProtocol";
+import type {
+  MemoryExtractionCandidateV2,
+  MemoryExtractionRejectionDiagnostic,
+} from "./memoryExtractionSchema";
 
 export type MemoryScenario =
   | "chat"
@@ -69,6 +73,8 @@ export interface MemoryExtractionApiParams {
 export interface MemoryExtractionApiResult {
   items?: unknown;
   candidates?: ExtractedKnowledgeCandidatePayload[];
+  /** Additive V2 metadata; old API responses continue to use candidates. */
+  structuredCandidatesV2?: MemoryExtractionCandidateV2[];
   error?: string;
 }
 
@@ -76,6 +82,10 @@ export interface MemoryExtractionResult {
   extractedMemories: MemoryItem[];
   acceptedClaims: KnowledgeClaim[];
   rejectedCandidateCount: number;
+  /** Optional V2 metadata for compatibility adapters; not a write signal. */
+  structuredCandidatesV2?: MemoryExtractionCandidateV2[];
+  /** Classification-only diagnostics; never includes statement/evidence bodies. */
+  rejectedCandidates?: MemoryExtractionRejectionDiagnostic[];
   apiError?: string;
 }
 

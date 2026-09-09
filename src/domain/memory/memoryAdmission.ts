@@ -32,7 +32,10 @@ export type MemoryAdmissionRejectionReason =
 
 export type MemoryAdmissionReviewReason =
   | "duplicate_source"
-  | "relationship_signal_requires_review";
+  | "relationship_signal_requires_review"
+  | "temporary_preference_requires_review"
+  | "unknown_preference_durability"
+  | "hypothesis_missing_subject";
 
 export type MemoryAdmissionReason =
   | MemoryAdmissionAcceptedReason
@@ -162,6 +165,19 @@ export function evaluateMemoryCandidate(candidate: MemoryCandidate, context: Mem
   }
   if (candidate.candidateKind === "relationship_signal") {
     return baseDecision(candidate, "needs_review", "relationship_signal_requires_review", idempotencyKey);
+  }
+  if (candidate.semanticFacet === "preference"
+    && candidate.durability === "temporary") {
+    return baseDecision(candidate, "needs_review", "temporary_preference_requires_review", idempotencyKey);
+  }
+  if (candidate.semanticFacet === "preference"
+    && candidate.durability === "unknown") {
+    return baseDecision(candidate, "needs_review", "unknown_preference_durability", idempotencyKey);
+  }
+  if (candidate.semanticFacet === "hypothesis"
+    && !candidate.provenance.actorId
+    && !candidate.provenance.targetId) {
+    return baseDecision(candidate, "needs_review", "hypothesis_missing_subject", idempotencyKey);
   }
 
   const target = acceptedTarget(candidate.candidateKind);
