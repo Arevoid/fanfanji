@@ -30,6 +30,8 @@ export interface MemorySelectionDiagnostics {
   missingTemporalCount: number;
   estimatedSelectedCharacters: number;
   selectedReasons: Record<string, "truth_authority" | "source_backed" | "fallback_legacy" | "recent">;
+  /** IDs are safe diagnostics; record bodies are intentionally never retained. */
+  droppedRecordIds: Partial<Record<DirectChatMemoryDropReason, string[]>>;
 }
 
 export interface DirectChatMemoryView {
@@ -61,9 +63,15 @@ const count = <T extends string>(values: readonly T[]): Partial<Record<T, number
 const addDrop = (
   diagnostics: MemorySelectionDiagnostics,
   reason: DirectChatMemoryDropReason,
+  id?: string,
 ) => {
   diagnostics.droppedCount += 1;
   diagnostics.droppedByReason[reason] = (diagnostics.droppedByReason[reason] || 0) + 1;
+  if (id) {
+    const ids = diagnostics.droppedRecordIds[reason] || [];
+    if (!ids.includes(id)) ids.push(id);
+    diagnostics.droppedRecordIds[reason] = ids;
+  }
 };
 
 const hasSourceOverlap = (left: CharacterMemoryReadRecord, right: CharacterMemoryReadRecord): boolean => {
@@ -76,9 +84,9 @@ export function buildDirectChatMemoryView(input: DirectChatMemoryViewInput): Dir
   const read = repository.readForScope(input.scope, input.now);
   const diagnostics: MemorySelectionDiagnostics = {
     selectedCount: 0,
-    droppedCount: read.dropped.length,
+    droppedCount: 0,
     selectedByKind: {},
-    droppedByReason: count(read.dropped.map((item) => item.reason) as DirectChatMemoryDropReason[]),
+    droppedByReason: {},
     duplicateGroups: [],
     unscopedLegacyCount: read.dropped.filter((item) => item.kind === "legacy-memory" && item.reason === "missing_scope").length,
     missingProvenanceCount: read.dropped.filter((item) => item.reason === "missing_provenance").length
@@ -86,7 +94,9 @@ export function buildDirectChatMemoryView(input: DirectChatMemoryViewInput): Dir
     missingTemporalCount: 0,
     estimatedSelectedCharacters: 0,
     selectedReasons: {},
+    droppedRecordIds: {},
   };
+  read.dropped.forEach((item) => addDrop(diagnostics, item.reason, item.id));
   const liveIds = new Set((input.liveSourceMessageIds || []).filter(Boolean));
   const liveTexts = new Set((input.liveSourceTexts || []).map(normalize).filter(Boolean));
   const truthIds = new Set(read.records.filter((record) => record.kind === "truth").map((record) => record.id));
@@ -94,11 +104,11 @@ export function buildDirectChatMemoryView(input: DirectChatMemoryViewInput): Dir
     .filter((record) => input.includeEvents === true || record.kind !== "event")
     .filter((record) => {
       if (record.kind === "legacy-memory" && record.canonicalMirrorOf?.some((id) => truthIds.has(id))) {
-        addDrop(diagnostics, "canonical_mirror");
+        addDrop(diagnostics, "canonical_mirror", record.id);
         return false;
       }
       if (record.sourceIds.some((id) => liveIds.has(id)) || liveTexts.has(normalize(record.content))) {
-        addDrop(diagnostics, "live_source_duplicate");
+        addDrop(diagnostics, "live_source_duplicate", record.id);
         return false;
       }
       return true;
@@ -119,19 +129,19 @@ export function buildDirectChatMemoryView(input: DirectChatMemoryViewInput): Dir
   const maxCharacters = Math.max(120, Math.floor(input.maxCharacters ?? 4800));
   for (const candidate of candidates) {
     if (selected.length >= maxItems) {
-      addDrop(diagnostics, "budget");
+      addDrop(diagnostics, "budget", candidate.record.id);
       continue;
     }
     const strongerSource = selected.find((item) => hasSourceOverlap(candidate.record, item));
     if (strongerSource) {
       const group = Array.from(new Set([strongerSource.id, candidate.record.id]));
       diagnostics.duplicateGroups.push(group);
-      addDrop(diagnostics, candidate.record.kind === "summary" && strongerSource.kind === "truth" ? "duplicate_source" : "legacy_low_authority");
+      addDrop(diagnostics, candidate.record.kind === "summary" && strongerSource.kind === "truth" ? "duplicate_source" : "legacy_low_authority", candidate.record.id);
       continue;
     }
     const cost = Math.max(1, candidate.record.content.length);
     if (selected.length > 0 && diagnostics.estimatedSelectedCharacters + cost > maxCharacters) {
-      addDrop(diagnostics, "budget");
+      addDrop(diagnostics, "budget", candidate.record.id);
       continue;
     }
     selected.push(candidate.record);
