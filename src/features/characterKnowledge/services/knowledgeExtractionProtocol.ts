@@ -31,6 +31,7 @@ const nonEmpty = (value: unknown): value is string => typeof value === "string" 
 export function normalizeExtractedKnowledgeCandidate(
   value: unknown,
   allowedMessageIds: ReadonlySet<string>,
+  options: MemoryExtractionCandidateV2NormalizationOptions = {},
 ): ExtractedKnowledgeCandidatePayload | undefined {
   if (!isRecord(value)
     || !nonEmpty(value.statement)
@@ -39,7 +40,8 @@ export function normalizeExtractedKnowledgeCandidate(
     || !TEMPORAL.has(value.temporalStatus as TemporalStatus)
     || !Array.isArray(value.sourceMessageIds)
     || value.sourceMessageIds.length === 0
-    || value.sourceMessageIds.some((id) => !nonEmpty(id) || !allowedMessageIds.has(id.trim()))
+    || value.sourceMessageIds.some((id) => !nonEmpty(id)
+      || (!options.preserveUnvalidatedSourceHints && !allowedMessageIds.has(id.trim())))
     || !nonEmpty(value.evidenceQuote)) return undefined;
   return {
     statement: value.statement.trim(),
@@ -55,9 +57,10 @@ export function normalizeExtractedKnowledgeCandidate(
 export function parseKnowledgeExtractionOutput(
   rawText: string,
   allowedMessageIds: ReadonlySet<string>,
+  options: MemoryExtractionCandidateV2NormalizationOptions = {},
 ): ExtractedKnowledgeCandidatePayload[] {
   return parseRawValues(rawText)
-    .map((value) => normalizeExtractedKnowledgeCandidate(value, allowedMessageIds))
+    .map((value) => normalizeExtractedKnowledgeCandidate(value, allowedMessageIds, options))
     .filter((value): value is ExtractedKnowledgeCandidatePayload => value !== undefined);
 }
 
@@ -96,7 +99,7 @@ export function parseKnowledgeExtractionOutputWithV2(
     .filter((value): value is MemoryExtractionCandidateV2 => value !== undefined);
   return {
     candidates: rawValues
-      .map((value) => normalizeExtractedKnowledgeCandidate(value, allowedMessageIds))
+      .map((value) => normalizeExtractedKnowledgeCandidate(value, allowedMessageIds, options))
       .filter((value): value is ExtractedKnowledgeCandidatePayload => value !== undefined),
     structuredCandidatesV2,
     v2MetadataPresent: rawValues.some((value) => Boolean(value && typeof value === "object" && !Array.isArray(value)
@@ -170,13 +173,20 @@ export function buildKnowledgeExtractionPrompt(input: {
   characterName: string;
   characterProfile?: string;
   history: readonly KnowledgeExtractionHistoryItem[];
+  sourceReferenceMode?: "canonical" | "local";
   templateType?: "refined" | "delicate";
   scenario?: "offline";
   includeV2Shadow?: boolean;
 }): string {
+  const usesLocalSourceRefs = input.sourceReferenceMode === "local";
   const history = input.history.map((item) =>
-    `[messageId=${JSON.stringify(item.id)}][${item.role === "user" ? "user" : "character"}] ${item.text}`,
+    usesLocalSourceRefs
+      ? `[${item.id}][${item.role === "user" ? "user" : "character"}] ${item.text}`
+      : `[messageId=${JSON.stringify(item.id)}][${item.role === "user" ? "user" : "character"}] ${item.text}`,
   ).join("\n");
+  const sourceReferenceRule = usesLocalSourceRefs
+    ? "你只能从带 source ref（例如 M1、M2）的原始消息中提出候选；sourceMessageIds 必须只使用本次请求提供的 M#，不能输出 canonical message ID。"
+    : "你只能从带 messageId 的原始消息中提出候选，不能补写或猜测。";
   const offlineRules = input.scenario === "offline" ? `
 7. 当前材料是已确认同步的单角色线下剧情：continue 模式由用户结束剧情时确认；导演或 IF 模式只能由用户在设置中手动确认。该段剧情已被用户确认为这段关系中需要保留的共同经历，因此可以引用 user 和 character 两侧消息来提取明确发生的事件；这项许可只适用于当前已确认材料，不能扩展到其他未同步分支或聊天。
 8. 只保留会影响后续关系连续性的关键记忆：已完成的重要事件、用户明确表达的偏好、关系状态变化、承诺或未来约定。忽略衣着外观、开门过程、姿势、逐句对话、情绪流水账和其他转瞬即逝的场景细节。
@@ -208,10 +218,11 @@ v2 可使用：{"schemaVersion":2,"kind":"fact|plan|belief|event|episodic|relati
 3. event 是“发生了什么”，episodic 是“值得长期记住的一段经历”；relationship_signal 只描述信号，scene_only 表示短暂场景，subjective_reflection 表示未验证的主观感受或判断。
 4. 只有旧字段能够安全兼容时才填写 legacy kind/subject；不要把 event、episodic、relationship_signal、scene_only 或 subjective_reflection 降级成 fact。v2 不得输出 authoritative、trusted、canonical ID、characterId、relationId、userIdentityId、actorId 或 targetId。
 5. v2 只是 shadow metadata，不决定写入、不改变旧 acceptedClaims、不触发额外请求；无法判断时可省略。` : "";
+  const sourceReferenceExample = usesLocalSourceRefs ? "M1" : "精确消息ID";
   const outputShape = input.includeV2Shadow && input.scenario !== "offline"
-    ? `{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis（仅旧兼容候选需要）","subject":"user|character|relationship|other（仅旧兼容候选需要）","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["精确消息ID"],"evidenceQuote":"源消息中的连续原文","v2":{"schemaVersion":2,"kind":"fact|plan|belief|event|episodic|relationship_signal|scene_only|subjective_reflection|unknown"}}`
-    : `{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis","subject":"user|character|relationship|other","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["精确消息ID"],"evidenceQuote":"源消息中的连续原文"}`;
-  return `你是长期知识候选提取器。你只能从带 messageId 的原始消息中提出候选，不能补写或猜测。
+    ? `{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis（仅旧兼容候选需要）","subject":"user|character|relationship|other（仅旧兼容候选需要）","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["${sourceReferenceExample}"],"evidenceQuote":"源消息中的连续原文","v2":{"schemaVersion":2,"kind":"fact|plan|belief|event|episodic|relationship_signal|scene_only|subjective_reflection|unknown"}}`
+    : `{"statement":"第三人称原子化事实","memoryText":"仅细腻版需要的角色第一人称日记片段","kind":"fact|preference|plan|belief|hypothesis","subject":"user|character|relationship|other","temporalStatus":"past|present|future|timeless|unknown","sourceMessageIds":["${sourceReferenceExample}"],"evidenceQuote":"源消息中的连续原文"}`;
+  return `你是长期知识候选提取器。${sourceReferenceRule}
 
 对话：
 ${history}

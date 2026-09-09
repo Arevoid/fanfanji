@@ -6,6 +6,10 @@ import { isDuplicateMemory } from "./MemoryDeduplicator";
 import type { MemoryExtractionApi, MemoryExtractionContext, MemoryExtractionResult } from "./memoryTypes";
 import { serializeMessageContentForPrompt } from "../../features/chat/prompts/messagePromptSerializer";
 import { buildMemoryExtractionSourceEnvelope } from "./memoryExtractionSourceEnvelope";
+import {
+  buildMemoryExtractionLocalSourceRefTable,
+  resolveMemoryExtractionSourceRefs,
+} from "./memoryExtractionLocalSourceRefs";
 
 const hasTruthScope = (context: MemoryExtractionContext): boolean => Boolean(
   context.relationId?.trim()
@@ -53,8 +57,12 @@ export async function extractMemories(
     ...result,
     sourceEnvelope,
   });
+  const usesLocalSourceRefs = context.scenario === "chat";
+  const localSourceRefTable = usesLocalSourceRefs
+    ? buildMemoryExtractionLocalSourceRefTable(sourceEnvelope)
+    : undefined;
   const history = context.recentMessages.map((message) => ({
-    id: message.id,
+    id: localSourceRefTable?.refs.find((source) => source.messageId === message.id)?.ref || message.id,
     role: message.sender === "user" ? "user" as const : "model" as const,
     text: serializeMessageContentForPrompt(message, {
       mode: "history",
@@ -73,6 +81,7 @@ export async function extractMemories(
     model: context.model,
     apiEndpoint: context.apiEndpoint,
     templateType: context.templateType,
+    ...(usesLocalSourceRefs ? { sourceReferenceMode: "local" as const } : {}),
     characterId: context.characterId,
     relationId: context.relationId,
     conversationId: context.conversationId,
@@ -80,8 +89,15 @@ export async function extractMemories(
     ...(context.enableMemoryExtractionV2Shadow ? { enableV2Shadow: true } : {}),
     ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
   });
+  const resolveModelSourceRefs = <T extends { sourceMessageIds?: readonly string[] }>(candidate: T): T => {
+    if (!localSourceRefTable || !Array.isArray(candidate.sourceMessageIds)) return candidate;
+    const resolution = resolveMemoryExtractionSourceRefs(candidate.sourceMessageIds, localSourceRefTable);
+    return resolution.invalidRefs.length === 0
+      ? { ...candidate, sourceMessageIds: resolution.canonicalMessageIds }
+      : candidate;
+  };
   const structuredCandidatesV2 = Array.isArray(data.structuredCandidatesV2) && data.structuredCandidatesV2.length > 0
-    ? data.structuredCandidatesV2
+    ? data.structuredCandidatesV2.map(resolveModelSourceRefs)
     : undefined;
 
   // API adapters return an empty array alongside their error so callers can
@@ -107,6 +123,12 @@ export async function extractMemories(
     });
   }
 
+  const resolvedRawItems = usesLocalSourceRefs
+    ? rawItems.map((item) => item && typeof item === "object" && !Array.isArray(item)
+      ? resolveModelSourceRefs(item as { sourceMessageIds?: readonly string[] } & Record<string, unknown>)
+      : item)
+    : rawItems;
+
   // A memory without a complete relationship scope cannot be attributed to a
   // specific user's relationship. Keep the result visible to the caller as a
   // rejected extraction, but never manufacture a legacy long-term MemoryItem.
@@ -122,7 +144,7 @@ export async function extractMemories(
   }
 
   const allowedMessageIds = new Set(context.recentMessages.map((message) => message.id));
-  const payloads = rawItems
+  const payloads = resolvedRawItems
     .map((item) => normalizeExtractedKnowledgeCandidate(item, allowedMessageIds))
     .filter((item): item is NonNullable<typeof item> => item !== undefined)
     .slice(0, context.scenario === "offline" ? 8 : 5);

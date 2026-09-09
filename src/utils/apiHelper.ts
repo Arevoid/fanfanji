@@ -659,6 +659,7 @@ async function apiExtractMemoriesImpl(params: {
   model: string;
   apiEndpoint?: string;
   templateType?: "refined" | "delicate";
+  sourceReferenceMode?: "canonical" | "local";
   /** Offline continuations need factual handoff summaries, not screenplay prose. */
   scenario?: "offline";
   characterId?: string;
@@ -694,7 +695,9 @@ async function apiExtractMemoriesImpl(params: {
       ? parseMemoryExtractionCandidateV2Output(
         JSON.stringify(data.structuredCandidatesV2),
         new Set(params.history.map((item) => item.id)),
-        params.enableV2Shadow ? { preserveUnvalidatedSourceHints: true, allowMissingSourceHints: true } : {},
+        params.sourceReferenceMode === "local" || params.enableV2Shadow
+          ? { preserveUnvalidatedSourceHints: true, ...(params.enableV2Shadow ? { allowMissingSourceHints: true } : {}) }
+          : {},
       )
       : undefined;
     if (res.ok && (Array.isArray(data?.candidates) || structuredCandidatesV2?.length || data?.v2MetadataPresent === true)) {
@@ -729,6 +732,7 @@ async function apiExtractMemoriesImpl(params: {
         history: params.history,
         templateType: params.templateType,
         scenario: params.scenario,
+        sourceReferenceMode: params.sourceReferenceMode,
         includeV2Shadow: params.enableV2Shadow,
       });
 
@@ -740,8 +744,10 @@ async function apiExtractMemoriesImpl(params: {
         apiEndpoint: params.apiEndpoint,
         apiTemperature: 0.5,
         ledger,
-        systemInstruction: params.apiEndpoint && params.apiEndpoint.trim() 
-          ? "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供精确 sourceMessageIds 和原文 evidenceQuote。"
+        systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
+          ? params.sourceReferenceMode === "local"
+            ? "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供本次请求的 M# source refs 和原文 evidenceQuote。"
+            : "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供精确 sourceMessageIds 和原文 evidenceQuote。"
           : undefined
       });
 
@@ -750,7 +756,7 @@ async function apiExtractMemoriesImpl(params: {
         rawText: aiText,
         allowedMessageIds: new Set(params.history.map((item) => item.id)),
         originalPrompt: prompt,
-        preserveUnvalidatedSourceHints: params.enableV2Shadow,
+        preserveUnvalidatedSourceHints: params.sourceReferenceMode === "local" || params.enableV2Shadow,
         repair: async (repairPrompt) => (await directClientChat({
           message: repairPrompt,
           history: [],
@@ -760,7 +766,9 @@ async function apiExtractMemoriesImpl(params: {
           apiTemperature: 0.2,
           ledger,
           systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
-            ? "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。"
+            ? params.sourceReferenceMode === "local"
+              ? "你是结构化记忆修复器。只输出使用本次 M# source refs 且可验证的 JSONL，不要解释。"
+              : "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。"
             : undefined,
         })).text || "",
       });

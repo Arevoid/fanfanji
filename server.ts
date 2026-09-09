@@ -432,7 +432,7 @@ ${historyText}
   // API Route: Extract individual memories
   app.post("/api/extract-memories", async (req, res) => {
     try {
-      const { history, characterName, characterProfile, apiKey, model, apiEndpoint, templateType, scenario, enableV2Shadow } = req.body;
+      const { history, characterName, characterProfile, apiKey, model, apiEndpoint, templateType, scenario, sourceReferenceMode, enableV2Shadow } = req.body;
       const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
       if (!apiKeyValue) {
         return res.status(400).json({
@@ -454,6 +454,7 @@ ${historyText}
         characterName,
         characterProfile: typeof characterProfile === "string" ? characterProfile : undefined,
         history: safeHistory,
+        sourceReferenceMode: sourceReferenceMode === "local" ? "local" : "canonical",
         templateType: templateType === "delicate" ? "delicate" : "refined",
         scenario,
         includeV2Shadow: enableV2Shadow === true && scenario !== "offline",
@@ -476,7 +477,7 @@ ${historyText}
         rawText: aiText,
         allowedMessageIds: new Set(safeHistory.map((item) => item.id)),
         originalPrompt: prompt,
-        preserveUnvalidatedSourceHints: enableV2Shadow === true && scenario !== "offline",
+        preserveUnvalidatedSourceHints: (sourceReferenceMode === "local" || enableV2Shadow === true) && scenario !== "offline",
         repair: (repairPrompt) => generateExtractionText(repairPrompt, 0.2),
       });
       res.json({

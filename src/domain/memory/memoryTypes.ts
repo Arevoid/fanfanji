@@ -63,6 +63,8 @@ export interface MemoryExtractionContext {
 
 export interface MemoryExtractionApiParams {
   history: { id: string; role: "user" | "model"; text: string }[];
+  /** Provider transport uses M# refs only for the direct-chat path. */
+  sourceReferenceMode?: "canonical" | "local";
   characterName: string;
   characterProfile?: string;
   apiKey: string;
