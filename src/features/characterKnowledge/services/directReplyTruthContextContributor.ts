@@ -22,6 +22,7 @@ export interface DirectReplyMemoryShadowDiagnosticsInput {
   events?: readonly CharacterEvent[];
   maxItems?: number;
   maxCharacters?: number;
+  onReport?: (input: { scope: TruthRetrievalInput["scope"]; comparison: DirectChatMemoryShadowComparison }) => void;
 }
 
 export interface DirectReplyTruthContextInput extends TruthRetrievalInput {
@@ -37,14 +38,26 @@ export function contributeDirectReplyTruthContext(input: DirectReplyTruthContext
   const { memoryShadowDiagnostics, ...retrievalInput } = input;
   const result = retrieveTruthForPrivatePrompt(retrievalInput);
   if (!memoryShadowDiagnostics?.enabled) return result;
-  const diagnostics = observeDirectReplyTruthMemoryShadow({
-    enabled: true,
-    retrievalInput: input,
-    result,
-    memories: memoryShadowDiagnostics.memories,
-    events: memoryShadowDiagnostics.events,
-    maxItems: memoryShadowDiagnostics.maxItems ?? input.limit,
-    maxCharacters: memoryShadowDiagnostics.maxCharacters ?? input.maxCharacters,
-  });
-  return diagnostics ? { ...result, memoryShadowDiagnostics: diagnostics } : result;
+  try {
+    const diagnostics = observeDirectReplyTruthMemoryShadow({
+      enabled: true,
+      retrievalInput: input,
+      result,
+      memories: memoryShadowDiagnostics.memories,
+      events: memoryShadowDiagnostics.events,
+      maxItems: memoryShadowDiagnostics.maxItems ?? input.limit,
+      maxCharacters: memoryShadowDiagnostics.maxCharacters ?? input.maxCharacters,
+    });
+    if (!diagnostics) return result;
+    try {
+      memoryShadowDiagnostics.onReport?.({ scope: input.scope, comparison: diagnostics });
+    } catch {
+      // Report sinks are best-effort and must never affect the direct reply.
+    }
+    return { ...result, memoryShadowDiagnostics: diagnostics };
+  } catch {
+    // Shadow failures are fail-open: the existing Truth result remains the
+    // sole production input to Prompt formatting and the provider request.
+    return result;
+  }
 }

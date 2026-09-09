@@ -11,6 +11,12 @@ import {
 import { buildDirectChatMemoryView } from "../src/features/chat/services/directChatMemoryShadowView";
 import { contributeDirectReplyTruthContext } from "../src/features/characterKnowledge/services/directReplyTruthContextContributor";
 import { formatTruthRetrievalForPrompt } from "../src/features/characterKnowledge/services/truthRetrievalService";
+import {
+  clearDirectChatMemoryShadowReports,
+  configureDirectChatMemoryShadowDiagnostics,
+  getDirectChatMemoryShadowDiagnosticsInput,
+  getRecentDirectChatMemoryShadowReports,
+} from "../src/features/chat/services/directChatMemoryShadowTelemetry";
 
 const scope = {
   characterId: "character-shadow",
@@ -190,8 +196,44 @@ assert.equal(onResult.memoryShadowDiagnostics?.equivalenceStatus, "equivalent");
 assert.equal(formatTruthRetrievalForPrompt(onResult), formatTruthRetrievalForPrompt(offResult), "shadow diagnostics never enter production Prompt");
 assert.equal(onResult.memoryShadowDiagnostics?.shadowDiagnostics.droppedCount, 0);
 
+configureDirectChatMemoryShadowDiagnostics({ enabled: false, explicitDebug: true });
+assert.equal(getDirectChatMemoryShadowDiagnosticsInput({ memories: [] }), undefined, "collector OFF does not create an option");
+configureDirectChatMemoryShadowDiagnostics({ enabled: true });
+assert.equal(getDirectChatMemoryShadowDiagnosticsInput({ memories: [] }), undefined, "non-dev runtime cannot enable collection without explicit debug injection");
+configureDirectChatMemoryShadowDiagnostics({ enabled: true, explicitDebug: true, maxReports: 2 });
+clearDirectChatMemoryShadowReports();
+const debugInput = getDirectChatMemoryShadowDiagnosticsInput({ memories: [], events: [] });
+assert.ok(debugInput, "explicit debug injection enables the real collector");
+for (let index = 0; index < 3; index += 1) {
+  contributeDirectReplyTruthContext({ ...truthInput, memoryShadowDiagnostics: debugInput });
+}
+const recentReports = getRecentDirectChatMemoryShadowReports();
+assert.equal(recentReports.length, 2, "collector is bounded and drops oldest reports");
+assert.equal(recentReports.every((report) => report.comparison.equivalenceStatus === "equivalent"), true);
+assert.equal(JSON.stringify(recentReports).includes("exact fact"), false, "real report does not retain body text");
+assert.equal(JSON.stringify(recentReports).includes("message:truth-exact"), true, "real report may retain opaque source IDs");
+clearDirectChatMemoryShadowReports();
+configureDirectChatMemoryShadowDiagnostics({ enabled: false, explicitDebug: true });
+
+const throwingReport = contributeDirectReplyTruthContext({
+  ...truthInput,
+  memoryShadowDiagnostics: {
+    enabled: true,
+    memories: [],
+    events: [],
+    onReport: () => { throw new Error("debug sink failure"); },
+  },
+});
+assert.deepEqual(formatTruthRetrievalForPrompt(throwingReport), formatTruthRetrievalForPrompt(offResult), "report sink failure is fail-open");
+
 const shadowSource = readFileSync(new URL("../src/features/chat/services/directChatMemoryShadowComparison.ts", import.meta.url), "utf8");
 assert.doesNotMatch(shadowSource, /localStorage|indexedDB|fetch\s*\(|apiChat|PromptComposer|systemInstruction|provider/i, "shadow comparison stays local and provider-free");
 assert.doesNotMatch(shadowSource, /ledger|requestPayload|responseBody/i, "shadow comparison does not add Ledger or response telemetry");
+const telemetrySource = readFileSync(new URL("../src/features/chat/services/directChatMemoryShadowTelemetry.ts", import.meta.url), "utf8");
+assert.doesNotMatch(telemetrySource, /localStorage|indexedDB|fetch\s*\(|navigator\.sendBeacon|apiChat|PromptComposer/i, "collector has no persistence, network, or provider dependency");
+const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+assert.equal((appChatSource.match(/getDirectChatMemoryShadowDiagnosticsInput/g) || []).length, 2, "normal Direct Chat has one import and one observation call");
+const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");
+assert.doesNotMatch(regenerationSource, /getDirectChatMemoryShadowDiagnosticsInput|memoryShadowDiagnostics/, "regenerate is not wired to real shadow telemetry");
 
 console.log("PASS Direct Chat memory shadow telemetry: opt-in guard, exact/source equivalence, authority/scope/temporal/budget/mirror/live diagnostics, 10 isolation fixtures, prompt/provider/storage safety");

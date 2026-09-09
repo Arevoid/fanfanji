@@ -78,6 +78,7 @@ import { buildCharacterCognitiveContext } from "../domain/characterCognitive/con
 import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
 import type { CharacterCognitiveContext, CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
 import { buildChatPromptContext, formatChatPromptContext } from "../features/characterCognitive/promptAdapters/chatPromptAdapter";
+import { getDirectChatMemoryShadowDiagnosticsInput } from "../features/chat/services/directChatMemoryShadowTelemetry";
 import { buildRelationMusicContext } from "../domain/prompt/musicContext";
 import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
@@ -2184,6 +2185,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           claims: loadKnowledgeClaims().value,
           summaries: loadConversationSummaries().value,
           corrections: loadBehaviorCorrections().value,
+          memoryShadowDiagnostics: getDirectChatMemoryShadowDiagnosticsInput({ memories: memories || [] }),
         })
         : undefined;
       const truthRetrievalPrompt = truthRetrieval ? formatTruthRetrievalForPrompt(truthRetrieval) : "";

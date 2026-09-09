@@ -93,6 +93,7 @@ export interface DirectChatMemoryBudgetDifference {
 export interface DirectChatMemoryShadowComparison {
   equivalenceStatus: DirectChatMemoryEquivalenceStatus;
   productionSelectedCount: number;
+  productionSelectedByKind: Partial<Record<CharacterMemoryReadKind, number>>;
   shadowSelectedCount: number;
   matchedIds: string[];
   productionOnlyIds: string[];
@@ -373,6 +374,10 @@ export function compareDirectChatMemoryShadowDetailed(
   return {
     equivalenceStatus,
     productionSelectedCount: production.length,
+    productionSelectedByKind: production.reduce<Partial<Record<CharacterMemoryReadKind, number>>>((counts, record) => {
+      counts[record.kind] = (counts[record.kind] || 0) + 1;
+      return counts;
+    }, {}),
     shadowSelectedCount: shadow.records.length,
     matchedIds,
     productionOnlyIds,
