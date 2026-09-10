@@ -12,6 +12,7 @@ import {
   resumeDirectChatMemoryLongEvidenceWindow,
   finishDirectChatMemoryLongEvidenceWindow,
   clearDirectChatMemoryLongEvidenceWindow,
+  createDirectChatMemoryLongEvidenceWindowToken,
   type DirectChatMemoryLongEvidenceInput,
 } from "../src/features/chat/services/directChatMemoryLongEvidenceCollector";
 import type { AiRequestEnvelope } from "../src/core/monitoring/aiRequestLedger";
@@ -22,6 +23,8 @@ const scope = {
   userIdentityId: "user-secret-id",
   conversationId: "conversation-secret-id",
 };
+const WINDOW_TOKEN_A = "window-a-7f23b1d9c4e8a6502f4b";
+const WINDOW_TOKEN_B = "window-b-9c42e8a1f7d6035b4a6c";
 
 const suppressionCandidate = {
   featureScope: "automatic_direct_chat",
@@ -221,7 +224,7 @@ try {
   assert.equal(unknownReason?.classification, "INVALID_SAMPLE");
 
   // Formal-window accounting is extraction-level, while suppression/control counts remain candidate-level.
-  const firstWindow = startDirectChatMemoryLongEvidenceWindow("window-token-a");
+  const firstWindow = startDirectChatMemoryLongEvidenceWindow(WINDOW_TOKEN_A);
   assert.equal(firstWindow, 1);
   clearDirectChatMemoryLongEvidenceCollector();
   const actionFirst = recordDirectChatMemoryLongEvidence(input({
@@ -289,7 +292,7 @@ try {
   assert.equal(formalSummary.validControlCount, 1);
 
   // Conflicting accounting for one action is excluded rather than resolved by max/min/last-wins.
-  resumeDirectChatMemoryLongEvidenceWindow("window-token-a");
+  resumeDirectChatMemoryLongEvidenceWindow(WINDOW_TOKEN_A);
   recordDirectChatMemoryLongEvidence(input({
     logicalActionId: "raw-logical-action-secret",
     accounting: { ...baseAccounting, providerPhysicalAttemptCount: 1, accountingShape: "single_row" },
@@ -308,7 +311,7 @@ try {
   const priorScopeFingerprint = actionFirst?.scopeFingerprint;
   clearDirectChatMemoryLongEvidenceWindow();
   assert.equal(getDirectChatMemoryLongEvidenceSummary().recordCount, 0);
-  assert.equal(startDirectChatMemoryLongEvidenceWindow("window-token-b"), 2);
+  assert.equal(startDirectChatMemoryLongEvidenceWindow(WINDOW_TOKEN_B), 2);
   const secondWindowRecord = recordDirectChatMemoryLongEvidence(input({ logicalActionId: "window-b-action" }));
   assert.notEqual(secondWindowRecord?.scopeFingerprint, priorScopeFingerprint);
   recordDirectChatMemoryLongEvidence(input());
@@ -364,7 +367,11 @@ try {
   assert.ok(parsed.countsByClassification.VALID_ELIGIBLE_SUPPRESSION >= 1);
   assert.equal(parsed.logicalActionTotal, 1);
   assert.equal(parsed.unknownGroupingCount, 1);
-  assert.doesNotMatch(exported, /window-token-a|window-token-b|raw-logical-action-secret/);
+  assert.doesNotMatch(exported, /window-a-7f23b1d9c4e8a6502f4b|window-b-9c42e8a1f7d6035b4a6c|raw-logical-action-secret/);
+
+  const generatedToken = createDirectChatMemoryLongEvidenceWindowToken();
+  assert.ok(generatedToken.length >= 24);
+  assert.notEqual(generatedToken, createDirectChatMemoryLongEvidenceWindowToken());
 
   console.log("PASS memory admission long-evidence collector: bounded, metadata-only classification, scope privacy, controls, and explicit AI accounting");
 } finally {
