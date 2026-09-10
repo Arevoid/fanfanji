@@ -248,7 +248,7 @@ function legacySemanticKind(candidate: DirectChatMemoryLegacyCandidate): MemoryA
   return "unknown";
 }
 
-function trustedCandidate(candidate: DirectChatMemoryV2Candidate): boolean {
+export function trustedCandidate(candidate: DirectChatMemoryV2Candidate): boolean {
   const runtimeRefs = new Set(normalizeRefs(candidate.runtime.allowedSourceRefs));
   const candidateRefs = normalizeRefs([
     ...(candidate.candidate.provenance.sourceMessageIds || []),

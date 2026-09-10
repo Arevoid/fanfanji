@@ -36,6 +36,7 @@ import {
 import {
   decideDirectChatMemoryBridge,
   matchDirectChatMemoryCandidates,
+  trustedCandidate,
   type DirectChatMemoryBridgeReason,
   type DirectChatMemoryBridgeRuntimeContext,
   type DirectChatMemoryBridgeScope,
@@ -61,6 +62,14 @@ export type DirectChatMemoryBridgeShadowMetadataSource =
 
 export interface DirectChatMemoryBridgeShadowObservation {
   bridgeCorrelation: DirectChatMemoryCorrelationState;
+  /** Runtime-only correlation classification; the opaque lineage token is never exposed. */
+  lineageStatus: "shared" | "partial" | "mismatch" | "absent";
+  /** True only when this observation contains exactly one legacy/V2 pair. */
+  pairUnique: boolean;
+  legacyAccepted: boolean;
+  legacyWriteEligibility: "canonical_write" | "not_write_eligible" | "needs_review" | "unknown";
+  legacyProvenanceTrusted: boolean;
+  v2ProvenanceTrusted: boolean;
   bridgeState: DirectChatMemoryBridgeState;
   bridgeReason: DirectChatMemoryBridgeReason;
   legacySemanticKind: MemoryAdmissionComparisonSemanticKind;
@@ -570,8 +579,23 @@ function shadowObservation(
   const v2Comparison = v2
     ? classifyV2AdmissionSemantics(v2.candidate, v2.decision)
     : undefined;
+  const legacyLineage = legacy?.runtimeLineageId;
+  const v2Lineage = v2?.candidate.runtimeLineageId;
+  const lineageStatus: DirectChatMemoryBridgeShadowObservation["lineageStatus"] = !legacyLineage && !v2Lineage
+    ? "absent"
+    : !legacyLineage || !v2Lineage
+      ? "partial"
+      : legacyLineage === v2Lineage
+        ? "shared"
+        : "mismatch";
   return {
     bridgeCorrelation: match.correlation,
+    lineageStatus,
+    pairUnique: match.legacy.length === 1 && match.v2.length === 1,
+    legacyAccepted: legacy?.diagnostic.decision === "accepted",
+    legacyWriteEligibility: legacyComparison?.writeEligibility || "unknown",
+    legacyProvenanceTrusted: Boolean(legacy?.provenanceTrusted),
+    v2ProvenanceTrusted: Boolean(v2 && trustedCandidate(v2)),
     bridgeState: decision.state,
     bridgeReason: decision.reason,
     legacySemanticKind: legacyComparison?.semanticKind || "unknown",

@@ -23,6 +23,10 @@ import {
   isDirectChatMemoryAdmissionShadowEvidenceEnabled,
   recordDirectChatMemoryAdmissionShadowEvidence,
 } from "../services/directChatMemoryAdmissionShadowTelemetry";
+import {
+  evaluateDirectChatSafetyVetoShadowForExtraction,
+  isDirectChatMemorySafetyVetoShadowEnabled,
+} from "../services/directChatMemorySafetyVetoShadow";
 
 type DirectScope = { characterId: string; relationId: string; userIdentityId: string; conversationId: string };
 
@@ -182,6 +186,8 @@ export function useChatMemoryExtraction({
         compatibilityCount: 0,
         rejectedCandidateCount: 0,
       };
+      const admissionShadowEnabled = manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled();
+      const safetyShadowEnabled = manualMessagesOverride === undefined && isDirectChatMemorySafetyVetoShadowEnabled();
       const markArchiveProgress = async (lastMessage: Message) => {
         if (activeCharacter.isGroupChat) {
           if (onUpdateCharacter) {
@@ -321,7 +327,7 @@ export function useChatMemoryExtraction({
             : {}),
           // Stage 4D-2 observation derives a V2 candidate from this same
           // response without changing the extraction Prompt or Provider call.
-          ...(manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled()
+          ...(admissionShadowEnabled || safetyShadowEnabled
             ? { enableAdmissionShadowObservation: true }
             : {}),
           apiKey: settings.apiKey,
@@ -349,7 +355,7 @@ export function useChatMemoryExtraction({
             + (result.shadowCandidatesV2?.length ?? result.acceptedClaims.length + result.rejectedCandidateCount),
           messageCount: unarchivedMessages.length,
         };
-        if (manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled()) {
+        if (admissionShadowEnabled || safetyShadowEnabled) {
           try {
             const shadowResult = observeDirectChatMemoryAdmissionShadow({
               extraction: result,
@@ -361,14 +367,22 @@ export function useChatMemoryExtraction({
               sourceEnvelope: result.sourceEnvelope,
               recordedAt: Date.now(),
             });
-            recordDirectChatMemoryAdmissionShadowEvidence({
-              scope: extractionScope,
-              result: shadowResult,
-              evidenceOrigin: "real_runtime",
-            });
+            if (admissionShadowEnabled) {
+              recordDirectChatMemoryAdmissionShadowEvidence({
+                scope: extractionScope,
+                result: shadowResult,
+                evidenceOrigin: "real_runtime",
+              });
+            }
+            if (safetyShadowEnabled) {
+              evaluateDirectChatSafetyVetoShadowForExtraction({
+                ...shadowResult,
+                featureScope: "automatic_direct_chat",
+              });
+            }
           } catch {
-            // Admission shadow evidence is fail-open and cannot affect the
-            // established canonical write or archive cursor.
+            // Both shadow paths are fail-open and cannot affect the established
+            // canonical write or archive cursor.
           }
         }
         if (persistenceMode === "observation_only") {
