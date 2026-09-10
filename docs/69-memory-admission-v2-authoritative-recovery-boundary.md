@@ -132,3 +132,49 @@ Keep collector and Canary disabled. After separate approval, continue the same
 window with the same developer-held token and a new bounded session. Persist the
 exact export before any checkpoint; the first successfully reviewed future file
 becomes authoritative retained evidence #1.
+
+## 18. Post-recovery continuation result
+
+The first continuation after this boundary completed on real UTC evidence day
+`2026-09-10` without creating a replacement window. It resumed the existing
+window and created a new session `session-2febd71437e7d77e`, distinct from the
+two excluded historical sessions. One automatic one-to-one Direct Chat
+extraction batch ran through the real Provider, existing fallback, Bridge/
+Safety shadow, canonical writer, cursor, and exact-scope readback. No mock DTO,
+synthetic candidate, handcrafted Bridge, or fake readback was used.
+
+The exact serialized export was immediately persisted at:
+
+`docs/evidence/memory-admission-v2/window-8817672802574c9a/2026-09-10__session-2febd71437e7d77e.json`
+
+The file was read back byte-for-byte and reviewed from disk with
+`reviewMemoryAdmissionLongEvidence.ts`. Review returned `status=ok`, one
+window, one formal session, one exact scope, one batch, one `VALID_CONTROL`,
+zero suppressions, zero fail-open/invalid/safety incidents, zero accounting
+conflicts, logical `1`, physical `2`, and one evidence day. The record retained
+`cursorAdvanced=true`, `cursorLoop=false`, `replayLoop=false`, `v2OnlyWrite=false`,
+`promptDelta=0`, `canaryProviderDelta=0`, and `privacyStatus=metadata_only`.
+The physical count of two is the existing fallback-split accounting shape for
+one logical request.
+
+The authoritative cumulative baseline is therefore now:
+
+```text
+retainedAuthoritativeExports = 1
+formalSessionCount = 1
+distinctExactScopeCount = 1
+extractionBatchCount = 1
+validSuppressionCount = 0
+validControlCount = 1
+logicalActionTotal = 1
+physicalAttemptTotal = 2
+firstEvidenceDay = 2026-09-10
+lastEvidenceDay = 2026-09-10
+distinctEvidenceDayCount = 1
+```
+
+R2 and 11O remain permanently excluded and contribute zero. Repeating the
+persisted file as an input produced `recordCount=2` and
+`dedupedRecordCount=1`, confirming immutable repeated-export handling. After
+the checkpoint, collector, Canary, and shadow were disabled; the formal window
+remains active and its raw token remains developer-held only.
