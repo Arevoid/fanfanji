@@ -9,7 +9,8 @@ This document is a design and audit artifact only. It does not authorize a
 long-window collection run, a cohort, positive V2 write authority, a Provider
 fallback change, or a persistent telemetry implementation.
 
-- Starting refactor HEAD: `e576365932d13de754aee727a25896fd3d226692`
+- Historical Stage 4D-11I starting refactor HEAD: `e576365932d13de754aee727a25896fd3d226692`
+- Stage 4D-11K starting refactor HEAD: `bf4e71a21a63e1e53719d7d3f8c58061ffdcc4f8`
 - Stable original-repository baseline: `f515f7408cfe19da145f15a8ddffceae06e608d`
 - Scope: cancelled-plan local Canary evidence and `memory_extract` accounting
 - Current Canary readiness: `LOCAL_CANARY_E2E_VALIDATED` for the bounded local
@@ -343,7 +344,7 @@ format, alias, or context retry is a new logical record linked to the same
 `parentActionId`; a backend-to-browser fallback within one shared Ledger
 session should be attempts of that logical record.
 
-## 12. Current Ledger shape and observed limitation
+## 12. Current Ledger shape and accounting status
 
 The current browser Ledger uses key `fanfan_ai_request_ledger_v1`, bounded
 localStorage persistence, deferred in-memory buffering, pagehide best-effort
@@ -352,35 +353,26 @@ request; `providerRequestCount` counts attempts within that row. No attempt-leve
 rows or event table exists, and provider/model/transport describe the last
 attempt represented by the row.
 
-However, `apiExtractMemoriesWithModelFallback` currently calls the wrapped
-`apiExtractMemories` function once for the primary model and again for the
-fallback model. Each wrapper creates its own Ledger session. Consequently, one
-business extraction can currently materialize as two rows, each with
-`providerRequestCount=1`, rather than one row with a count of two. This is a
-known accounting-shape limitation, not a change made by 11I.
+The limitation above is historical. Before Stage 4D-11J, the primary and
+fallback wrapper calls could create two rows without a reliable shared logical
+ID. The resulting J/K artifact remains valid as a historical observation (four
+rows for two logical operations and four physical attempts), but its logical
+count was not inferred from raw row count.
 
-Therefore:
+Since Stage 4D-11J, every new `memory_extract` operation receives an explicit
+`logicalActionId` before the primary call. A model-fallback call reuses that
+same ID, so linked fallback rows can be authoritatively aggregated as one
+logical action with two physical attempts. Legacy rows without an ID remain
+`logical_grouping_unknown`; they are retained for audit but excluded from
+authoritative logical-action counts. Authoritative long-evidence accounting
+therefore starts only with post-11J rows. The accounting dependency is resolved
+for new evidence, while the long-evidence window itself has not been collected.
 
-- Raw `memory_extract` row count can make business call count look doubled.
-- Physical Provider-attempt totals from the two rows can still be summed for
-  cost/quota review when the pair is independently correlated.
-- Logical extraction count must come from the business operation/correlation,
-  not raw row count.
-- The derived extra-attempt/fallback-rate metric is authoritative only for
-  explicitly reviewed linked shapes; it must not guess fallback versus retry
-  from timestamps, models, or reason text.
-- Existing 11H J/K evidence is four Ledger rows for two logical operations and
-  four physical attempts; it must be reported in that form.
-- The current rows do not reliably carry one shared logical ID across the
-  split fallback calls. This is accounting debt and blocks authoritative
-  long-window aggregation.
-
-The fallback is therefore more than a display issue: it adds latency, may add
-Provider cost and rate-limit consumption, and can complicate failure/duplicate
-interpretation. It should be understood and, if product policy requires exact
-accounting, fixed before any Admission cutover or tiny cohort. It may be
-scheduled as a separate accounting task before Memory V2 closeout, but is not
-fixed in this stage.
+The current ledger still has no attempt-level event table: `providerRequestCount`
+is the total attempts represented by one logical row, and provider/model/
+transport describe the last represented attempt. A linked split-row shape may
+be reported as `fallback_split_rows`; it must never be reconstructed from
+timestamps, model names, or free-form error text.
 
 ## 13. Collection protocol (future; not run here)
 
@@ -427,9 +419,12 @@ roll back the dev-only Canary if needed.
   cannot be reviewed safely.
 - `LONG_EVIDENCE_DESIGN_READY`: this design is approved for a separately
   authorized collection implementation, but no collection has completed.
-- `LONG_EVIDENCE_ACCOUNTING_UNCLEAR`: the design is documented, but current
-  Ledger rows cannot unambiguously aggregate fallback-split logical requests.
-  This is the Stage 4D-11I outcome.
+- `ACCOUNTING_LINEAGE_FIXED_VALIDATED`: the Stage 4D-11J accounting contract is
+  validated for new rows; legacy rows remain unknown rather than guessed.
+- `LONG_EVIDENCE_ACCOUNTING_UNCLEAR`: historical/superseded Stage 4D-11I
+  outcome, when fallback-split rows lacked an explicit shared logical ID.
+- `NOT_STARTED`: no formal long-evidence collection window has begun. This is
+  the current collection state after 11J.
 - `LONG_EVIDENCE_COLLECTION_INSUFFICIENT`: a future run lacks any minimum,
   including the 7-day/20-batch longer-duration rule.
 - `LONG_EVIDENCE_SAFETY_FAILURE`: a future run violates any zero-error
@@ -479,7 +474,7 @@ cutover.
 28. One physical attempt is one actual Provider execution, primary or fallback.
 29. Primary fail plus fallback success: one logical request.
 30. The same case: two physical attempts.
-31. Current Ledger shows two rows because each fallback invocation creates a separate `apiExtractMemories` Ledger session.
+31. Historical 11I Ledger showed two rows per fallback operation because each fallback invocation had a separate session; post-11J rows carry one explicit shared `logicalActionId` and are linked authoritatively.
 32. Yes. Raw row count can overstate business call count.
 33. Cost accounting should use physical Provider attempts and verified Provider usage, while separately reporting logical actions.
 34. Latency should report total extraction duration and local Canary filtering duration separately, with fallback marked.
@@ -490,17 +485,17 @@ cutover.
 39. Yes, it must be understood and, if exact accounting is required, resolved before Admission cutover or a tiny cohort.
 40. Yes, it should be resolved before Memory V2 closeout even if it is scheduled separately.
 41. No Ledger write-schema change is made in 11I; a future minimal aggregation/lineage improvement is needed before authoritative long-window counting.
-42. Yes, the fallback pair needs a shared parent/logical action lineage for reliable aggregation.
+42. The fallback pair is now linked by explicit `logicalActionId` from 11J; no timestamp/model heuristic is used. `parentActionId` remains the broader user-action link.
 43. Provider code changed: no.
 44. Ledger write implementation changed: no.
 45. Persistent evidence implementation: no.
 46. Long evidence completed: no; only its design was documented.
 47. Phase 2 allowed: no.
-48. Readiness: `LONG_EVIDENCE_ACCOUNTING_UNCLEAR`.
-49. Next recommendation: a separately scoped accounting-lineage clarification/fix and tests, followed by an explicitly approved bounded collection; do not start a cohort yet.
-50. Starting refactor HEAD: `e576365932d13de754aee727a25896fd3d226692`.
+48. Current readiness is split: accounting `ACCOUNTING_LINEAGE_FIXED_VALIDATED`, design `LONG_EVIDENCE_DESIGN_READY`, collection `NOT_STARTED`.
+49. Next recommendation: implement and validate a bounded developer/local metadata-only collector, then seek separate approval for collection; do not start a cohort or Phase 2.
+50. Historical 11I starting refactor HEAD: `e576365932d13de754aee727a25896fd3d226692`; Stage 4D-11K starts at `bf4e71a21a63e1e53719d7d3f8c58061ffdcc4f8`.
 51. Final HEAD: the docs-only commit created for this stage (reported with its full hash after commit).
-52. Commit: `docs: design long evidence window and clarify ledger accounting`.
+52. Commit: `docs: design long evidence window and clarify ledger accounting`, followed by the post-11J lineage commits.
 53. Tests: existing baseline remains 581/581; full verification is rerun after this docs-only change.
 54. Lint: rerun and must remain passing.
 55. Build: rerun and must remain passing.
@@ -511,9 +506,9 @@ cutover.
 
 ## 19. Recommendation and stop condition
 
-The design is sufficiently explicit to review, but the current fallback-split
-Ledger shape keeps readiness at `LONG_EVIDENCE_ACCOUNTING_UNCLEAR`. Approve a
-separate, minimal accounting-lineage task before relying on raw Ledger data for
-long-window counts. After that task, a new approval may authorize a bounded
-manual-export collection. Do not enter Phase 2 or positive V2 authority from
-this document.
+The historical fallback-split limitation is superseded for new rows by the
+Stage 4D-11J explicit logical-action lineage. Current accounting readiness is
+`ACCOUNTING_LINEAGE_FIXED_VALIDATED`, and the schema/privacy/control design is
+`LONG_EVIDENCE_DESIGN_READY`. Formal long-evidence collection remains
+`NOT_STARTED`; no 7-day/20-batch window, cohort, Phase 2, or positive V2
+authority is authorized by this document.
