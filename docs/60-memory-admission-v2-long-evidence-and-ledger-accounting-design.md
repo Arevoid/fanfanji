@@ -85,15 +85,19 @@ type LongEvidenceRecord = {
   pairUnique: boolean;
   exactScope: boolean;
   provenanceTrusted: boolean;
-  metadataSource: "model_native" | "legacy_derived" | "mixed" | "unknown";
+  metadataSource: "v2_model_native" | "legacy_derived" | "mixed" | "unknown";
   semanticKind: "plan" | "preference" | "fact" | "unknown";
   planLifecycle: "cancelled" | "active" | "not_applicable" | "unknown";
   legacyAccepted: boolean;
   legacyWriteEligible: boolean;
-  suppressed: boolean;
-  acceptedBeforeCount: number;
-  acceptedAfterCount: number;
-  zeroCandidates: boolean;
+  candidateSuppressed: boolean;
+  /** Batch-level counts; they must not be mistaken for candidate-local state. */
+  batchAcceptedBefore: number;
+  batchAcceptedAfter: number;
+  batchZeroCandidates: boolean;
+  vetoedCandidateCanonicalAbsent: boolean;
+  survivingCanonicalWritesExpected: boolean;
+  survivingCanonicalWritesObserved: boolean;
   cursorAdvanced: boolean;
   canonicalWriteCountDelta: number;
   summaryDelta: number;
@@ -125,38 +129,75 @@ small enums and integer ranges before export.
 
 ### 5.1 `VALID_ELIGIBLE_SUPPRESSION`
 
-One record counts toward the ten only when all of the following are true:
+Suppression validity is candidate-local. It must not require the entire batch to
+become empty. One record counts toward the ten only when all of the following
+candidate and lineage predicates are true:
 
 ```text
 legacyAccepted = true
 legacyWriteEligible = true
-acceptedBeforeCount >= 1
+batchAcceptedBefore >= 1
 correlationClass = shared_unique
 lineageStatus = shared
 pairUnique = true
 exactScope = true
 provenanceTrusted = true
-metadataSource is trusted (model_native, legacy_derived, or mixed)
+metadataSource = v2_model_native
 semanticKind = plan
 planLifecycle = cancelled
 validatorResult = allow_veto
 canaryReason = SAFETY_VETO_CANCELLED_PLAN
-suppressed = true
-acceptedAfterCount = 0
-zeroCandidates = true
-cursorAdvanced = true
-canonicalWriteCountDelta = 0
-summaryDelta = 0
-projectionDelta = 0
+candidateSuppressed = true
+vetoedCandidateCanonicalAbsent = true
 failOpen = false
 privacyStatus = metadata_only
 ```
 
-The canonical readback must be exact-scope and occur after the write boundary.
-It must show no new canonical claim, Summary, Projection job, or Legacy
-MemoryItem for the suppressed candidate. A missing plan/cancelled marker, an
-ambiguous Bridge, a duplicate pair, an untrusted source, or an unverified
-readback is not an eligible suppression.
+The canonical readback must be exact-scope and occur after the write boundary;
+it must show no canonical claim, Summary, Projection job, or Legacy MemoryItem
+for the vetoed candidate. The evidence review may display `v2_model_native` as
+the normalized `model_native` category, but only the runtime
+`v2_model_native` gate qualifies. `legacy_derived` and `mixed` metadata may be retained
+as observation, control, or invalid records, but cannot contribute to the ten
+production-shaped suppressions. A missing plan/cancelled marker, an ambiguous
+Bridge, a duplicate pair, untrusted source, or unverified readback is not
+eligible.
+
+The batch-level state is then classified without changing the candidate-local
+predicate.
+
+#### Partial suppression
+
+```text
+batchAcceptedBefore > batchAcceptedAfter
+batchAcceptedAfter > 0
+batchZeroCandidates = false
+survivingCanonicalWritesExpected = true
+survivingCanonicalWritesObserved = true
+cursorAdvanced = true
+```
+
+The vetoed candidate is absent while surviving candidates are written exactly as
+the established canonical path requires. Summary and Projection deltas are
+validated against the surviving canonical state; they do not have to be zero.
+
+#### All-veto suppression
+
+```text
+batchAcceptedBefore > 0
+batchAcceptedAfter = 0
+batchZeroCandidates = true
+survivingCanonicalWritesExpected = false
+survivingCanonicalWritesObserved = true
+cursorAdvanced = true
+canonicalWriteCountDelta = 0
+summaryDelta = 0
+projectionDelta = 0
+```
+
+This is the existing `ZERO_CANDIDATES` path. Both partial and all-veto records
+may contribute one suppression count per valid vetoed candidate. The cursor must
+advance in either case.
 
 A Provider failure followed by a successful fallback may still be an eligible
 extraction if the safety chain is otherwise complete, but the record must set
@@ -167,7 +208,7 @@ non-single-row code). It is never silently counted as one physical attempt.
 
 A valid control is a normal, non-veto candidate from the same approved scope
 whose chain proves `legacyAccepted=true`, `validatorResult=deny_veto`,
-`suppressed=false`, a positive canonical write delta, normal Summary/Projection
+`candidateSuppressed=false`, a positive canonical write delta, normal Summary/Projection
 behavior, and cursor advancement. The control must not be a V2-only write.
 
 For every session containing an eligible suppression, collect at least one
@@ -405,9 +446,9 @@ cutover.
 1. Minimum: 5 sessions, 10 valid suppressions, 3 exact scopes, and at least 7 days or 20 batches, whichever is longer.
 2. A session is one explicit fresh developer/local run with a new in-memory ordinal and clear boundary.
 3. Three scopes are three distinct canonical character/identity-relationship/conversation tuples, represented only by opaque fingerprints/ordinals.
-4. Ten suppressions are ten records satisfying every `VALID_ELIGIBLE_SUPPRESSION` predicate and exact canonical readback.
+4. Ten suppressions are ten candidate-local records satisfying every `VALID_ELIGIBLE_SUPPRESSION` predicate and exact canonical readback; partial and all-veto batches both count.
 5. Count elapsed calendar days from the first to last session; also count completed automatic extraction batches; use the longer requirement.
-6. Validity requires legacy eligibility, shared unique lineage, exact scope, trusted provenance, cancelled plan, validator `allow_veto`, enabled reason, suppression, zero accepted output, cursor progress, zero canonical deltas, no fail-open, and privacy-safe metadata.
+6. Validity requires legacy eligibility, shared unique lineage, exact scope, trusted provenance, runtime `metadataSource=v2_model_native` (optionally displayed as normalized `model_native`), cancelled plan, validator `allow_veto`, enabled reason, candidate suppression, vetoed-candidate absence, cursor progress, no fail-open, and privacy-safe metadata. Batch deltas must reconcile surviving candidates; zero deltas are required only for all-veto batches.
 7. At least one normal non-veto control per suppression-bearing session, or five controls across at least three sessions when a session has no safe control opportunity.
 8. Wrong suppression threshold: 0.
 9. Cross-scope threshold: 0.
@@ -419,7 +460,7 @@ cutover.
 15. Prompt delta threshold: 0.
 16. Blocking/material user regression threshold: 0.
 17. Current telemetry remains in memory with manual sanitized export; no durable store is implemented.
-18. Raw IDs are not persisted or exported.
+18. Long-evidence records do not persist/export raw IDs; the existing AI Ledger scope-ID fields remain unchanged and are not used as long-evidence artifacts.
 19. Raw text is not persisted or exported.
 20. Secrets, keys, Authorization, and raw error bodies are not persisted or exported.
 21. Future optional store/review cap: 30 days, 500 records total, 100 per session.
@@ -470,4 +511,3 @@ separate, minimal accounting-lineage task before relying on raw Ledger data for
 long-window counts. After that task, a new approval may authorize a bounded
 manual-export collection. Do not enter Phase 2 or positive V2 authority from
 this document.
-
