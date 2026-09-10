@@ -13,6 +13,7 @@ import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHis
 import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError, readResponseTextWithTimeout } from "./fetchWithTimeout";
 import { recordApiUsage, type ApiUsageOperation } from "../core/monitoring/apiUsageMetrics";
 import {
+  createAiActionId,
   withAiRequestLedger,
   type AiPurpose,
   type AiRequestLedgerInput,
@@ -22,6 +23,7 @@ import { emptyTextApiErrorDetails, parseTextApiErrorPayload, type TextApiErrorCo
 
 type AiRequestMetadata = {
   purpose?: AiPurpose;
+  logicalActionId?: string;
   parentActionId?: string;
   characterId?: string;
   relationId?: string;
@@ -34,6 +36,7 @@ type AiRequestMetadata = {
 function buildLedgerInput(defaultPurpose: AiPurpose, inputCharacters: number, metadata?: AiRequestMetadata): AiRequestLedgerInput {
   return {
     purpose: metadata?.purpose || defaultPurpose,
+    logicalActionId: metadata?.logicalActionId,
     parentActionId: metadata?.parentActionId,
     characterId: metadata?.characterId,
     relationId: metadata?.relationId,
@@ -670,6 +673,8 @@ async function apiExtractMemoriesImpl(params: {
   parentActionId?: string;
   enableV2Shadow?: boolean;
   purpose?: AiPurpose;
+  /** Internal accounting lineage; never sent to the Provider. */
+  logicalActionId?: string;
   ledger?: AiRequestLedgerSession;
 }): Promise<{
   text: string;
@@ -681,7 +686,7 @@ async function apiExtractMemoriesImpl(params: {
   runtimeLineageTransport?: import("../features/characterKnowledge/services/knowledgeExtractionProtocol").KnowledgeExtractionLineageTransport;
   error?: string;
 }> {
-  const { ledger, purpose, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
+  const { ledger, purpose, logicalActionId, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
   try {
     ledger?.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/extract-memories", transport: "backend_proxy" });
     const res = await fetchWithTimeout("/api/extract-memories", {
@@ -809,7 +814,9 @@ async function apiExtractMemoriesImpl(params: {
 
 export async function apiExtractMemories(params: Parameters<typeof apiExtractMemoriesImpl>[0]): Promise<Awaited<ReturnType<typeof apiExtractMemoriesImpl>>> {
   const inputCharacters = params.history.reduce((total, entry) => total + String(entry.text || "").length, 0);
-  return trackApiUsage("memory-extraction", inputCharacters, buildLedgerInput("memory_extract", inputCharacters, params), (ledger) => apiExtractMemoriesImpl({ ...params, ledger }));
+  const logicalActionId = params.logicalActionId || createAiActionId();
+  const requestParams = { ...params, logicalActionId };
+  return trackApiUsage("memory-extraction", inputCharacters, buildLedgerInput("memory_extract", inputCharacters, requestParams), (ledger) => apiExtractMemoriesImpl({ ...requestParams, ledger }));
 }
 
 // summarize personality wrapper
@@ -1013,9 +1020,11 @@ export async function apiExtractMemoriesWithModelFallback(
   fallbackModel?: string,
   request: (nextParams: MemoryExtractionParams) => Promise<MemoryExtractionResponse> = apiExtractMemories,
 ): Promise<MemoryExtractionResponse> {
-  const primary = normalizeMemoryExtractionResponse(await request(params));
+  const logicalActionId = params.logicalActionId || createAiActionId();
+  const requestParams = { ...params, logicalActionId };
+  const primary = normalizeMemoryExtractionResponse(await request(requestParams));
   const normalizedFallback = fallbackModel?.trim();
   if (!primary.error || !normalizedFallback || normalizedFallback === params.model.trim()) return primary;
   console.warn(`Memory extraction model '${params.model}' failed; retrying with the active chat model '${normalizedFallback}'.`);
-  return normalizeMemoryExtractionResponse(await request({ ...params, model: normalizedFallback }));
+  return normalizeMemoryExtractionResponse(await request({ ...requestParams, model: normalizedFallback }));
 }

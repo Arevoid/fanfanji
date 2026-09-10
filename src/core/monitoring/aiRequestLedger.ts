@@ -49,6 +49,8 @@ export type AiRequestErrorCategory =
 
 export interface AiRequestEnvelope {
   requestId: string;
+  /** Stable identity for one logical AI action across linked request rows. */
+  logicalActionId?: string;
   parentActionId?: string;
   purpose: AiPurpose;
   characterId?: string;
@@ -79,6 +81,8 @@ export interface AiRequestEnvelope {
 
 export interface AiRequestLedgerInput {
   purpose: AiPurpose;
+  /** Stable identity for one logical AI action across linked request rows. */
+  logicalActionId?: string;
   parentActionId?: string;
   characterId?: string;
   relationId?: string;
@@ -103,6 +107,7 @@ export interface AiRequestAttempt {
 
 export interface AiRequestLedgerSession {
   readonly parentActionId?: string;
+  readonly logicalActionId?: string;
   markAttempt(attempt?: AiRequestAttempt): void;
   markRetry(reason: string): void;
   markFallback(reason: string): void;
@@ -209,6 +214,7 @@ function normalizeRecord(value: unknown): AiRequestEnvelope | null {
   if (candidate.status !== "success" && candidate.status !== "failure") return null;
   return {
     requestId: candidate.requestId,
+    ...(typeof candidate.logicalActionId === "string" ? { logicalActionId: candidate.logicalActionId } : {}),
     ...(typeof candidate.parentActionId === "string" ? { parentActionId: candidate.parentActionId } : {}),
     purpose: candidate.purpose as AiPurpose,
     ...(typeof candidate.characterId === "string" ? { characterId: candidate.characterId } : {}),
@@ -340,6 +346,7 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
 
   return {
     parentActionId: input.parentActionId,
+    logicalActionId: input.logicalActionId,
     markAttempt(attempt = {}) {
       if (completed) return;
       providerRequestCount += 1;
@@ -355,6 +362,7 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
       if (completed) {
         return {
           requestId,
+          logicalActionId: input.logicalActionId,
           parentActionId: input.parentActionId,
           purpose: input.purpose,
           transport: latestAttempt.transport || input.transport || "unknown",
@@ -375,6 +383,7 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
       const category = result.succeeded ? "none" : errorCategory(result.error);
       const record: AiRequestEnvelope = {
         requestId,
+        ...(input.logicalActionId ? { logicalActionId: input.logicalActionId } : {}),
         ...(input.parentActionId ? { parentActionId: input.parentActionId } : {}),
         purpose: input.purpose,
         ...(input.characterId ? { characterId: input.characterId } : {}),
@@ -426,4 +435,56 @@ export async function withAiRequestLedger<T>(
     session.complete({ succeeded: false, error });
     throw error;
   }
+}
+
+export interface AiRequestLedgerAccountingSummary {
+  /** Number of distinct logical action IDs that are authoritative. */
+  logicalActionCount: number;
+  /** Sum of provider attempts across authoritative and unknown rows. */
+  physicalProviderAttemptCount: number;
+  /** Rows from before logical lineage was recorded; never heuristically grouped. */
+  logicalGroupingUnknownRows: number;
+  /** Physical attempts beyond one attempt per known logical action. */
+  fallbackAttemptCount: number;
+  fallbackAttemptRate?: number;
+  physicalAttemptsPerLogicalAction?: number;
+}
+
+/**
+ * Aggregate only explicit logicalActionId groups. Legacy rows without the
+ * additive field remain visible as unknown and are never paired by timestamp,
+ * model, array position, or reason text.
+ */
+export function aggregateAiRequestLedgerAccounting(
+  records: readonly AiRequestEnvelope[],
+): AiRequestLedgerAccountingSummary {
+  const logicalActionIds = new Set<string>();
+  let physicalProviderAttemptCount = 0;
+  let knownLogicalPhysicalAttempts = 0;
+  let logicalGroupingUnknownRows = 0;
+  for (const record of records) {
+    const logicalActionId = typeof record.logicalActionId === "string" && record.logicalActionId.trim()
+      ? record.logicalActionId.trim()
+      : undefined;
+    const attempts = Math.max(0, Math.floor(Number(record.providerRequestCount) || 0));
+    if (logicalActionId) {
+      logicalActionIds.add(logicalActionId);
+      knownLogicalPhysicalAttempts += attempts;
+    } else logicalGroupingUnknownRows += 1;
+    physicalProviderAttemptCount += attempts;
+  }
+  const logicalActionCount = logicalActionIds.size;
+  const fallbackAttemptCount = Math.max(0, knownLogicalPhysicalAttempts - logicalActionCount);
+  return {
+    logicalActionCount,
+    physicalProviderAttemptCount,
+    logicalGroupingUnknownRows,
+    fallbackAttemptCount,
+    ...(logicalActionCount > 0
+      ? {
+        fallbackAttemptRate: fallbackAttemptCount / logicalActionCount,
+        physicalAttemptsPerLogicalAction: physicalProviderAttemptCount / logicalActionCount,
+      }
+      : {}),
+  };
 }

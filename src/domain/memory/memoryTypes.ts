@@ -78,6 +78,8 @@ export interface MemoryExtractionApiParams {
   relationId?: string;
   conversationId?: string;
   parentActionId?: string;
+  /** Internal accounting lineage; never sent to a Provider or source envelope. */
+  logicalActionId?: string;
   /** Internal producer flag; never changes legacy write authority. */
   enableV2Shadow?: boolean;
 }
