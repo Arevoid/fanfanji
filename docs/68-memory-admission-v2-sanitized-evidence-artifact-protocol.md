@@ -100,10 +100,22 @@ and classify the export as unrecoverable rather than continuing collection.
 
 ## 13. Continuity and recovery
 
-The same developer-held window token may resume a window only when the exact
-prior artifacts are already durable. A missing prior file is a recovery block;
-do not reconstruct it from a Markdown summary and do not create a new window to
-hide the gap. R1 intentionally performs no new formal activity.
+The window fingerprint identifies one long-evidence review campaign; it does
+not make every in-memory observation promotion-authoritative. Observations
+before an established recovery boundary without a durable full export are
+permanently `historical_non_authoritative`. They are never carried into formal
+session, scope, batch, suppression, control, accounting, or evidence-day
+counters.
+
+Normal continuation is allowed when all prior authoritative observations have
+complete durable artifacts. Recovery continuation is also allowed when the
+lost observations are explicitly excluded, the retained counters are reset to
+the durable baseline, the boundary is documented, the reviewer ignores
+summaries/manifests as evidence, persist-first is a hard precondition, the same
+developer-held token remains available, and the window fingerprint is
+unchanged. A missing prior file is therefore a baseline reset, not permission
+to reconstruct evidence or create a replacement window. R1 intentionally
+performs no new formal activity.
 
 ## 14. Tests
 
@@ -146,8 +158,12 @@ secret-bearing file to Git.
 
 ## 19. Next recommendation
 
-Keep the collector and Canary disabled. After a separately approved run, repeat
-the bounded local evidence flow using persist-first saving and this reviewer,
-then combine only the durable full artifacts. Do not enter Phase 2 or implement
+The recovery boundary is now explicitly established for the existing window;
+its retained authoritative baseline is zero. Keep the collector and Canary
+disabled. After a separately approved continuation, resume the same window
+only after confirming token continuity and a writable artifact path; create a
+new session, then use persist-first saving and this reviewer. The first future
+full artifact that passes disk review becomes authoritative record/session #1
+and supplies the new `firstEvidenceDay`. Do not enter Phase 2 or implement
 positive V2 authority until the required real coverage and safety review are
 complete.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -96,6 +96,20 @@ function review(contents: readonly string[]) {
 
 const valid = exportJson([record()]);
 
+const zeroRetained = review([]);
+assert.equal(zeroRetained.status, "ok");
+assert.equal(zeroRetained.authoritativeArtifactCount, 0);
+assert.equal(zeroRetained.formalSessionCount, 0);
+assert.equal(zeroRetained.distinctExactScopeCount, 0);
+assert.equal(zeroRetained.extractionBatchCount, 0);
+assert.equal(zeroRetained.validSuppressionCount, 0);
+assert.equal(zeroRetained.validControlCount, 0);
+assert.equal(zeroRetained.logicalActionTotal, 0);
+assert.equal(zeroRetained.physicalAttemptTotal, 0);
+assert.equal(zeroRetained.firstEvidenceDay, null);
+assert.equal(zeroRetained.lastEvidenceDay, null);
+assert.equal(zeroRetained.distinctEvidenceDayCount, 0);
+
 assert.doesNotThrow(() => review([valid]));
 const single = review([valid]);
 assert.equal(single.status, "ok");
@@ -185,6 +199,40 @@ assert.equal(summaryOnly.authoritativeArtifactCount, 0);
 const emptyRecords = review([JSON.stringify({ schemaVersion: LONG_EVIDENCE_SCHEMA_VERSION, records: [] })]);
 assert.equal(emptyRecords.status, "malformed");
 assert.equal(emptyRecords.authoritativeArtifactCount, 0);
+
+const unrecoverableLabels = review([JSON.stringify({
+  schemaVersion: LONG_EVIDENCE_SCHEMA_VERSION,
+  excludedHistoricalArtifacts: ["R2_EXPORT_UNRECOVERABLE", "11O_EXPORT_UNRECOVERABLE"],
+  retainedAuthoritativeArtifactCount: 99,
+})]);
+assert.equal(unrecoverableLabels.status, "malformed");
+assert.equal(unrecoverableLabels.formalSessionCount, 0);
+assert.equal(unrecoverableLabels.extractionBatchCount, 0);
+assert.equal(unrecoverableLabels.validControlCount, 0);
+
+const recoveryManifest = readFileSync(path.resolve(
+  "docs/evidence/memory-admission-v2/window-8817672802574c9a/recovery-boundary.json",
+), "utf8");
+assert.equal(recoveryManifest.includes("raw window token"), false);
+const manifestReview = review([recoveryManifest]);
+assert.equal(manifestReview.status, "malformed");
+assert.equal(manifestReview.authoritativeArtifactCount, 0);
+assert.equal(manifestReview.formalSessionCount, 0);
+assert.equal(manifestReview.extractionBatchCount, 0);
+
+const futureFirstArtifact = review([exportJson([record({
+  evidenceRecordFingerprint: "evidence-8888888888888888",
+  sessionFingerprint: "session-8888888888888888",
+  logicalActionFingerprint: "action-bbbbbbbb",
+  batchActionFingerprint: "batch-cccccccc",
+  evidenceDay: "2026-09-12",
+})])]);
+assert.equal(futureFirstArtifact.status, "ok");
+assert.equal(futureFirstArtifact.windowFingerprint, "window-aaaaaaaaaaaaaaaa");
+assert.equal(futureFirstArtifact.authoritativeArtifactCount, 1);
+assert.equal(futureFirstArtifact.formalSessionCount, 1);
+assert.equal(futureFirstArtifact.firstEvidenceDay, "2026-09-12");
+assert.equal(futureFirstArtifact.distinctEvidenceDayCount, 1);
 
 const malformedRecord = review([exportJson([record({ evidenceRecordFingerprint: "not-a-fingerprint" })])]);
 assert.equal(malformedRecord.status, "malformed");

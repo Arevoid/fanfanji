@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "memory-admission-v2-long-evidence-1",
+  "windowFingerprint": "window-8817672802574c9a",
+  "boundaryType": "authoritative_baseline_reset",
+  "recoveryBoundaryEstablished": true,
+  "excludedHistoricalArtifacts": [
+    "R2_EXPORT_UNRECOVERABLE",
+    "11O_EXPORT_UNRECOVERABLE"
+  ],
+  "retainedAuthoritativeArtifactCount": 0,
+  "formalSessionCount": 0,
+  "distinctExactScopeCount": 0,
+  "extractionBatchCount": 0,
+  "validSuppressionCount": 0,
+  "validControlCount": 0,
+  "logicalActionTotal": 0,
+  "physicalAttemptTotal": 0,
+  "firstEvidenceDay": null,
+  "lastEvidenceDay": null,
+  "distinctEvidenceDayCount": 0,
+  "source": "stage-4d-11o-r2-recovery-boundary",
+  "authoritativeEvidence": false
+}
