@@ -45,9 +45,13 @@ production bundle. The exported configuration function accepts `explicitDebug`
 only for the Node test environment, so a production caller cannot turn on the
 collector through the test seam.
 
-An enable call always starts a fresh evidence session. Disable ends collection
-but leaves the current in-memory records available for an explicit export;
-clear removes only those records. Reload naturally loses the in-memory session.
+An enable call always starts a fresh evidence session. `startWindow(token)` and
+`resumeWindow(token)` accept an explicit developer-held window token; the token
+is never exported or persisted. A formal window supplies the stable salt for
+cross-session scope/action fingerprints. Without an active window, records are
+dry-run observations. Disable ends collection but leaves records available for
+an explicit export; clear removes only records. Reload loses records and the
+active window, so resuming requires re-entering the same local token.
 
 ## 5. Candidate/batch schema
 
@@ -92,27 +96,36 @@ never accepted into the record or export.
 
 ## 8. Scope fingerprint
 
-The four-part exact scope tuple is combined with a session-local salt and a
-non-reversible FNV-style digest. Only `scope-<opaque token>` is exported. The
-same tuple is stable during one evidence session, while a changed tuple or a
-new session produces a different token. Character, relation, user identity and
-conversation IDs never appear in a record.
+For formal collection, the four-part exact scope tuple is combined with a
+window-local manual token and a non-reversible FNV-style digest. Only
+`scope-<opaque token>` is exported. The same tuple is stable across sessions in
+one window, while a changed tuple or a new window token produces a different
+token. Dry-run records use only a session-local salt and are never formal
+window evidence. Character, relation, user identity and conversation IDs never
+appear in a record.
 
 ## 9. Session ordinal
 
 `sessionOrdinal` is a process-local monotonic ordinal created by an explicit
 collector enable cycle. It is not an account/session identifier and is never
-persisted. Disable, reload, or a subsequent enable starts a new evidence
-boundary; clearing records does not pretend that a new account session began.
+persisted. A window has its own opaque ordinal and lifecycle: start/create,
+resume with the same manually held token, session start/end, explicit export,
+finish, and clear/destroy. Clearing window identity removes only collector
+state; it never touches chat, Memory, Ledger, Canary, or character data.
 
 ## 10. Logical accounting integration
 
 `deriveLongEvidenceAccounting()` delegates to the Stage 4D-11J
-`aggregateAiRequestLedgerAccounting()` helper. A single explicit logical ID in
-one row is `single_row` (logical 1, physical 1). Multiple rows sharing that
-explicit ID are `fallback_split_rows` (for example logical 1, physical 2).
-Rows without an ID, or mixtures that cannot be authoritative, are `unknown`.
-No timestamp, model, row position, or reason-text heuristic is used.
+`aggregateAiRequestLedgerAccounting()` helper. Each evidence record also
+stores only a salted `logicalActionFingerprint`/`batchActionFingerprint`.
+Multiple candidate records sharing one explicit action fingerprint are grouped
+once: a single row is `single_row` (logical 1, physical 1), while linked
+fallback rows are `fallback_split_rows` (logical 1, physical 2). If repeated
+records for one action disagree on logical count, physical count, or shape, the
+action is marked `accounting_conflict` in summary and excluded rather than
+resolved by max/min/last-wins. Rows without an ID or with unknown shape remain
+unknown. No timestamp, model, row position, scope, or reason-text heuristic is
+used.
 
 ## 11. Controls
 
@@ -144,15 +157,19 @@ errors.
 
 Each enabled session uses an in-memory latest-record ring buffer capped at 100
 records. There is no localStorage, IndexedDB, cross-tab merge, durable
-cross-session store, or cloud/network path. The bounded policy prevents an
-observation tool from growing with chat volume.
+cross-session store, or cloud/network path. The window token is the only
+window identity material and lives in memory/caller state; it is not persisted.
+The bounded policy prevents an observation tool from growing with chat volume.
 
 ## 15. Export
 
 `exportJson()` returns a sanitized object containing `schemaVersion`,
-`persistenceMode: "in_memory_only"`, enabled/session ordinal, record count,
-classification counts, logical-action total, physical-attempt total, unknown
-grouping count, and the bounded records. `summary()` returns the same aggregate
+`persistenceMode: "in_memory_only"`, window/session ordinals, window state,
+record count, classification counts, session count, distinct exact-scope count,
+extraction-batch count, candidate-level suppression/control counts, logical and
+physical totals, accounting-conflict count, unknown-grouping count, and the
+bounded records. Formal aggregate counts exclude dry-run records; observation
+classification counts remain visible for audit. `summary()` returns the same
 metadata without records. Export is explicit and manual; the collector does
 not upload or auto-sync anything.
 
@@ -169,17 +186,19 @@ rows, no Provider/Prompt invocation, input immutability, and export summaries.
 
 The implementation test performs a short synthetic dry-run with exactly two
 logical-shaped samples: one cancelled-plan suppression and one normal control.
-The test also exercises the partial/all-veto classifier branches, but these are
-not real application extraction operations. No Provider is called and no
+It then starts a separate explicit test window to verify repeated candidate
+records, linked accounting, cross-session scope stability, conflict handling,
+and a second scope. The test also exercises partial/all-veto branches, but
+none are real application extraction operations. No Provider is called and no
 canonical state is written.
 
 ## 18. Formal collection exclusion
 
-The dry-run records are explicitly excluded from the future long-window
-minimums. This stage does not claim five sessions, ten valid suppressions, three
-scopes, seven days, or twenty batches. A separately approved Stage 4D-11L may
-start bounded local collection; it must begin a new evidence session and use
-new manual exports.
+Dry-run records have no formal `windowOrdinal` and are explicitly excluded from
+the future long-window minimums. This stage does not claim five sessions, ten
+valid suppressions, three scopes, seven days, or twenty batches. A separately
+approved Stage 4D-11M may start bounded local collection; it must start a new
+explicit window token and use new manual exports.
 
 ## 19. Rollback
 
@@ -191,18 +210,17 @@ artifact to migrate or clean up.
 
 ## 20. Readiness
 
-After docs reconciliation, implementation, tests, and full verification, the
-collector state is `LONG_EVIDENCE_COLLECTOR_DRY_RUN_VALIDATED`. This means the
-collector contract and dry-run are validated—not that the long evidence window
-is complete. Accounting remains `ACCOUNTING_LINEAGE_FIXED_VALIDATED`, design
-readiness remains `LONG_EVIDENCE_DESIGN_READY`, and collection remains
-`NOT_STARTED`.
+After the 11L accounting/scope integrity checks and full verification, the
+collector state is `LONG_EVIDENCE_COLLECTOR_INTEGRITY_VALIDATED`. This means
+the collector contract and dry-run accounting are validated—not that the long
+evidence window is complete. Accounting remains
+`ACCOUNTING_LINEAGE_FIXED_VALIDATED`, design readiness remains
+`LONG_EVIDENCE_DESIGN_READY`, and collection remains `NOT_STARTED`.
 
 ## 21. Next recommendation
 
-Stop after this stage. Seek explicit approval for Stage 4D-11L — Bounded Local
+Stop after this stage. Seek explicit approval for Stage 4D-11M — Bounded Local
 Long-Evidence Collection Start. That stage may use only developer/local manual
 exports and the existing cancelled-plan observation; it must not enable positive
 V2 authority, broaden Canary reasons, enter Phase 2, persist a durable evidence
 store, or upload telemetry.
-

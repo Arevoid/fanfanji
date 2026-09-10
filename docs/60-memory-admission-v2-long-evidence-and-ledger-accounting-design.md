@@ -78,7 +78,10 @@ type LongEvidenceRecord = {
   timeBucket: string; // coarse UTC bucket, not an exact event timestamp
   featureScope: "direct_chat_memory_extraction";
   sessionOrdinal: number; // opaque ordinal within the exported review set
+  windowOrdinal?: number; // formal-window ordinal; absent for dry-run records
   scopeFingerprint: string; // non-reversible, reviewer-safe scope token
+  logicalActionFingerprint?: string; // salted action token; never raw logicalActionId
+  batchActionFingerprint?: string; // extraction-level deduplication token
   canaryReason: "SAFETY_VETO_CANCELLED_PLAN";
   validatorResult: "allow_veto" | "deny_veto" | "not_evaluated";
   validatorReason: string; // allowlisted reason code
@@ -232,13 +235,16 @@ not a quota to generate artificial traffic.
   suppressed, a cursor/replay loop occurred, privacy was violated, or another
   zero-error invariant failed. The window is aborted.
 
-## 6. Session and relationship/conversation counting
+## 6. Session, window, and relationship/conversation counting
 
 The safest first collection mechanism is manual export and review. A session is
 one explicit developer/local evidence run with a fresh in-memory session ordinal,
-a clear boundary, and a recorded start/end coarse time bucket. Reloading or
-clearing the page starts a new ordinal; the ordinal is not an application ID and
-is not persisted as user data.
+a clear boundary, and a recorded start/end coarse time bucket. A formal window
+uses an explicit developer-held `windowReviewToken`; its salted digest provides
+stable scope/action fingerprints across sessions in that window. The token is
+never exported or persisted. Reloading loses the in-memory collector state, so
+the developer must explicitly re-enter the same token to resume the window.
+Dry-run records have no `windowOrdinal` and cannot enter formal counts.
 
 Three distinct relationships/conversations means three distinct canonical exact
 scope tuples (character, identity/relationship, and conversation) that each
@@ -248,10 +254,12 @@ local salted hash or assign opaque ordinals while inspecting the isolated
 fixture. Two records with unknown or conflicting scope cannot be treated as
 distinct.
 
-Because the current Canary telemetry is page-memory only, it cannot itself
-prove five sessions or three scopes across reloads. The reviewer must combine
-the bounded, sanitized exports offline and record only the resulting ordinals
-and counts. No automatic cross-session analytics is authorized in this stage.
+Because collector records remain page-memory only, the reviewer must explicitly
+resume a window with its manually held token after reload and combine the
+bounded, sanitized exports offline. Session count is distinct
+`sessionOrdinal`; exact-scope count is distinct stable `scopeFingerprint` among
+valid, privacy-safe formal records. No automatic cross-window analytics is
+authorized in this stage.
 
 If a future team needs automatic multi-day counting, the smallest safe design
 is a separate developer-only store with an independent versioned schema, a
@@ -262,13 +270,14 @@ here.
 
 ## 7. Persistence and export strategy
 
-### Current recommendation: A — manual export + review
+### Current recommendation: A — manual window token + export/review
 
-Keep Canary telemetry in memory, as in 11H. At an explicit end-of-session action,
+Keep Canary/collector telemetry in memory. At an explicit end-of-session action,
 export a sanitized JSON artifact capped at 100 records. Reviewers combine files
-offline on a trusted workstation; no automatic upload, sync, or background
-analytics is permitted. If an export is lost or a session was not explicitly
-closed, the window is incomplete rather than inferred.
+offline on a trusted workstation using the same manually held window token; no
+automatic upload, sync, or background analytics is permitted. If an export is
+lost or a session was not explicitly closed, the window is incomplete rather
+than inferred.
 
 The future optional store described in section 6 is not needed to decide whether
 the design is safe and would create additional retention and deletion surface.
@@ -492,7 +501,7 @@ cutover.
 46. Long evidence completed: no; only its design was documented.
 47. Phase 2 allowed: no.
 48. Current readiness is split: accounting `ACCOUNTING_LINEAGE_FIXED_VALIDATED`, design `LONG_EVIDENCE_DESIGN_READY`, collection `NOT_STARTED`.
-49. Next recommendation: implement and validate a bounded developer/local metadata-only collector, then seek separate approval for collection; do not start a cohort or Phase 2.
+49. The collector is now implemented and integrity-validated in Stage 4D-11L; next recommendation is a separately approved bounded local collection start, not a cohort or Phase 2.
 50. Historical 11I starting refactor HEAD: `e576365932d13de754aee727a25896fd3d226692`; Stage 4D-11K starts at `bf4e71a21a63e1e53719d7d3f8c58061ffdcc4f8`.
 51. Final HEAD: the docs-only commit created for this stage (reported with its full hash after commit).
 52. Commit: `docs: design long evidence window and clarify ledger accounting`, followed by the post-11J lineage commits.
