@@ -17,14 +17,14 @@ assert.match(trigger, /env\?\.DEV/);
 assert.equal(DIRECT_CHAT_MEMORY_ADMISSION_SYNTHETIC_WRITE_TOKEN, "stage4d11h-synthetic-write");
 assert.match(appChat, /DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL/);
 assert.match(appChat, /activeDirectScope/);
-assert.match(appChat, /extractNow: \(\) => runAdmissionExtraction\("observation_only"\)/);
+assert.match(appChat, /extractNow: \(options = \{\}\) => runAdmissionExtraction\(options\.persistenceMode \|\| "production_equivalent_write"\)/);
 assert.match(appChat, /extractSyntheticCanaryWrite: \(token: string\)/);
 assert.match(appChat, /DIRECT_CHAT_MEMORY_ADMISSION_SYNTHETIC_WRITE_TOKEN/);
 assert.match(appChat, /activeCharacter\?\.name\?\.startsWith\("Stage4D3"\)/);
 assert.match(appChat, /isDirectChatMemorySafetyVetoCanaryEnabled\(\)/);
-assert.match(appChat, /runAdmissionExtraction\("observation_only"\)/);
-assert.match(appChat, /persistenceMode,\s*enableV2Metadata: true/u);
-assert.match(appChat, /enableV2Metadata: true/);
+assert.match(appChat, /options\.persistenceMode \|\| "production_equivalent_write"/);
+assert.match(appChat, /handleExtractMemories\(undefined, \{ persistenceMode \}\)/);
+assert.doesNotMatch(appChat.slice(appChat.indexOf("const runAdmissionExtraction"), appChat.indexOf("const api:")), /enableV2Metadata/);
 assert.match(appChat, /ACTIVE_DIRECT_SCOPE_UNAVAILABLE/);
 assert.match(appChat, /delete runtime\[DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL\]/);
 
@@ -40,4 +40,4 @@ assert.match(hook, /recordDirectChatMemoryAdmissionShadowEvidence/);
 assert.match(hook, /getLastMemoryExtractionRunDiagnostics/);
 assert.doesNotMatch(trigger, /content|prompt|response|sourceMessageIds|apiKey|Authorization/iu);
 
-console.log("PASS dev-only real Direct Chat memory extraction trigger is guarded, scoped and observation-only");
+console.log("PASS dev-only real Direct Chat memory extraction trigger is guarded, scoped and reuses production-equivalent writer path");
