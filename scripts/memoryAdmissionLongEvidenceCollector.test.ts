@@ -8,6 +8,10 @@ import {
   getDirectChatMemoryLongEvidenceRecords,
   getDirectChatMemoryLongEvidenceSummary,
   recordDirectChatMemoryLongEvidence,
+  startDirectChatMemoryLongEvidenceWindow,
+  resumeDirectChatMemoryLongEvidenceWindow,
+  finishDirectChatMemoryLongEvidenceWindow,
+  clearDirectChatMemoryLongEvidenceWindow,
   type DirectChatMemoryLongEvidenceInput,
 } from "../src/features/chat/services/directChatMemoryLongEvidenceCollector";
 import type { AiRequestEnvelope } from "../src/core/monitoring/aiRequestLedger";
@@ -216,6 +220,101 @@ try {
   assert.equal(unknownReason?.validatorReason, "unknown");
   assert.equal(unknownReason?.classification, "INVALID_SAMPLE");
 
+  // Formal-window accounting is extraction-level, while suppression/control counts remain candidate-level.
+  const firstWindow = startDirectChatMemoryLongEvidenceWindow("window-token-a");
+  assert.equal(firstWindow, 1);
+  clearDirectChatMemoryLongEvidenceCollector();
+  const actionFirst = recordDirectChatMemoryLongEvidence(input({
+    logicalActionId: "raw-logical-action-secret",
+    accounting: { ...baseAccounting, providerPhysicalAttemptCount: 2, accountingShape: "fallback_split_rows" },
+  }));
+  const actionSecond = recordDirectChatMemoryLongEvidence(input({
+    logicalActionId: "raw-logical-action-secret",
+    accounting: { ...baseAccounting, providerPhysicalAttemptCount: 2, accountingShape: "fallback_split_rows" },
+  }));
+  const actionThird = recordDirectChatMemoryLongEvidence(input({
+    logicalActionId: "raw-logical-action-secret",
+    accounting: { ...baseAccounting, providerPhysicalAttemptCount: 2, accountingShape: "fallback_split_rows" },
+  }));
+  assert.equal(actionFirst?.logicalActionFingerprint, actionSecond?.logicalActionFingerprint);
+  assert.equal(actionSecond?.logicalActionFingerprint, actionThird?.logicalActionFingerprint);
+  let formalSummary = getDirectChatMemoryLongEvidenceSummary();
+  assert.equal(formalSummary.logicalActionTotal, 1);
+  assert.equal(formalSummary.physicalAttemptTotal, 2);
+  assert.equal(formalSummary.extractionBatchCount, 1);
+  assert.equal(formalSummary.validSuppressionCount, 3);
+  assert.equal(formalSummary.formalSessionCount, 1);
+  assert.equal(formalSummary.distinctExactScopeCount, 1);
+
+  // A new collector session in the same formal window preserves prior records and scope identity.
+  configureDirectChatMemoryLongEvidenceCollector({ enabled: true, explicitDebug: true });
+  const sameWindowSameScope = recordDirectChatMemoryLongEvidence(input({
+    logicalActionId: "raw-logical-action-secret",
+    accounting: { ...baseAccounting, providerPhysicalAttemptCount: 2, accountingShape: "fallback_split_rows" },
+  }));
+  assert.equal(sameWindowSameScope?.scopeFingerprint, actionFirst?.scopeFingerprint);
+  const secondAction = recordDirectChatMemoryLongEvidence(input({
+    logicalActionId: "second-action",
+    scope: { ...scope, conversationId: "conversation-other" },
+    candidate: {
+      ...suppressionCandidate,
+      canaryReason: "none",
+      validatorResult: "deny_veto",
+      validatorReason: "predicate_disabled",
+      bridgeState: "legacy_passthrough",
+      bridgeReason: "no_veto",
+      candidateSuppressed: false,
+      vetoedCandidateCanonicalAbsent: true,
+    },
+    batch: {
+      ...allVetoBatch,
+      batchAcceptedAfter: 1,
+      batchZeroCandidates: false,
+      survivingCanonicalWritesExpected: true,
+      survivingCanonicalWritesObserved: true,
+      canonicalWriteCountDelta: 1,
+      summaryDelta: 1,
+      projectionDelta: 1,
+    },
+  }));
+  assert.ok(secondAction);
+  formalSummary = getDirectChatMemoryLongEvidenceSummary();
+  assert.equal(formalSummary.sessionCount, 2);
+  assert.equal(formalSummary.formalSessionCount, 2);
+  assert.equal(formalSummary.distinctExactScopeCount, 2);
+  assert.equal(formalSummary.logicalActionTotal, 2);
+  assert.equal(formalSummary.physicalAttemptTotal, 3);
+  assert.equal(formalSummary.extractionBatchCount, 2);
+  assert.equal(formalSummary.validSuppressionCount, 4);
+  assert.equal(formalSummary.validControlCount, 1);
+
+  // Conflicting accounting for one action is excluded rather than resolved by max/min/last-wins.
+  resumeDirectChatMemoryLongEvidenceWindow("window-token-a");
+  recordDirectChatMemoryLongEvidence(input({
+    logicalActionId: "raw-logical-action-secret",
+    accounting: { ...baseAccounting, providerPhysicalAttemptCount: 1, accountingShape: "single_row" },
+  }));
+  formalSummary = getDirectChatMemoryLongEvidenceSummary();
+  assert.equal(formalSummary.accountingConflictCount, 1);
+  assert.equal(formalSummary.logicalActionTotal, 1, "only the non-conflicting second action remains authoritative");
+  assert.equal(formalSummary.physicalAttemptTotal, 1);
+
+  finishDirectChatMemoryLongEvidenceWindow();
+  assert.equal(getDirectChatMemoryLongEvidenceSummary().windowState, "finished");
+  const afterWindow = recordDirectChatMemoryLongEvidence(input({ logicalActionId: "post-window-action" }));
+  assert.equal(afterWindow?.evidenceMode, "dry_run");
+
+  // A different formal window gets a different fingerprint for the same raw scope.
+  const priorScopeFingerprint = actionFirst?.scopeFingerprint;
+  clearDirectChatMemoryLongEvidenceWindow();
+  assert.equal(getDirectChatMemoryLongEvidenceSummary().recordCount, 0);
+  assert.equal(startDirectChatMemoryLongEvidenceWindow("window-token-b"), 2);
+  const secondWindowRecord = recordDirectChatMemoryLongEvidence(input({ logicalActionId: "window-b-action" }));
+  assert.notEqual(secondWindowRecord?.scopeFingerprint, priorScopeFingerprint);
+  recordDirectChatMemoryLongEvidence(input());
+  assert.equal(getDirectChatMemoryLongEvidenceSummary().unknownGroupingCount, 1);
+  assert.equal(getDirectChatMemoryLongEvidenceSummary().logicalActionTotal, 1);
+
   // Stage 11J accounting: linked fallback rows are one logical action and two physical attempts.
   const linked = deriveLongEvidenceAccounting([
     envelope("request-primary", "logical-fallback"),
@@ -263,12 +362,14 @@ try {
   assert.equal(parsed.recordCount, getDirectChatMemoryLongEvidenceRecords().length);
   assert.ok(parsed.recordCount <= 100);
   assert.ok(parsed.countsByClassification.VALID_ELIGIBLE_SUPPRESSION >= 1);
-  assert.equal(parsed.logicalActionTotal >= 0, true);
-  assert.equal(parsed.unknownGroupingCount >= 0, true);
+  assert.equal(parsed.logicalActionTotal, 1);
+  assert.equal(parsed.unknownGroupingCount, 1);
+  assert.doesNotMatch(exported, /window-token-a|window-token-b|raw-logical-action-secret/);
 
   console.log("PASS memory admission long-evidence collector: bounded, metadata-only classification, scope privacy, controls, and explicit AI accounting");
 } finally {
   globalThis.fetch = originalFetch;
   configureDirectChatMemoryLongEvidenceCollector({ enabled: false });
   clearDirectChatMemoryLongEvidenceCollector();
+  clearDirectChatMemoryLongEvidenceWindow();
 }
