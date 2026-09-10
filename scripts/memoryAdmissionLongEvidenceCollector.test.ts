@@ -195,6 +195,14 @@ try {
     performance: { ...basePerformance, privacyStatus: "violation" },
   }));
   assert.equal(privacyIncident?.classification, "SAFETY_INCIDENT");
+  const providerIncident = recordDirectChatMemoryLongEvidence(input({
+    accounting: { ...baseAccounting, canaryProviderDelta: 1 },
+  }));
+  assert.equal(providerIncident?.classification, "SAFETY_INCIDENT");
+  const promptIncident = recordDirectChatMemoryLongEvidence(input({
+    accounting: { ...baseAccounting, promptDelta: 1 },
+  }));
+  assert.equal(promptIncident?.classification, "SAFETY_INCIDENT");
 
   // Runtime v2_model_native is the only authoritative suppression source; mixed/legacy are retained but do not count.
   assert.equal(classifyLongEvidenceRecord(invalid!), "INVALID_SAMPLE");
@@ -202,6 +210,11 @@ try {
     candidate: { ...suppressionCandidate, metadataSource: "mixed" },
   }));
   assert.equal(mixed?.classification, "INVALID_SAMPLE");
+  const unknownReason = recordDirectChatMemoryLongEvidence(input({
+    candidate: { ...suppressionCandidate, validatorReason: "raw exception with user message" },
+  }));
+  assert.equal(unknownReason?.validatorReason, "unknown");
+  assert.equal(unknownReason?.classification, "INVALID_SAMPLE");
 
   // Stage 11J accounting: linked fallback rows are one logical action and two physical attempts.
   const linked = deriveLongEvidenceAccounting([

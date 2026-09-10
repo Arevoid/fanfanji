@@ -327,6 +327,7 @@ function hasSafetyIncident(record: DirectChatMemoryLongEvidenceRecord): boolean 
 
 /** Pure, side-effect-free classification of an already sanitized record. */
 export function classifyLongEvidenceRecord(record: DirectChatMemoryLongEvidenceRecord): LongEvidenceClassification {
+  if (!record || typeof record !== "object") return "INVALID_SAMPLE";
   if (hasSafetyIncident(record)) return "SAFETY_INCIDENT";
   if (record.failOpen) return "FAIL_OPEN_OBSERVATION";
   if (record.candidateSuppressed) {
@@ -338,6 +339,9 @@ export function classifyLongEvidenceRecord(record: DirectChatMemoryLongEvidenceR
     && record.legacyAccepted
     && !record.candidateSuppressed
     && !record.v2OnlyWrite
+    && record.canaryReason !== "SAFETY_VETO_CANCELLED_PLAN"
+    && record.validatorResult !== "allow_veto"
+    && record.bridgeState !== "safety_veto"
     && record.exactScope
     && record.provenanceTrusted
     && record.cursorAdvanced
