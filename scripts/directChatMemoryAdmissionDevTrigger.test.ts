@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  DIRECT_CHAT_MEMORY_ADMISSION_SYNTHETIC_WRITE_TOKEN,
   DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL,
   isDirectChatMemoryAdmissionDevRuntime,
 } from "../src/features/chat/services/directChatMemoryAdmissionDevTrigger";
@@ -13,10 +14,16 @@ assert.equal(DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL, "__fanfanjiMemoryAdmissio
 assert.equal(isDirectChatMemoryAdmissionDevRuntime(), false, "test/production module evaluation must not expose the dev runtime");
 assert.match(trigger, /import\.meta/);
 assert.match(trigger, /env\?\.DEV/);
+assert.equal(DIRECT_CHAT_MEMORY_ADMISSION_SYNTHETIC_WRITE_TOKEN, "stage4d11h-synthetic-write");
 assert.match(appChat, /DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL/);
 assert.match(appChat, /activeDirectScope/);
-assert.match(appChat, /extractNow: async/);
-assert.match(appChat, /persistenceMode: "observation_only"/);
+assert.match(appChat, /extractNow: \(\) => runAdmissionExtraction\("observation_only"\)/);
+assert.match(appChat, /extractSyntheticCanaryWrite: \(token: string\)/);
+assert.match(appChat, /DIRECT_CHAT_MEMORY_ADMISSION_SYNTHETIC_WRITE_TOKEN/);
+assert.match(appChat, /activeCharacter\?\.name\?\.startsWith\("Stage4D3"\)/);
+assert.match(appChat, /isDirectChatMemorySafetyVetoCanaryEnabled\(\)/);
+assert.match(appChat, /runAdmissionExtraction\("observation_only"\)/);
+assert.match(appChat, /persistenceMode,\s*enableV2Metadata: true/u);
 assert.match(appChat, /enableV2Metadata: true/);
 assert.match(appChat, /ACTIVE_DIRECT_SCOPE_UNAVAILABLE/);
 assert.match(appChat, /delete runtime\[DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL\]/);

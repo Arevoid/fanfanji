@@ -1,4 +1,6 @@
 export const DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL = "__fanfanjiMemoryAdmissionTest" as const;
+/** Deliberately non-secret token required by the isolated local write probe. */
+export const DIRECT_CHAT_MEMORY_ADMISSION_SYNTHETIC_WRITE_TOKEN = "stage4d11h-synthetic-write" as const;
 
 export type DirectChatMemoryAdmissionTestStatus =
   | "completed"
@@ -14,11 +16,13 @@ export interface DirectChatMemoryAdmissionTestResult {
   candidateCount: number;
   shadowObservationCountBefore: number;
   shadowObservationCountAfter: number;
-  persistenceMode: "observation_only";
+  persistenceMode: "observation_only" | "production_equivalent_write";
 }
 
 export interface DirectChatMemoryAdmissionTestApi {
   extractNow: () => Promise<DirectChatMemoryAdmissionTestResult>;
+  /** Dev-only, token-gated writer probe for an isolated synthetic fixture. */
+  extractSyntheticCanaryWrite?: (token: string) => Promise<DirectChatMemoryAdmissionTestResult>;
 }
 
 /** The explicit trigger is installed only in a Vite development build. */

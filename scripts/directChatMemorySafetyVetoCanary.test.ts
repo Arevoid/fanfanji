@@ -338,6 +338,10 @@ const canarySource = readFileSync(resolve(sourceRoot, "src/features/chat/service
 assert.doesNotMatch(canarySource, /apiHelper|Prompt|fetch\s*\(|commitMemoryWriteBundle/u);
 const extractionHookSource = readFileSync(resolve(sourceRoot, "src/features/chat/hooks/useChatMemoryExtraction.ts"), "utf8");
 assert.match(extractionHookSource, /!activeCharacter\.isGroupChat[\s\S]*activeDirectScope !== undefined[\s\S]*manualMessagesOverride === undefined/u);
+const appChatSource = readFileSync(resolve(sourceRoot, "src/components/AppChat.tsx"), "utf8");
+assert.doesNotMatch(appChatSource, /configureDirectChatMemorySafetyVetoCanary/u);
+assert.doesNotMatch(appChatSource, /cohort|rollout|production[_-]?enable/u);
+assert.match(canarySource, /if \(!isDevBuild\(\)\) return/u);
 
 // 29–30. Bounded, metadata-only telemetry.
 clearDirectChatMemorySafetyVetoCanary();

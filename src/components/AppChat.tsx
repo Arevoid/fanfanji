@@ -85,10 +85,12 @@ import {
 } from "../features/chat/services/directChatMemoryAdmissionShadowTelemetry";
 import {
   DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL,
+  DIRECT_CHAT_MEMORY_ADMISSION_SYNTHETIC_WRITE_TOKEN,
   isDirectChatMemoryAdmissionDevRuntime,
   type DirectChatMemoryAdmissionTestApi,
   type DirectChatMemoryAdmissionTestResult,
 } from "../features/chat/services/directChatMemoryAdmissionDevTrigger";
+import { isDirectChatMemorySafetyVetoCanaryEnabled } from "../features/chat/services/directChatMemorySafetyVetoCanary";
 import { buildRelationMusicContext } from "../domain/prompt/musicContext";
 import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
@@ -3390,68 +3392,87 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     const runtime = globalThis as typeof globalThis & {
       __fanfanjiMemoryAdmissionTest?: DirectChatMemoryAdmissionTestApi;
     };
+    const runAdmissionExtraction = async (
+      persistenceMode: DirectChatMemoryAdmissionTestResult["persistenceMode"],
+    ): Promise<DirectChatMemoryAdmissionTestResult> => {
+      const shadowObservationCountBefore = getDirectChatMemoryAdmissionShadowEvidence().length;
+      const scopeAvailable = Boolean(activeDirectScope && activeCharacter && !activeCharacter.isGroupChat);
+      if (!scopeAvailable) {
+        return {
+          status: "ACTIVE_DIRECT_SCOPE_UNAVAILABLE",
+          scopeAvailable: false,
+          messageCount: 0,
+          providerRequestObserved: false,
+          candidateCount: 0,
+          shadowObservationCountBefore,
+          shadowObservationCountAfter: shadowObservationCountBefore,
+          persistenceMode,
+        };
+      }
+      if (currentChatMessages.length === 0) {
+        return {
+          status: "NO_MESSAGES",
+          scopeAvailable: true,
+          messageCount: 0,
+          providerRequestObserved: false,
+          candidateCount: 0,
+          shadowObservationCountBefore,
+          shadowObservationCountAfter: shadowObservationCountBefore,
+          persistenceMode,
+        };
+      }
+
+      configureDirectChatMemoryAdmissionShadowEvidence({ enabled: true });
+      try {
+        const extractedCount = await handleExtractMemories(undefined, {
+          persistenceMode,
+          enableV2Metadata: true,
+        });
+        const diagnostics = getLastMemoryExtractionRunDiagnostics();
+        const shadowObservationCountAfter = getDirectChatMemoryAdmissionShadowEvidence().length;
+        return {
+          status: extractedCount >= 0 ? "completed" : "FAILED",
+          scopeAvailable: diagnostics.scopeAvailable,
+          messageCount: diagnostics.messageCount,
+          providerRequestObserved: diagnostics.providerRequestObserved,
+          candidateCount: diagnostics.candidateCount,
+          shadowObservationCountBefore,
+          shadowObservationCountAfter,
+          persistenceMode,
+        };
+      } catch {
+        const diagnostics = getLastMemoryExtractionRunDiagnostics();
+        return {
+          status: "FAILED",
+          scopeAvailable: diagnostics.scopeAvailable,
+          messageCount: diagnostics.messageCount,
+          providerRequestObserved: diagnostics.providerRequestObserved,
+          candidateCount: diagnostics.candidateCount,
+          shadowObservationCountBefore,
+          shadowObservationCountAfter: getDirectChatMemoryAdmissionShadowEvidence().length,
+          persistenceMode,
+        };
+      }
+    };
     const api: DirectChatMemoryAdmissionTestApi = {
-      extractNow: async (): Promise<DirectChatMemoryAdmissionTestResult> => {
-        const shadowObservationCountBefore = getDirectChatMemoryAdmissionShadowEvidence().length;
-        const scopeAvailable = Boolean(activeDirectScope && activeCharacter && !activeCharacter.isGroupChat);
-        if (!scopeAvailable) {
-          return {
-            status: "ACTIVE_DIRECT_SCOPE_UNAVAILABLE",
+      extractNow: () => runAdmissionExtraction("observation_only"),
+      extractSyntheticCanaryWrite: (token: string) => {
+        const syntheticFixture = activeCharacter?.name?.startsWith("Stage4D3");
+        if (token !== DIRECT_CHAT_MEMORY_ADMISSION_SYNTHETIC_WRITE_TOKEN
+          || !syntheticFixture
+          || !isDirectChatMemorySafetyVetoCanaryEnabled()) {
+          return Promise.resolve({
+            status: "FAILED",
             scopeAvailable: false,
             messageCount: 0,
             providerRequestObserved: false,
             candidateCount: 0,
-            shadowObservationCountBefore,
-            shadowObservationCountAfter: shadowObservationCountBefore,
-            persistenceMode: "observation_only",
-          };
-        }
-        if (currentChatMessages.length === 0) {
-          return {
-            status: "NO_MESSAGES",
-            scopeAvailable: true,
-            messageCount: 0,
-            providerRequestObserved: false,
-            candidateCount: 0,
-            shadowObservationCountBefore,
-            shadowObservationCountAfter: shadowObservationCountBefore,
-            persistenceMode: "observation_only",
-          };
-        }
-
-        // Enabling evidence is itself explicit and dev-only. The collection is
-        // bounded in memory and never becomes a production default or sink.
-        configureDirectChatMemoryAdmissionShadowEvidence({ enabled: true });
-        try {
-          const extractedCount = await handleExtractMemories(undefined, {
-            persistenceMode: "observation_only",
-            enableV2Metadata: true,
-          });
-          const diagnostics = getLastMemoryExtractionRunDiagnostics();
-          const shadowObservationCountAfter = getDirectChatMemoryAdmissionShadowEvidence().length;
-          return {
-            status: extractedCount >= 0 ? "completed" : "FAILED",
-            scopeAvailable: diagnostics.scopeAvailable,
-            messageCount: diagnostics.messageCount,
-            providerRequestObserved: diagnostics.providerRequestObserved,
-            candidateCount: diagnostics.candidateCount,
-            shadowObservationCountBefore,
-            shadowObservationCountAfter,
-            persistenceMode: "observation_only",
-          };
-        } catch {
-          const diagnostics = getLastMemoryExtractionRunDiagnostics();
-          return {
-            status: "FAILED",
-            scopeAvailable: diagnostics.scopeAvailable,
-            messageCount: diagnostics.messageCount,
-            providerRequestObserved: diagnostics.providerRequestObserved,
-            candidateCount: diagnostics.candidateCount,
-            shadowObservationCountBefore,
+            shadowObservationCountBefore: getDirectChatMemoryAdmissionShadowEvidence().length,
             shadowObservationCountAfter: getDirectChatMemoryAdmissionShadowEvidence().length,
-            persistenceMode: "observation_only",
-          };
+            persistenceMode: "production_equivalent_write" as const,
+          });
         }
+        return runAdmissionExtraction("production_equivalent_write");
       },
     };
     runtime[DIRECT_CHAT_MEMORY_ADMISSION_TEST_GLOBAL] = api;
