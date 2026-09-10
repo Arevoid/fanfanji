@@ -3424,10 +3424,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
       configureDirectChatMemoryAdmissionShadowEvidence({ enabled: true });
       try {
-        const extractedCount = await handleExtractMemories(undefined, {
-          persistenceMode,
-          enableV2Metadata: true,
-        });
+        const extractedCount = await handleExtractMemories(undefined, { persistenceMode });
         const diagnostics = getLastMemoryExtractionRunDiagnostics();
         const shadowObservationCountAfter = getDirectChatMemoryAdmissionShadowEvidence().length;
         return {
@@ -3455,7 +3452,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
     };
     const api: DirectChatMemoryAdmissionTestApi = {
-      extractNow: () => runAdmissionExtraction("observation_only"),
+      // The dev trigger reuses the real automatic path, including its writer,
+      // cursor and exact-scope readback. Observation-only remains an explicit
+      // diagnostic option, never the default integration probe.
+      extractNow: (options = {}) => runAdmissionExtraction(options.persistenceMode || "production_equivalent_write"),
       extractSyntheticCanaryWrite: (token: string) => {
         const syntheticFixture = activeCharacter?.name?.startsWith("Stage4D3");
         if (token !== DIRECT_CHAT_MEMORY_ADMISSION_SYNTHETIC_WRITE_TOKEN

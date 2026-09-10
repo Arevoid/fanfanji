@@ -18,6 +18,7 @@ import {
   type MemoryProjectionEnqueueResult,
 } from "../../../core/memory/memoryProjectionEnqueue";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "../../../utils/apiHelper";
+import { createAiActionId } from "../../../core/monitoring/aiRequestLedger";
 import { observeDirectChatMemoryAdmissionShadow } from "../services/directChatMemoryAdmissionShadow";
 import {
   isDirectChatMemoryAdmissionShadowEvidenceEnabled,
@@ -31,7 +32,15 @@ import {
 import {
   applyDirectChatMemorySafetyVetoCanary,
   isDirectChatMemorySafetyVetoCanaryEnabled,
+  type DirectChatMemorySafetyVetoCanaryResult,
 } from "../services/directChatMemorySafetyVetoCanary";
+import type { DirectChatMemoryAdmissionShadowResult } from "../services/directChatMemoryAdmissionShadow";
+import type { DirectChatMemorySafetyVetoShadowEvaluation } from "../services/directChatMemorySafetyVetoShadow";
+import {
+  isDirectChatMemoryLongEvidenceCollectorEnabled,
+  observeDirectChatMemoryLongEvidenceRuntime,
+  readDirectChatMemoryCanonicalReadback,
+} from "../services/directChatMemoryLongEvidenceRuntime";
 
 type DirectScope = { characterId: string; relationId: string; userIdentityId: string; conversationId: string };
 
@@ -204,18 +213,21 @@ export function useChatMemoryExtraction({
       const admissionShadowEnabled = manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled();
       const safetyShadowEnabled = manualMessagesOverride === undefined
         && (isDirectChatMemorySafetyVetoShadowEnabled() || canaryEnabled);
-      const markArchiveProgress = async (lastMessage: Message) => {
+      const markArchiveProgress = async (lastMessage: Message): Promise<boolean> => {
         if (activeCharacter.isGroupChat) {
           if (onUpdateCharacter) {
             await onUpdateCharacter(activeCharacter.id, { lastImmediateSummaryMsgId: lastMessage.id });
+            return true;
           }
-          return;
+          return false;
         }
         if (activeDirectScope && onSaveRelationships) {
           onSaveRelationships((previous) => previous.map((relation) => relation.id === activeDirectScope.relationId
             ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: Date.now() }
             : relation));
+          return true;
         }
+        return false;
       };
 
       if (activeCharacter.isGroupChat) {
@@ -317,9 +329,19 @@ export function useChatMemoryExtraction({
         return 0;
       }
       const extractionScope = activeDirectScope;
+      // Long-evidence collection is a dev-only, automatic Direct Chat seam.
+      // It is completely bypassed for manual/group paths and when disabled.
+      const longEvidenceEnabled = manualMessagesOverride === undefined
+        && !activeCharacter.isGroupChat
+        && isDirectChatMemoryLongEvidenceCollectorEnabled();
 
       for (const messagesToCompress of archiveBatches) {
         archiveStats.sourceMessageCount += messagesToCompress.length;
+        const longEvidenceBefore = longEvidenceEnabled
+          ? await readDirectChatMemoryCanonicalReadback(extractionScope).catch(() => undefined)
+          : undefined;
+        const extractionStartedAt = longEvidenceEnabled ? Date.now() : undefined;
+        const logicalActionId = longEvidenceEnabled ? createAiActionId() : undefined;
         const isDelicate = activeCharacter.archiveTemplateType === "delicate";
         const headerLabel = isDelicate ? "【心境日记归档 (细腻版)】" : "【精炼归档事件日志 (精炼版)】";
         lastRunDiagnosticsRef.current = {
@@ -355,7 +377,10 @@ export function useChatMemoryExtraction({
           formatContent: (items, formatOptions) => isDelicate
             ? formatDelicateMemoryDiary(headerLabel, formatOptions?.displayItems || items)
             : formatExtractedMemorySummary(headerLabel, items),
-        }, (params) => apiExtractMemoriesWithModelFallback(params, settings.selectedModel));
+        }, (params) => apiExtractMemoriesWithModelFallback(
+          logicalActionId ? { ...params, logicalActionId } : params,
+          settings.selectedModel,
+        ));
         if (result.apiError) {
           console.error("Extract memory API error:", result.apiError);
           lastRunDiagnosticsRef.current = {
@@ -373,9 +398,12 @@ export function useChatMemoryExtraction({
         };
         let canaryFilteredAcceptedClaims = result.acceptedClaims;
         let canarySuppressedCount = 0;
+        let shadowResult: DirectChatMemoryAdmissionShadowResult | undefined;
+        let safetyEvaluation: DirectChatMemorySafetyVetoShadowEvaluation | undefined;
+        let canaryResult: DirectChatMemorySafetyVetoCanaryResult | undefined;
         if (admissionShadowEnabled || safetyShadowEnabled || canaryEnabled) {
           try {
-            const shadowResult = observeDirectChatMemoryAdmissionShadow({
+            shadowResult = observeDirectChatMemoryAdmissionShadow({
               extraction: result,
               scope: extractionScope,
               lineage: {
@@ -392,14 +420,14 @@ export function useChatMemoryExtraction({
                 evidenceOrigin: "real_runtime",
               });
             }
-            const safetyEvaluation = safetyShadowEnabled
+            safetyEvaluation = safetyShadowEnabled
               ? evaluateDirectChatSafetyVetoShadowForExtraction({
                 ...shadowResult,
                 featureScope: "automatic_direct_chat",
               })
               : undefined;
             if (canaryEnabled) {
-              const canaryResult = applyDirectChatMemorySafetyVetoCanary({
+              canaryResult = applyDirectChatMemorySafetyVetoCanary({
                 claims: result.acceptedClaims,
                 bridgeShadow: shadowResult.bridgeShadow,
                 safetyEvaluation,
@@ -521,7 +549,27 @@ export function useChatMemoryExtraction({
         archiveStats.summaryCount += write.summaryWritten ? 1 : 0;
         archiveStats.rejectedCandidateCount += result.rejectedCandidateCount + canarySuppressedCount;
         totalExtracted += canaryFilteredAcceptedClaims.length;
-        await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
+        const cursorAdvanced = await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
+        if (longEvidenceEnabled && logicalActionId && longEvidenceBefore && shadowResult) {
+          const canonicalAfter = await readDirectChatMemoryCanonicalReadback(extractionScope).catch(() => undefined);
+          if (canonicalAfter) {
+            await observeDirectChatMemoryLongEvidenceRuntime({
+              scope: extractionScope,
+              extraction: result,
+              admissionShadow: shadowResult,
+              safetyEvaluation,
+              canaryResult,
+              acceptedClaimsBefore: result.acceptedClaims,
+              filteredAcceptedClaims: canaryFilteredAcceptedClaims,
+              canonicalBefore: longEvidenceBefore,
+              canonicalAfter,
+              canonicalWriteSucceeded: write.canonicalWritten,
+              cursorAdvanced,
+              logicalActionId,
+              extractionLatencyMs: extractionStartedAt === undefined ? undefined : Date.now() - extractionStartedAt,
+            });
+          }
+        }
       }
       lastArchiveFeedbackRef.current = { ...archiveStats };
       lastRunDiagnosticsRef.current = {

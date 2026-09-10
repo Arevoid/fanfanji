@@ -20,7 +20,9 @@ export interface DirectChatMemoryAdmissionTestResult {
 }
 
 export interface DirectChatMemoryAdmissionTestApi {
-  extractNow: () => Promise<DirectChatMemoryAdmissionTestResult>;
+  extractNow: (options?: {
+    persistenceMode?: "observation_only" | "production_equivalent_write";
+  }) => Promise<DirectChatMemoryAdmissionTestResult>;
   /** Dev-only, token-gated writer probe for an isolated synthetic fixture. */
   extractSyntheticCanaryWrite?: (token: string) => Promise<DirectChatMemoryAdmissionTestResult>;
 }
