@@ -316,6 +316,8 @@ const shadowSource = readFileSync(new URL("../src/features/chat/services/directC
 assert.match(shadowSource, /observeDirectChatMemoryAdmissionBridgeShadow/u);
 const hookSource = readFileSync(new URL("../src/features/chat/hooks/useChatMemoryExtraction.ts", import.meta.url), "utf8");
 assert.match(hookSource, /manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled/u);
-assert.doesNotMatch(hookSource, /MemoryExtractor.*bridge|bridge.*commitMemoryWriteBundle/isu);
+assert.doesNotMatch(hookSource, /MemoryExtractor.*bridge/isu);
+assert.match(hookSource, /applyDirectChatMemorySafetyVetoCanary[\s\S]*canaryFilteredAcceptedClaims/u);
+assert.doesNotMatch(hookSource, /commitMemoryWriteBundle\(\{\s*claims:\s*shadowResult\.bridgeShadow/isu);
 
 console.log("PASS Stage 4D-10C synthetic production-shaped bridge shadow integration, metadata projection, veto metrics, privacy, fail-open and legacy equivalence contract");
