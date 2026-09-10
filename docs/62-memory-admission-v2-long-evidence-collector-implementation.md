@@ -40,18 +40,20 @@ re-reads or writes canonical state, and it cannot alter `acceptedClaims` or
 
 Collection is off by default. A Vite development build installs the optional
 `globalThis.__fanfanjiMemoryAdmissionLongEvidence` API with `enable`, `disable`,
-`clear`, `count`, `exportJson`, and `summary`. The API is not installed in a
+`clear`, `count`, `exportJson`, `summary`, and the governed `createWindowToken`
+helper. The API is not installed in a
 production bundle. The exported configuration function accepts `explicitDebug`
 only for the Node test environment, so a production caller cannot turn on the
 collector through the test seam.
 
 An enable call always starts a fresh evidence session. `startWindow(token)` and
-`resumeWindow(token)` accept an explicit developer-held window token; the token
-is never exported or persisted. A formal window supplies the stable salt for
-cross-session scope/action fingerprints. Without an active window, records are
-dry-run observations. Disable ends collection but leaves records available for
-an explicit export; clear removes only records. Reload loses records and the
-active window, so resuming requires re-entering the same local token.
+`resumeWindow(token)` accept an explicit high-entropy developer-held window
+token; `createWindowToken()` delegates to the governed project ID utility. The
+token is never exported or persisted. A formal window supplies the stable salt
+for cross-session scope/action fingerprints. Without an active window, records
+are dry-run observations. Disable ends collection but leaves records available
+for an explicit export; clear removes only records. Reload loses records and
+the active window, so resuming requires re-entering the same local token.
 
 ## 5. Candidate/batch schema
 
@@ -97,7 +99,7 @@ never accepted into the record or export.
 ## 8. Scope fingerprint
 
 For formal collection, the four-part exact scope tuple is combined with a
-window-local manual token and a non-reversible FNV-style digest. Only
+window-local manual token and a bounded non-reversible digest. Only
 `scope-<opaque token>` is exported. The same tuple is stable across sessions in
 one window, while a changed tuple or a new window token produces a different
 token. Dry-run records use only a session-local salt and are never formal
@@ -107,11 +109,15 @@ appear in a record.
 ## 9. Session ordinal
 
 `sessionOrdinal` is a process-local monotonic ordinal created by an explicit
-collector enable cycle. It is not an account/session identifier and is never
-persisted. A window has its own opaque ordinal and lifecycle: start/create,
-resume with the same manually held token, session start/end, explicit export,
-finish, and clear/destroy. Clearing window identity removes only collector
-state; it never touches chat, Memory, Ledger, Canary, or character data.
+collector enable cycle. Reload/dev restart can reset it, so it is display/debug
+metadata only and is never used for authoritative session counts. Each session
+gets a fresh nonce and reviewer-safe `sessionFingerprint`; repeated exports of
+that session retain the same fingerprint, while a resumed session gets a new
+one. A window has its own display ordinal and authoritative `windowFingerprint`.
+The lifecycle is start/create, resume with the same manually held token, session
+start/end, explicit export, finish, and clear/destroy. Clearing window identity
+removes only collector state; it never touches chat, Memory, Ledger, Canary, or
+character data.
 
 ## 10. Logical accounting integration
 
@@ -126,6 +132,14 @@ action is marked `accounting_conflict` in summary and excluded rather than
 resolved by max/min/last-wins. Rows without an ID or with unknown shape remain
 unknown. No timestamp, model, row position, scope, or reason-text heuristic is
 used.
+
+Each candidate observation also has an opaque `evidenceRecordFingerprint`,
+derived from the window/session identities, batch fingerprint, and a bounded
+candidate-local ordinal. `combineLongEvidenceExports()` deduplicates this key
+before counting suppressions/controls, sessions, scopes, and batches. It
+requires one `windowFingerprint`; mixed-window exports are rejected. Duplicate
+ordinals never merge sessions because `sessionFingerprint`, not ordinal, is
+authoritative.
 
 ## 11. Controls
 
@@ -147,7 +161,7 @@ change is attempted.
 ## 13. Privacy
 
 The record contains only allowlisted enums, booleans, bounded counts, opaque
-fingerprints, a coarse UTC hour bucket, and latency buckets. Validator/Bridge
+fingerprints, a coarse UTC hour bucket, a coarse UTC `evidenceDay`, and latency buckets. Validator/Bridge
 codes are normalized to allowlists and unknown values become `unknown`. The
 export cannot contain Prompt, response, transcript, statement, raw lineage,
 source references, API keys, Authorization, stack traces, or raw Provider
@@ -181,6 +195,11 @@ distinct scope fingerprints, privacy sanitization, all-veto and partial
 suppression, controls, fail-open/invalid/incident states, the
 `v2_model_native` gate, linked fallback and normal accounting, unknown legacy
 rows, no Provider/Prompt invocation, input immutability, and export summaries.
+`scripts/memoryAdmissionFormalWindowIdentity.test.ts` covers stable window and
+session identities, reload/resume, duplicate ordinals, observation fingerprints,
+multi-export deduplication, mixed-window rejection, malformed exports,
+accounting conflicts, safety incidents, deterministic day calculation, privacy,
+and dry-run exclusion.
 
 ## 17. Dry-run
 
@@ -194,7 +213,7 @@ canonical state is written.
 
 ## 18. Formal collection exclusion
 
-Dry-run records have no formal `windowOrdinal` and are explicitly excluded from
+Dry-run records have no formal `windowFingerprint` and are explicitly excluded from
 the future long-window minimums. This stage does not claim five sessions, ten
 valid suppressions, three scopes, seven days, or twenty batches. A separately
 approved Stage 4D-11M may start bounded local collection; it must start a new

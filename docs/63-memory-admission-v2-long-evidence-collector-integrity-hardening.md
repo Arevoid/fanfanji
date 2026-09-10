@@ -22,7 +22,7 @@ The collector keeps these units separate:
 
 | Unit | Definition | Deduplication |
 | --- | --- | --- |
-| session | one explicit `enable()` cycle | distinct `sessionOrdinal` |
+| session | one explicit `enable()` cycle | distinct authoritative `sessionFingerprint` |
 | scope | one exact character/relation/identity/conversation tuple | stable window-local `scopeFingerprint` |
 | batch/logical action | one extraction operation | `logicalActionFingerprint`/`batchActionFingerprint` |
 | suppression/control | one candidate outcome | candidate records; no accounting dedup |
@@ -89,11 +89,11 @@ or production identifier.
 
 ## 10. Session semantics
 
-Every explicit enable cycle has one new `sessionOrdinal`. Re-enabling inside an
-active formal window starts another session but preserves that window's records
-so the same scope/action can be recognized across sessions. A dry-run enable
-without an active window starts an isolated session and has no formal
-`windowOrdinal`.
+Every explicit enable cycle has one new process-local `sessionOrdinal` and a
+fresh authoritative `sessionFingerprint`. Re-enabling inside an active formal
+window starts another session but preserves that window's records so the same
+scope/action can be recognized across sessions. A dry-run enable without an
+active window starts an isolated session and has no formal `windowFingerprint`.
 
 ## 11. Batch semantics
 
@@ -140,9 +140,10 @@ count as scopes.
 
 ## 17. Session counting
 
-`sessionCount` counts distinct session ordinals in retained observations;
-`formalSessionCount` counts those represented in the active/former formal
-window. Ten candidate records from one session therefore count as one session.
+`sessionCount` counts distinct process-local session ordinals in the retained
+debug view; `formalSessionCount` counts distinct authoritative
+`sessionFingerprint` values represented by valid formal records. Ten candidate
+records from one session therefore count as one session.
 
 ## 18. Summary contract
 
@@ -214,3 +215,42 @@ collection. It must create a fresh explicit window token, preserve the existing
 cancelled-plan-only Canary reason, export manually, and stop on any zero-error
 invariant breach.
 
+## 27. Stage 4D-11M identity/readiness addendum
+
+The original ordinal descriptions above are superseded for formal review by
+the following identity contract. `sessionOrdinal` and `windowOrdinal` are
+process-local display/debug values only. A reload or development restart can
+reset either counter, and a resumed window can therefore contain duplicate
+ordinal values. They are never used to merge or count formal sessions/windows.
+
+`createDirectChatMemoryLongEvidenceWindowToken()` delegates to the governed
+project `createId()` utility. The explicit developer-held token must be
+high-entropy; the collector rejects short/low-diversity tokens. A deterministic
+reviewer-safe `windowFingerprint` is retained/exported, while the raw token is
+kept only in memory and is never sent to Provider, Prompt, Memory, Ledger, user
+data, or a network endpoint.
+
+Each formal session receives a fresh in-memory nonce and a
+`sessionFingerprint = digest(windowToken + separator + sessionNonce)`. The
+fingerprint is stable for every export of that session, differs after resume or
+reload, and is the authoritative session key. The nonce and token never appear
+in an export. A candidate observation gets an `evidenceRecordFingerprint` from
+window/session identity, batch/action fingerprint, and a bounded candidate-local
+ordinal; candidate text and raw IDs are not identity inputs.
+
+`combineLongEvidenceExports()` is a pure offline helper. It validates schema and
+privacy-safe records, rejects mixed `windowFingerprint` values, deduplicates
+`evidenceRecordFingerprint`, counts distinct authoritative session/scope/batch
+fingerprints, preserves safety incidents and accounting conflicts, and reports
+malformed exports/records. Repeated exports therefore cannot inflate sessions,
+batches, suppressions, or controls. Formal `calendarDaySpan` is the number of
+distinct UTC `evidenceDay` values represented; `firstEvidenceDay` and
+`lastEvidenceDay` remain visible for review. Empty sessions have no record and
+do not count.
+
+The dry readiness protocol is: start token → session A export/end → simulate
+reload → resume the same token → session B export/end → combine (one window,
+two sessions); add a second exact scope (two scopes); repeat export A (no
+increase); combine an export from a different token (reject). This is synthetic
+verification only. Formal collection remains `NOT_STARTED`; no sample, day,
+batch, suppression, or scope quota is claimed by this addendum.

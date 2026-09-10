@@ -61,6 +61,11 @@ The minimum is not relaxed:
 4. At least **7 calendar days or 20 automatic extraction batches, whichever
    takes longer**.
 
+The collector records `evidenceDay` as coarse UTC `YYYY-MM-DD`. Review uses
+`firstEvidenceDay`, `lastEvidenceDay`, and `calendarDaySpan`, where
+`calendarDaySpan` is the number of distinct UTC calendar dates represented
+(days with no evidence do not count). Repeated exports do not add dates.
+
 The window is complete only when all four conditions hold and every zero-error
 threshold in section 9 remains zero. A shorter run can be useful for debugging,
 but it is `LONG_EVIDENCE_COLLECTION_INSUFFICIENT` and cannot support a
@@ -76,9 +81,14 @@ coarse buckets):
 type LongEvidenceRecord = {
   schemaVersion: "memory-admission-v2-long-evidence-1";
   timeBucket: string; // coarse UTC bucket, not an exact event timestamp
+  evidenceDay: string; // coarse UTC calendar day, YYYY-MM-DD
   featureScope: "direct_chat_memory_extraction";
-  sessionOrdinal: number; // opaque ordinal within the exported review set
-  windowOrdinal?: number; // formal-window ordinal; absent for dry-run records
+  sessionOrdinal: number; // process-local display/debug ordinal only
+  windowOrdinal?: number; // formal-window display/debug ordinal only
+  windowFingerprint: string | null; // authoritative formal-window key
+  sessionFingerprint: string; // authoritative formal-session key
+  evidenceRecordFingerprint: string; // suppression/control observation key
+  observationOrdinal: number; // bounded candidate-local ordinal, not a raw ID
   scopeFingerprint: string; // non-reversible, reviewer-safe scope token
   logicalActionFingerprint?: string; // salted action token; never raw logicalActionId
   batchActionFingerprint?: string; // extraction-level deduplication token
@@ -238,13 +248,21 @@ not a quota to generate artificial traffic.
 ## 6. Session, window, and relationship/conversation counting
 
 The safest first collection mechanism is manual export and review. A session is
-one explicit developer/local evidence run with a fresh in-memory session ordinal,
-a clear boundary, and a recorded start/end coarse time bucket. A formal window
-uses an explicit developer-held `windowReviewToken`; its salted digest provides
-stable scope/action fingerprints across sessions in that window. The token is
-never exported or persisted. Reloading loses the in-memory collector state, so
-the developer must explicitly re-enter the same token to resume the window.
-Dry-run records have no `windowOrdinal` and cannot enter formal counts.
+one explicit developer/local evidence run with a fresh random nonce and a clear
+boundary. `sessionOrdinal` is process-local display/debug metadata: reload or a
+dev restart can reset it, so duplicate ordinals must never merge sessions. The
+authoritative `sessionFingerprint` is derived from the developer-held window
+token plus the per-session nonce and is stable for that session's exports.
+
+A formal window uses an explicit high-entropy developer-held
+`windowReviewToken`; `createDirectChatMemoryLongEvidenceWindowToken()` delegates
+to the governed project ID utility. Its reviewer-safe `windowFingerprint` is
+stable for the same token and is the only authoritative window key. The raw
+token/nonce is never exported, persisted, sent to a Provider, or included in
+Prompt, Memory, Ledger, or user data. Reloading loses in-memory state, so the
+developer explicitly re-enters the same token to resume the window and start a
+new session fingerprint. Dry-run records have `windowFingerprint = null` and
+cannot enter formal counts.
 
 Three distinct relationships/conversations means three distinct canonical exact
 scope tuples (character, identity/relationship, and conversation) that each
@@ -256,9 +274,13 @@ distinct.
 
 Because collector records remain page-memory only, the reviewer must explicitly
 resume a window with its manually held token after reload and combine the
-bounded, sanitized exports offline. Session count is distinct
-`sessionOrdinal`; exact-scope count is distinct stable `scopeFingerprint` among
-valid, privacy-safe formal records. No automatic cross-window analytics is
+bounded, sanitized exports offline with `combineLongEvidenceExports()`. Session
+count is distinct valid `sessionFingerprint`; window count is distinct
+`windowFingerprint`; exact-scope count is distinct stable `scopeFingerprint`
+among valid, privacy-safe formal records. `batchActionFingerprint` is the
+logical extraction/batch key, while `evidenceRecordFingerprint` deduplicates
+candidate observations and controls across overlapping exports. Mixed windows
+are rejected rather than joined. No automatic cross-window analytics is
 authorized in this stage.
 
 If a future team needs automatic multi-day counting, the smallest safe design
