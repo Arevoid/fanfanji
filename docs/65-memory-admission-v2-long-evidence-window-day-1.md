@@ -78,3 +78,113 @@ observation seam in `directChatMemoryLongEvidenceRuntime.ts`; it does not start
 formal Day 1, create a formal token, or alter this document's prior evidence
 counts. The R1 seam must be reviewed in its own report before any bounded local
 window is opened.
+
+## R2 Actual Day 1
+
+This section records the first bounded **formal** local window after the R1
+runtime seam was validated. The historical blocked attempt above is retained
+unchanged; this section does not claim long-evidence completion or authorize
+Phase 2.
+
+### Run boundary and identity
+
+- Starting refactor HEAD: `d4d9a1ce05f5510b7a66956d78263e11546e0bb3`.
+- Formal window start: this bounded local run on UTC evidence day
+  `2026-09-10`; the collector intentionally retains only the UTC evidence day
+  and reviewer fingerprints, not a wall-clock start timestamp.
+- Stable original repository remained at `f515f7408cfe19da145f15a8ddffceae06e608d`.
+- A fresh developer-held window token was created in the local dev page and
+  was never exported, persisted, or logged. Only its reviewer fingerprint was
+  retained in evidence: `window-8817672802574c9a`.
+- One formal session produced one authoritative observation. Its sanitized
+  fingerprint is `session-1df2c8bbdcd05b15`.
+- The run used only the isolated `Stage4D3 临时样本` automatic one-to-one
+  Direct Chat fixture. No group, manual, diary, Moments, phone, migration,
+  backfill, production user data, or backup was used.
+
+### Actual bounded activity
+
+- One short synthetic local test turn was sent through the real Provider so
+  the fixture had a real message boundary; the UI returned to its normal send
+  state with two ordered assistant bubbles and no duplicate user/reply.
+- One formal `extractNow()` batch then ran through the real Provider extraction
+  path and the existing fallback. No mock DTO, handcrafted bridge result, or
+  fake canonical readback was used.
+- Formal batch identity: `batch-b9c40c91`; evidence identity:
+  `evidence-901c1008d2439e06`.
+- The natural result was a control (`VALID_CONTROL`), not a suppression:
+  validator `deny_veto`, bridge `route`, correlation `shared_unique`, shared
+  lineage, exact scope, trusted provenance, and `v2_model_native` metadata.
+  The only enabled Canary reason remained
+  `SAFETY_VETO_CANCELLED_PLAN`; no synthetic or forced suppression was added.
+
+### Sanitized Day 1 checkpoint
+
+The following is the saved metadata-only checkpoint. It contains no prompt,
+message, candidate statement, response, raw identifier, token, API key,
+Authorization header, or provider response body.
+
+```json
+{
+  "windowFingerprint": "window-8817672802574c9a",
+  "formalSessionCount": 1,
+  "distinctExactScopeCount": 1,
+  "extractionBatchCount": 1,
+  "validSuppressionCount": 0,
+  "validControlCount": 1,
+  "failOpenCount": 0,
+  "invalidSampleCount": 0,
+  "safetyIncidentCount": 0,
+  "logicalActionTotal": 1,
+  "physicalAttemptTotal": 2,
+  "accountingConflictCount": 0,
+  "unknownGroupingCount": 0,
+  "firstEvidenceDay": "2026-09-10",
+  "lastEvidenceDay": "2026-09-10",
+  "distinctEvidenceDayCount": 1
+}
+```
+
+The formal record had `exactScope=true`, `canonicalWriteCountDelta=1`,
+`projectionDelta=1`, `summaryDelta=0` (no new summary row was required),
+`survivingCanonicalWritesObserved=true`, `cursorAdvanced=true`,
+`cursorLoop=false`, `replayLoop=false`, `v2OnlyWrite=false`,
+`blockingMaterialUserRegression=false`, `promptDelta=0`, and
+`canaryProviderDelta=0`. No vetoed candidate existed, so vetoed canonical,
+summary, and projection absence were not applicable; no unauthorized write
+was observed.
+
+### Accounting and review
+
+The formal batch was represented by two Ledger rows under one real
+`logicalActionId`, each with one physical provider attempt (one failed default
+model row followed by one successful fallback row). The authoritative formal
+accounting is therefore logical `1`, physical `2`, with one fallback batch;
+the collector does not expose raw action IDs.
+
+Export A was combined with an identical second export using
+`combineLongEvidenceExports()`. The formal-data review returned
+`status=ok`, `windowCount=1`, `mixed_window=false`, `malformedExportCount=0`,
+`malformedRecordCount=0`, `recordCount=2`, `dedupedRecordCount=1`, one formal
+session, one batch, one control, zero suppressions, zero accounting conflicts,
+zero unknown groupings, zero safety incidents, and one UTC evidence day.
+
+### Shutdown and readiness
+
+After the checkpoint, the collector and Canary were disabled. The formal
+window identity remains active in memory (`windowState=active`) and the raw
+developer token is retained only in the current automation session for a
+future `resumeWindow(token)`; the window was not finished or destroyed.
+
+All Day 1 safety thresholds are zero: wrong/cross-scope suppression,
+unauthorized or V2-only write, legacy-reject write, cursor/replay loop,
+privacy violation, Canary provider delta, prompt delta, and blocking/material
+user regression. The appropriate readiness is therefore
+`LONG_EVIDENCE_WINDOW_ACTIVE_HEALTHY` for this bounded Day 1 window only.
+The long-term minimum (5 sessions, 10 suppressions, 3 scopes, 7 days or 20
+batches) is intentionally not met and is not a failure.
+
+The next step, if separately approved, is **Stage 4D-11O — Long-Evidence
+Window Continuation** using the same developer-held token, a new session
+fingerprint, real elapsed days, and bounded checkpoints. Do not run Day 2 or
+enter Phase 2 automatically.
