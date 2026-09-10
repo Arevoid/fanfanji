@@ -1,6 +1,9 @@
 # Stage 4D-11I — Long Evidence Window & Ledger Accounting Design
 
-Status: `LONG_EVIDENCE_ACCOUNTING_UNCLEAR`
+Historical Stage 4D-11I status: `LONG_EVIDENCE_ACCOUNTING_UNCLEAR`.
+After the Stage 4D-11J lineage fix and verification, the accounting dependency
+is `ACCOUNTING_LINEAGE_FIXED_VALIDATED`; the long evidence window itself remains
+uncollected and Phase 2 remains unauthorized.
 
 This document is a design and audit artifact only. It does not authorize a
 long-window collection run, a cohort, positive V2 write authority, a Provider
