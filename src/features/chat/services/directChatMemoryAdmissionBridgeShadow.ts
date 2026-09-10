@@ -9,7 +9,15 @@ import {
   type MemoryAdmissionDecision,
   type MemoryAdmissionState,
 } from "../../../domain/memory/memoryAdmission";
-import type { MemoryCandidate, MemoryCandidateKind } from "../../../domain/memory/memoryCandidate";
+import type {
+  MemoryCandidate,
+  MemoryCandidateKind,
+  MemoryCandidateDurability,
+  MemoryCandidateEpistemicStatus,
+  MemoryCandidatePlanLifecycle,
+  MemoryCandidateAuthorityRole,
+  MemoryCandidateSemanticFacet,
+} from "../../../domain/memory/memoryCandidate";
 import type {
   MemoryExtractionCandidateDecision,
   MemoryExtractionRejectionDiagnostic,
@@ -20,7 +28,9 @@ import { buildMemoryShadowCorrelationKey } from "../../../domain/memory/memorySh
 import {
   classifyLegacyAdmissionSemantics,
   classifyV2AdmissionSemantics,
+  classifyAdmissionComparisonMismatch,
   type MemoryAdmissionComparisonAuthorityClass,
+  type MemoryAdmissionComparisonMismatchClass,
   type MemoryAdmissionComparisonSemanticKind,
 } from "./directChatMemoryAdmissionComparison";
 import {
@@ -31,6 +41,7 @@ import {
   type DirectChatMemoryBridgeScope,
   type DirectChatMemoryBridgeState,
   type DirectChatMemoryCorrelationState,
+  type DirectChatMemoryBridgePolicyDimensions,
   type DirectChatMemoryIdentityDiagnostics,
   type DirectChatMemoryPairCandidateMatrixEntry,
   type DirectChatMemoryLegacyCandidate,
@@ -64,8 +75,55 @@ export interface DirectChatMemoryBridgeShadowObservation {
   wouldReview: boolean;
   wouldReject: boolean;
   wouldRoute: boolean;
+  /**
+   * Metadata-only anatomy for a paired observation. It is intentionally
+   * additive and never feeds matcher or bridge decisions.
+   */
+  conflictAnatomy?: DirectChatMemoryConflictAnatomy;
   legacyIdentity?: DirectChatMemoryIdentityDiagnostics;
   v2Identity?: DirectChatMemoryIdentityDiagnostics;
+}
+
+export interface DirectChatMemoryConflictAnatomy {
+  legacy: {
+    semanticKind: MemoryAdmissionComparisonSemanticKind;
+    claimKind?: KnowledgeKind;
+    truthStatus?: KnowledgeClaim["truthStatus"];
+    temporalStatus: TemporalStatus;
+    epistemicProjection: MemoryCandidateEpistemicStatus;
+    durabilityProjection: MemoryCandidateDurability;
+    planLifecycleProjection: MemoryCandidatePlanLifecycle;
+    resolvedAuthorityRole: MemoryCandidateAuthorityRole;
+    metadataSource: DirectChatMemoryBridgeShadowMetadataSource;
+    actorTargetShape: DirectChatMemoryIdentityDiagnostics["actorTargetShape"];
+  };
+  v2: {
+    candidateKind: MemoryCandidateKind;
+    semanticFacet?: MemoryCandidateSemanticFacet;
+    semanticKind: MemoryAdmissionComparisonSemanticKind;
+    epistemicStatus: MemoryCandidateEpistemicStatus;
+    durability: MemoryCandidateDurability;
+    planLifecycle: MemoryCandidatePlanLifecycle;
+    resolvedAuthorityRole: MemoryCandidateAuthorityRole;
+    admissionState: MemoryAdmissionState;
+    admissionReason: MemoryAdmissionDecision["reason"];
+    metadataSource: DirectChatMemoryBridgeShadowMetadataSource;
+    actorTargetShape: DirectChatMemoryIdentityDiagnostics["actorTargetShape"];
+  };
+  comparison: {
+    semanticCompatible: boolean;
+    epistemicConflict: boolean;
+    durabilityConflict: boolean;
+    lifecycleConflict: boolean;
+    authorityConflict: boolean;
+    actorTargetConflict: boolean;
+    temporalConflict: boolean;
+    conflictFields: readonly (keyof DirectChatMemoryBridgePolicyDimensions)[];
+    unsafe: boolean;
+    mismatchClass: MemoryAdmissionComparisonMismatchClass;
+    bridgeState: DirectChatMemoryBridgeState;
+    bridgeReason: DirectChatMemoryBridgeReason;
+  };
 }
 
 export interface DirectChatMemoryBridgeShadowMetrics {
@@ -417,6 +475,85 @@ function v2MetadataSource(candidate: MemoryCandidate): DirectChatMemoryBridgeSha
   return "unknown";
 }
 
+function buildConflictAnatomy(
+  match: ReturnType<typeof matchDirectChatMemoryCandidates>["matches"][number],
+  decision: ReturnType<typeof decideDirectChatMemoryBridge>,
+): DirectChatMemoryConflictAnatomy | undefined {
+  const legacy = match.legacy[0];
+  const v2 = match.v2[0];
+  if (!legacy || !v2) return undefined;
+
+  const legacyComparison = classifyLegacyAdmissionSemantics({
+    decision: legacy.diagnostic.decision,
+    candidateKind: legacy.candidateKind,
+    truthStatus: legacy.truthStatus,
+  }, legacy.claim);
+  const v2Comparison = classifyV2AdmissionSemantics(v2.candidate, v2.decision);
+  const legacyPolicy = legacy.policy;
+  const v2Policy = {
+    epistemicStatus: v2.candidate.epistemicStatus || UNKNOWN,
+    durability: v2.candidate.durability || UNKNOWN,
+    planLifecycle: v2.candidate.planLifecycle || UNKNOWN,
+    resolvedAuthorityRole: v2.candidate.resolvedAuthorityRole || UNKNOWN,
+  } satisfies DirectChatMemoryBridgePolicyDimensions;
+  const fields = match.policyConflict?.fields || [];
+  const hasConflict = (field: keyof DirectChatMemoryBridgePolicyDimensions): boolean => fields.includes(field);
+  const actorTargetConflict = Boolean(
+    legacy.provenance.actorId
+      && v2.candidate.provenance.actorId
+      && legacy.provenance.actorId !== v2.candidate.provenance.actorId,
+  ) || Boolean(
+    legacy.provenance.targetId
+      && v2.candidate.provenance.targetId
+      && legacy.provenance.targetId !== v2.candidate.provenance.targetId,
+  );
+  const temporalConflict = legacy.temporalStatus !== "unknown"
+    && v2.candidate.temporal.status !== "unknown"
+    && legacy.temporalStatus !== v2.candidate.temporal.status;
+
+  return {
+    legacy: {
+      semanticKind: legacyComparison.semanticKind,
+      ...(legacy.claim?.kind ? { claimKind: legacy.claim.kind } : {}),
+      ...(legacy.truthStatus ? { truthStatus: legacy.truthStatus } : {}),
+      temporalStatus: legacy.temporalStatus,
+      epistemicProjection: legacyPolicy.epistemicStatus,
+      durabilityProjection: legacyPolicy.durability,
+      planLifecycleProjection: legacyPolicy.planLifecycle,
+      resolvedAuthorityRole: legacyPolicy.resolvedAuthorityRole,
+      metadataSource: policyForLegacy(legacy.claim, legacySemanticKindForCandidate(legacy)).source,
+      actorTargetShape: match.legacyIdentity?.actorTargetShape || "none",
+    },
+    v2: {
+      candidateKind: v2.candidate.candidateKind,
+      ...(v2.candidate.semanticFacet ? { semanticFacet: v2.candidate.semanticFacet } : {}),
+      semanticKind: v2Comparison.semanticKind,
+      epistemicStatus: v2Policy.epistemicStatus,
+      durability: v2Policy.durability,
+      planLifecycle: v2Policy.planLifecycle,
+      resolvedAuthorityRole: v2Policy.resolvedAuthorityRole,
+      admissionState: v2.decision.state,
+      admissionReason: v2.decision.reason,
+      metadataSource: v2MetadataSource(v2.candidate),
+      actorTargetShape: match.v2Identity?.actorTargetShape || "none",
+    },
+    comparison: {
+      semanticCompatible: match.legacyIdentity?.semanticCompatible ?? true,
+      epistemicConflict: hasConflict("epistemicStatus"),
+      durabilityConflict: hasConflict("durability"),
+      lifecycleConflict: hasConflict("planLifecycle"),
+      authorityConflict: hasConflict("resolvedAuthorityRole"),
+      actorTargetConflict,
+      temporalConflict,
+      conflictFields: fields,
+      unsafe: Boolean(match.policyConflict?.unsafe),
+      mismatchClass: classifyAdmissionComparisonMismatch(legacyComparison, v2Comparison),
+      bridgeState: decision.state,
+      bridgeReason: decision.reason,
+    },
+  };
+}
+
 function shadowObservation(
   match: ReturnType<typeof matchDirectChatMemoryCandidates>["matches"][number],
   decision: ReturnType<typeof decideDirectChatMemoryBridge>,
@@ -451,6 +588,7 @@ function shadowObservation(
     wouldReview: decision.state === "review",
     wouldReject: decision.state === "reject",
     wouldRoute: decision.state === "route",
+    ...(buildConflictAnatomy(match, decision) ? { conflictAnatomy: buildConflictAnatomy(match, decision) } : {}),
     ...(match.legacyIdentity ? { legacyIdentity: match.legacyIdentity } : {}),
     ...(match.v2Identity ? { v2Identity: match.v2Identity } : {}),
   };

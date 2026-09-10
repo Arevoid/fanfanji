@@ -162,6 +162,12 @@ const subjectiveConflict = oneBridgeObservation(observe({ claims: [objectiveClai
 assert.equal(subjectiveConflict.bridgeCorrelation, "conflict");
 assert.equal(subjectiveConflict.bridgeState, "safety_veto");
 assert.equal(subjectiveConflict.bridgeReason, "authority_conflict");
+assert.equal(subjectiveConflict.conflictAnatomy?.legacy.truthStatus, "confirmed");
+assert.equal(subjectiveConflict.conflictAnatomy?.legacy.durabilityProjection, "unknown");
+assert.equal(subjectiveConflict.conflictAnatomy?.v2.epistemicStatus, "subjective");
+assert.equal(subjectiveConflict.conflictAnatomy?.comparison.authorityConflict, true);
+assert.equal(subjectiveConflict.conflictAnatomy?.comparison.unsafe, true);
+assert.doesNotMatch(JSON.stringify(subjectiveConflict.conflictAnatomy), /statement|sourceMessageIds|candidateId|bridge-character|bridge-relation|bridge-user|bridge-conversation/u);
 
 // 7–8. Preference lacks legacy durability; stable reviews, temporary vetoes.
 const preference = claim("preference", { id: "preference", truthStatus: "asserted" });
