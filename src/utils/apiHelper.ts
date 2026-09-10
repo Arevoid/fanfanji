@@ -2,6 +2,8 @@
 
 import {
   buildKnowledgeExtractionPrompt,
+  hydrateRuntimeExtractionLineage,
+  normalizeKnowledgeExtractionLineageTransport,
   parseOrRepairKnowledgeExtractionOutput,
   parseMemoryExtractionCandidateV2Output,
   type ExtractedKnowledgeCandidatePayload,
@@ -675,6 +677,8 @@ async function apiExtractMemoriesImpl(params: {
   candidates?: ExtractedKnowledgeCandidatePayload[];
   structuredCandidatesV2?: import("../domain/memory/memoryExtractionSchema").MemoryExtractionCandidateV2[];
   v2MetadataPresent?: boolean;
+  /** Backend-only transient sidecar; hydrated into the parser WeakMap then discarded. */
+  runtimeLineageTransport?: import("../features/characterKnowledge/services/knowledgeExtractionProtocol").KnowledgeExtractionLineageTransport;
   error?: string;
 }> {
   const { ledger, purpose, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
@@ -700,6 +704,14 @@ async function apiExtractMemoriesImpl(params: {
           : {},
       )
       : undefined;
+    const backendCandidates = Array.isArray(data?.candidates) ? data.candidates : [];
+    const runtimeLineageTransport = normalizeKnowledgeExtractionLineageTransport(data?.runtimeLineageTransport);
+    if (runtimeLineageTransport) {
+      hydrateRuntimeExtractionLineage({
+        legacy: backendCandidates.filter((candidate: unknown): candidate is object => Boolean(candidate && typeof candidate === "object")),
+        v2: structuredCandidatesV2 || [],
+      }, runtimeLineageTransport);
+    }
     if (res.ok && (Array.isArray(data?.candidates) || structuredCandidatesV2?.length || data?.v2MetadataPresent === true)) {
       return {
         text: typeof data.text === "string" ? data.text : "",
@@ -778,6 +790,9 @@ async function apiExtractMemoriesImpl(params: {
         candidates: repaired.candidates,
         ...(repaired.structuredCandidatesV2.length ? { structuredCandidatesV2: repaired.structuredCandidatesV2 } : {}),
         ...(repaired.v2MetadataPresent ? { v2MetadataPresent: true } : {}),
+        ...(repaired.runtimeLineageTransport.legacy.length || repaired.runtimeLineageTransport.v2.length
+          ? { runtimeLineageTransport: repaired.runtimeLineageTransport }
+          : {}),
       };
     } catch (fallbackErr) {
       console.error("Direct extract memories fallback failed:", fallbackErr);

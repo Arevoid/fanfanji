@@ -486,6 +486,7 @@ ${historyText}
         candidates: repaired.candidates,
         structuredCandidatesV2: repaired.structuredCandidatesV2,
         v2MetadataPresent: repaired.v2MetadataPresent,
+        runtimeLineageTransport: repaired.runtimeLineageTransport,
         repaired: repaired.repaired,
       });
     } catch (error: any) {

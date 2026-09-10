@@ -124,6 +124,7 @@ export interface DirectChatMemoryIdentityDimensions {
 }
 
 export type DirectChatMemoryIdentityKnown = boolean | "unknown";
+export type DirectChatMemoryLineageStatus = "shared" | "partial" | "mismatch" | "absent";
 
 /** Metadata-only identity anatomy; values never contain source/scope IDs. */
 export interface DirectChatMemoryIdentityDiagnostics {
@@ -158,6 +159,7 @@ export interface DirectChatMemoryPairCandidateMatrixEntry {
   sameProducer: DirectChatMemoryIdentityKnown;
   sameSourceType: DirectChatMemoryIdentityKnown;
   sameTemporal: boolean;
+  lineageStatus: DirectChatMemoryLineageStatus;
 }
 
 export interface DirectChatMemoryPolicyConflict {
@@ -411,6 +413,17 @@ function sameDimension(left: string | undefined, right: string | undefined): Dir
   return left === right;
 }
 
+function lineageStatus(
+  left: DirectChatMemoryIdentityDimensions,
+  right: DirectChatMemoryIdentityDimensions,
+): DirectChatMemoryLineageStatus {
+  const leftPresent = Boolean(left.runtimeLineageId);
+  const rightPresent = Boolean(right.runtimeLineageId);
+  if (!leftPresent && !rightPresent) return "absent";
+  if (!leftPresent || !rightPresent) return "partial";
+  return left.runtimeLineageId === right.runtimeLineageId ? "shared" : "mismatch";
+}
+
 function sourceSubsetCompatible(
   left: DirectChatMemoryIdentityDimensions,
   right: DirectChatMemoryIdentityDimensions,
@@ -648,6 +661,7 @@ export function matchDirectChatMemoryCandidates(input: {
         sameProducer: sameDimension(left.producer, right.producer),
         sameSourceType: sameDimension(left.sourceType, right.sourceType),
         sameTemporal: left.temporalStatus === right.temporalStatus,
+        lineageStatus: lineageStatus(left, right),
       });
     });
   });

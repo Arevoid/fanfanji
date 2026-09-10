@@ -244,7 +244,13 @@ export default {
             ? "你是结构化记忆修复器。只输出使用本次 M# source refs 且可验证的 JSONL，不要解释。"
             : "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。", 0.2)),
         });
-        return json({ text: repaired.text, items: repaired.candidates, candidates: repaired.candidates, repaired: repaired.repaired });
+        return json({
+          text: repaired.text,
+          items: repaired.candidates,
+          candidates: repaired.candidates,
+          runtimeLineageTransport: repaired.runtimeLineageTransport,
+          repaired: repaired.repaired,
+        });
       } catch (error) { return textErrorResponse(error, "记忆提取失败。"); }
     }
 

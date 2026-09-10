@@ -108,6 +108,88 @@ export interface ParsedKnowledgeExtractionOutput {
   structuredCandidatesV2: MemoryExtractionCandidateV2[];
   /** A JSON candidate carried V2 metadata, even when that metadata was invalid. */
   v2MetadataPresent: boolean;
+  /**
+   * Transient backend-boundary sidecar. Ordinals only hydrate parser-owned
+   * lineage on the corresponding projection; they are never semantic pairs.
+   */
+  runtimeLineageTransport: KnowledgeExtractionLineageTransport;
+}
+
+export interface KnowledgeExtractionLineageTransportEntry {
+  ordinal: number;
+  runtimeLineage: string;
+}
+
+export interface KnowledgeExtractionLineageTransport {
+  legacy: KnowledgeExtractionLineageTransportEntry[];
+  v2: KnowledgeExtractionLineageTransportEntry[];
+}
+
+const MAX_LINEAGE_TRANSPORT_ENTRIES = 64;
+
+function buildRuntimeLineageTransport(
+  projections: readonly { legacy: ExtractedKnowledgeCandidatePayload | undefined; v2: MemoryExtractionCandidateV2 | undefined }[],
+): KnowledgeExtractionLineageTransport {
+  const legacy: KnowledgeExtractionLineageTransportEntry[] = [];
+  const v2: KnowledgeExtractionLineageTransportEntry[] = [];
+  projections.forEach((projection) => {
+    if (projection.legacy && legacy.length < MAX_LINEAGE_TRANSPORT_ENTRIES) {
+      const runtimeLineage = getRuntimeExtractionLineage(projection.legacy);
+      if (runtimeLineage) legacy.push({ ordinal: legacy.length, runtimeLineage });
+    }
+    if (projection.v2 && v2.length < MAX_LINEAGE_TRANSPORT_ENTRIES) {
+      const runtimeLineage = getRuntimeExtractionLineage(projection.v2);
+      if (runtimeLineage) v2.push({ ordinal: v2.length, runtimeLineage });
+    }
+  });
+  return { legacy, v2 };
+}
+
+function isLineageTransportEntry(value: unknown): value is KnowledgeExtractionLineageTransportEntry {
+  return isRecord(value)
+    && Number.isInteger(value.ordinal)
+    && (value.ordinal as number) >= 0
+    && (value.ordinal as number) < MAX_LINEAGE_TRANSPORT_ENTRIES
+    && nonEmpty(value.runtimeLineage)
+    && value.runtimeLineage.length <= 200;
+}
+
+export function normalizeKnowledgeExtractionLineageTransport(value: unknown): KnowledgeExtractionLineageTransport | undefined {
+  if (!isRecord(value)) return undefined;
+  const normalizeEntries = (entries: unknown): KnowledgeExtractionLineageTransportEntry[] => {
+    if (!Array.isArray(entries)) return [];
+    const seen = new Set<number>();
+    return entries
+      .filter(isLineageTransportEntry)
+      .filter((entry) => {
+        if (seen.has(entry.ordinal)) return false;
+        seen.add(entry.ordinal);
+        return true;
+      })
+      .slice(0, MAX_LINEAGE_TRANSPORT_ENTRIES)
+      .map((entry) => ({ ordinal: entry.ordinal, runtimeLineage: entry.runtimeLineage.trim() }));
+  };
+  const legacy = normalizeEntries(value.legacy);
+  const v2 = normalizeEntries(value.v2);
+  if (legacy.length === 0 && v2.length === 0) return undefined;
+  return { legacy, v2 };
+}
+
+/** Hydrate the private WeakMap after an additive DTO crossed JSON. */
+export function hydrateRuntimeExtractionLineage(input: {
+  legacy: readonly object[];
+  v2: readonly object[];
+}, transport: unknown): void {
+  const normalized = normalizeKnowledgeExtractionLineageTransport(transport);
+  if (!normalized) return;
+  normalized.legacy.forEach((entry) => {
+    const projection = input.legacy[entry.ordinal];
+    if (projection) runtimeLineageByProjection.set(projection, entry.runtimeLineage);
+  });
+  normalized.v2.forEach((entry) => {
+    const projection = input.v2[entry.ordinal];
+    if (projection) runtimeLineageByProjection.set(projection, entry.runtimeLineage);
+  });
 }
 
 /** Parse both projections from one response without duplicating candidate text. */
@@ -140,6 +222,7 @@ export function parseKnowledgeExtractionOutputWithV2(
     structuredCandidatesV2,
     v2MetadataPresent: rawValues.some((value) => Boolean(value && typeof value === "object" && !Array.isArray(value)
       && ("v2" in value || "schemaVersion" in value))),
+    runtimeLineageTransport: buildRuntimeLineageTransport(parsedProjections),
   };
 }
 
