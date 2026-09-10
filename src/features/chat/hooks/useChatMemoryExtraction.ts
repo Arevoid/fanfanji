@@ -24,9 +24,14 @@ import {
   recordDirectChatMemoryAdmissionShadowEvidence,
 } from "../services/directChatMemoryAdmissionShadowTelemetry";
 import {
+  configureDirectChatMemorySafetyVetoShadow,
   evaluateDirectChatSafetyVetoShadowForExtraction,
   isDirectChatMemorySafetyVetoShadowEnabled,
 } from "../services/directChatMemorySafetyVetoShadow";
+import {
+  applyDirectChatMemorySafetyVetoCanary,
+  isDirectChatMemorySafetyVetoCanaryEnabled,
+} from "../services/directChatMemorySafetyVetoCanary";
 
 type DirectScope = { characterId: string; relationId: string; userIdentityId: string; conversationId: string };
 
@@ -186,8 +191,19 @@ export function useChatMemoryExtraction({
         compatibilityCount: 0,
         rejectedCandidateCount: 0,
       };
+      const canaryEnabled = !activeCharacter.isGroupChat
+        && activeDirectScope !== undefined
+        && manualMessagesOverride === undefined
+        && isDirectChatMemorySafetyVetoCanaryEnabled();
+      if (canaryEnabled) {
+        // A developer/local Canary opt-in requires the existing fail-open
+        // Safety shadow to produce the same-operation validator result. This
+        // configuration is dev-gated and has no effect in production builds.
+        configureDirectChatMemorySafetyVetoShadow({ enabled: true });
+      }
       const admissionShadowEnabled = manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled();
-      const safetyShadowEnabled = manualMessagesOverride === undefined && isDirectChatMemorySafetyVetoShadowEnabled();
+      const safetyShadowEnabled = manualMessagesOverride === undefined
+        && (isDirectChatMemorySafetyVetoShadowEnabled() || canaryEnabled);
       const markArchiveProgress = async (lastMessage: Message) => {
         if (activeCharacter.isGroupChat) {
           if (onUpdateCharacter) {
@@ -322,12 +338,12 @@ export function useChatMemoryExtraction({
           scenario: "chat",
           // The controller supplies an explicit eligible batch for automatic
           // Direct Chat extraction; manual archive actions leave this off.
-          ...(manualMessagesOverride !== undefined || runOptions.enableV2Metadata
+          ...(manualMessagesOverride !== undefined || runOptions.enableV2Metadata || canaryEnabled
             ? { enableMemoryExtractionV2Shadow: true }
             : {}),
           // Stage 4D-2 observation derives a V2 candidate from this same
           // response without changing the extraction Prompt or Provider call.
-          ...(admissionShadowEnabled || safetyShadowEnabled
+          ...(admissionShadowEnabled || safetyShadowEnabled || canaryEnabled
             ? { enableAdmissionShadowObservation: true }
             : {}),
           apiKey: settings.apiKey,
@@ -355,7 +371,9 @@ export function useChatMemoryExtraction({
             + (result.shadowCandidatesV2?.length ?? result.acceptedClaims.length + result.rejectedCandidateCount),
           messageCount: unarchivedMessages.length,
         };
-        if (admissionShadowEnabled || safetyShadowEnabled) {
+        let canaryFilteredAcceptedClaims = result.acceptedClaims;
+        let canarySuppressedCount = 0;
+        if (admissionShadowEnabled || safetyShadowEnabled || canaryEnabled) {
           try {
             const shadowResult = observeDirectChatMemoryAdmissionShadow({
               extraction: result,
@@ -374,11 +392,20 @@ export function useChatMemoryExtraction({
                 evidenceOrigin: "real_runtime",
               });
             }
-            if (safetyShadowEnabled) {
-              evaluateDirectChatSafetyVetoShadowForExtraction({
+            const safetyEvaluation = safetyShadowEnabled
+              ? evaluateDirectChatSafetyVetoShadowForExtraction({
                 ...shadowResult,
                 featureScope: "automatic_direct_chat",
+              })
+              : undefined;
+            if (canaryEnabled) {
+              const canaryResult = applyDirectChatMemorySafetyVetoCanary({
+                claims: result.acceptedClaims,
+                bridgeShadow: shadowResult.bridgeShadow,
+                safetyEvaluation,
               });
+              canaryFilteredAcceptedClaims = canaryResult.filteredAcceptedClaims;
+              canarySuppressedCount = canaryResult.suppressed;
             }
           } catch {
             // Both shadow paths are fail-open and cannot affect the established
@@ -389,22 +416,22 @@ export function useChatMemoryExtraction({
           // The real Provider/parser/source-binding/Shadow path has completed,
           // but this explicit dev run must not write canonical claims,
           // summaries, projection jobs, or archive cursors.
-          archiveStats.acceptedTruthCount += result.acceptedClaims.length;
+          archiveStats.acceptedTruthCount += canaryFilteredAcceptedClaims.length;
           archiveStats.rejectedCandidateCount += result.rejectedCandidateCount;
-          totalExtracted += result.acceptedClaims.length;
+          totalExtracted += canaryFilteredAcceptedClaims.length;
           continue;
         }
-        let finalCanonicalClaims = result.acceptedClaims;
+        let finalCanonicalClaims = canaryFilteredAcceptedClaims;
         const isAutomaticDirectChat = manualMessagesOverride === undefined;
         let canonicalSnapshotAvailable = false;
         let finalCanonicalSnapshot: CanonicalMemoryCommitSnapshot | undefined;
         let extractedSummary: ConversationSummaryRecord | undefined;
         let enqueueResult: MemoryProjectionEnqueueResult | undefined;
-        let cutoverDecision: DirectChatSummaryCutoverDecision | undefined = isAutomaticDirectChat && result.acceptedClaims.length === 0
+        let cutoverDecision: DirectChatSummaryCutoverDecision | undefined = isAutomaticDirectChat && canaryFilteredAcceptedClaims.length === 0
           ? resolveDirectChatSummaryCutover({ automatic: true, canonicalSnapshotAvailable: true, zeroCandidates: true })
           : undefined;
         const write = await commitMemoryWriteBundle({
-          claims: result.acceptedClaims,
+          claims: canaryFilteredAcceptedClaims,
           buildSummary: () => {
             if (isAutomaticDirectChat && (!cutoverDecision || !cutoverDecision.writeSynchronousSummary)) {
               return undefined;
@@ -415,7 +442,7 @@ export function useChatMemoryExtraction({
               // Normal automatic Direct Chat uses the same exact-scope final
               // canonical snapshot as the durable projection. Manual archive
               // remains on its historical batch-local path.
-              claims: canonicalSnapshot?.activeClaims || result.acceptedClaims,
+              claims: canonicalSnapshot?.activeClaims || canaryFilteredAcceptedClaims,
               sourceMessageIds: canonicalSnapshot?.sourceMessageIds || messagesToCompress.map((message) => message.id),
               ...(canonicalSnapshot ? { canonicalRevision: canonicalSnapshot.canonicalRevision } : {}),
               generatedAt: Date.now(),
@@ -475,7 +502,7 @@ export function useChatMemoryExtraction({
             automatic: true,
             canonicalSnapshotAvailable,
             enqueueKind: enqueueResult?.kind,
-            zeroCandidates: result.acceptedClaims.length === 0,
+            zeroCandidates: canaryFilteredAcceptedClaims.length === 0,
             fallbackSummaryWritten,
           })
           : resolveDirectChatSummaryCutover({ automatic: false, canonicalSnapshotAvailable: true });
@@ -490,10 +517,10 @@ export function useChatMemoryExtraction({
           console.error("[memory-projection] Direct Chat archive cursor held:", finalCutoverDecision.outcome);
           return -1;
         }
-        archiveStats.acceptedTruthCount += result.acceptedClaims.length;
+        archiveStats.acceptedTruthCount += canaryFilteredAcceptedClaims.length;
         archiveStats.summaryCount += write.summaryWritten ? 1 : 0;
-        archiveStats.rejectedCandidateCount += result.rejectedCandidateCount;
-        totalExtracted += result.acceptedClaims.length;
+        archiveStats.rejectedCandidateCount += result.rejectedCandidateCount + canarySuppressedCount;
+        totalExtracted += canaryFilteredAcceptedClaims.length;
         await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
       }
       lastArchiveFeedbackRef.current = { ...archiveStats };
