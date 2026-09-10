@@ -69,3 +69,12 @@ authority, or storage behavior. After that seam is tested, a new 4D-11N run may
 create a fresh developer-held token and start Day 1.
 
 Until then, the correct state remains `LONG_EVIDENCE_COLLECTION_BLOCKED`.
+
+## Historical status after 4D-11N-R1
+
+The structural gap above is retained as the historical reason that the original
+4D-11N attempt stopped. Stage 4D-11N-R1 adds and tests a separate, dev-only
+observation seam in `directChatMemoryLongEvidenceRuntime.ts`; it does not start
+formal Day 1, create a formal token, or alter this document's prior evidence
+counts. The R1 seam must be reviewed in its own report before any bounded local
+window is opened.
