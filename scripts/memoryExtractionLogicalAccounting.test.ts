@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import {
   aggregateAiRequestLedgerAccounting,
+  AI_REQUEST_LEDGER_KEY,
   clearInMemoryAiRequestLedgerForTests,
+  flushAiRequestLedger,
   loadAiRequestLedger,
   recordAiRequest,
   type AiRequestEnvelope,
@@ -99,6 +101,10 @@ try {
   assert.equal(fallbackRecords[1].providerRequestCount, 1);
   assert.equal(fallbackRecords[0].retryCount, 0);
   assert.equal(fallbackRecords[1].retryCount, 0);
+  flushAiRequestLedger();
+  const persistedFallbackRecords = JSON.parse(storage.get(AI_REQUEST_LEDGER_KEY) || "[]") as Array<{ logicalActionId?: string }>;
+  assert.equal(persistedFallbackRecords.length, 2);
+  assert.equal(persistedFallbackRecords[0].logicalActionId, persistedFallbackRecords[1].logicalActionId);
 
   resetLedger();
   let doubleFailureCalls = 0;
