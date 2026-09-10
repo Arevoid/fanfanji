@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "memory-admission-v2-campaign-1",
+  "campaignFingerprint": "campaign-memory-admission-v2-2026-09-10",
+  "campaignStatus": "paused",
+  "promotionPolicyVersion": "memory-admission-v2-promotion-1",
+  "approvedWindows": [
+    {
+      "windowFingerprint": "window-8817672802574c9a",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-8817672802574c9a/2026-09-10__session-2febd71437e7d77e.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-8817672802574c9a/window-closure.json"
+    }
+  ],
+  "closedWindows": [
+    "window-8817672802574c9a"
+  ],
+  "createdAtUtc": "2026-09-10T15:46:57.912Z",
+  "promotionScopeMappings": [
+    {
+      "windowFingerprint": "window-8817672802574c9a",
+      "localScopeFingerprint": "scope-bbb51957",
+      "promotionScopeFingerprint": "promotion-scope-001"
+    }
+  ],
+  "cumulativeAuthoritativeCounts": {
+    "authoritativeArtifactCount": 1,
+    "formalSessionCount": 1,
+    "distinctExactScopeCount": 1,
+    "extractionBatchCount": 1,
+    "validControlCount": 1,
+    "validSuppressionCount": 0,
+    "logicalActionTotal": 1,
+    "physicalAttemptTotal": 2,
+    "distinctEvidenceDayCount": 1,
+    "fallbackBatchCount": 1,
+    "safetyIncidentCount": 0,
+    "privacyViolationCount": 0,
+    "accountingConflictCount": 0
+  },
+  "zeroErrorState": {
+    "safety": true,
+    "privacy": true,
+    "accounting": true
+  },
+  "firstEvidenceDay": "2026-09-10",
+  "lastEvidenceDay": "2026-09-10",
+  "thresholdProgress": {
+    "sessions": {
+      "current": 1,
+      "minimum": 5
+    },
+    "suppressions": {
+      "current": 0,
+      "minimum": 10
+    },
+    "scopes": {
+      "current": 1,
+      "minimum": 3
+    },
+    "days": {
+      "current": 1,
+      "minimum": 7
+    },
+    "batches": {
+      "current": 1,
+      "minimum": 20
+    },
+    "allMinimumsSatisfied": false,
+    "promotionEligible": false
+  }
+}

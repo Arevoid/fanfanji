@@ -246,5 +246,13 @@ modified. The proposed next stage is Stage 4D-11Q — Campaign Governance
 Implementation / Closure Preparation. It must not open a new evidence window
 automatically.
 
+## 17. Implementation checkpoint
+
+Stage 4D-11Q implements this design in dev/evidence governance tooling only.
+The current campaign is explicitly identified as
+campaign-memory-admission-v2-2026-09-10, with the existing window as its sole
+approved and closed member. The closure and campaign manifests are sanitized
+governance metadata; the full evidence artifact remains the authority. No
+runtime token, observer state, or product storage was changed.
 
 
