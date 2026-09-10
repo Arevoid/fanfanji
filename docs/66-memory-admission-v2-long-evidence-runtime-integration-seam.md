@@ -145,3 +145,27 @@ Ledger/readback linkage. If that probe is unavailable, readiness stays
 `LONG_EVIDENCE_RUNTIME_INTEGRATION_BLOCKED`; do not open a formal window. Only
 after `LONG_EVIDENCE_RUNTIME_INTEGRATION_VALIDATED` may a separately approved
 R2 task create a fresh formal window token and begin bounded Day 1 collection.
+
+## R1 isolated runtime probe result
+
+The local Vite app was opened on the isolated `Stage4D3` fixture. One short,
+non-sensitive test turn was sent because the fixture initially had no
+unarchived messages. The first `extractNow()` call correctly returned
+`NO_MESSAGES` without a Provider request; the second (and only real extraction
+operation) completed through the real Provider/parser/writer path. The bounded
+collector observed one `dry_run` `VALID_CONTROL` record with one logical action
+and two physical attempts (the existing extraction fallback path), zero Prompt
+delta and zero collector Provider delta. The canonical and Projection deltas
+were read back, the archive cursor completed, and the UI returned to its normal
+send state without duplicate delivery. No formal window was started: formal
+window/session/suppression/scope/day/batch counts remain zero. The collector was
+disabled after inspection while its in-memory observation remained available;
+no raw text, IDs or secrets were exported.
+
+With the automated tests, privacy checks, dependency gate and this isolated
+runtime probe complete, the R1 readiness is:
+
+`LONG_EVIDENCE_RUNTIME_INTEGRATION_VALIDATED`
+
+This status validates only the integration seam. It is not approval to start
+formal Day 1 or Phase 2; that requires a separate R2 decision.
