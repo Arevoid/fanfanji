@@ -10,6 +10,9 @@ import {
   buildMemoryExtractionLocalSourceRefTable,
   resolveMemoryExtractionSourceRefs,
 } from "./memoryExtractionLocalSourceRefs";
+import {
+  copyRuntimeExtractionLineage,
+} from "../../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import type {
   MemoryExtractionCandidateV2,
   MemoryExtractionRejectionDiagnostic,
@@ -78,21 +81,25 @@ const shadowCandidateFromPayload = (
     sourceMessageIds: readonly string[];
     evidenceQuote: string;
   },
-): MemoryExtractionCandidateV2 => ({
-  schemaVersion: 2,
-  kind: candidateKindForLegacyKind(payload.kind),
-  ...(payload.kind === "preference" ? { semanticFacet: "preference", durability: "unknown" as const } : {}),
-  ...(payload.kind === "hypothesis" ? { semanticFacet: "hypothesis" } : {}),
-  epistemicStatus: payload.kind === "belief" || payload.kind === "hypothesis" ? "uncertain" : "unknown",
-  ...(payload.kind === "plan" ? { planLifecycle: "unknown" as const } : {}),
-  statement: payload.statement,
-  temporalStatus: payload.temporalStatus,
-  sourceMessageIds: payload.sourceMessageIds,
-  evidenceQuote: payload.evidenceQuote,
-  actorRole: payload.subject === "user" || payload.subject === "character" || payload.subject === "relationship" || payload.subject === "other"
-    ? payload.subject
-    : undefined,
-});
+): MemoryExtractionCandidateV2 => {
+  const candidate: MemoryExtractionCandidateV2 = {
+    schemaVersion: 2,
+    kind: candidateKindForLegacyKind(payload.kind),
+    ...(payload.kind === "preference" ? { semanticFacet: "preference", durability: "unknown" as const } : {}),
+    ...(payload.kind === "hypothesis" ? { semanticFacet: "hypothesis" } : {}),
+    epistemicStatus: payload.kind === "belief" || payload.kind === "hypothesis" ? "uncertain" : "unknown",
+    ...(payload.kind === "plan" ? { planLifecycle: "unknown" as const } : {}),
+    statement: payload.statement,
+    temporalStatus: payload.temporalStatus,
+    sourceMessageIds: payload.sourceMessageIds,
+    evidenceQuote: payload.evidenceQuote,
+    actorRole: payload.subject === "user" || payload.subject === "character" || payload.subject === "relationship" || payload.subject === "other"
+      ? payload.subject
+      : undefined,
+  };
+  copyRuntimeExtractionLineage(payload, candidate);
+  return candidate;
+};
 
 const diagnostic = (input: Omit<MemoryExtractionRejectionDiagnostic, "decision"> & {
   decision: MemoryExtractionRejectionDiagnostic["decision"];
@@ -153,9 +160,10 @@ export async function extractMemories(
   const resolveModelSourceRefs = <T extends { sourceMessageIds?: readonly string[] }>(candidate: T): T => {
     if (!localSourceRefTable || !Array.isArray(candidate.sourceMessageIds)) return candidate;
     const resolution = resolveMemoryExtractionSourceRefs(candidate.sourceMessageIds, localSourceRefTable);
-    return resolution.invalidRefs.length === 0
-      ? { ...candidate, sourceMessageIds: resolution.canonicalMessageIds }
-      : candidate;
+    if (resolution.invalidRefs.length !== 0) return candidate;
+    const resolved = { ...candidate, sourceMessageIds: resolution.canonicalMessageIds };
+    copyRuntimeExtractionLineage(candidate, resolved);
+    return resolved;
   };
   const structuredCandidatesV2 = Array.isArray(data.structuredCandidatesV2) && data.structuredCandidatesV2.length > 0
     ? data.structuredCandidatesV2.map(resolveModelSourceRefs)
@@ -225,7 +233,10 @@ export async function extractMemories(
   const payloadEntries = resolvedRawItems
     .map((item, index) => ({ item, index, payload: normalizeExtractedKnowledgeCandidate(item, allowedMessageIds) }))
     .filter((entry): entry is typeof entry & { payload: NonNullable<typeof entry.payload> } => {
-      if (entry.payload) return true;
+      if (entry.payload) {
+        copyRuntimeExtractionLineage(entry.item && typeof entry.item === "object" ? entry.item : undefined, entry.payload);
+        return true;
+      }
       const sourceMessageIds = entry.item && typeof entry.item === "object" && !Array.isArray(entry.item)
         && Array.isArray((entry.item as Record<string, unknown>).sourceMessageIds)
         ? ((entry.item as Record<string, unknown>).sourceMessageIds as unknown[]).filter((id): id is string => typeof id === "string")
@@ -247,6 +258,16 @@ export async function extractMemories(
   const acceptedClaims: KnowledgeClaim[] = [];
   const displayTextByClaimId = new Map<string, string>();
   const legacyDiagnostics: MemoryExtractionRejectionDiagnostic[] = [...parserDiagnostics];
+  const diagnosticForPayload = (
+    payload: NonNullable<typeof payloadEntries[number]["payload"]>,
+    input: Omit<MemoryExtractionRejectionDiagnostic, "decision"> & {
+      decision: MemoryExtractionRejectionDiagnostic["decision"];
+    },
+  ): MemoryExtractionRejectionDiagnostic => {
+    const next = diagnostic(input);
+    copyRuntimeExtractionLineage(payload, next);
+    return next;
+  };
   let rejectedCandidateCount = rawItems.length - payloads.length;
 
   payloadEntries.forEach(({ payload, index }) => {
@@ -254,7 +275,7 @@ export async function extractMemories(
     const sourceMessageCount = payload.sourceMessageIds.length;
     if (filteredStatements && !filteredStatements.has(payload.statement)) {
       rejectedCandidateCount += 1;
-      if (collectDiagnostics) legacyDiagnostics.push(diagnostic({
+      if (collectDiagnostics) legacyDiagnostics.push(diagnosticForPayload(payload, {
         decision: "rejected",
         stage: "knowledge_gate",
         reason: "filtered",
@@ -276,7 +297,7 @@ export async function extractMemories(
       }), payload.evidenceQuote));
     if (!quotedMessage) {
       rejectedCandidateCount += 1;
-      if (collectDiagnostics) legacyDiagnostics.push(diagnostic({
+      if (collectDiagnostics) legacyDiagnostics.push(diagnosticForPayload(payload, {
         decision: "rejected",
         stage: "knowledge_gate",
         reason: "evidence_not_found",
@@ -300,7 +321,7 @@ export async function extractMemories(
       : isVerifiedUserEvidence ? payload.evidenceQuote : payload.statement;
     if (context.filterItems && context.filterItems([statement]).length === 0) {
       rejectedCandidateCount += 1;
-      if (collectDiagnostics) legacyDiagnostics.push(diagnostic({
+      if (collectDiagnostics) legacyDiagnostics.push(diagnosticForPayload(payload, {
         decision: "rejected",
         stage: "knowledge_gate",
         reason: "filtered",
@@ -338,7 +359,7 @@ export async function extractMemories(
     const decision = evaluateKnowledgeWrite(writeCandidate);
     if (decision.accepted) {
       acceptedClaims.push(decision.claim);
-      if (collectDiagnostics) legacyDiagnostics.push(diagnostic({
+      if (collectDiagnostics) legacyDiagnostics.push(diagnosticForPayload(payload, {
         decision: "accepted",
         stage: "knowledge_gate",
         reason: "accepted",
@@ -355,7 +376,7 @@ export async function extractMemories(
       );
     } else {
       rejectedCandidateCount += 1;
-      if (collectDiagnostics) legacyDiagnostics.push(diagnostic({
+      if (collectDiagnostics) legacyDiagnostics.push(diagnosticForPayload(payload, {
         decision: "rejected",
         stage: "knowledge_gate",
         reason: `knowledge_write_${"reason" in decision ? decision.reason : "rejected"}`,

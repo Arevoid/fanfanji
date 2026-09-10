@@ -84,6 +84,8 @@ export interface DirectChatMemoryBridgePolicyDimensions {
 
 export interface DirectChatMemoryLegacyCandidate {
   id: string;
+  /** Parser-owned, in-process lineage; never model-authored or persisted. */
+  runtimeLineageId?: string;
   diagnostic: Pick<MemoryExtractionRejectionDiagnostic, "decision" | "candidateKind" | "temporalStatus" | "correlationKey" | "reason">;
   claim?: KnowledgeClaim;
   candidateKind?: MemoryAdmissionComparisonSemanticKind;
@@ -118,6 +120,44 @@ export interface DirectChatMemoryIdentityDimensions {
   producer: string;
   sourceType: string;
   evidenceKey?: string;
+  runtimeLineageId?: string;
+}
+
+export type DirectChatMemoryIdentityKnown = boolean | "unknown";
+
+/** Metadata-only identity anatomy; values never contain source/scope IDs. */
+export interface DirectChatMemoryIdentityDiagnostics {
+  sourceWindowPresent: boolean;
+  scopeExact: boolean;
+  semanticCompatible: boolean;
+  actorPresent: boolean;
+  targetPresent: boolean;
+  producerNormalized: boolean;
+  sourceTypePresent: boolean;
+  evidenceKeyPresent: boolean;
+  temporalPresent: boolean;
+  lineagePresent: boolean;
+  sourceWindowFingerprint?: string;
+  sourceSetFingerprint?: string;
+  scopeFingerprint?: string;
+  semanticClass: string;
+  producerClass: string;
+  sourceTypeClass: string;
+  temporalStatus: TemporalStatus;
+  actorTargetShape: "both" | "actor_only" | "target_only" | "none";
+}
+
+export interface DirectChatMemoryPairCandidateMatrixEntry {
+  legacyOrdinal: number;
+  v2Ordinal: number;
+  sameSourceWindow: boolean;
+  sameSourceSet: boolean;
+  sameScope: boolean;
+  semanticCompatible: boolean;
+  sameActorTarget: DirectChatMemoryIdentityKnown;
+  sameProducer: DirectChatMemoryIdentityKnown;
+  sameSourceType: DirectChatMemoryIdentityKnown;
+  sameTemporal: boolean;
 }
 
 export interface DirectChatMemoryPolicyConflict {
@@ -134,12 +174,15 @@ export interface DirectChatMemoryMatch {
   v2: readonly DirectChatMemoryV2Candidate[];
   policyConflict?: DirectChatMemoryPolicyConflict;
   reason?: Extract<DirectChatMemoryBridgeReason, "ambiguous_correlation" | "scope_mismatch" | "provenance_mismatch" | "conflicting_duplicate">;
+  legacyIdentity?: DirectChatMemoryIdentityDiagnostics;
+  v2Identity?: DirectChatMemoryIdentityDiagnostics;
 }
 
 export interface DirectChatMemoryMatcherResult {
   matches: readonly DirectChatMemoryMatch[];
   unmatchedLegacy: readonly DirectChatMemoryLegacyCandidate[];
   unmatchedV2: readonly DirectChatMemoryV2Candidate[];
+  pairCandidateMatrix: readonly DirectChatMemoryPairCandidateMatrixEntry[];
 }
 
 export interface DirectChatMemoryWriteProposal {
@@ -170,6 +213,15 @@ const normalizeRefs = (values: readonly string[]): string[] => Array.from(new Se
 
 const sameStringArray = (left: readonly string[], right: readonly string[]): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
+
+const fingerprint = (value: string): string => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+};
 
 function sameScope(left: Partial<DirectChatMemoryBridgeScope>, right: DirectChatMemoryBridgeScope): boolean {
   const values = [left.characterId, left.relationId, left.userIdentityId, left.conversationId];
@@ -211,7 +263,10 @@ function trustedCandidate(candidate: DirectChatMemoryV2Candidate): boolean {
 }
 
 function normalizeProducer(value: string): string {
-  return value.startsWith("memory-extractor.chat") ? "direct_chat" : value;
+  const normalized = value.trim();
+  if (normalized.startsWith("memory-extractor.chat")) return "direct_chat";
+  if (normalized === "direct-chat" || normalized === "direct_chat") return "direct_chat";
+  return normalized;
 }
 
 function legacyActorTarget(candidate: DirectChatMemoryLegacyCandidate): { actorId?: string; targetId?: string } {
@@ -237,6 +292,8 @@ function identityForLegacy(candidate: DirectChatMemoryLegacyCandidate): DirectCh
     temporalStatus: candidate.temporalStatus,
     producer: normalizeProducer(candidate.provenance.producer),
     sourceType: candidate.provenance.sourceType,
+    ...(normalize(candidate.provenance.evidenceKey) ? { evidenceKey: normalize(candidate.provenance.evidenceKey) } : {}),
+    ...(candidate.runtimeLineageId ? { runtimeLineageId: candidate.runtimeLineageId } : {}),
   };
 }
 
@@ -256,8 +313,10 @@ function identityForV2(candidate: DirectChatMemoryV2Candidate): DirectChatMemory
     ...(normalize(value.provenance.actorId) ? { actorId: normalize(value.provenance.actorId) } : {}),
     ...(normalize(value.provenance.targetId) ? { targetId: normalize(value.provenance.targetId) } : {}),
     temporalStatus: value.temporal.status,
-    producer: value.provenance.producer,
+    producer: normalizeProducer(value.provenance.producer),
     sourceType: value.provenance.sourceType,
+    ...(normalize(value.evidence.evidenceKey) ? { evidenceKey: normalize(value.evidence.evidenceKey) } : {}),
+    ...(value.runtimeLineageId ? { runtimeLineageId: value.runtimeLineageId } : {}),
   };
 }
 
@@ -276,6 +335,91 @@ function identityKey(identity: DirectChatMemoryIdentityDimensions): string {
 
 function sourceWindowKey(identity: DirectChatMemoryIdentityDimensions): string | undefined {
   return buildMemoryShadowCorrelationKey(identity.sourceRefs, identity.temporalStatus);
+}
+
+function semanticCompatible(
+  legacy: DirectChatMemoryLegacyCandidate,
+  v2: DirectChatMemoryV2Candidate,
+): boolean {
+  const left = legacySemanticKind(legacy);
+  const right = effectiveSemanticKind(v2.candidate);
+  return semanticKindsCompatible(left, right);
+}
+
+function semanticKindsCompatible(
+  left: MemoryAdmissionComparisonSemanticKind,
+  right: MemoryAdmissionComparisonSemanticKind,
+): boolean {
+  if (left === right) return true;
+  const nonObjectiveKind = new Set<MemoryAdmissionComparisonSemanticKind>([
+    "belief", "hypothesis", "subjective_reflection", "scene_only", "relationship_signal",
+  ]);
+  return (left === "fact" && nonObjectiveKind.has(right))
+    || (right === "fact" && nonObjectiveKind.has(left));
+}
+
+function identityDiagnostics(
+  identity: DirectChatMemoryIdentityDimensions,
+  runtimeScope: DirectChatMemoryBridgeScope,
+  peer?: DirectChatMemoryIdentityDimensions,
+): DirectChatMemoryIdentityDiagnostics {
+  const sourceRefs = normalizeRefs(identity.sourceRefs);
+  const actorPresent = Boolean(identity.actorId);
+  const targetPresent = Boolean(identity.targetId);
+  const actorTargetShape: DirectChatMemoryIdentityDiagnostics["actorTargetShape"] = actorPresent && targetPresent
+    ? "both"
+    : actorPresent ? "actor_only" : targetPresent ? "target_only" : "none";
+  return {
+    sourceWindowPresent: Boolean(sourceWindowKey(identity)),
+    scopeExact: sameScope(identity.scope, runtimeScope),
+    semanticCompatible: peer ? semanticKindsCompatible(identity.semanticKind, peer.semanticKind) : true,
+    actorPresent,
+    targetPresent,
+    producerNormalized: Boolean(identity.producer),
+    sourceTypePresent: Boolean(identity.sourceType),
+    evidenceKeyPresent: Boolean(identity.evidenceKey),
+    temporalPresent: identity.temporalStatus !== "unknown",
+    lineagePresent: Boolean(identity.runtimeLineageId),
+    ...(sourceWindowKey(identity) ? { sourceWindowFingerprint: fingerprint(sourceWindowKey(identity)!) } : {}),
+    ...(sourceRefs.length ? { sourceSetFingerprint: fingerprint(sourceRefs.join("\u0000")) } : {}),
+    scopeFingerprint: fingerprint([
+      identity.scope.characterId,
+      identity.scope.relationId,
+      identity.scope.userIdentityId,
+      identity.scope.conversationId,
+    ].join("\u0000")),
+    semanticClass: identity.semanticKind,
+    producerClass: identity.producer,
+    sourceTypeClass: identity.sourceType,
+    temporalStatus: identity.temporalStatus,
+    actorTargetShape,
+  };
+}
+
+function sameActorTarget(
+  left: DirectChatMemoryIdentityDimensions,
+  right: DirectChatMemoryIdentityDimensions,
+): DirectChatMemoryIdentityKnown {
+  const leftKnown = Boolean(left.actorId || left.targetId);
+  const rightKnown = Boolean(right.actorId || right.targetId);
+  if (!leftKnown || !rightKnown) return "unknown";
+  return left.actorId === right.actorId && left.targetId === right.targetId;
+}
+
+function sameDimension(left: string | undefined, right: string | undefined): DirectChatMemoryIdentityKnown {
+  if (!left || !right) return "unknown";
+  return left === right;
+}
+
+function sourceSubsetCompatible(
+  left: DirectChatMemoryIdentityDimensions,
+  right: DirectChatMemoryIdentityDimensions,
+): boolean {
+  if (left.temporalStatus !== right.temporalStatus) return false;
+  const leftRefs = new Set(left.sourceRefs);
+  const rightRefs = new Set(right.sourceRefs);
+  const subset = (small: Set<string>, large: Set<string>): boolean => small.size < large.size && [...small].every((value) => large.has(value));
+  return subset(leftRefs, rightRefs) || subset(rightRefs, leftRefs);
 }
 
 function authorityOnlySemanticDivergence(
@@ -366,7 +510,7 @@ function matchGroup(
  * Pure two-stage matcher. Policy dimensions are intentionally excluded from
  * identityKey, so objective/subjective and lifecycle conflicts remain paired.
  */
-export function matchDirectChatMemoryCandidates(input: {
+function matchDirectChatMemoryCandidatesLegacy(input: {
   legacy: readonly DirectChatMemoryLegacyCandidate[];
   v2: readonly DirectChatMemoryV2Candidate[];
   runtime: DirectChatMemoryBridgeRuntimeContext;
@@ -473,7 +617,191 @@ export function matchDirectChatMemoryCandidates(input: {
     if (input.legacy.length === 0 && match.legacy.length === 0 && match.v2.length > 0) return { ...match, correlation: "v2_only" as const };
     return match;
   });
-  return { matches: normalizedMatches, unmatchedLegacy, unmatchedV2 };
+  return { matches: normalizedMatches, unmatchedLegacy, unmatchedV2, pairCandidateMatrix: [] };
+}
+
+/**
+ * Revised matcher with a parser-owned lineage tier. The legacy structural
+ * matcher remains the fallback for callers that do not have lineage metadata;
+ * no statement, evidence text, array position, or fuzzy similarity is used.
+ */
+export function matchDirectChatMemoryCandidates(input: {
+  legacy: readonly DirectChatMemoryLegacyCandidate[];
+  v2: readonly DirectChatMemoryV2Candidate[];
+  runtime: DirectChatMemoryBridgeRuntimeContext;
+}): DirectChatMemoryMatcherResult {
+  const legacyIndexes = input.legacy.map((candidate) => ({ candidate, identity: identityForLegacy(candidate) }));
+  const v2Indexes = input.v2.map((candidate) => ({ candidate, identity: identityForV2(candidate) }));
+  const pairCandidateMatrix: DirectChatMemoryPairCandidateMatrixEntry[] = [];
+  legacyIndexes.forEach((legacyItem, legacyOrdinal) => {
+    v2Indexes.forEach((v2Item, v2Ordinal) => {
+      const left = legacyItem.identity;
+      const right = v2Item.identity;
+      pairCandidateMatrix.push({
+        legacyOrdinal,
+        v2Ordinal,
+        sameSourceWindow: Boolean(sourceWindowKey(left) && sourceWindowKey(left) === sourceWindowKey(right)),
+        sameSourceSet: sameStringArray(normalizeRefs(left.sourceRefs), normalizeRefs(right.sourceRefs)),
+        sameScope: sameScope(left.scope, input.runtime.scope) && sameScope(right.scope, input.runtime.scope),
+        semanticCompatible: semanticCompatible(legacyItem.candidate, v2Item.candidate),
+        sameActorTarget: sameActorTarget(left, right),
+        sameProducer: sameDimension(left.producer, right.producer),
+        sameSourceType: sameDimension(left.sourceType, right.sourceType),
+        sameTemporal: left.temporalStatus === right.temporalStatus,
+      });
+    });
+  });
+  const validLegacy = (candidate: DirectChatMemoryLegacyCandidate): boolean => sameScope(candidate.scope, input.runtime.scope) && candidate.provenanceTrusted;
+  const validV2 = (candidate: DirectChatMemoryV2Candidate): boolean => sameScope(candidate.candidate.scope, input.runtime.scope) && trustedCandidate(candidate);
+  const lineageCompatible = (legacy: DirectChatMemoryLegacyCandidate, v2: DirectChatMemoryV2Candidate): boolean =>
+    !legacy.runtimeLineageId || !v2.candidate.runtimeLineageId || legacy.runtimeLineageId === v2.candidate.runtimeLineageId;
+  const annotate = (match: DirectChatMemoryMatch): DirectChatMemoryMatch => {
+    const legacyIdentity = match.legacy[0] ? identityForLegacy(match.legacy[0]) : undefined;
+    const v2Identity = match.v2[0] ? identityForV2(match.v2[0]) : undefined;
+    return {
+      ...match,
+      ...(legacyIdentity ? { legacyIdentity: identityDiagnostics(legacyIdentity, input.runtime.scope, v2Identity) } : {}),
+      ...(v2Identity ? { v2Identity: identityDiagnostics(v2Identity, input.runtime.scope, legacyIdentity) } : {}),
+    };
+  };
+  const usedLegacy = new Set<string>();
+  const usedV2 = new Set<string>();
+  const matches: DirectChatMemoryMatch[] = [];
+
+  // Tier 1: pair only a unique shared parser lineage. A duplicated token is
+  // deliberately represented as ambiguous/conflict, never as an exact pair.
+  const legacyByLineage = new Map<string, DirectChatMemoryLegacyCandidate[]>();
+  const v2ByLineage = new Map<string, DirectChatMemoryV2Candidate[]>();
+  legacyIndexes.forEach(({ candidate }) => {
+    if (!candidate.runtimeLineageId) return;
+    const list = legacyByLineage.get(candidate.runtimeLineageId) || [];
+    list.push(candidate);
+    legacyByLineage.set(candidate.runtimeLineageId, list);
+  });
+  v2Indexes.forEach(({ candidate }) => {
+    if (!candidate.candidate.runtimeLineageId) return;
+    const list = v2ByLineage.get(candidate.candidate.runtimeLineageId) || [];
+    list.push(candidate);
+    v2ByLineage.set(candidate.candidate.runtimeLineageId, list);
+  });
+  [...legacyByLineage.keys()].filter((lineage) => v2ByLineage.has(lineage)).forEach((lineage) => {
+    const legacy = legacyByLineage.get(lineage)!;
+    const v2 = v2ByLineage.get(lineage)!;
+    legacy.forEach((candidate) => usedLegacy.add(candidate.id));
+    v2.forEach((candidate) => usedV2.add(candidate.candidate.candidateId));
+    if (legacy.length === 1 && v2.length === 1 && validLegacy(legacy[0]!) && validV2(v2[0]!)) {
+      const left = legacy[0]!;
+      const right = v2[0]!;
+      matches.push(annotate(matchGroup([left], [right], sourceWindowKey(identityForLegacy(left)), identityKey(identityForLegacy(left)))));
+    } else {
+      const correlation: DirectChatMemoryCorrelationState = legacy.length > 1 && v2.length > 1 ? "conflict" : "ambiguous";
+      matches.push(annotate({
+        correlation,
+        identityExact: false,
+        legacy,
+        v2,
+        reason: correlation === "conflict" ? "conflicting_duplicate" : "ambiguous_correlation",
+      }));
+    }
+  });
+
+  // Tier 2: retain the old exact structural matcher for all remaining
+  // candidates, but refuse a pair when both sides carry different lineage.
+  const structural = matchDirectChatMemoryCandidatesLegacy({
+    legacy: legacyIndexes.map((item) => item.candidate).filter((candidate) => !usedLegacy.has(candidate.id)),
+    v2: v2Indexes.map((item) => item.candidate).filter((candidate) => !usedV2.has(candidate.candidate.candidateId)),
+    runtime: input.runtime,
+  });
+  structural.matches.forEach((match) => {
+    if (match.legacy.length > 0 && match.v2.length > 0
+      && !match.legacy.every((legacy) => match.v2.every((v2) => lineageCompatible(legacy, v2)))) return;
+    if (match.legacy.length > 0 && match.v2.length > 0) {
+      const next = annotate(match);
+      matches.push(next);
+      match.legacy.forEach((candidate) => usedLegacy.add(candidate.id));
+      match.v2.forEach((candidate) => usedV2.add(candidate.candidate.candidateId));
+    }
+  });
+
+  // Tier 3: one-side actor/target unknown is compatible only when every other
+  // structural dimension is exact and the pair is unique. Unknown is never
+  // treated as equality when there is a competing candidate.
+  const pendingLegacy = legacyIndexes.map((item) => item.candidate).filter((candidate) => !usedLegacy.has(candidate.id));
+  const pendingV2 = v2Indexes.map((item) => item.candidate).filter((candidate) => !usedV2.has(candidate.candidate.candidateId));
+  const unknownActorPairs: Array<{ legacy: DirectChatMemoryLegacyCandidate; v2: DirectChatMemoryV2Candidate }> = [];
+  pendingLegacy.forEach((legacy) => {
+    const left = identityForLegacy(legacy);
+    const options = pendingV2.filter((v2) => {
+      const right = identityForV2(v2);
+      const actor = sameActorTarget(left, right);
+      return lineageCompatible(legacy, v2)
+        && sameStringArray(left.sourceRefs, right.sourceRefs)
+        && left.temporalStatus === right.temporalStatus
+        && validLegacy(legacy)
+        && validV2(v2)
+        && semanticCompatible(legacy, v2)
+        && left.producer === right.producer
+        && left.sourceType === right.sourceType
+        && actor === "unknown";
+    });
+    if (options.length === 1) unknownActorPairs.push({ legacy, v2: options[0]! });
+  });
+  const unknownActorV2Counts = new Map<string, number>();
+  unknownActorPairs.forEach((pair) => unknownActorV2Counts.set(pair.v2.candidate.candidateId, (unknownActorV2Counts.get(pair.v2.candidate.candidateId) || 0) + 1));
+  unknownActorPairs.forEach((pair) => {
+    if (unknownActorV2Counts.get(pair.v2.candidate.candidateId) !== 1) return;
+    const structuralMatch = matchGroup([pair.legacy], [pair.v2], sourceWindowKey(identityForLegacy(pair.legacy)), identityKey(identityForLegacy(pair.legacy)));
+    matches.push(annotate({ ...structuralMatch, identityExact: false }));
+    usedLegacy.add(pair.legacy.id);
+    usedV2.add(pair.v2.candidate.candidateId);
+  });
+
+  // Tier 4: allow only a unique source subset/superset from the same trusted
+  // batch. This is not a score or nearest-candidate fallback.
+  const subsetLegacy = legacyIndexes.map((item) => item.candidate).filter((candidate) => !usedLegacy.has(candidate.id));
+  const subsetV2 = v2Indexes.map((item) => item.candidate).filter((candidate) => !usedV2.has(candidate.candidate.candidateId));
+  const subsetPairs: Array<{ legacy: DirectChatMemoryLegacyCandidate; v2: DirectChatMemoryV2Candidate }> = [];
+  subsetLegacy.forEach((legacy) => {
+    const left = identityForLegacy(legacy);
+    const options = subsetV2.filter((v2) => {
+      const right = identityForV2(v2);
+      const actor = sameActorTarget(left, right);
+      return lineageCompatible(legacy, v2)
+        && sourceSubsetCompatible(left, right)
+        && validLegacy(legacy)
+        && validV2(v2)
+        && semanticCompatible(legacy, v2)
+        && left.producer === right.producer
+        && left.sourceType === right.sourceType
+        && actor !== false;
+    });
+    if (options.length === 1) subsetPairs.push({ legacy, v2: options[0]! });
+  });
+  const subsetV2Counts = new Map<string, number>();
+  subsetPairs.forEach((pair) => subsetV2Counts.set(pair.v2.candidate.candidateId, (subsetV2Counts.get(pair.v2.candidate.candidateId) || 0) + 1));
+  subsetPairs.forEach((pair) => {
+    if (subsetV2Counts.get(pair.v2.candidate.candidateId) !== 1) return;
+    const structuralMatch = matchGroup([pair.legacy], [pair.v2], sourceWindowKey(identityForLegacy(pair.legacy)), identityKey(identityForLegacy(pair.legacy)));
+    matches.push(annotate({ ...structuralMatch, identityExact: false }));
+    usedLegacy.add(pair.legacy.id);
+    usedV2.add(pair.v2.candidate.candidateId);
+  });
+
+  const unmatchedLegacy = legacyIndexes.filter((item) => !usedLegacy.has(item.candidate.id)).map((item) => item.candidate);
+  const unmatchedV2 = v2Indexes.filter((item) => !usedV2.has(item.candidate.candidate.candidateId)).map((item) => item.candidate);
+  if (unmatchedLegacy.length > 0) matches.push(...unmatchedLegacy.map((candidate) => annotate({
+    correlation: input.v2.length === 0 ? "legacy_only" : "unmatched_legacy",
+    identityExact: false,
+    legacy: [candidate],
+    v2: [],
+  })));
+  if (unmatchedV2.length > 0) matches.push(...unmatchedV2.map((candidate) => annotate({
+    correlation: input.legacy.length === 0 ? "v2_only" : "unmatched_v2",
+    identityExact: false,
+    legacy: [],
+    v2: [candidate],
+  })));
+  return { matches, unmatchedLegacy, unmatchedV2, pairCandidateMatrix };
 }
 
 function semanticForV2(candidate: MemoryCandidate): MemoryAdmissionComparisonSemanticKind {

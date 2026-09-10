@@ -15,6 +15,7 @@ import type {
   MemoryExtractionRejectionDiagnostic,
 } from "../../../domain/memory/memoryExtractionSchema";
 import type { MemoryExtractionResult } from "../../../domain/memory/memoryTypes";
+import { getRuntimeExtractionLineage } from "../../characterKnowledge/services/knowledgeExtractionProtocol";
 import { buildMemoryShadowCorrelationKey } from "../../../domain/memory/memoryShadowCorrelation";
 import {
   classifyLegacyAdmissionSemantics,
@@ -30,6 +31,8 @@ import {
   type DirectChatMemoryBridgeScope,
   type DirectChatMemoryBridgeState,
   type DirectChatMemoryCorrelationState,
+  type DirectChatMemoryIdentityDiagnostics,
+  type DirectChatMemoryPairCandidateMatrixEntry,
   type DirectChatMemoryLegacyCandidate,
   type DirectChatMemoryV2Candidate,
 } from "./directChatMemoryAdmissionBridge";
@@ -61,6 +64,8 @@ export interface DirectChatMemoryBridgeShadowObservation {
   wouldReview: boolean;
   wouldReject: boolean;
   wouldRoute: boolean;
+  legacyIdentity?: DirectChatMemoryIdentityDiagnostics;
+  v2Identity?: DirectChatMemoryIdentityDiagnostics;
 }
 
 export interface DirectChatMemoryBridgeShadowMetrics {
@@ -87,6 +92,7 @@ export interface DirectChatMemoryBridgeShadowResult {
   failedOpen: boolean;
   metrics: DirectChatMemoryBridgeShadowMetrics;
   observations: readonly DirectChatMemoryBridgeShadowObservation[];
+  pairCandidateMatrix: readonly DirectChatMemoryPairCandidateMatrixEntry[];
 }
 
 const emptyCandidateAdapterResult = {
@@ -338,6 +344,7 @@ function buildLegacyCandidates(input: {
     const actorTarget = claim ? actorTargetForClaim(claim, input.scope) : {};
     return {
       id: claim?.id || `legacy-diagnostic-${index}`,
+      ...(getRuntimeExtractionLineage(diagnostic) ? { runtimeLineageId: getRuntimeExtractionLineage(diagnostic) } : {}),
       diagnostic: {
         decision: diagnostic.decision,
         candidateKind: diagnostic.candidateKind,
@@ -444,6 +451,8 @@ function shadowObservation(
     wouldReview: decision.state === "review",
     wouldReject: decision.state === "reject",
     wouldRoute: decision.state === "route",
+    ...(match.legacyIdentity ? { legacyIdentity: match.legacyIdentity } : {}),
+    ...(match.v2Identity ? { v2Identity: match.v2Identity } : {}),
   };
 }
 
@@ -476,7 +485,7 @@ function incrementMetric(metrics: DirectChatMemoryBridgeShadowMetrics, observati
 }
 
 function failedOpenResult(): DirectChatMemoryBridgeShadowResult {
-  return { failedOpen: true, metrics: emptyMetrics(), observations: [] };
+  return { failedOpen: true, metrics: emptyMetrics(), observations: [], pairCandidateMatrix: [] };
 }
 
 /**
@@ -526,10 +535,11 @@ export function observeDirectChatMemoryAdmissionBridgeShadow(
       incrementMetric(metrics, observation);
       return observation;
     });
-    return { failedOpen: false, metrics, observations };
+    return { failedOpen: false, metrics, observations, pairCandidateMatrix: matched.pairCandidateMatrix };
   } catch {
     return failedOpenResult();
   }
 }
 
 export type { MemoryAdmissionState, MemoryCandidateKind, KnowledgeKind };
+export type { DirectChatMemoryPairCandidateMatrixEntry };

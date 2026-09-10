@@ -7,6 +7,7 @@ import type {
 import type {
   DirectChatMemoryBridgeShadowMetrics,
   DirectChatMemoryBridgeShadowObservation,
+  DirectChatMemoryPairCandidateMatrixEntry,
 } from "./directChatMemoryAdmissionBridgeShadow";
 import type {
   MemoryAdmissionComparisonMismatchClass,
@@ -103,6 +104,7 @@ let latestBridgeShadow: {
   failedOpen: boolean;
   metrics: DirectChatMemoryBridgeShadowMetrics;
   observations: readonly DirectChatMemoryBridgeShadowObservation[];
+  pairCandidateMatrix: readonly DirectChatMemoryPairCandidateMatrixEntry[];
 } | undefined;
 
 const isDevBuild = (): boolean => {
@@ -271,6 +273,7 @@ export function recordDirectChatMemoryAdmissionShadowEvidence(input: {
       failedOpen: input.result.bridgeShadow.failedOpen,
       metrics: input.result.bridgeShadow.metrics,
       observations: input.result.bridgeShadow.observations.slice(-maxObservations),
+      pairCandidateMatrix: input.result.bridgeShadow.pairCandidateMatrix.slice(-maxObservations * maxObservations),
     };
     const evidenceOrigin = input.evidenceOrigin || "real_runtime";
     const records = input.result.observations.map((observation) => sanitizeObservation(observation, input.scope, evidenceOrigin));
@@ -300,6 +303,7 @@ export function exportDirectChatMemoryAdmissionShadowJson(): string {
       failedOpen: false,
       metrics: null,
       observations: [],
+      pairCandidateMatrix: [],
     },
     observations: records,
   }, null, 2);

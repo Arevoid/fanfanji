@@ -155,6 +155,11 @@ export interface MemoryCandidate {
   /** Retrieval/consolidation signal only; it is not authority. */
   importance?: number;
   lineage?: MemoryCandidateLineage;
+  /**
+   * Runtime-only parsed-item correlation. It is never part of a claim,
+   * MemoryItem, persistence payload, Prompt, or Provider request.
+   */
+  runtimeLineageId?: string;
 }
 
 const isNonEmptyString = (value: unknown): value is string =>

@@ -1,3 +1,4 @@
+import { createId } from "../../../core/id/createId";
 import type { KnowledgeKind, KnowledgeSubject, TemporalStatus } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import {
   normalizeEmbeddedMemoryExtractionCandidateV2,
@@ -65,6 +66,29 @@ export function parseKnowledgeExtractionOutput(
 }
 
 /**
+ * Runtime-only lineage for one parsed provider item.  It is deliberately kept
+ * in a WeakMap instead of the JSON-facing candidate shape so model output
+ * cannot supply or persist it.  The parser attaches the same opaque token to
+ * the legacy and V2 projections produced from one raw item.
+ */
+const runtimeLineageByProjection = new WeakMap<object, string>();
+
+export function getRuntimeExtractionLineage(value: object | undefined): string | undefined {
+  return value ? runtimeLineageByProjection.get(value) : undefined;
+}
+
+export function copyRuntimeExtractionLineage(source: object | undefined, target: object): void {
+  const lineage = getRuntimeExtractionLineage(source);
+  if (lineage) runtimeLineageByProjection.set(target, lineage);
+}
+
+function attachRuntimeExtractionLineage<T extends object>(value: T | undefined, lineage: string): T | undefined {
+  if (!value) return value;
+  runtimeLineageByProjection.set(value, lineage);
+  return value;
+}
+
+/**
  * Parse additive schema V2 metadata without changing the legacy extraction
  * parser.  The same JSON/JSONL framing is accepted for both contracts.
  */
@@ -93,13 +117,25 @@ export function parseKnowledgeExtractionOutputWithV2(
   options: MemoryExtractionCandidateV2NormalizationOptions = {},
 ): ParsedKnowledgeExtractionOutput {
   const rawValues = parseRawValues(rawText);
-  const structuredCandidatesV2 = rawValues
-    .map((value) => normalizeEmbeddedMemoryExtractionCandidateV2(value, allowedMessageIds, options)
-      || normalizeMemoryExtractionCandidateV2(value, allowedMessageIds, options))
+  const parsedProjections = rawValues.map((value) => {
+    const runtimeLineage = createId("memory-extraction-item");
+    const legacy = attachRuntimeExtractionLineage(
+      normalizeExtractedKnowledgeCandidate(value, allowedMessageIds, options),
+      runtimeLineage,
+    );
+    const v2 = attachRuntimeExtractionLineage(
+      normalizeEmbeddedMemoryExtractionCandidateV2(value, allowedMessageIds, options)
+        || normalizeMemoryExtractionCandidateV2(value, allowedMessageIds, options),
+      runtimeLineage,
+    );
+    return { legacy, v2 };
+  });
+  const structuredCandidatesV2 = parsedProjections
+    .map((projection) => projection.v2)
     .filter((value): value is MemoryExtractionCandidateV2 => value !== undefined);
   return {
-    candidates: rawValues
-      .map((value) => normalizeExtractedKnowledgeCandidate(value, allowedMessageIds, options))
+    candidates: parsedProjections
+      .map((projection) => projection.legacy)
       .filter((value): value is ExtractedKnowledgeCandidatePayload => value !== undefined),
     structuredCandidatesV2,
     v2MetadataPresent: rawValues.some((value) => Boolean(value && typeof value === "object" && !Array.isArray(value)

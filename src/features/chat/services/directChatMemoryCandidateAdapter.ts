@@ -9,6 +9,7 @@ import type { MemoryCandidate, MemoryCandidateKind, MemoryCandidateSourceType } 
 import type { MemoryExtractionCandidateV2 } from "../../../domain/memory/memoryExtractionSchema";
 import type { MemoryExtractionSourceEnvelope } from "../../../domain/memory/memoryExtractionSourceEnvelope";
 import type { MemoryExtractionResult } from "../../../domain/memory/memoryTypes";
+import { getRuntimeExtractionLineage } from "../../characterKnowledge/services/knowledgeExtractionProtocol";
 import {
   bindDirectChatMemorySourceHints,
   resolveDirectChatMemoryActorTarget,
@@ -152,6 +153,7 @@ function adaptV2Candidate(
   const lineage = input.lineage && (input.lineage.parentActionId || input.lineage.producerActionId || input.lineage.sourceRequestId)
     ? input.lineage
     : undefined;
+  const runtimeLineageId = getRuntimeExtractionLineage(candidate);
   const metadataCandidate: MemoryCandidate = {
     schemaVersion: 1,
     candidateId: createCandidateId(),
@@ -194,6 +196,7 @@ function adaptV2Candidate(
     ...(candidate.confidence !== undefined ? { confidence: candidate.confidence } : {}),
     ...(candidate.importance !== undefined ? { importance: candidate.importance } : {}),
     ...(lineage ? { lineage } : {}),
+    ...(runtimeLineageId ? { runtimeLineageId } : {}),
   };
   if (metadataSource === "v2") {
     metadataCandidate.resolvedAuthorityRole = resolveMemoryCandidateAuthorityRole(metadataCandidate).role;
