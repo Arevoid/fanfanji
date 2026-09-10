@@ -237,6 +237,14 @@ function isDevBuild(): boolean {
   }
 }
 
+function isTestInjection(): boolean {
+  try {
+    return typeof process !== "undefined" && process.env.NODE_ENV === "test";
+  } catch {
+    return false;
+  }
+}
+
 function fingerprint(value: string): string {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -431,7 +439,7 @@ let sessionSalt = "";
 let records: DirectChatMemoryLongEvidenceRecord[] = [];
 
 export function configureDirectChatMemoryLongEvidenceCollector(configuration: { enabled: boolean; explicitDebug?: boolean }): void {
-  const nextEnabled = configuration.enabled && (configuration.explicitDebug === true || isDevBuild());
+  const nextEnabled = configuration.enabled && (isDevBuild() || (configuration.explicitDebug === true && isTestInjection()));
   if (nextEnabled) {
     configured = true;
     sessionOrdinalCounter += 1;
@@ -534,4 +542,3 @@ function installDevApi(): void {
 }
 
 installDevApi();
-
