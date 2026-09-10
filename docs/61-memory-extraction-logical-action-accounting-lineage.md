@@ -96,8 +96,11 @@ long-evidence counting starts only with rows created after this lineage fix.
   `providerRequestCount`;
 - `logicalGroupingUnknownRows`: rows without a usable logical ID;
 - `fallbackAttemptCount`: known-group physical attempts beyond one baseline
-  attempt per known logical action;
-- `fallbackAttemptRate`: fallback attempts divided by known logical actions;
+  attempt per known logical action. This is an extra-attempt metric; a report
+  must use the reviewed accounting shape before attributing every extra to a
+  specific fallback rather than a retry/repair;
+- `fallbackAttemptRate`: the extra-attempt rate divided by known logical
+  actions; it is not a free-text reason classifier;
 - `physicalAttemptsPerLogicalAction`: known-group physical attempts divided by
   known logical actions.
 

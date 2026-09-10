@@ -366,6 +366,9 @@ Therefore:
   cost/quota review when the pair is independently correlated.
 - Logical extraction count must come from the business operation/correlation,
   not raw row count.
+- The derived extra-attempt/fallback-rate metric is authoritative only for
+  explicitly reviewed linked shapes; it must not guess fallback versus retry
+  from timestamps, models, or reason text.
 - Existing 11H J/K evidence is four Ledger rows for two logical operations and
   four physical attempts; it must be reported in that form.
 - The current rows do not reliably carry one shared logical ID across the
