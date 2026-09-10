@@ -86,6 +86,8 @@ export interface DirectChatMemoryLongEvidenceInput {
   batch: DirectChatMemoryLongEvidenceBatchInput;
   accounting: DirectChatMemoryLongEvidenceAccountingInput;
   performance: DirectChatMemoryLongEvidencePerformanceInput;
+  /** Raw lineage is consumed only to create an opaque, in-memory-safe token. */
+  logicalActionId?: string;
 }
 
 export type LongEvidenceExtractionLatencyBucket = "0_5s" | "5_15s" | "15_30s" | "30_60s" | "60s_plus" | "unknown";
@@ -96,7 +98,11 @@ export interface DirectChatMemoryLongEvidenceRecord {
   timeBucket: string;
   featureScope: "automatic_direct_chat" | "unknown";
   sessionOrdinal: number;
+  windowOrdinal: number | null;
+  evidenceMode: "formal_window" | "dry_run";
   scopeFingerprint: string;
+  logicalActionFingerprint: string;
+  batchActionFingerprint: string;
   canaryReason: "SAFETY_VETO_CANCELLED_PLAN" | "none" | "unknown";
   validatorResult: LongEvidenceValidatorResult;
   validatorReason: string;
@@ -146,10 +152,23 @@ export interface DirectChatMemoryLongEvidenceSummary {
   persistenceMode: "in_memory_only";
   enabled: boolean;
   sessionOrdinal: number | null;
+  windowOrdinal: number | null;
+  windowState: "not_started" | "active" | "finished";
   recordCount: number;
   countsByClassification: Record<LongEvidenceClassification, number>;
+  sessionCount: number;
+  formalSessionCount: number;
+  formalWindowRecordCount: number;
+  distinctExactScopeCount: number;
+  extractionBatchCount: number;
+  validSuppressionCount: number;
+  validControlCount: number;
+  failOpenCount: number;
+  invalidSampleCount: number;
+  safetyIncidentCount: number;
   logicalActionTotal: number;
   physicalAttemptTotal: number;
+  accountingConflictCount: number;
   unknownGroupingCount: number;
 }
 
@@ -160,6 +179,10 @@ export interface DirectChatMemoryLongEvidenceDebugApi {
   count: () => number;
   exportJson: () => string;
   summary: () => DirectChatMemoryLongEvidenceSummary;
+  startWindow: (windowToken: string) => number | null;
+  resumeWindow: (windowToken: string) => number | null;
+  finishWindow: () => void;
+  clearWindow: () => void;
 }
 
 const SAFE_VALIDATOR_REASONS = new Set([
@@ -261,6 +284,12 @@ function scopeFingerprint(scope: DirectChatMemoryLongEvidenceScope, salt: string
   return `scope-${fingerprint(`${salt}\u0000${tuple}`)}`;
 }
 
+function actionFingerprint(logicalActionId: unknown, salt: string, prefix: "action" | "batch"): string {
+  const normalized = typeof logicalActionId === "string" ? logicalActionId.trim() : "";
+  if (!normalized) return "unknown";
+  return `${prefix}-${fingerprint(`${salt}\u0000${prefix}\u0000${normalized}`)}`;
+}
+
 function coarseTimeBucket(): string {
   const now = new Date();
   return `${now.toISOString().slice(0, 13)}:00Z`;
@@ -352,7 +381,12 @@ export function classifyLongEvidenceRecord(record: DirectChatMemoryLongEvidenceR
   return validControl ? "VALID_CONTROL" : "INVALID_SAMPLE";
 }
 
-function sanitizeInput(input: DirectChatMemoryLongEvidenceInput, currentSession: number, salt: string): DirectChatMemoryLongEvidenceRecord {
+function sanitizeInput(
+  input: DirectChatMemoryLongEvidenceInput,
+  currentSession: number,
+  sessionSaltValue: string,
+  activeWindow: { ordinal: number; salt: string } | null,
+): DirectChatMemoryLongEvidenceRecord {
   const candidate = input.candidate || {};
   const batch = input.batch || {} as DirectChatMemoryLongEvidenceBatchInput;
   const accounting = input.accounting || {} as DirectChatMemoryLongEvidenceAccountingInput;
@@ -362,7 +396,11 @@ function sanitizeInput(input: DirectChatMemoryLongEvidenceInput, currentSession:
     timeBucket: coarseTimeBucket(),
     featureScope: candidate.featureScope === "automatic_direct_chat" ? "automatic_direct_chat" : "unknown",
     sessionOrdinal: currentSession,
-    scopeFingerprint: scopeFingerprint(input.scope, salt),
+    windowOrdinal: activeWindow?.ordinal ?? null,
+    evidenceMode: activeWindow ? "formal_window" : "dry_run",
+    scopeFingerprint: scopeFingerprint(input.scope, activeWindow?.salt || sessionSaltValue),
+    logicalActionFingerprint: actionFingerprint(input.logicalActionId, activeWindow?.salt || sessionSaltValue, "action"),
+    batchActionFingerprint: actionFingerprint(input.logicalActionId, activeWindow?.salt || sessionSaltValue, "batch"),
     canaryReason: candidate.canaryReason === "SAFETY_VETO_CANCELLED_PLAN" || candidate.canaryReason === "none"
       ? candidate.canaryReason
       : "unknown",
@@ -440,19 +478,68 @@ let configured = false;
 let currentSessionOrdinal: number | null = null;
 let sessionOrdinalCounter = 0;
 let sessionSalt = "";
+let windowOrdinalCounter = 0;
+let activeWindow: { ordinal: number; salt: string } | null = null;
+let windowState: "not_started" | "active" | "finished" = "not_started";
+let lastWindowOrdinal: number | null = null;
 let records: DirectChatMemoryLongEvidenceRecord[] = [];
 
 export function configureDirectChatMemoryLongEvidenceCollector(configuration: { enabled: boolean; explicitDebug?: boolean }): void {
   const nextEnabled = configuration.enabled && (isDevBuild() || (configuration.explicitDebug === true && isTestInjection()));
   if (nextEnabled) {
     configured = true;
-    sessionOrdinalCounter += 1;
-    currentSessionOrdinal = sessionOrdinalCounter;
-    sessionSalt = createAiActionId();
-    records = [];
+    const continuingFormalWindow = activeWindow !== null;
+    startEvidenceSession();
+    if (!continuingFormalWindow) records = [];
     return;
   }
   configured = false;
+}
+
+function startEvidenceSession(): void {
+  sessionOrdinalCounter += 1;
+  currentSessionOrdinal = sessionOrdinalCounter;
+  sessionSalt = createAiActionId();
+}
+
+/** Start a formal window with an explicit developer-held token; the token is never exported or persisted. */
+export function startDirectChatMemoryLongEvidenceWindow(windowToken: string): number | null {
+  if (!configured || typeof windowToken !== "string" || !windowToken.trim()) return null;
+  windowOrdinalCounter += 1;
+  activeWindow = { ordinal: windowOrdinalCounter, salt: windowToken.trim() };
+  lastWindowOrdinal = activeWindow.ordinal;
+  windowState = "active";
+  records = [];
+  startEvidenceSession();
+  return activeWindow.ordinal;
+}
+
+/** Resume the same formal window after a reload by explicitly re-entering its local token. */
+export function resumeDirectChatMemoryLongEvidenceWindow(windowToken: string): number | null {
+  if (!configured || typeof windowToken !== "string" || !windowToken.trim()) return null;
+  if (!activeWindow) {
+    windowOrdinalCounter += 1;
+    activeWindow = { ordinal: windowOrdinalCounter, salt: windowToken.trim() };
+    lastWindowOrdinal = activeWindow.ordinal;
+  } else {
+    activeWindow = { ...activeWindow, salt: windowToken.trim() };
+    lastWindowOrdinal = activeWindow.ordinal;
+  }
+  windowState = "active";
+  startEvidenceSession();
+  return activeWindow.ordinal;
+}
+
+export function finishDirectChatMemoryLongEvidenceWindow(): void {
+  if (activeWindow) windowState = "finished";
+  activeWindow = null;
+}
+
+export function clearDirectChatMemoryLongEvidenceWindow(): void {
+  activeWindow = null;
+  windowState = "not_started";
+  lastWindowOrdinal = null;
+  records = [];
 }
 
 export function isDirectChatMemoryLongEvidenceCollectorEnabled(): boolean {
@@ -471,7 +558,7 @@ export function recordDirectChatMemoryLongEvidence(input: DirectChatMemoryLongEv
   if (!configured || currentSessionOrdinal === null) return null;
   try {
     if (!input || !input.scope) return null;
-    const record = sanitizeInput(input, currentSessionOrdinal, sessionSalt);
+    const record = sanitizeInput(input, currentSessionOrdinal, sessionSalt, activeWindow);
     records = [...records, record].slice(-LONG_EVIDENCE_MAX_RECORDS);
     return record;
   } catch {
@@ -498,27 +585,110 @@ export function deriveLongEvidenceAccounting(
   };
 }
 
-export function getDirectChatMemoryLongEvidenceSummary(): DirectChatMemoryLongEvidenceSummary {
-  const countsByClassification = emptyCounts();
+interface AccountingGroup {
+  logical: number;
+  physical: number;
+  shape: LongEvidenceAccountingShape;
+  conflict: boolean;
+}
+
+function aggregateFormalRecords(formalRecords: readonly DirectChatMemoryLongEvidenceRecord[]): {
+  logicalActionTotal: number;
+  physicalAttemptTotal: number;
+  accountingConflictCount: number;
+  unknownGroupingCount: number;
+  extractionBatchCount: number;
+  distinctExactScopeCount: number;
+  validSuppressionCount: number;
+  validControlCount: number;
+} {
+  const groups = new Map<string, AccountingGroup>();
+  let unknownGroupingCount = 0;
+  for (const record of formalRecords) {
+    if (record.classification !== "VALID_ELIGIBLE_SUPPRESSION" && record.classification !== "VALID_CONTROL") continue;
+    if (record.logicalActionFingerprint === "unknown" || record.accountingShape === "unknown") {
+      unknownGroupingCount += 1;
+      continue;
+    }
+    const existing = groups.get(record.logicalActionFingerprint);
+    if (!existing) {
+      groups.set(record.logicalActionFingerprint, {
+        logical: record.providerLogicalRequestCount,
+        physical: record.providerPhysicalAttemptCount,
+        shape: record.accountingShape,
+        conflict: false,
+      });
+      continue;
+    }
+    if (existing.logical !== record.providerLogicalRequestCount
+      || existing.physical !== record.providerPhysicalAttemptCount
+      || existing.shape !== record.accountingShape) {
+      existing.conflict = true;
+    }
+  }
+  let accountingConflictCount = 0;
   let logicalActionTotal = 0;
   let physicalAttemptTotal = 0;
-  let unknownGroupingCount = 0;
+  const authoritativeActionFingerprints = new Set<string>();
+  groups.forEach((group, actionFingerprintValue) => {
+    if (group.conflict) {
+      accountingConflictCount += 1;
+      return;
+    }
+    authoritativeActionFingerprints.add(actionFingerprintValue);
+    logicalActionTotal += 1;
+    physicalAttemptTotal += group.physical;
+  });
+  const authoritativeRecords = formalRecords.filter((record) =>
+    (record.classification === "VALID_ELIGIBLE_SUPPRESSION" || record.classification === "VALID_CONTROL")
+    && authoritativeActionFingerprints.has(record.logicalActionFingerprint));
+  const scopeFingerprints = new Set(
+    authoritativeRecords
+      .filter((record) => record.exactScope && record.privacyStatus === "metadata_only" && record.scopeFingerprint !== "unknown")
+      .map((record) => record.scopeFingerprint),
+  );
+  const batchFingerprints = new Set(authoritativeRecords.map((record) => record.batchActionFingerprint).filter((value) => value !== "unknown"));
+  return {
+    logicalActionTotal,
+    physicalAttemptTotal,
+    accountingConflictCount,
+    unknownGroupingCount,
+    extractionBatchCount: batchFingerprints.size,
+    distinctExactScopeCount: scopeFingerprints.size,
+    validSuppressionCount: authoritativeRecords.filter((record) => record.classification === "VALID_ELIGIBLE_SUPPRESSION").length,
+    validControlCount: authoritativeRecords.filter((record) => record.classification === "VALID_CONTROL").length,
+  };
+}
+
+export function getDirectChatMemoryLongEvidenceSummary(): DirectChatMemoryLongEvidenceSummary {
+  const countsByClassification = emptyCounts();
+  const sessionOrdinals = new Set<number>();
+  const formalRecords: DirectChatMemoryLongEvidenceRecord[] = [];
   records.forEach((record) => {
     countsByClassification[record.classification] += 1;
-    logicalActionTotal += record.providerLogicalRequestCount;
-    physicalAttemptTotal += record.providerPhysicalAttemptCount;
-    if (record.accountingShape === "unknown") unknownGroupingCount += 1;
+    sessionOrdinals.add(record.sessionOrdinal);
+    if (record.windowOrdinal !== null) formalRecords.push(record);
   });
+  const formalSessionOrdinals = new Set(formalRecords.map((record) => record.sessionOrdinal));
+  const formalAggregation = aggregateFormalRecords(formalRecords);
+  const formalClassificationCounts = emptyCounts();
+  formalRecords.forEach((record) => { formalClassificationCounts[record.classification] += 1; });
   return {
     schemaVersion: LONG_EVIDENCE_SCHEMA_VERSION,
     persistenceMode: "in_memory_only",
     enabled: configured,
     sessionOrdinal: currentSessionOrdinal,
+    windowOrdinal: activeWindow?.ordinal ?? lastWindowOrdinal,
+    windowState,
     recordCount: records.length,
     countsByClassification,
-    logicalActionTotal,
-    physicalAttemptTotal,
-    unknownGroupingCount,
+    sessionCount: sessionOrdinals.size,
+    formalSessionCount: formalSessionOrdinals.size,
+    formalWindowRecordCount: formalRecords.length,
+    ...formalAggregation,
+    failOpenCount: formalClassificationCounts.FAIL_OPEN_OBSERVATION,
+    invalidSampleCount: formalClassificationCounts.INVALID_SAMPLE,
+    safetyIncidentCount: formalClassificationCounts.SAFETY_INCIDENT,
   };
 }
 
@@ -542,6 +712,10 @@ function installDevApi(): void {
     count: () => records.length,
     exportJson: exportDirectChatMemoryLongEvidenceJson,
     summary: getDirectChatMemoryLongEvidenceSummary,
+    startWindow: startDirectChatMemoryLongEvidenceWindow,
+    resumeWindow: resumeDirectChatMemoryLongEvidenceWindow,
+    finishWindow: finishDirectChatMemoryLongEvidenceWindow,
+    clearWindow: clearDirectChatMemoryLongEvidenceWindow,
   };
 }
 
