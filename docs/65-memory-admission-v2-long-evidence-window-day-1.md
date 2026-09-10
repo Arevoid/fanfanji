@@ -260,3 +260,37 @@ performed from the available sanitized artifact, this stage closes with
 long-window continuation. No production data or backup was used. Do not run
 additional batches or Day 2 until the checkpoint-artifact gap is resolved and
 separately approved.
+
+## Stage 4D-11O-R1 — Sanitized artifact recovery checkpoint
+
+R1 started from refactor HEAD `c1f38fcdf417f7bc07f3c2f562d77df883780a79`;
+the stable original repository remains at
+`f515f7408cfe19da145f15a8ddffceae06e608d`. This was a read-only recovery and
+protocol-hardening pass. No new browser session, scope, message, extraction
+batch, suppression, control, or evidence record was created.
+
+The closed browser page no longer exposed the exact serialized 11O export to
+the review runtime. The prior R2 payload was already absent, so both records
+are explicitly classified as `R2_EXPORT_UNRECOVERABLE` and
+`11O_EXPORT_UNRECOVERABLE`. The summaries in this document and in
+`docs/67-memory-admission-v2-long-evidence-window-running-checkpoint.md` are
+historical, non-authoritative metadata only. No record was reconstructed, no
+placeholder artifact directory was created, and no hand-added counters are
+eligible for promotion.
+
+R1 adds the offline reviewer
+`scripts/reviewMemoryAdmissionLongEvidence.ts` and its tests. The reviewer
+accepts only complete sanitized JSON exports with a non-empty `records` array,
+delegates aggregation/deduplication to `combineLongEvidenceExports()`, rejects
+wrong schema, malformed records, mixed windows, summary-only input, and
+privacy-sensitive keys/values, and reports authoritative artifact counts
+separately from rejected inputs. No raw window token is written to a file,
+document, log, or Git history.
+
+Because no exact export could be recovered, retained authoritative formal
+artifact counts remain zero. R1 can only establish
+`EVIDENCE_ARTIFACT_PROTOCOL_VALIDATED` after its tests and full repository
+verification pass; it does not claim long-window evidence or authorize Phase
+2. A future run must follow persist-first ordering: exact `exportJson()` output
+to a durable file, read-back, machine review, privacy review, checkpoint, then
+disable the collector/Canary.

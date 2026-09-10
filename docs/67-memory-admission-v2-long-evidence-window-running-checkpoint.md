@@ -42,6 +42,15 @@ candidate statement, response, API key, Authorization header, or raw ID.
 
 The prior R2 Day 1 export is summarized in
 `docs/65-memory-admission-v2-long-evidence-window-day-1.md`, but its complete
-record payload was not persisted. Consequently a machine-checked
-previous-plus-current combined review is pending; this checkpoint is not a
-long-evidence promotion.
+record payload was not persisted. The summary above is historical context only:
+it is not an authoritative export and must not be supplied to
+`combineLongEvidenceExports()` or counted toward promotion. Consequently a
+machine-checked previous-plus-current combined review is pending; this
+checkpoint is not a long-evidence promotion.
+
+The 11O continuation export was likewise available only in the browser page
+that was closed before persistence. It is therefore recorded as
+`11O_EXPORT_UNRECOVERABLE`; no placeholder JSON or reconstructed record may be
+created from this summary. The durable-artifact protocol and offline review
+tool are specified in
+`docs/68-memory-admission-v2-sanitized-evidence-artifact-protocol.md`.
