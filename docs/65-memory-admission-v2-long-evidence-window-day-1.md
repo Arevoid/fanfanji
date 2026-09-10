@@ -188,3 +188,75 @@ The next step, if separately approved, is **Stage 4D-11O — Long-Evidence
 Window Continuation** using the same developer-held token, a new session
 fingerprint, real elapsed days, and bounded checkpoints. Do not run Day 2 or
 enter Phase 2 automatically.
+
+## Stage 4D-11O — Day 1 continuation checkpoint
+
+This continuation resumed the same formal window on the same real UTC
+calendar day. It did not create a replacement window, simulate Day 2, or
+enter Phase 2.
+
+### Continuity and bounded activity
+
+- Starting refactor HEAD: `2563c329ab3497e5d838abd17dba9eb9cc4f86b2`.
+- The previously retained raw developer token was successfully passed to
+  `resumeWindow(token)`; the resulting fingerprint remained
+  `window-8817672802574c9a`.
+- Actual UTC evidence day remained `2026-09-10`, so this is a Day 1
+  continuation and `distinctEvidenceDayCount` remains `1`.
+- A new formal session was created with unique fingerprint
+  `session-803588fc45247e6e` (distinct from
+  `session-1df2c8bbdcd05b15`).
+- One short synthetic message was sent only in the isolated
+  `Stage4D3 临时样本` Direct Chat fixture to establish a real message
+  boundary. One subsequent `extractNow()` batch used the real Provider path,
+  existing fallback, writer, cursor, and exact-scope readback.
+
+### Continuation checkpoint
+
+The current sanitized export contains one formal `VALID_CONTROL` record:
+
+- batch fingerprint: `batch-17b6502c`
+- evidence fingerprint: `evidence-30e3b20a69bc9b70`
+- exact scope: `scope-bbb51957`
+- `legacyAccepted=true`, `legacyWriteEligible=true`, `correlation=shared_unique`,
+  `lineage=shared`, `pairUnique=true`, `exactScope=true`,
+  `provenanceTrusted=true`, `metadataSource=v2_model_native`
+- validator: `deny_veto` / `bridge_not_safety_veto`; `candidateSuppressed=false`
+- canonical survivor observed, `cursorAdvanced=true`, `cursorLoop=false`,
+  `replayLoop=false`, `v2OnlyWrite=false`
+- logical `1`, physical `2`, accounting shape `fallback_split_rows`
+- `promptDelta=0`, `canaryProviderDelta=0`, privacy `metadata_only`
+
+Repeating this current export through `combineLongEvidenceExports()` produced
+`status=ok`, `windowCount=1`, `mixed_window=false`, malformed counts `0`,
+`recordCount=2`, `dedupedRecordCount=1`, one formal session, one batch, one
+control, and zero suppression/safety/accounting-conflict counts.
+
+### Cumulative-merge limitation
+
+The complete R2 Day 1 sanitized export was held only in the prior browser page
+and was not persisted to the repository before that page closed. Its summary
+is documented above, but the original record payload is unavailable for the
+required machine-checked `combineLongEvidenceExports(previous, current)`.
+No record was reconstructed, no counters were hand-added as authoritative,
+and no synthetic evidence was introduced. Therefore the continuation evidence
+is valid and safe, but the cumulative combined checkpoint is **not yet
+reviewable** and long-window promotion must not proceed until the prior
+sanitized export is recovered or a new approved continuation protocol captures
+both exports durably.
+
+### Shutdown and readiness
+
+After the current checkpoint, collector and Canary were disabled. The formal
+window remains active in memory and the same raw token is retained only in the
+current developer automation session; the window was not finished or
+destroyed. Current continuation safety thresholds remain zero (no wrong or
+cross-scope suppression, unauthorized/V2-only write, loop, privacy issue,
+Provider/Prompt delta, or material user regression).
+
+Because the required previous-plus-current cumulative review cannot be
+performed from the available sanitized artifact, this stage closes with
+`LONG_EVIDENCE_COLLECTION_INSUFFICIENT` rather than claiming healthy
+long-window continuation. No production data or backup was used. Do not run
+additional batches or Day 2 until the checkpoint-artifact gap is resolved and
+separately approved.
