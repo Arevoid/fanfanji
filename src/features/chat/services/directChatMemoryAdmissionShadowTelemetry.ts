@@ -5,6 +5,10 @@ import type {
   DirectChatMemoryShadowSeverity,
 } from "./directChatMemoryAdmissionShadow";
 import type {
+  DirectChatMemoryBridgeShadowMetrics,
+  DirectChatMemoryBridgeShadowObservation,
+} from "./directChatMemoryAdmissionBridgeShadow";
+import type {
   MemoryAdmissionComparisonMismatchClass,
   MemoryAdmissionComparisonSemantics,
 } from "./directChatMemoryAdmissionComparison";
@@ -95,6 +99,11 @@ let configured = false;
 let maxObservations = DEFAULT_MAX_OBSERVATIONS;
 let recentRecords: DirectChatMemoryAdmissionShadowEvidenceRecord[] = [];
 let failedOpenCount = 0;
+let latestBridgeShadow: {
+  failedOpen: boolean;
+  metrics: DirectChatMemoryBridgeShadowMetrics;
+  observations: readonly DirectChatMemoryBridgeShadowObservation[];
+} | undefined;
 
 const isDevBuild = (): boolean => {
   try {
@@ -184,6 +193,7 @@ export function configureDirectChatMemoryAdmissionShadowEvidence(
   if (!configured) {
     recentRecords = [];
     failedOpenCount = 0;
+    latestBridgeShadow = undefined;
   }
 }
 
@@ -194,6 +204,7 @@ export function isDirectChatMemoryAdmissionShadowEvidenceEnabled(): boolean {
 export function clearDirectChatMemoryAdmissionShadowEvidence(): void {
   recentRecords = [];
   failedOpenCount = 0;
+  latestBridgeShadow = undefined;
 }
 
 export function getDirectChatMemoryAdmissionShadowEvidence(): DirectChatMemoryAdmissionShadowEvidenceRecord[] {
@@ -256,6 +267,11 @@ export function recordDirectChatMemoryAdmissionShadowEvidence(input: {
   if (!configured) return;
   try {
     if (input.result.failedOpen) failedOpenCount += 1;
+    latestBridgeShadow = {
+      failedOpen: input.result.bridgeShadow.failedOpen,
+      metrics: input.result.bridgeShadow.metrics,
+      observations: input.result.bridgeShadow.observations.slice(-maxObservations),
+    };
     const evidenceOrigin = input.evidenceOrigin || "real_runtime";
     const records = input.result.observations.map((observation) => sanitizeObservation(observation, input.scope, evidenceOrigin));
     recentRecords = [...recentRecords, ...records].slice(-maxObservations);
@@ -280,6 +296,11 @@ export function exportDirectChatMemoryAdmissionShadowJson(): string {
         : "mixed",
     exportedAt: Date.now(),
     metrics: aggregateDirectChatMemoryAdmissionShadowEvidence(records, failedOpenCount),
+    bridgeShadow: latestBridgeShadow || {
+      failedOpen: false,
+      metrics: null,
+      observations: [],
+    },
     observations: records,
   }, null, 2);
 }

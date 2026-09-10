@@ -21,6 +21,10 @@ import {
   type MemoryAdmissionComparisonMismatchClass,
   type MemoryAdmissionComparisonSemantics,
 } from "./directChatMemoryAdmissionComparison";
+import {
+  observeDirectChatMemoryAdmissionBridgeShadow,
+  type DirectChatMemoryBridgeShadowResult,
+} from "./directChatMemoryAdmissionBridgeShadow";
 export type DirectChatMemoryMismatchCategory =
   | "both_allow"
   | "old_allow_new_reject"
@@ -93,6 +97,8 @@ export interface DirectChatMemoryAdmissionShadowResult {
   comparisonMismatchCounts: Record<MemoryAdmissionComparisonMismatchClass, number>;
   severityCounts: Record<DirectChatMemoryShadowSeverity, number>;
   observations: readonly DirectChatMemoryShadowObservation[];
+  /** Additive pure bridge characterization; never feeds legacy decisions. */
+  bridgeShadow: DirectChatMemoryBridgeShadowResult;
 }
 
 const emptyDecisionCounts = (): Record<MemoryAdmissionState, number> => ({
@@ -228,6 +234,36 @@ function failedOpenResult(): DirectChatMemoryAdmissionShadowResult {
     comparisonMismatchCounts: emptyComparisonMismatches(),
     severityCounts: emptySeverities(),
     observations: [],
+    bridgeShadow: {
+      failedOpen: true,
+      metrics: {
+        totalObservations: 0,
+        exactCount: 0,
+        ambiguousCount: 0,
+        unmatchedLegacyCount: 0,
+        unmatchedV2Count: 0,
+        legacyOnlyCount: 0,
+        v2OnlyCount: 0,
+        duplicateCount: 0,
+        conflictCount: 0,
+        wouldWriteProposal: 0,
+        wouldSafetyVeto: 0,
+        wouldPassthrough: 0,
+        wouldReview: 0,
+        wouldReject: 0,
+        wouldRoute: 0,
+        stateCounts: {
+          legacy_passthrough: 0,
+          write_proposal: 0,
+          review: 0,
+          reject: 0,
+          route: 0,
+          safety_veto: 0,
+        },
+        safetyVetoReasonCounts: {},
+      },
+      observations: [],
+    },
   };
 }
 
@@ -382,6 +418,15 @@ export function observeDirectChatMemoryAdmissionShadow(
       });
     }
 
+    let bridgeShadow: DirectChatMemoryBridgeShadowResult;
+    try {
+      bridgeShadow = observeDirectChatMemoryAdmissionBridgeShadow(input);
+    } catch {
+      // Bridge shadow is strictly fail-open; existing comparator output is
+      // returned even when the additive adapter cannot characterize a result.
+      bridgeShadow = failedOpenResult().bridgeShadow;
+    }
+
     return {
       failedOpen: false,
       candidateCount: adapted.candidates.length,
@@ -404,6 +449,7 @@ export function observeDirectChatMemoryAdmissionShadow(
       comparisonMismatchCounts,
       severityCounts,
       observations,
+      bridgeShadow,
     };
   } catch {
     return failedOpenResult();

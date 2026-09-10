@@ -200,7 +200,8 @@ untrusted.runtime.trustedProvenance = false;
 const provenanceMismatch = match([legacy()], [untrusted]);
 assert.equal(provenanceMismatch.matches.some((item) => item.correlation === "exact"), false);
 
-// Production import isolation: only tests may import this new pure module.
+// Production import isolation: only the approved shadow adapter may import the
+// pure bridge module. The shadow adapter itself remains observation-only.
 function listSourceFiles(directory: string): string[] {
   return readdirSync(directory).flatMap((name) => {
     const path = join(directory, name);
@@ -208,8 +209,15 @@ function listSourceFiles(directory: string): string[] {
   });
 }
 const bridgeModule = "directChatMemoryAdmissionBridge";
+const approvedIntegration = "directChatMemoryAdmissionBridgeShadow.ts";
+const bridgeImport = /(?:from|import\()\s*["'][^"']*directChatMemoryAdmissionBridge["']/u;
 listSourceFiles(resolve(process.cwd(), "src")).filter((path) => !path.endsWith(`${bridgeModule}.ts`)).forEach((path) => {
-  assert.doesNotMatch(readFileSync(path, "utf8"), new RegExp(bridgeModule), `production file must not import ${bridgeModule}: ${path}`);
+  const source = readFileSync(path, "utf8");
+  if (path.endsWith(approvedIntegration)) {
+    assert.match(source, bridgeImport, `approved shadow adapter must import ${bridgeModule}: ${path}`);
+  } else {
+    assert.doesNotMatch(source, bridgeImport, `production file must not import ${bridgeModule} directly: ${path}`);
+  }
 });
 
 console.log("PASS Stage 4D-10B pure matcher, bridge decision, safety-veto, idempotency, replay and import isolation contract");
