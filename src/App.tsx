@@ -9,6 +9,12 @@ import { readString, remove as removeStoredValue, writeJson, writeString } from 
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { flushMessages, initializeMessages, loadMessageWindow, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
+import {
+  consumeMessagePersistenceDecision,
+  createMessagePersistenceLifecycle,
+  markMessageHydrated,
+  markMessageSnapshotPersisted,
+} from "./core/messagePersistenceLifecycle";
 import { flushMoments, initializeMomentRepository, loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
 import { removeMemoriesForMoment } from "./features/moments/services/momentMemory";
@@ -726,7 +732,7 @@ export default function App() {
     let active = true;
     void initializeMessages(DEFAULT_MESSAGES).then((result) => {
       if (!active || !result.valid) return;
-      skipNextMessagesPersistenceRef.current = true;
+      markMessageHydrated(messagesPersistenceLifecycleRef.current);
       setMessages(normalizeCharacterPhoneProactiveMessages(result.value.filter((message) =>
         !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content)),
       )));
@@ -861,11 +867,9 @@ export default function App() {
   const offlineStoriesHydratedRef = useRef(false);
   const deletedOfflineStoryIdsRef = useRef(new Set<string>());
   const charactersRepositoryHydrated = useRef(false);
-  const messagesPersistenceReady = useRef(false);
-  const explicitlyPersistedMessagesRef = useRef<Message[] | null>(null);
+  const messagesPersistenceLifecycleRef = useRef(createMessagePersistenceLifecycle());
   const momentsPersistenceReady = useRef(false);
   const skipNextCharactersPersistenceRef = useRef(false);
-  const skipNextMessagesPersistenceRef = useRef(false);
   const skipNextMomentsPersistenceRef = useRef(false);
   const presetsPersistenceReady = useRef(false);
   const worldBookPersistenceReady = useRef(false);
@@ -2453,19 +2457,8 @@ export default function App() {
   }, [characters]);
 
   useEffect(() => {
-    if (!messagesPersistenceReady.current) {
-      messagesPersistenceReady.current = true;
-      if (explicitlyPersistedMessagesRef.current === messages) explicitlyPersistedMessagesRef.current = null;
-      return;
-    }
-    if (explicitlyPersistedMessagesRef.current === messages) {
-      explicitlyPersistedMessagesRef.current = null;
-      return;
-    }
-    if (skipNextMessagesPersistenceRef.current) {
-      skipNextMessagesPersistenceRef.current = false;
-      return;
-    }
+    const decision = consumeMessagePersistenceDecision(messagesPersistenceLifecycleRef.current, messages);
+    if (decision !== "persist") return;
     const result = saveMessages(messages);
     if (!result.success) console.error("Failed to save messages to localStorage:", result.error);
   }, [messages]);
@@ -2996,7 +2989,7 @@ export default function App() {
     if (!persisted.success) {
       console.error("Failed to save messages to durable storage:", persisted.error);
     } else {
-      explicitlyPersistedMessagesRef.current = nextMessages;
+      markMessageSnapshotPersisted(messagesPersistenceLifecycleRef.current, nextMessages);
     }
     messagesRef.current = nextMessages;
     setMessages(nextMessages);
