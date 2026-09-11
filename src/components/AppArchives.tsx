@@ -7,6 +7,7 @@ import { getSpeechForText } from "../utils/minimaxTts";
 import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile, createCharacterFromRawDocument } from "../features/archives/characterExport";
 import { buildCharacterTtsOptions, type TtsProvider } from "../features/voice/ttsConfig";
 import { readString } from "../core/storage/storageAdapter";
+import { createCharacterFromInput } from "../domain/character/characterCreation";
 
 interface AppArchivesProps {
   characters: Character[];
@@ -384,7 +385,7 @@ export default function AppArchives({
     const finalAvatar = avatar || "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg";
     const finalPersonality = personality.trim();
 
-    const savedChar: Character = {
+    const savedChar = createCharacterFromInput({
       // Archive editing changes the profile form only. Keep chat/runtime
       // preferences and future character fields intact instead of replacing
       // the record with a partial profile object.
@@ -408,7 +409,7 @@ export default function AppArchives({
       references: originalChar ? originalChar.references : [],
       minimaxVoiceId: minimaxVoiceId,
       mosslandVoiceId: mosslandVoiceId,
-    };
+    });
 
     onSaveCharacter(savedChar);
     resetForm();
