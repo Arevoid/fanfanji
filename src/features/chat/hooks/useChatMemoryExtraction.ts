@@ -44,6 +44,16 @@ import {
   readDirectChatMemoryCanonicalReadback,
 } from "../services/directChatMemoryLongEvidenceRuntime";
 import { recordDirectChatMemoryEvidenceTrace } from "../services/directChatMemoryEvidenceTrace";
+import { currentDevDiagnosticMode, isDevDiagnosticRuntime, registerDevModuleTrace } from "../../../core/runtime/devDiagnostics";
+
+registerDevModuleTrace({
+  stage: "memory_extraction_module_evaluated",
+  timestamp: Date.now(),
+  moduleName: "memory_extraction",
+  dev: isDevDiagnosticRuntime(),
+  mode: currentDevDiagnosticMode(),
+  reason: "module_loaded",
+});
 
 type DirectScope = { characterId: string; relationId: string; userIdentityId: string; conversationId: string };
 

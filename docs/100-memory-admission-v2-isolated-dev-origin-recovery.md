@@ -1,11 +1,12 @@
-# Stage 4D-11O-R3E — Isolated Dev Origin Recovery (blocked)
+# Stage 4D-11O-R3E — Isolated Dev Origin Recovery (diagnosed)
 
 ## Result
 
-This attempt stopped before any Memory Admission runtime action. The required
-readiness condition was not reached.
+The original supported-browser attempt stopped before any Memory Admission
+runtime action. A later bounded Edge/CDP diagnostic run reached the runtime
+diagnosis boundary without sending a message or invoking Memory.
 
-Stop code: `R3E_CURRENT_DEV_BUNDLE_NOT_LOADED`
+Original stop code: `R3E_CURRENT_DEV_BUNDLE_NOT_LOADED`
 
 - Starting HEAD: `2bec271856051f1f90e36397aa656255d61dfeeb`
 - Refactor branch: `refactor/v2-architecture`
@@ -81,8 +82,57 @@ before the runtime stop:
   restored to the tracked baseline after the check);
 - dependency gate: passed (`105` allowlisted boundary edges, `3` cycles).
 
-These checks validate the source change only; they do not upgrade this attempt
-to runtime readiness.
+These checks validate the source change only; the later CDP run below supplies
+the bounded runtime diagnosis.
+
+## R3E-R1-R1 runtime diagnosis
+
+The supported CUA kernel remained unavailable, so a pre-existing Microsoft
+Edge executable was launched with a separate diagnostic-only profile and CDP.
+The only origin opened was `http://127.0.0.2:3000/`. No site data was cleared.
+
+The root probe reported:
+
+```text
+rootBundleLoaded = true
+dev = true
+mode = development
+hostClass = loopback
+window === window.top = true
+serviceWorker.controller = null
+registrations = []
+```
+
+A timing probe after a harmless reload reproduced the preflight boundary:
+
+```text
+~50ms:  helper=false, trace=false, Chat resources not yet evaluated
+~700ms: helper=false, trace=false, Chat resources not yet evaluated
+~1.8s:  helper=true, trace=true, collector ordinal=1
+```
+
+The module registry then recorded `chat_module_evaluated`,
+`memory_extraction_module_evaluated`, `collector_module_evaluated`, and
+`trace_module_evaluated`, followed by successful dev API installation. The
+helper ordinal and Collector ordinal were both `1`.
+
+This proves classification `J — helper unavailable before lazy business module
+load by design`. `App.tsx` schedules the existing `IDLE_PRELOAD_APP_IDS`
+preload through `requestIdleCallback` (with a 1500ms timeout), so an immediate
+preflight can observe a current root bundle while the Chat module has not yet
+run. The current run had no Service Worker controller, no registration, and no
+module evaluation error; stale SW and wrong browsing context were not involved
+in this diagnosis.
+
+To make that state inspectable without forcing a business action, the
+checkpoint now exposes a dev/test-only root probe and a bounded 64-entry
+privacy-safe module registry. It records only enumerated stage/module/mode,
+timestamp, optional instance ordinal, and safe reason codes. It does not
+contain prompts, responses, messages, tokens, credentials, request IDs, or
+user data. This corrects the preflight model; it does not preload production
+modules or alter Memory behavior.
+
+Readiness: `DEV_RUNTIME_PRECHECK_MODEL_CORRECTED`
 
 ## Recovery boundary
 

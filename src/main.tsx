@@ -4,6 +4,9 @@ import App from './App.tsx';
 import './index.css';
 import { ThemeProvider } from './features/theme/ThemeProvider.tsx';
 import { isDevLoopbackOrigin } from './core/runtime/devOrigin.ts';
+import { installDevRuntimeProbe } from './core/runtime/devDiagnostics.ts';
+
+installDevRuntimeProbe();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,3 +1,5 @@
+import { currentDevDiagnosticMode, isDevDiagnosticRuntime, registerDevModuleTrace } from "../../../core/runtime/devDiagnostics";
+
 export type DirectChatMemoryEvidenceTraceStage =
   | "extraction_completed"
   | "long_evidence_gate_checked"
@@ -80,6 +82,15 @@ const TRACE_REASONS = new Set<DirectChatMemoryEvidenceTraceReason>([
   "unknown",
 ]);
 
+registerDevModuleTrace({
+  stage: "trace_module_evaluated",
+  timestamp: Date.now(),
+  moduleName: "trace",
+  dev: isDevDiagnosticRuntime(),
+  mode: currentDevDiagnosticMode(),
+  reason: "module_loaded",
+});
+
 type TraceRoot = typeof globalThis & {
   [TRACE_GLOBAL]?: DirectChatMemoryEvidenceTraceApi;
   [TRACE_STORE]?: { entries: DirectChatMemoryEvidenceTraceEntry[] };
@@ -161,7 +172,25 @@ export function exportDirectChatMemoryEvidenceTraceJson(): string {
 }
 
 function installDevApi(): void {
-  if (!isTraceRuntime()) return;
+  registerDevModuleTrace({
+    stage: "install_dev_api_attempted",
+    timestamp: Date.now(),
+    moduleName: "trace",
+    dev: isDevDiagnosticRuntime(),
+    mode: currentDevDiagnosticMode(),
+    reason: "module_loaded",
+  });
+  if (!isTraceRuntime()) {
+    registerDevModuleTrace({
+      stage: "install_dev_api_skipped",
+      timestamp: Date.now(),
+      moduleName: "trace",
+      dev: isDevDiagnosticRuntime(),
+      mode: currentDevDiagnosticMode(),
+      reason: "environment_gate_false",
+    });
+    return;
+  }
   const root = globalThis as TraceRoot;
   root[TRACE_GLOBAL] = {
     clear: clearDirectChatMemoryEvidenceTrace,
@@ -169,6 +198,14 @@ function installDevApi(): void {
     exportJson: exportDirectChatMemoryEvidenceTraceJson,
     get: getDirectChatMemoryEvidenceTrace,
   };
+  registerDevModuleTrace({
+    stage: "install_dev_api_completed",
+    timestamp: Date.now(),
+    moduleName: "trace",
+    dev: isDevDiagnosticRuntime(),
+    mode: currentDevDiagnosticMode(),
+    reason: "api_installed",
+  });
 }
 
 installDevApi();

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
+import { currentDevDiagnosticMode, registerDevModuleTrace, isDevDiagnosticRuntime } from "../core/runtime/devDiagnostics";
 import { ApiChatError, apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "../utils/apiHelper";
 import { readJson, readString, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
@@ -335,6 +336,15 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   if (!rgb) return hexColor;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
 }
+
+registerDevModuleTrace({
+  stage: "chat_module_evaluated",
+  timestamp: Date.now(),
+  moduleName: "chat",
+  dev: isDevDiagnosticRuntime(),
+  mode: currentDevDiagnosticMode(),
+  reason: "module_loaded",
+});
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
   { key: "image", label: "图片" }, { key: "textImage", label: "文字图" }, { key: "voice", label: "语音" }, { key: "sticker", label: "表情" },

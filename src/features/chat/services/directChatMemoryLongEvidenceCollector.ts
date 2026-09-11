@@ -4,6 +4,7 @@ import {
   type AiRequestEnvelope,
 } from "../../../core/monitoring/aiRequestLedger";
 import { createId } from "../../../core/id/createId";
+import { currentDevDiagnosticMode, isDevDiagnosticRuntime, registerDevModuleTrace } from "../../../core/runtime/devDiagnostics";
 
 export const LONG_EVIDENCE_SCHEMA_VERSION = "memory-admission-v2-long-evidence-1" as const;
 export const LONG_EVIDENCE_MAX_RECORDS = 100 as const;
@@ -650,6 +651,16 @@ const collectorRoot = globalThis as typeof globalThis & { [COLLECTOR_INSTANCE_CO
 const collectorInstanceOrdinal = (collectorRoot[COLLECTOR_INSTANCE_COUNTER] || 0) + 1;
 collectorRoot[COLLECTOR_INSTANCE_COUNTER] = collectorInstanceOrdinal;
 
+registerDevModuleTrace({
+  stage: "collector_module_evaluated",
+  timestamp: Date.now(),
+  moduleName: "collector",
+  dev: isDevDiagnosticRuntime(),
+  mode: currentDevDiagnosticMode(),
+  instanceOrdinal: collectorInstanceOrdinal,
+  reason: "module_loaded",
+});
+
 export function getDirectChatMemoryLongEvidenceCollectorInstanceOrdinal(): number {
   return collectorInstanceOrdinal;
 }
@@ -1114,7 +1125,26 @@ export function combineLongEvidenceExports(
 }
 
 function installDevApi(force = false): void {
-  if (!isDevBuild() && !force) return;
+  registerDevModuleTrace({
+    stage: "install_dev_api_attempted",
+    timestamp: Date.now(),
+    moduleName: "collector",
+    dev: isDevDiagnosticRuntime(),
+    mode: currentDevDiagnosticMode(),
+    instanceOrdinal: collectorInstanceOrdinal,
+  });
+  if (!isDevBuild() && !force) {
+    registerDevModuleTrace({
+      stage: "install_dev_api_skipped",
+      timestamp: Date.now(),
+      moduleName: "collector",
+      dev: isDevDiagnosticRuntime(),
+      mode: currentDevDiagnosticMode(),
+      instanceOrdinal: collectorInstanceOrdinal,
+      reason: "environment_gate_false",
+    });
+    return;
+  }
   const root = globalThis as typeof globalThis & {
     __fanfanjiMemoryAdmissionLongEvidence?: DirectChatMemoryLongEvidenceDebugApi;
   };
@@ -1135,6 +1165,15 @@ function installDevApi(force = false): void {
     createWindowToken: createDirectChatMemoryLongEvidenceWindowToken,
     instanceOrdinal: collectorInstanceOrdinal,
   };
+  registerDevModuleTrace({
+    stage: "install_dev_api_completed",
+    timestamp: Date.now(),
+    moduleName: "collector",
+    dev: isDevDiagnosticRuntime(),
+    mode: currentDevDiagnosticMode(),
+    instanceOrdinal: collectorInstanceOrdinal,
+    reason: force ? "hmr_rebind" : "api_installed",
+  });
 }
 
 /** Test-only hook for exercising the HMR rebind contract without a runtime turn. */

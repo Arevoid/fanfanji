@@ -76,3 +76,52 @@ missing path was not identified with enough certainty to create or modify
 additional directories safely.
 
 R3E-R2 stop code: `R3E_BROWSER_INSPECTION_ENVIRONMENT_STILL_FAILED`.
+
+## R3E-R1-R1 — bounded Edge/CDP resume
+
+The supported CUA kernel was still unavailable, so diagnosis used the
+pre-existing Microsoft Edge executable with an isolated diagnostic-only profile
+and CDP. The page was limited to `http://127.0.0.2:3000/`; no fixture, site
+storage, chat, Provider, or Memory action was performed.
+
+Harmless runtime reads succeeded:
+
+```text
+href = http://127.0.0.2:3000/
+readyState = complete
+title = 米饭机
+window === window.top = true
+```
+
+The dev root probe reported the current Vite bundle (`dev=true`,
+`mode=development`, `hostClass=loopback`). The page had no Service Worker
+controller and no registrations. CDP `Debugger.scriptParsed` events included
+the current `main.tsx`, `App.tsx`, `AppChat.tsx`,
+`useChatMemoryExtraction.ts`, `directChatMemoryLongEvidenceCollector.ts`, and
+`directChatMemoryEvidenceTrace.ts`; no module-evaluation exception was
+observed. The browser's CSP blocked the Vite HMR websocket, so no HMR
+transition was inferred or manufactured.
+
+The bounded timing sample was:
+
+```text
+50ms / 700ms after reload: helper and trace absent
+1.8s after reload:          helper and trace present, ordinal=1
+```
+
+The module registry subsequently recorded root, Chat, memory-extraction,
+Collector, and Trace evaluation, plus completed API installation. Helper and
+runtime Collector ordinals matched (`1`). The exact application cause is
+`J — helper unavailable before lazy business module load by design`: the
+existing `requestIdleCallback`/1500ms `IDLE_PRELOAD_APP_IDS` path evaluates the
+Chat module after the early preflight window. The earlier preflight therefore
+used an invalid assumption that helper presence was required immediately.
+
+The fix is diagnostic-only: `src/core/runtime/devDiagnostics.ts` installs a
+dev/test-only root probe and a maximum-64-entry registry with an enum-only,
+metadata-only schema. It distinguishes current root plus module-not-loaded
+from stale bundle without forcing Collector evaluation or changing production
+loading. Production does not install any of the diagnostic globals.
+
+R3E-R1-R1 result: `DEV_RUNTIME_PRECHECK_MODEL_CORRECTED`. This is not Memory
+readiness and does not authorize R3D-R1 or evidence collection in this turn.
