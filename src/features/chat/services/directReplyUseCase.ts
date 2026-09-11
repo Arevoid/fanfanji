@@ -119,7 +119,9 @@ export async function executeDirectReplyUseCase<PreparedResponse>(
   const turn = await executeDirectReplyTurn(input.turn);
   const deliveredMessages = deliveredMessagesFromTurn(turn);
   const delivery = deliveryForTurn(turn);
-  let durableCompletionConfirmed = true;
+  // Without an injected completion boundary the use case must not imply that
+  // the delivered messages are durable.
+  let durableCompletionConfirmed = false;
   if (input.durableCompletion) {
     try {
       durableCompletionConfirmed = await input.durableCompletion({

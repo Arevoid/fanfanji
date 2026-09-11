@@ -29,6 +29,7 @@ App 的统一 `handleSendMessage` 现在以当前 `messagesRef` 构造下一份�
 - 多 bubble：delivery 仍逐 bubble 展示；durable completion 只在全部已交付 bubbles（或部分交付失败已经返回）后执行一次。
 - Provider failure / no response / cancellation：completion boundary 仍执行，因此已进入 runtime 的 user message 可以被 durable flush；不会凭非 durable history 触发 Memory。
 - backend success 与 browser-direct fallback success 共享同一个 boundary；没有 fallback-only 分支。
+- 若调用方未注入 completion handler，Direct Reply result 会明确标记 `durableCompletionConfirmed=false`，不会默认宣称已持久化。
 
 UI 仍可先 optimistic render，Provider 请求不等待 user message 的 IndexedDB transaction。只有 turn 完成边界等待 writer idle，因此不会每个 token/bubble 做 full flush。
 
