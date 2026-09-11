@@ -126,7 +126,12 @@ const requestDirectChatResponse = async (input: {
   const retry = normalizeDirectChatResponse(retryRaw, true);
   if (!retry.formatIssue && retry.text.trim()) return retry;
 
-  throw new Error("模型回复格式异常：重试后仍未得到有效文字回复。请更换模型或重试。");
+  // Preserve a machine-readable parse category at the lifecycle boundary;
+  // the user-facing message remains unchanged for the existing UI flow.
+  throw Object.assign(
+    new Error("模型回复格式异常：重试后仍未得到有效文字回复。请更换模型或重试。"),
+    { code: "response_format" as const },
+  );
 };
 
 const requestDirectChatResponseWithContextRecovery = async (input: {
