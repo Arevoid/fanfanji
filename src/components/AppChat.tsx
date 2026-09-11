@@ -349,6 +349,7 @@ interface AppChatProps {
   messages: Message[];
   moments: Moment[];
   onSendMessage: (msg: Message) => void;
+  onEnsureMessageDurability?: () => boolean | Promise<boolean>;
   onSaveImageToCharacterPhone?: (input: CharacterPhoneImageSaveInput) => void | Promise<void>;
   /** Character phones are owned by the primary persona, even in alias chats. */
   characterPhoneOwnerIdentityId?: string;
@@ -461,6 +462,7 @@ export default function AppChat({
   messages,
   moments,
   onSendMessage: onSendMessageRaw,
+  onEnsureMessageDurability,
   onSaveImageToCharacterPhone,
   characterPhoneOwnerIdentityId,
   onSaveCharacter,
@@ -1022,6 +1024,18 @@ export default function AppChat({
   const isOfflineModeActive = false;
   const isInputNarration = false;
   const activeOfflineStoryId = null;
+
+  const confirmMessageDurability = async (): Promise<boolean> => {
+    if (!onEnsureMessageDurability) return true;
+    try {
+      const confirmed = await onEnsureMessageDurability();
+      if (!confirmed) console.warn("[chat-persistence] Direct Chat durable completion was not confirmed.");
+      return confirmed;
+    } catch {
+      console.warn("[chat-persistence] Direct Chat durable completion failed.");
+      return false;
+    }
+  };
 
   /**
    * Start a relation-scoped offline story only after the online transcript
@@ -2658,6 +2672,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             onSendMessage: isConnectedVoiceCall ? onSendMessage : onSendMessageRaw,
           }),
         },
+        durableCompletion: async () => confirmMessageDurability(),
         postReply: ({ response: prepared, deliveredMessages: createdMessages }) => {
           const data = prepared.data;
           const inlineRelationship = turnRelationship
@@ -3076,6 +3091,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       : undefined,
     currentChatMessages,
     onSendMessage,
+    onMessagePersistenceComplete: confirmMessageDurability,
     generateResponseForUserMessage,
     generateAndSendCharacterImage,
     offlineStories,

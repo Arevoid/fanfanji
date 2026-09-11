@@ -8,7 +8,7 @@ import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storag
 import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
-import { initializeMessages, loadMessageWindow, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
+import { flushMessages, initializeMessages, loadMessageWindow, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
 import { flushMoments, initializeMomentRepository, loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
 import { removeMemoriesForMoment } from "./features/moments/services/momentMemory";
@@ -862,6 +862,7 @@ export default function App() {
   const deletedOfflineStoryIdsRef = useRef(new Set<string>());
   const charactersRepositoryHydrated = useRef(false);
   const messagesPersistenceReady = useRef(false);
+  const explicitlyPersistedMessagesRef = useRef<Message[] | null>(null);
   const momentsPersistenceReady = useRef(false);
   const skipNextCharactersPersistenceRef = useRef(false);
   const skipNextMessagesPersistenceRef = useRef(false);
@@ -2454,6 +2455,11 @@ export default function App() {
   useEffect(() => {
     if (!messagesPersistenceReady.current) {
       messagesPersistenceReady.current = true;
+      if (explicitlyPersistedMessagesRef.current === messages) explicitlyPersistedMessagesRef.current = null;
+      return;
+    }
+    if (explicitlyPersistedMessagesRef.current === messages) {
+      explicitlyPersistedMessagesRef.current = null;
       return;
     }
     if (skipNextMessagesPersistenceRef.current) {
@@ -2961,6 +2967,14 @@ export default function App() {
   };
 
   // Chat message send handler
+  const ensureMessagesDurable = async (): Promise<boolean> => {
+    const result = await flushMessages();
+    if (!result.success) {
+      console.warn("[chat-persistence] Durable message completion unavailable:", result.error || "write");
+    }
+    return result.success;
+  };
+
   const handleSendMessage = (msg: Message, ownerIdentityIdOverride?: string) => {
     const isGroupMessage = characters.some((character) => character.id === msg.characterId && character.isGroupChat);
     let messageToSave = msg;
@@ -2976,10 +2990,16 @@ export default function App() {
       }
       messageToSave = { ...msg, conversationId: relationship.conversationId || getConversationId(relationship.id) };
     }
-    setMessages((prev) => {
-      if (prev.some((message) => message.id === messageToSave.id)) return prev;
-      return normalizeCharacterPhoneProactiveMessages([...prev, messageToSave]);
-    });
+    if (messagesRef.current.some((message) => message.id === messageToSave.id)) return;
+    const nextMessages = normalizeCharacterPhoneProactiveMessages([...messagesRef.current, messageToSave]);
+    const persisted = saveMessages(nextMessages);
+    if (!persisted.success) {
+      console.error("Failed to save messages to durable storage:", persisted.error);
+    } else {
+      explicitlyPersistedMessagesRef.current = nextMessages;
+    }
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
 
     // Update character's last active time on message exchange
       if (messageToSave.relationId) {
@@ -4880,6 +4900,7 @@ export default function App() {
                     messages={messages}
                     moments={moments}
                     onSendMessage={handleSendMessage}
+                    onEnsureMessageDurability={ensureMessagesDurable}
                     onSaveImageToCharacterPhone={saveImageToCharacterPhone}
                     characterPhoneOwnerIdentityId={characterPhoneIdentity.id}
                     onSaveCharacter={handleSaveCharacter}

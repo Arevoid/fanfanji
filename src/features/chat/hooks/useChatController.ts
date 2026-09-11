@@ -27,6 +27,7 @@ export interface UseChatControllerOptions {
   getQuotedSenderName?: (message: Message) => string | undefined;
   currentChatMessages: Message[];
   onSendMessage: (message: Message) => void;
+  onMessagePersistenceComplete?: () => boolean | Promise<boolean>;
   generateResponseForUserMessage: ChatResponseHandler;
   generateAndSendCharacterImage: CharacterImageHandler;
   offlineStories: OfflineStory[];
@@ -51,6 +52,7 @@ export function useChatController({
   getQuotedSenderName,
   currentChatMessages,
   onSendMessage,
+  onMessagePersistenceComplete,
   generateResponseForUserMessage,
   generateAndSendCharacterImage,
   offlineStories,
@@ -94,6 +96,17 @@ export function useChatController({
       && message.relationId === runtimeContext.relationId
       && (!message.conversationId || message.conversationId === runtimeContext.conversationId);
 
+  const confirmMessagePersistence = async () => {
+    if (isOfflineModeActive || !onMessagePersistenceComplete) return;
+    try {
+      if (!await onMessagePersistenceComplete()) {
+        console.warn("[chat-persistence] User-only message durable completion was not confirmed.");
+      }
+    } catch {
+      console.warn("[chat-persistence] User-only message durable completion failed.");
+    }
+  };
+
   // Handle Send Message (User sends only, no immediate reply)
   const handleSendOnly = async (inputText: string, event?: FormEvent) => {
     if (event) event.preventDefault();
@@ -115,6 +128,7 @@ export function useChatController({
       authorAvatarSnapshot: activeIdentityAvatar,
     });
     onSendMessage(userMessage);
+    await confirmMessagePersistence();
     appendChatUserMessageToOfflineStory({
       userMessage,
       isOfflineModeActive,
@@ -166,6 +180,7 @@ export function useChatController({
       // persisted before any character text is allowed.
       if (shouldGenerateExplicitImage) {
         await generateAndSendCharacterImage("explicit-user-text", pendingImageRequest!, abortController.signal);
+        await confirmMessagePersistence();
         return;
       }
 

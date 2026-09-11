@@ -35,6 +35,18 @@ export type DirectReplyUseCasePostReplyHandler<PreparedResponse> = (
   input: DirectReplyUseCasePostReplyInput<PreparedResponse>,
 ) => DirectReplyUseCasePostReplyOutcome | void;
 
+export interface DirectReplyDurableCompletionInput<PreparedResponse> {
+  lifecycle: DirectReplyLifecycleInput;
+  turn: DirectReplyTurnResult<PreparedResponse>;
+  response?: PreparedResponse;
+  candidates?: ReplyCandidatesResult;
+  deliveredMessages: readonly Message[];
+}
+
+export type DirectReplyDurableCompletionHandler<PreparedResponse> = (
+  input: DirectReplyDurableCompletionInput<PreparedResponse>,
+) => boolean | Promise<boolean>;
+
 /**
  * Prepared input for one normal direct send.  User-message persistence and
  * context/prompt assembly happen before this boundary; the turn bundle is
@@ -43,6 +55,12 @@ export type DirectReplyUseCasePostReplyHandler<PreparedResponse> = (
 export interface DirectReplyUseCaseInput<PreparedResponse> {
   lifecycle: DirectReplyLifecycleInput;
   turn: DirectReplyTurnExecutorInput<PreparedResponse>;
+  /**
+   * Runs once after the turn executor has finished, before post-reply side
+   * effects. The callback is best-effort and reports whether durability was
+   * confirmed without changing the provider or delivery result.
+   */
+  durableCompletion?: DirectReplyDurableCompletionHandler<PreparedResponse>;
   postReply?: DirectReplyUseCasePostReplyHandler<PreparedResponse>;
 }
 
@@ -52,6 +70,7 @@ export interface DirectReplyUseCaseResult<PreparedResponse> {
   response?: PreparedResponse;
   candidates?: ReplyCandidatesResult;
   deliveredMessages: readonly Message[];
+  durableCompletionConfirmed: boolean;
   postReply?: DirectReplyUseCasePostReplyOutcome;
 }
 
@@ -100,6 +119,20 @@ export async function executeDirectReplyUseCase<PreparedResponse>(
   const turn = await executeDirectReplyTurn(input.turn);
   const deliveredMessages = deliveredMessagesFromTurn(turn);
   const delivery = deliveryForTurn(turn);
+  let durableCompletionConfirmed = true;
+  if (input.durableCompletion) {
+    try {
+      durableCompletionConfirmed = await input.durableCompletion({
+        lifecycle: input.lifecycle,
+        turn,
+        response: turn.response,
+        candidates: turn.candidates,
+        deliveredMessages,
+      });
+    } catch {
+      durableCompletionConfirmed = false;
+    }
+  }
 
   if (turn.status === "cancelled") {
     return {
@@ -107,6 +140,7 @@ export async function executeDirectReplyUseCase<PreparedResponse>(
       response: turn.response,
       candidates: turn.candidates,
       deliveredMessages,
+      durableCompletionConfirmed,
       outcome: createDirectReplyLifecycleOutcome({
         lifecycle: input.lifecycle,
         status: "cancelled",
@@ -125,6 +159,7 @@ export async function executeDirectReplyUseCase<PreparedResponse>(
       response: turn.response,
       candidates: turn.candidates,
       deliveredMessages,
+      durableCompletionConfirmed,
       outcome: createDirectReplyLifecycleOutcome({
         lifecycle: input.lifecycle,
         status: "failed",
@@ -156,6 +191,7 @@ export async function executeDirectReplyUseCase<PreparedResponse>(
     response: turn.response,
     candidates: turn.candidates,
     deliveredMessages,
+    durableCompletionConfirmed,
     ...(postReply ? { postReply } : {}),
     outcome: createDirectReplyLifecycleOutcome({
       lifecycle: input.lifecycle,
