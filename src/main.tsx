@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { ThemeProvider } from './features/theme/ThemeProvider.tsx';
+import { isDevLoopbackOrigin } from './core/runtime/devOrigin.ts';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -15,15 +16,15 @@ createRoot(document.getElementById('root')!).render(
 // Register service worker for PWA capability and listen to beforeinstallprompt
 if (typeof window !== "undefined") {
   // A previously installed PWA worker can keep controlling a local Vite page
-  // even after its source has changed. Remove that controller once on local
-  // development hosts so lazy-loaded Chat chunks always come from the dev
-  // server instead of an old cache.
-  const isLocalDevelopmentHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  // even after its source has changed. Remove that controller once on dev-only
+  // loopback hosts so lazy-loaded Chat chunks always come from the dev server
+  // instead of an old cache. Production builds keep the normal PWA path.
+  const isLocalDevelopmentHost = isDevLoopbackOrigin(
+    window.location.hostname,
+    Boolean(typeof import.meta.env !== "undefined" && import.meta.env.DEV),
+  );
   if (isLocalDevelopmentHost && "serviceWorker" in navigator) {
-    Promise.all([
-      navigator.serviceWorker.getRegistrations().then((registrations) => Promise.all(registrations.map((registration) => registration.unregister()))),
-      caches.keys().then((cacheNames) => Promise.all(cacheNames.filter((name) => name.startsWith("fanfan-phone-")).map((name) => caches.delete(name)))),
-    ]).then(() => {
+    navigator.serviceWorker.getRegistrations().then((registrations) => Promise.all(registrations.map((registration) => registration.unregister()))).then(() => {
       if (navigator.serviceWorker.controller) window.location.reload();
     }).catch(() => undefined);
   }

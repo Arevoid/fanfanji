@@ -318,7 +318,7 @@ const FILTERING_LATENCIES = new Set<LongEvidenceFilteringLatencyBucket>([
 
 function isDevBuild(): boolean {
   try {
-    return Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV);
+    return Boolean(typeof import.meta.env !== "undefined" && import.meta.env.DEV);
   } catch {
     return false;
   }

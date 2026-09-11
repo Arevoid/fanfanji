@@ -87,7 +87,7 @@ type TraceRoot = typeof globalThis & {
 
 function isTraceRuntime(): boolean {
   try {
-    return Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV)
+    return Boolean(typeof import.meta.env !== "undefined" && import.meta.env.DEV)
       || (typeof process !== "undefined" && process.env.NODE_ENV === "test");
   } catch {
     return false;
