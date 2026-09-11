@@ -19,6 +19,7 @@ import {
   type AliasIdentityResponseGuardContext,
 } from "../../../domain/prompt/aliasIdentityResponseGuard";
 import { createAiActionId } from "../../../core/monitoring/aiRequestLedger";
+import { recordDirectReplyRuntimeLifecycleStage } from "../services/directReplyRuntimeLifecycleObserver";
 
 type PromptInput = Pick<PromptContext, "scenario" | "message" | "history" | "systemInstruction" | "imageDataUrl" | "historyInjections">;
 type RequestAi = typeof apiChat;
@@ -114,7 +115,12 @@ const requestDirectChatResponse = async (input: {
     await requestAiReply(input.requestAi, input.request),
     Boolean(input.includeInnerVoice),
   );
-  if (!first.formatIssue) return first;
+  if (!first.formatIssue) {
+    recordDirectReplyRuntimeLifecycleStage("initial_parse_success");
+    return first;
+  }
+  recordDirectReplyRuntimeLifecycleStage("initial_parse_format_issue");
+  recordDirectReplyRuntimeLifecycleStage("repair_requested");
 
   const retryRaw = await requestAiReply(input.requestAi, {
     ...input.request,
@@ -124,7 +130,12 @@ const requestDirectChatResponse = async (input: {
     retryReasons: ["response format validation"],
   });
   const retry = normalizeDirectChatResponse(retryRaw, true);
-  if (!retry.formatIssue && retry.text.trim()) return retry;
+  if (!retry.formatIssue && retry.text.trim()) {
+    recordDirectReplyRuntimeLifecycleStage("repair_parse_success");
+    return retry;
+  }
+  recordDirectReplyRuntimeLifecycleStage("repair_parse_format_issue");
+  recordDirectReplyRuntimeLifecycleStage("terminal_response_format");
 
   // Preserve a machine-readable parse category at the lifecycle boundary;
   // the user-facing message remains unchanged for the existing UI flow.

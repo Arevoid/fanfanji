@@ -3,6 +3,7 @@ import { requestDirectChatTurn } from "../controllers/chatGenerationController";
 import { createDirectReplyCandidates } from "./directChatService";
 import { deliverDirectReplyCandidates, DirectReplyDeliveryError } from "./directReplyDeliveryService";
 import { isChatResponseFormatError } from "./chatTurnResponseProtocol";
+import { recordDirectReplyRuntimeLifecycleStage } from "./directReplyRuntimeLifecycleObserver";
 import type {
   ParsedAiChatResponse,
   ReplyCandidateContext,
@@ -119,6 +120,7 @@ export async function executeDirectReplyTurn<PreparedResponse>(
   }
   if (signal?.aborted) return result({ status: "cancelled", phase: "cancelled", response: preparedResponse });
   if (!input.hasReplyText(preparedResponse)) {
+    recordDirectReplyRuntimeLifecycleStage("candidate_no_response");
     return result({ status: "failed", phase: "parsed", response: preparedResponse });
   }
 
@@ -127,9 +129,13 @@ export async function executeDirectReplyTurn<PreparedResponse>(
     candidates = createDirectReplyCandidates({
       ...input.createCandidateContext(preparedResponse),
     });
+    recordDirectReplyRuntimeLifecycleStage("candidate_created", { candidateCount: candidates.messages.length });
   } catch (error) {
     return result({ status: "failed", phase: "parsed", response: preparedResponse, error });
   }
+
+  let candidateNoResponseRecorded = candidates.messages.length === 0;
+  if (candidateNoResponseRecorded) recordDirectReplyRuntimeLifecycleStage("candidate_no_response");
 
   if (signal?.aborted) return result({ status: "cancelled", phase: "cancelled", response: preparedResponse, candidates });
 
@@ -163,6 +169,13 @@ export async function executeDirectReplyTurn<PreparedResponse>(
 
   if (signal?.aborted) {
     return result({ status: "cancelled", phase: "cancelled", response: preparedResponse, candidates, deliveredMessages });
+  }
+  if (deliveredMessages.length === 0 && !candidateNoResponseRecorded) {
+    candidateNoResponseRecorded = true;
+    recordDirectReplyRuntimeLifecycleStage("candidate_no_response");
+  }
+  if (deliveredMessages.length > 0) {
+    recordDirectReplyRuntimeLifecycleStage("delivery_success", { deliveredCount: deliveredMessages.length });
   }
   return result({
     status: deliveredMessages.length > 0 ? "delivered" : "no_response",
