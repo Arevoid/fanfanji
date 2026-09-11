@@ -23,6 +23,8 @@ export function sanitizeChatIcons(value: unknown): ChatIconOverrides {
 
 export interface Character {
   id: string;
+  /** Optional dev-only synthetic fixture namespace; production records omit it. */
+  syntheticFixtureId?: string;
   name: string;
   /** Original import filename kept as source metadata, never as a display name. */
   sourceFileName?: string;
@@ -683,6 +685,8 @@ export interface WorldBookEntry {
 
 export interface UserIdentity {
   id: string;
+  /** Optional dev-only synthetic fixture namespace; production records omit it. */
+  syntheticFixtureId?: string;
   name: string;
   avatar: string;
   signature: string;

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { createCharacterOwnershipBootstrapApi } from "../src/features/archives/characterOwnershipBootstrapDev";
+import {
+  createCharacterOwnershipBootstrapApi,
+  SYNTHETIC_IDENTITY_BIO,
+} from "../src/features/archives/characterOwnershipBootstrapDev";
 import type { Character, UserIdentity, UserSettings } from "../src/types";
 
 const syntheticIdentity: UserIdentity = {
@@ -7,7 +10,7 @@ const syntheticIdentity: UserIdentity = {
   name: "Synthetic Identity",
   avatar: "synthetic-avatar",
   signature: "",
-  bio: "仅用于本地开发证据验证的合成身份，不代表真实用户。",
+  bio: SYNTHETIC_IDENTITY_BIO,
   kind: "primary",
 };
 
@@ -64,3 +67,29 @@ const missingIdentityResult = await missingIdentityApi.bootstrap();
 assert.equal(missingIdentityResult.status, "OWNED_CHARACTER_IDENTITY_CONTEXT_BLOCKED");
 
 console.log("PASS dev-only owned Character bootstrap validates explicit identity ownership, persistence readback, privacy fingerprints, and one-shot guard");
+
+const portableIdentity: UserIdentity = {
+  id: "portable-identity-canonical",
+  name: "Stage4D3Portable User",
+  avatar: "portable-avatar",
+  signature: "",
+  bio: SYNTHETIC_IDENTITY_BIO,
+  kind: "primary",
+  syntheticFixtureId: "stage4d3-portable",
+};
+const legacyCharacter = { ...characters[0], id: "legacy-character", ownerIdentityId: syntheticIdentity.id };
+let coexistCharacters: Character[] = [legacyCharacter];
+const coexistApi = createCharacterOwnershipBootstrapApi({
+  getSettings: () => ({ identities: [syntheticIdentity, portableIdentity] } as UserSettings),
+  getCharacters: () => coexistCharacters,
+  saveCharacter: async (next) => { coexistCharacters = [...coexistCharacters, next]; return true; },
+  readCharacters: () => coexistCharacters,
+});
+const coexistBefore = structuredClone(legacyCharacter);
+const portableResult = await coexistApi.bootstrap({ fixtureId: "stage4d3-portable", identityId: portableIdentity.id, characterName: "Stage4D3Portable Character" });
+assert.equal(portableResult.status, "OWNED_CHARACTER_RUNTIME_BOOTSTRAPPED_VALIDATED");
+assert.deepEqual(coexistCharacters.find((candidate) => candidate.id === legacyCharacter.id), coexistBefore);
+assert.equal(coexistCharacters.filter((candidate) => candidate.syntheticFixtureId === "stage4d3-portable").length, 1);
+assert.equal((await coexistApi.inspect({ fixtureId: "stage4d3-portable", identityId: portableIdentity.id })).ownerExact, true);
+
+console.log("PASS synthetic fixture namespaces coexist without mutating legacy Character ownership");

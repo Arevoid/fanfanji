@@ -6,6 +6,7 @@ import type { Character, UserIdentity, UserSettings } from "../../types";
 export const CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL = "__fanfanjiCharacterOwnershipBootstrap" as const;
 
 export const SYNTHETIC_IDENTITY_BIO = "仅用于本地开发证据验证的合成身份，不代表真实用户。";
+export const LEGACY_DEDICATED_SYNTHETIC_IDENTITY_NAME = "Stage4D11OR4 Synthetic Identity";
 const SYNTHETIC_CHARACTER_NAME = "Stage4D11OR4B Owned Character";
 const DEFAULT_SYNTHETIC_AVATAR = "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg";
 
@@ -28,8 +29,15 @@ export interface CharacterOwnershipBootstrapResult {
 }
 
 export interface CharacterOwnershipBootstrapApi {
-  bootstrap: () => Promise<CharacterOwnershipBootstrapResult>;
-  inspect: () => Promise<CharacterOwnershipBootstrapResult>;
+  bootstrap: (options?: CharacterOwnershipBootstrapOptions) => Promise<CharacterOwnershipBootstrapResult>;
+  inspect: (options?: CharacterOwnershipBootstrapOptions) => Promise<CharacterOwnershipBootstrapResult>;
+}
+
+/** Selects one synthetic namespace without changing the default legacy seam. */
+export interface CharacterOwnershipBootstrapOptions {
+  fixtureId?: string;
+  identityId?: string;
+  characterName?: string;
 }
 
 export function isCharacterOwnershipBootstrapDevRuntime(): boolean {
@@ -81,18 +89,33 @@ export async function fingerprintCanonicalId(value: string): Promise<string> {
   return [first, second].map((part) => (part >>> 0).toString(16).padStart(8, "0")).join("");
 }
 
-export function findSyntheticIdentity(identities: readonly UserIdentity[]): UserIdentity | undefined {
+export function findSyntheticIdentity(
+  identities: readonly UserIdentity[],
+  options?: Pick<CharacterOwnershipBootstrapOptions, "fixtureId" | "identityId">,
+): UserIdentity | undefined {
   const matches = identities.filter((identity) => identity.kind !== "alias"
     && !identity.archived
+    && identity.bio.trim() === SYNTHETIC_IDENTITY_BIO
+    && (!options?.identityId || identity.id === options.identityId)
+    && (!options?.fixtureId || identity.syntheticFixtureId === options.fixtureId));
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/** Legacy R4B identity selector used only when the old global seam has no namespace metadata. */
+export function findLegacyDedicatedSyntheticIdentity(identities: readonly UserIdentity[]): UserIdentity | undefined {
+  const matches = identities.filter((identity) => identity.kind !== "alias"
+    && !identity.archived
+    && identity.name === LEGACY_DEDICATED_SYNTHETIC_IDENTITY_NAME
     && identity.bio.trim() === SYNTHETIC_IDENTITY_BIO);
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-function buildSyntheticCharacter(ownerIdentityId: string): Character {
+function buildSyntheticCharacter(ownerIdentityId: string, options?: CharacterOwnershipBootstrapOptions): Character {
   return createCharacterFromInput({
     id: createId("stage4d11o-owned-character"),
+    syntheticFixtureId: options?.fixtureId,
     ownerIdentityId,
-    name: SYNTHETIC_CHARACTER_NAME,
+    name: options?.characterName || SYNTHETIC_CHARACTER_NAME,
     age: "",
     gender: "synthetic",
     mbti: "ISTJ",
@@ -113,14 +136,20 @@ function buildSyntheticCharacter(ownerIdentityId: string): Character {
 export function createCharacterOwnershipBootstrapApi(
   dependencies: CharacterOwnershipBootstrapDependencies,
 ): CharacterOwnershipBootstrapApi {
-  const inspect = async (): Promise<CharacterOwnershipBootstrapResult> => {
+  const inspect = async (options?: CharacterOwnershipBootstrapOptions): Promise<CharacterOwnershipBootstrapResult> => {
     const characters = dependencies.readCharacters();
-    const identity = findSyntheticIdentity(dependencies.getSettings().identities || []);
+    const identity = findSyntheticIdentity(dependencies.getSettings().identities || [], options);
     if (!identity || typeof identity.id !== "string" || !identity.id.trim()) {
       return unavailableResult(characters.length, "OWNED_CHARACTER_IDENTITY_CONTEXT_BLOCKED");
     }
     const identityFingerprint = await fingerprintCanonicalId(identity.id);
-    const readback = characters.length === 1 ? characters[0] : undefined;
+    const ownedCharacters = characters.filter((candidate) => candidate.ownerIdentityId === identity.id
+      && !candidate.isGroupChat
+      && !candidate.isContactInstance
+      && (!options?.fixtureId || candidate.syntheticFixtureId === options.fixtureId));
+    const readback = options?.fixtureId
+      ? ownedCharacters.length === 1 ? ownedCharacters[0] : undefined
+      : characters.length === 1 ? characters[0] : undefined;
     const ownerExact = Boolean(readback && readback.ownerIdentityId === identity.id);
     return {
       status: readback && ownerExact
@@ -138,19 +167,23 @@ export function createCharacterOwnershipBootstrapApi(
   };
 
   return {
-    bootstrap: async () => {
+    bootstrap: async (options?: CharacterOwnershipBootstrapOptions) => {
       const characterCountBefore = dependencies.getCharacters().length;
-      if (characterCountBefore !== 0) {
-        return unavailableResult(characterCountBefore, "OWNED_CHARACTER_RUNTIME_BOOTSTRAP_BLOCKED");
-      }
-
-      const identity = findSyntheticIdentity(dependencies.getSettings().identities || []);
+      const identity = findSyntheticIdentity(dependencies.getSettings().identities || [], options);
       if (!identity || typeof identity.id !== "string" || !identity.id.trim()) {
         return unavailableResult(characterCountBefore, "OWNED_CHARACTER_IDENTITY_CONTEXT_BLOCKED");
       }
 
+      const existingOwned = dependencies.getCharacters().filter((candidate) => candidate.ownerIdentityId === identity.id
+        && !candidate.isGroupChat
+        && !candidate.isContactInstance
+        && (!options?.fixtureId || candidate.syntheticFixtureId === options.fixtureId));
+      if ((!options?.fixtureId && characterCountBefore !== 0) || (options?.fixtureId && existingOwned.length > 0)) {
+        return unavailableResult(characterCountBefore, "OWNED_CHARACTER_RUNTIME_BOOTSTRAP_BLOCKED");
+      }
+
       const identityFingerprint = await fingerprintCanonicalId(identity.id);
-      const character = buildSyntheticCharacter(identity.id);
+      const character = buildSyntheticCharacter(identity.id, options);
       const saved = await dependencies.saveCharacter(character);
       if (!saved) {
         return {

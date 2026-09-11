@@ -5,10 +5,12 @@ import type { UserIdentity, UserSettings } from "../../types";
 import {
   SYNTHETIC_IDENTITY_BIO,
   fingerprintCanonicalId,
-  findSyntheticIdentity,
   type CharacterOwnershipBootstrapResult,
 } from "./characterOwnershipBootstrapDev";
-import type { DedicatedRelationInspectorResult } from "./dedicatedRelationBootstrapDev";
+import type {
+  DedicatedRelationBootstrapOptions,
+  DedicatedRelationInspectorResult,
+} from "./dedicatedRelationBootstrapDev";
 
 export const PORTABLE_DIRECT_CHAT_FIXTURE_GLOBAL = "__fanfanjiPortableDirectChatFixture" as const;
 export const PORTABLE_DIRECT_CHAT_FIXTURE_ID = "stage4d3-portable" as const;
@@ -68,10 +70,10 @@ export interface PortableDirectChatFixtureResult {
 interface PortableDirectChatFixtureDependencies {
   getSettings: () => UserSettings;
   saveSettings: (update: (previous: UserSettings) => UserSettings) => boolean;
-  bootstrapCharacter: () => Promise<CharacterOwnershipBootstrapResult>;
-  inspectCharacter: () => Promise<CharacterOwnershipBootstrapResult>;
-  bootstrapRelation: () => Promise<DedicatedRelationInspectorResult>;
-  inspectRelation: () => Promise<DedicatedRelationInspectorResult>;
+  bootstrapCharacter: (options?: { fixtureId?: string; identityId?: string; characterName?: string }) => Promise<CharacterOwnershipBootstrapResult>;
+  inspectCharacter: (options?: { fixtureId?: string; identityId?: string; characterName?: string }) => Promise<CharacterOwnershipBootstrapResult>;
+  bootstrapRelation: (options?: DedicatedRelationBootstrapOptions) => Promise<DedicatedRelationInspectorResult>;
+  inspectRelation: (options?: DedicatedRelationBootstrapOptions) => Promise<DedicatedRelationInspectorResult>;
   now?: () => number;
 }
 
@@ -103,14 +105,14 @@ const emptyResult = (status: PortableDirectChatFixtureStatus): PortableDirectCha
 function portableIdentities(settings: UserSettings): UserIdentity[] {
   return (settings.identities || []).filter((identity) => identity.kind !== "alias"
     && !identity.archived
-    && identity.name === PORTABLE_SYNTHETIC_IDENTITY_NAME
-    && identity.bio.trim() === SYNTHETIC_IDENTITY_BIO);
+    && identity.syntheticFixtureId === PORTABLE_DIRECT_CHAT_FIXTURE_ID);
 }
 
 function createPortableIdentity(settings: UserSettings): UserIdentity {
   const id = createId("stage4d3-portable-identity");
   return {
     id,
+    syntheticFixtureId: PORTABLE_DIRECT_CHAT_FIXTURE_ID,
     name: PORTABLE_SYNTHETIC_IDENTITY_NAME,
     avatar: "",
     signature: "Synthetic-only Direct Chat fixture",
@@ -205,15 +207,12 @@ export function createPortableDirectChatFixtureApi(
   const inspect = async (): Promise<PortableDirectChatFixtureResult> => {
     const settings = dependencies.getSettings();
     const matches = portableIdentities(settings);
-    const allSynthetic = (settings.identities || []).filter((identity) => identity.kind !== "alias"
-      && !identity.archived
-      && identity.bio.trim() === SYNTHETIC_IDENTITY_BIO);
-    if (matches.length !== 1 || allSynthetic.some((identity) => !matches.some((portable) => portable.id === identity.id))) {
+    if (matches.length !== 1) {
       return emptyResult("PORTABLE_FIXTURE_PRECONDITION_BLOCKED");
     }
     const identityFingerprint = await fingerprintCanonicalId(matches[0].id);
-    const character = await dependencies.inspectCharacter();
-    const relation = await dependencies.inspectRelation();
+    const character = await dependencies.inspectCharacter({ fixtureId: PORTABLE_DIRECT_CHAT_FIXTURE_ID, identityId: matches[0].id, characterName: "Stage4D3Portable Character" });
+    const relation = await dependencies.inspectRelation({ fixtureId: PORTABLE_DIRECT_CHAT_FIXTURE_ID, identityId: matches[0].id });
     return resultFromInspection(identityFingerprint, character, relation);
   };
 
@@ -221,11 +220,8 @@ export function createPortableDirectChatFixtureApi(
     inspect,
     bootstrap: async () => {
       const settings = dependencies.getSettings();
-      const allSynthetic = (settings.identities || []).filter((identity) => identity.kind !== "alias"
-        && !identity.archived
-        && identity.bio.trim() === SYNTHETIC_IDENTITY_BIO);
       const matches = portableIdentities(settings);
-      if (allSynthetic.some((identity) => !matches.some((portable) => portable.id === identity.id)) || matches.length > 1) {
+      if (matches.length > 1) {
         return emptyResult("PORTABLE_FIXTURE_PRECONDITION_BLOCKED");
       }
 
@@ -237,14 +233,14 @@ export function createPortableDirectChatFixtureApi(
         return emptyResult("PORTABLE_FIXTURE_PERSISTENCE_BLOCKED");
       }
 
-      const character = await dependencies.bootstrapCharacter();
+      const character = await dependencies.bootstrapCharacter({ fixtureId: PORTABLE_DIRECT_CHAT_FIXTURE_ID, identityId: identity.id, characterName: "Stage4D3Portable Character" });
       if (character.status !== "OWNED_CHARACTER_RUNTIME_BOOTSTRAPPED_VALIDATED") {
         const result = emptyResult("PORTABLE_FIXTURE_CHARACTER_BLOCKED");
         result.identityPresent = true;
         result.identityFingerprint = await fingerprintCanonicalId(identity.id);
         return result;
       }
-      const relation = await dependencies.bootstrapRelation();
+      const relation = await dependencies.bootstrapRelation({ fixtureId: PORTABLE_DIRECT_CHAT_FIXTURE_ID, identityId: identity.id, characterId: undefined });
       const identityFingerprint = await fingerprintCanonicalId(identity.id);
       const result = resultFromInspection(identityFingerprint, character, relation);
       if (result.status !== "PORTABLE_FIXTURE_READY_VALIDATED") {

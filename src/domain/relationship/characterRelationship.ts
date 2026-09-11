@@ -7,6 +7,8 @@ export type IdentityRecognitionState = "unknown" | "suspected" | "recognized" | 
 /** A direct, user-identity-to-canonical-character relationship. */
 export interface CharacterRelationship {
   id: string;
+  /** Optional dev-only synthetic fixture namespace; production records omit it. */
+  syntheticFixtureId?: string;
   characterId: string;
   userIdentityId: string;
   /** Stable owner space used to aggregate a primary identity and its aliases. */
@@ -170,6 +172,7 @@ export function findRelationshipForCanonicalCharacter(
 
 export function createRelationship(input: {
   id: string;
+  syntheticFixtureId?: string;
   characterId: string;
   userIdentityId: string;
   rootIdentityId?: string;
@@ -178,6 +181,7 @@ export function createRelationship(input: {
 }): CharacterRelationship {
   return {
     id: input.id,
+    ...(input.syntheticFixtureId ? { syntheticFixtureId: input.syntheticFixtureId } : {}),
     characterId: input.characterId,
     userIdentityId: input.userIdentityId,
     ...(input.rootIdentityId ? { rootIdentityId: input.rootIdentityId } : {}),

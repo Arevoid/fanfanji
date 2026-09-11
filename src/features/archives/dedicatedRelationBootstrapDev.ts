@@ -3,7 +3,12 @@ import { loadRelationships } from "../../core/storage/repositories/relationshipR
 import { getOfflineModeStorageKey, getConversationId, createRelationship, type CharacterRelationship } from "../../domain/relationship/characterRelationship";
 import { resolveDirectInteractionScope, type DirectInteractionScope } from "../chat/context/directInteractionScope";
 import type { Character, Message, UserIdentity, UserSettings } from "../../types";
-import { findSyntheticIdentity, fingerprintCanonicalId } from "./characterOwnershipBootstrapDev";
+import {
+  findLegacyDedicatedSyntheticIdentity,
+  findSyntheticIdentity,
+  fingerprintCanonicalId,
+  type CharacterOwnershipBootstrapOptions,
+} from "./characterOwnershipBootstrapDev";
 import { readString } from "../../core/storage/storageAdapter";
 
 export const DEDICATED_RELATION_BOOTSTRAP_GLOBAL = "__fanfanjiDedicatedRelationBootstrap" as const;
@@ -41,9 +46,13 @@ export interface DedicatedRelationInspectorResult {
 }
 
 export interface DedicatedRelationBootstrapApi {
-  bootstrap: () => Promise<DedicatedRelationInspectorResult>;
-  inspectDedicatedEvidenceFixture: () => Promise<DedicatedRelationInspectorResult>;
+  bootstrap: (options?: DedicatedRelationBootstrapOptions) => Promise<DedicatedRelationInspectorResult>;
+  inspectDedicatedEvidenceFixture: (options?: DedicatedRelationBootstrapOptions) => Promise<DedicatedRelationInspectorResult>;
 }
+
+export type DedicatedRelationBootstrapOptions = Pick<CharacterOwnershipBootstrapOptions, "fixtureId" | "identityId"> & {
+  characterId?: string;
+};
 
 interface DedicatedRelationBootstrapDependencies {
   getSettings: () => UserSettings;
@@ -94,29 +103,41 @@ function offlineForRelation(relationId: string): boolean {
 function findOwnedCharacter(
   characters: readonly Character[],
   identity: UserIdentity,
+  options?: DedicatedRelationBootstrapOptions,
 ): Character | undefined {
-  if (characters.length !== 1) return undefined;
-  const character = characters[0];
-  return character.ownerIdentityId === identity.id && !character.isGroupChat && !character.isContactInstance
-    ? character
-    : undefined;
+  const owned = characters.filter((candidate) => candidate.ownerIdentityId === identity.id
+    && !candidate.isGroupChat
+    && !candidate.isContactInstance
+    && (!options?.characterId || candidate.id === options.characterId)
+    && (!options?.fixtureId || candidate.syntheticFixtureId === options.fixtureId));
+  if (options?.fixtureId || options?.identityId || options?.characterId) return owned.length === 1 ? owned[0] : undefined;
+  if (owned.length === 1) return owned[0];
+  const legacy = owned.filter((candidate) => candidate.name === "Stage4D11OR4B Owned Character" && !candidate.syntheticFixtureId);
+  return legacy.length === 1 ? legacy[0] : undefined;
+}
+
+function resolveIdentity(
+  identities: readonly UserIdentity[],
+  options?: DedicatedRelationBootstrapOptions,
+): UserIdentity | undefined {
+  if (options?.fixtureId || options?.identityId) return findSyntheticIdentity(identities, options);
+  return findLegacyDedicatedSyntheticIdentity(identities) || findSyntheticIdentity(identities);
 }
 
 export function createDedicatedRelationBootstrapApi(
   dependencies: DedicatedRelationBootstrapDependencies,
 ): DedicatedRelationBootstrapApi {
-  const inspectDedicatedEvidenceFixture = async (): Promise<DedicatedRelationInspectorResult> => {
+  const inspectDedicatedEvidenceFixture = async (options?: DedicatedRelationBootstrapOptions): Promise<DedicatedRelationInspectorResult> => {
     const settings = dependencies.getSettings();
-    const identity = findSyntheticIdentity(settings.identities || []);
-    const character = identity ? findOwnedCharacter(dependencies.readCharacters(), identity) : undefined;
+    const identity = resolveIdentity(settings.identities || [], options);
+    const character = identity ? findOwnedCharacter(dependencies.readCharacters(), identity, options) : undefined;
     if (!identity || !character) return emptyResult("DEDICATED_FIXTURE_INSPECTOR_BLOCKED");
 
     const relationships = dependencies.readRelationships();
-    const relation = relationships.length === 1
-      && relationships[0].userIdentityId === identity.id
-      && relationships[0].characterId === character.id
-      ? relationships[0]
-      : undefined;
+    const matchingRelationships = relationships.filter((candidate) => candidate.userIdentityId === identity.id
+      && candidate.characterId === character.id
+      && (!options?.fixtureId || candidate.syntheticFixtureId === options.fixtureId));
+    const relation = matchingRelationships.length === 1 ? matchingRelationships[0] : undefined;
     const identityFingerprint = await fingerprintCanonicalId(identity.id);
     const characterFingerprint = await fingerprintCanonicalId(character.id);
     if (!relation) {
@@ -183,12 +204,17 @@ export function createDedicatedRelationBootstrapApi(
 
   return {
     inspectDedicatedEvidenceFixture,
-    bootstrap: async () => {
-      const identity = findSyntheticIdentity(dependencies.getSettings().identities || []);
+    bootstrap: async (options?: DedicatedRelationBootstrapOptions) => {
+      const identity = resolveIdentity(dependencies.getSettings().identities || [], options);
       const characters = dependencies.readCharacters();
-      const character = identity ? findOwnedCharacter(characters, identity) : undefined;
+      const character = identity ? findOwnedCharacter(characters, identity, options) : undefined;
       const relationships = dependencies.getRelationships();
-      if (!identity || !character || relationships.length > 1) {
+      const scopedRelationships = identity && character
+        ? relationships.filter((candidate) => candidate.userIdentityId === identity.id
+          && candidate.characterId === character.id
+          && (!options?.fixtureId || candidate.syntheticFixtureId === options.fixtureId))
+        : [];
+      if (!identity || !character || (!options?.fixtureId && relationships.length > 1)) {
         console.info("[dev] dedicated relation precondition", JSON.stringify({
           syntheticIdentityPresent: Boolean(identity),
           ownedCharacterPresent: Boolean(character),
@@ -199,31 +225,33 @@ export function createDedicatedRelationBootstrapApi(
       }
       const identityFingerprint = await fingerprintCanonicalId(identity.id);
       const characterFingerprint = await fingerprintCanonicalId(character.id);
-      if (relationships.length === 1) {
-        const existing = relationships[0];
+      if (scopedRelationships.length === 1) {
+        const existing = scopedRelationships[0];
         if (existing.userIdentityId !== identity.id || existing.characterId !== character.id) {
           return { ...emptyResult("DEDICATED_RELATION_BOOTSTRAP_BLOCKED"), identityFingerprint, characterFingerprint };
         }
-        return inspectDedicatedEvidenceFixture();
+        return inspectDedicatedEvidenceFixture(options);
       }
 
       const now = dependencies.now?.() ?? Date.now();
       const relation = createRelationship({
         id: createId("stage4d11o-relation"),
+        syntheticFixtureId: options?.fixtureId,
         characterId: character.id,
         userIdentityId: identity.id,
         now,
       });
-      const saved = await dependencies.persistRelationships([relation]);
+      const saved = await dependencies.persistRelationships(options?.fixtureId ? [...relationships, relation] : [relation]);
       if (!saved) {
         return { ...emptyResult("DEDICATED_RELATION_PERSISTENCE_BLOCKED"), identityFingerprint, characterFingerprint };
       }
       dependencies.captureRelationshipCreatedEvent(relation);
       const readback = dependencies.readRelationships();
-      if (readback.length !== 1 || readback[0].id !== relation.id) {
+      const readbackMatch = readback.find((candidate) => candidate.id === relation.id);
+      if (!readbackMatch) {
         return { ...emptyResult("DEDICATED_RELATION_PERSISTENCE_BLOCKED"), identityFingerprint, characterFingerprint };
       }
-      return inspectDedicatedEvidenceFixture();
+      return inspectDedicatedEvidenceFixture(options);
     },
   };
 }

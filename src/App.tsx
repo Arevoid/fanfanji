@@ -134,8 +134,8 @@ import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
 import { listByRelation as listCharacterEventsByRelation, retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
-import { CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL, installCharacterOwnershipBootstrapDevApi, isCharacterOwnershipBootstrapDevRuntime, readCharacterRepositoryForOwnershipBootstrap, type CharacterOwnershipBootstrapResult } from "./features/archives/characterOwnershipBootstrapDev";
-import { DEDICATED_RELATION_BOOTSTRAP_GLOBAL, installDedicatedRelationBootstrapDevApi, readRelationshipRepositoryForDedicatedBootstrap, type DedicatedRelationInspectorResult } from "./features/archives/dedicatedRelationBootstrapDev";
+import { CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL, installCharacterOwnershipBootstrapDevApi, isCharacterOwnershipBootstrapDevRuntime, readCharacterRepositoryForOwnershipBootstrap, type CharacterOwnershipBootstrapOptions, type CharacterOwnershipBootstrapResult } from "./features/archives/characterOwnershipBootstrapDev";
+import { DEDICATED_RELATION_BOOTSTRAP_GLOBAL, installDedicatedRelationBootstrapDevApi, readRelationshipRepositoryForDedicatedBootstrap, type DedicatedRelationBootstrapOptions, type DedicatedRelationInspectorResult } from "./features/archives/dedicatedRelationBootstrapDev";
 import { PORTABLE_DIRECT_CHAT_FIXTURE_GLOBAL, installPortableDirectChatFixtureDevApi } from "./features/archives/portableDirectChatFixtureDev";
 import { removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
 import { loadMomentTopicRecords, removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
@@ -2735,37 +2735,37 @@ export default function App() {
   useEffect(() => installPortableDirectChatFixtureDevApi({
     getSettings: () => settingsRef.current,
     saveSettings: setSettings,
-    bootstrapCharacter: async () => {
+    bootstrapCharacter: async (options?: CharacterOwnershipBootstrapOptions) => {
       const runtime = globalThis as typeof globalThis & {
-        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { bootstrap: () => Promise<CharacterOwnershipBootstrapResult> };
+        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { bootstrap: (options?: CharacterOwnershipBootstrapOptions) => Promise<CharacterOwnershipBootstrapResult> };
       };
       const api = runtime[CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL];
       if (!api) throw new Error("owned Character bootstrap API unavailable");
-      return api.bootstrap();
+      return api.bootstrap(options);
     },
-    inspectCharacter: async () => {
+    inspectCharacter: async (options?: CharacterOwnershipBootstrapOptions) => {
       const runtime = globalThis as typeof globalThis & {
-        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { inspect: () => Promise<CharacterOwnershipBootstrapResult> };
+        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { inspect: (options?: CharacterOwnershipBootstrapOptions) => Promise<CharacterOwnershipBootstrapResult> };
       };
       const api = runtime[CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL];
       if (!api) throw new Error("owned Character bootstrap API unavailable");
-      return api.inspect();
+      return api.inspect(options);
     },
-    bootstrapRelation: async () => {
+    bootstrapRelation: async (options?: DedicatedRelationBootstrapOptions) => {
       const runtime = globalThis as typeof globalThis & {
-        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: { bootstrap: () => Promise<DedicatedRelationInspectorResult> };
+        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: { bootstrap: (options?: DedicatedRelationBootstrapOptions) => Promise<DedicatedRelationInspectorResult> };
       };
       const api = runtime[DEDICATED_RELATION_BOOTSTRAP_GLOBAL];
       if (!api) throw new Error("dedicated relation bootstrap API unavailable");
-      return api.bootstrap();
+      return api.bootstrap(options);
     },
-    inspectRelation: async () => {
+    inspectRelation: async (options?: DedicatedRelationBootstrapOptions) => {
       const runtime = globalThis as typeof globalThis & {
-        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: { inspectDedicatedEvidenceFixture: () => Promise<DedicatedRelationInspectorResult> };
+        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: { inspectDedicatedEvidenceFixture: (options?: DedicatedRelationBootstrapOptions) => Promise<DedicatedRelationInspectorResult> };
       };
       const api = runtime[DEDICATED_RELATION_BOOTSTRAP_GLOBAL];
       if (!api) throw new Error("dedicated relation bootstrap API unavailable");
-      return api.inspectDedicatedEvidenceFixture();
+      return api.inspectDedicatedEvidenceFixture(options);
     },
   }), []);
 

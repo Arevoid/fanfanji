@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   createPortableDirectChatFixtureApi,
+  installPortableDirectChatFixtureDevApi,
   PORTABLE_DIRECT_CHAT_FIXTURE_ID,
   PORTABLE_DIRECT_CHAT_FIXTURE_LINEAGE,
   PORTABLE_SYNTHETIC_IDENTITY_NAME,
@@ -18,6 +19,15 @@ const localStorage = {
 } as unknown as Storage;
 Object.defineProperty(root, "window", { value: { localStorage }, configurable: true });
 
+const legacySyntheticIdentity = {
+  id: "old-r4b-identity",
+  name: "Stage4D11OR4 Synthetic Identity",
+  avatar: "legacy-avatar",
+  signature: "legacy-signature",
+  bio: SYNTHETIC_IDENTITY_BIO,
+  kind: "primary" as const,
+};
+
 let settings = {
   name: "Default",
   avatar: "",
@@ -29,7 +39,10 @@ let settings = {
   customIcons: {},
   bubbleCss: "",
   globalCss: "",
-  identities: [{ id: "identity-1", name: "Default", avatar: "", signature: "", bio: "", kind: "primary" }],
+  identities: [
+    { id: "identity-1", name: "Default", avatar: "", signature: "", bio: "", kind: "primary" },
+    legacySyntheticIdentity,
+  ],
   activeIdentityId: "identity-1",
   identityDataVersion: 2,
 } as unknown as UserSettings;
@@ -80,6 +93,18 @@ const api = createPortableDirectChatFixtureApi({
   now: () => 123456,
 });
 
+const devRuntimeRoot = globalThis as typeof globalThis & { __fanfanjiPortableDirectChatFixture?: unknown };
+const cleanupProductionProbe = installPortableDirectChatFixtureDevApi({
+  getSettings: () => settings,
+  saveSettings: (update) => { settings = update(settings); return true; },
+  bootstrapCharacter: async () => characterReady,
+  inspectCharacter: async () => characterReady,
+  bootstrapRelation: async () => relationReady,
+  inspectRelation: async () => relationReady,
+});
+assert.equal(devRuntimeRoot.__fanfanjiPortableDirectChatFixture, undefined);
+cleanupProductionProbe();
+
 const result = await api.bootstrap();
 assert.equal(result.status, "PORTABLE_FIXTURE_READY_VALIDATED");
 assert.equal(result.fixtureId, PORTABLE_DIRECT_CHAT_FIXTURE_ID);
@@ -94,6 +119,8 @@ assert.equal(result.distanceToTrigger, 20);
 assert.equal(result.manifestPersisted, true);
 assert.equal(settings.activeIdentityId !== "identity-1", true);
 assert.equal(settings.identities?.some((identity) => identity.name === PORTABLE_SYNTHETIC_IDENTITY_NAME && identity.bio === SYNTHETIC_IDENTITY_BIO), true);
+assert.equal(settings.identities?.find((identity) => identity.id === legacySyntheticIdentity.id), legacySyntheticIdentity);
+assert.equal(settings.identities?.find((identity) => identity.name === PORTABLE_SYNTHETIC_IDENTITY_NAME)?.syntheticFixtureId, PORTABLE_DIRECT_CHAT_FIXTURE_ID);
 
 const manifest = readPortableDirectChatFixtureManifest();
 assert.ok(manifest);
@@ -121,18 +148,35 @@ assert.deepEqual({
   updatedAt: 123456,
 });
 
-const conflictSettings = {
+const sameBioDifferentLineage = {
   ...settings,
   identities: [...(settings.identities || []), {
-    id: "old-synthetic",
-    name: "Old Stage4D3",
+    id: "future-synthetic",
+    name: "Future Synthetic Fixture",
     avatar: "",
     signature: "",
     bio: SYNTHETIC_IDENTITY_BIO,
     kind: "primary" as const,
+    syntheticFixtureId: "future-fixture",
   }],
 };
-settings = conflictSettings;
+settings = sameBioDifferentLineage;
+const notBlocked = await api.inspect();
+assert.equal(notBlocked.status, "PORTABLE_FIXTURE_READY_VALIDATED");
+
+const duplicateOwnSettings = {
+  ...settings,
+  identities: [...(settings.identities || []), {
+    id: "duplicate-portable",
+    name: PORTABLE_SYNTHETIC_IDENTITY_NAME,
+    avatar: "",
+    signature: "",
+    bio: SYNTHETIC_IDENTITY_BIO,
+    kind: "primary" as const,
+    syntheticFixtureId: PORTABLE_DIRECT_CHAT_FIXTURE_ID,
+  }],
+};
+settings = duplicateOwnSettings;
 const blocked = await api.inspect();
 assert.equal(blocked.status, "PORTABLE_FIXTURE_PRECONDITION_BLOCKED");
 

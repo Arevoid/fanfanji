@@ -4,14 +4,15 @@ import {
   createDedicatedRelationBootstrapApi,
   type DedicatedRelationInspectorResult,
 } from "../src/features/archives/dedicatedRelationBootstrapDev";
+import { LEGACY_DEDICATED_SYNTHETIC_IDENTITY_NAME, SYNTHETIC_IDENTITY_BIO } from "../src/features/archives/characterOwnershipBootstrapDev";
 import type { Character, Message, UserIdentity, UserSettings } from "../src/types";
 
 const identity: UserIdentity = {
   id: "synthetic-identity-canonical",
-  name: "Synthetic Identity",
+  name: LEGACY_DEDICATED_SYNTHETIC_IDENTITY_NAME,
   avatar: "synthetic-avatar",
   signature: "",
-  bio: "仅用于本地开发证据验证的合成身份，不代表真实用户。",
+  bio: SYNTHETIC_IDENTITY_BIO,
   kind: "primary",
 };
 
@@ -130,3 +131,52 @@ assert.equal(offline.nextTurnTriggers, false);
 runtimeGlobal.window = previousWindow;
 
 console.log("PASS dedicated relation bootstrap, exact direct scope inspector, duplicate guard, and mutation-free checks");
+
+const portableIdentity: UserIdentity = {
+  id: "portable-identity-canonical",
+  name: "Stage4D3Portable User",
+  avatar: "portable-avatar",
+  signature: "",
+  bio: SYNTHETIC_IDENTITY_BIO,
+  kind: "primary",
+  syntheticFixtureId: "stage4d3-portable",
+};
+const portableCharacter: Character = {
+  ...character,
+  id: "portable-character-canonical",
+  ownerIdentityId: portableIdentity.id,
+  name: "Stage4D3Portable Character",
+  syntheticFixtureId: "stage4d3-portable",
+};
+let coexistRelationships = [...relationships];
+const legacyRelationshipBefore = structuredClone(coexistRelationships[0]);
+const coexistApi = createDedicatedRelationBootstrapApi({
+  getSettings: () => ({ identities: [identity, portableIdentity] } as UserSettings),
+  readCharacters: () => [character, portableCharacter],
+  getRelationships: () => coexistRelationships,
+  persistRelationships: async (next) => { coexistRelationships = [...next]; return true; },
+  readRelationships: () => coexistRelationships,
+  readMessages: async (scope) => messages.filter((message) =>
+    message.characterId === scope.characterId
+    && message.relationId === scope.relationId
+    && message.conversationId === scope.conversationId),
+  captureRelationshipCreatedEvent: () => undefined,
+  now: () => 200,
+});
+const portableRelationResult = await coexistApi.bootstrap({
+  fixtureId: "stage4d3-portable",
+  identityId: portableIdentity.id,
+  characterId: portableCharacter.id,
+});
+assert.equal(portableRelationResult.status, "DEDICATED_DIRECT_FIXTURE_READY_VALIDATED");
+assert.equal(coexistRelationships.length, 2);
+assert.deepEqual(coexistRelationships.find((candidate) => candidate.id === legacyRelationshipBefore.id), legacyRelationshipBefore);
+const portableRelation = coexistRelationships.find((candidate) => candidate.syntheticFixtureId === "stage4d3-portable");
+assert.ok(portableRelation);
+assert.notEqual(portableRelation?.id, legacyRelationshipBefore.id);
+assert.notEqual(portableRelation?.conversationId, legacyRelationshipBefore.conversationId);
+const portableInspect = await coexistApi.inspectDedicatedEvidenceFixture({ fixtureId: "stage4d3-portable", identityId: portableIdentity.id, characterId: portableCharacter.id });
+assert.equal(portableInspect.exactScopeHealth, true);
+assert.equal((await coexistApi.inspectDedicatedEvidenceFixture()).exactScopeHealth, true);
+
+console.log("PASS synthetic fixture relation namespaces coexist with legacy relation and conversation intact");
