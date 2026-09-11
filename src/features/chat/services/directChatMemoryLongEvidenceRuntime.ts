@@ -17,13 +17,20 @@ import type { DirectChatMemorySafetyVetoShadowEvaluation } from "./directChatMem
 import type { DirectChatMemorySafetyVetoCanaryResult } from "./directChatMemorySafetyVetoCanary";
 import {
   deriveLongEvidenceAccounting,
+  getDirectChatMemoryLongEvidenceSummary,
+  getDirectChatMemoryLongEvidenceCollectorInstanceOrdinal,
   isDirectChatMemoryLongEvidenceCollectorEnabled,
   recordDirectChatMemoryLongEvidence,
   type DirectChatMemoryLongEvidenceRecord,
   type DirectChatMemoryLongEvidenceScope,
 } from "./directChatMemoryLongEvidenceCollector";
+import { recordDirectChatMemoryEvidenceTrace } from "./directChatMemoryEvidenceTrace";
 
-export { isDirectChatMemoryLongEvidenceCollectorEnabled } from "./directChatMemoryLongEvidenceCollector";
+export {
+  getDirectChatMemoryLongEvidenceCollectorInstanceOrdinal,
+  getDirectChatMemoryLongEvidenceSummary,
+  isDirectChatMemoryLongEvidenceCollectorEnabled,
+} from "./directChatMemoryLongEvidenceCollector";
 
 export interface DirectChatMemoryCanonicalReadback {
   activeClaimIds: readonly string[];
@@ -202,11 +209,34 @@ function ledgerRowsForAction(logicalActionId: string): AiRequestEnvelope[] {
 export async function observeDirectChatMemoryLongEvidenceRuntime(
   input: DirectChatMemoryLongEvidenceRuntimeInput,
 ): Promise<DirectChatMemoryLongEvidenceRuntimeResult> {
+  const collectorBefore = getDirectChatMemoryLongEvidenceSummary();
+  const collectorActive = isDirectChatMemoryLongEvidenceCollectorEnabled();
+  recordDirectChatMemoryEvidenceTrace({
+    stage: "observer_entered",
+    timestamp: Date.now(),
+    collectorActive,
+    hasWindow: collectorBefore.windowState === "active",
+    observerEntered: true,
+    collectorRecordCountBefore: collectorBefore.recordCount,
+    collectorInstanceOrdinal: getDirectChatMemoryLongEvidenceCollectorInstanceOrdinal(),
+  });
   const empty: DirectChatMemoryLongEvidenceRuntimeResult = {
     recorded: [],
     accounting: deriveLongEvidenceAccounting([]),
   };
-  if (!isDirectChatMemoryLongEvidenceCollectorEnabled()) return empty;
+  if (!collectorActive) {
+    recordDirectChatMemoryEvidenceTrace({
+      stage: "observer_skipped",
+      timestamp: Date.now(),
+      reason: "collector_inactive",
+      collectorActive: false,
+      hasWindow: collectorBefore.windowState === "active",
+      observerEntered: true,
+      collectorRecordCountBefore: collectorBefore.recordCount,
+      collectorRecordCountAfter: collectorBefore.recordCount,
+    });
+    return empty;
+  }
   try {
     const accounting = deriveLongEvidenceAccounting(ledgerRowsForAction(input.logicalActionId));
     const suppressedIds = filteredClaimIds(input.acceptedClaimsBefore, input.filteredAcceptedClaims);
@@ -235,6 +265,15 @@ export async function observeDirectChatMemoryLongEvidenceRuntime(
       && observations.length === 0
       && !input.admissionShadow.failedOpen;
     if (legitimateZeroCandidate) {
+      recordDirectChatMemoryEvidenceTrace({
+        stage: "collector_append_attempted",
+        timestamp: Date.now(),
+        collectorActive: true,
+        hasWindow: getDirectChatMemoryLongEvidenceSummary().windowState === "active",
+        hasLogicalActionId: Boolean(input.logicalActionId.trim()),
+        shadowCandidateCount: 0,
+        collectorRecordCountBefore: getDirectChatMemoryLongEvidenceSummary().recordCount,
+      });
       const zeroRecord = recordDirectChatMemoryLongEvidence({
         scope: input.scope,
         recordKind: "batch",
@@ -283,6 +322,18 @@ export async function observeDirectChatMemoryLongEvidenceRuntime(
           privacyStatus: "metadata_only",
         },
       });
+      const collectorAfter = getDirectChatMemoryLongEvidenceSummary();
+      recordDirectChatMemoryEvidenceTrace({
+        stage: zeroRecord ? "collector_append_succeeded" : "collector_append_rejected",
+        timestamp: Date.now(),
+        reason: zeroRecord ? undefined : "record_rejected",
+        collectorActive: true,
+        hasWindow: collectorAfter.windowState === "active",
+        hasLogicalActionId: Boolean(input.logicalActionId.trim()),
+        shadowCandidateCount: 0,
+        collectorRecordCountBefore: collectorBefore.recordCount,
+        collectorRecordCountAfter: collectorAfter.recordCount,
+      });
       if (zeroRecord) recorded.push(zeroRecord);
       return { recorded, accounting };
     }
@@ -291,6 +342,15 @@ export async function observeDirectChatMemoryLongEvidenceRuntime(
       const safety = safetyEvaluation[index];
       const canary = canaryRecords[index];
       const candidateSuppressed = Boolean(canary?.suppressed);
+      recordDirectChatMemoryEvidenceTrace({
+        stage: "collector_append_attempted",
+        timestamp: Date.now(),
+        collectorActive: true,
+        hasWindow: getDirectChatMemoryLongEvidenceSummary().windowState === "active",
+        hasLogicalActionId: Boolean(input.logicalActionId.trim()),
+        shadowCandidateCount: observations.length,
+        collectorRecordCountBefore: getDirectChatMemoryLongEvidenceSummary().recordCount,
+      });
       const record = recordDirectChatMemoryLongEvidence({
         scope: input.scope,
         logicalActionId: input.logicalActionId,
@@ -341,10 +401,33 @@ export async function observeDirectChatMemoryLongEvidenceRuntime(
           privacyStatus: "metadata_only",
         },
       });
+      const collectorAfter = getDirectChatMemoryLongEvidenceSummary();
+      recordDirectChatMemoryEvidenceTrace({
+        stage: record ? "collector_append_succeeded" : "collector_append_rejected",
+        timestamp: Date.now(),
+        reason: record ? undefined : "record_rejected",
+        collectorActive: true,
+        hasWindow: collectorAfter.windowState === "active",
+        hasLogicalActionId: Boolean(input.logicalActionId.trim()),
+        shadowCandidateCount: observations.length,
+        collectorRecordCountBefore: collectorBefore.recordCount,
+        collectorRecordCountAfter: collectorAfter.recordCount,
+      });
       if (record) recorded.push(record);
     });
     return { recorded, accounting };
   } catch {
+    const collectorAfter = getDirectChatMemoryLongEvidenceSummary();
+    recordDirectChatMemoryEvidenceTrace({
+      stage: "observer_skipped",
+      timestamp: Date.now(),
+      reason: "observer_exception",
+      collectorActive: collectorAfter.enabled,
+      hasWindow: collectorAfter.windowState === "active",
+      observerEntered: true,
+      collectorRecordCountBefore: collectorBefore.recordCount,
+      collectorRecordCountAfter: collectorAfter.recordCount,
+    });
     return empty;
   }
 }

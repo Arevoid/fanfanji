@@ -37,10 +37,13 @@ import {
 import type { DirectChatMemoryAdmissionShadowResult } from "../services/directChatMemoryAdmissionShadow";
 import type { DirectChatMemorySafetyVetoShadowEvaluation } from "../services/directChatMemorySafetyVetoShadow";
 import {
+  getDirectChatMemoryLongEvidenceCollectorInstanceOrdinal,
+  getDirectChatMemoryLongEvidenceSummary,
   isDirectChatMemoryLongEvidenceCollectorEnabled,
   observeDirectChatMemoryLongEvidenceRuntime,
   readDirectChatMemoryCanonicalReadback,
 } from "../services/directChatMemoryLongEvidenceRuntime";
+import { recordDirectChatMemoryEvidenceTrace } from "../services/directChatMemoryEvidenceTrace";
 
 type DirectScope = { characterId: string; relationId: string; userIdentityId: string; conversationId: string };
 
@@ -199,6 +202,15 @@ export function useChatMemoryExtraction({
         && activeDirectScope !== undefined
         && manualMessagesOverride === undefined
         && isDirectChatMemoryLongEvidenceCollectorEnabled();
+      const longEvidenceCollectorSummary = getDirectChatMemoryLongEvidenceSummary();
+      recordDirectChatMemoryEvidenceTrace({
+        stage: "long_evidence_gate_checked",
+        timestamp: Date.now(),
+        longEvidenceEnabled,
+        collectorActive: longEvidenceCollectorSummary.enabled,
+        hasWindow: longEvidenceCollectorSummary.windowState === "active",
+        collectorInstanceOrdinal: getDirectChatMemoryLongEvidenceCollectorInstanceOrdinal(),
+      });
       let totalExtracted = 0;
       const archiveStats: MemoryArchiveStats = {
         sourceMessageCount: 0,
@@ -346,8 +358,24 @@ export function useChatMemoryExtraction({
         const longEvidenceBefore = longEvidenceEnabled
           ? await readDirectChatMemoryCanonicalReadback(extractionScope).catch(() => undefined)
           : undefined;
+        recordDirectChatMemoryEvidenceTrace({
+          stage: "before_snapshot_present",
+          timestamp: Date.now(),
+          longEvidenceEnabled,
+          collectorActive: getDirectChatMemoryLongEvidenceSummary().enabled,
+          hasWindow: getDirectChatMemoryLongEvidenceSummary().windowState === "active",
+          hasLongEvidenceBefore: Boolean(longEvidenceBefore),
+        });
         const extractionStartedAt = longEvidenceEnabled ? Date.now() : undefined;
         const logicalActionId = longEvidenceEnabled ? createAiActionId() : undefined;
+        recordDirectChatMemoryEvidenceTrace({
+          stage: "logical_action_id_created",
+          timestamp: Date.now(),
+          longEvidenceEnabled,
+          collectorActive: getDirectChatMemoryLongEvidenceSummary().enabled,
+          hasWindow: getDirectChatMemoryLongEvidenceSummary().windowState === "active",
+          hasLogicalActionId: Boolean(logicalActionId),
+        });
         const isDelicate = activeCharacter.archiveTemplateType === "delicate";
         const headerLabel = isDelicate ? "【心境日记归档 (细腻版)】" : "【精炼归档事件日志 (精炼版)】";
         lastRunDiagnosticsRef.current = {
@@ -396,6 +424,16 @@ export function useChatMemoryExtraction({
           };
           return -1;
         }
+        recordDirectChatMemoryEvidenceTrace({
+          stage: "extraction_completed",
+          timestamp: Date.now(),
+          longEvidenceEnabled,
+          collectorActive: getDirectChatMemoryLongEvidenceSummary().enabled,
+          hasWindow: getDirectChatMemoryLongEvidenceSummary().windowState === "active",
+          hasLogicalActionId: Boolean(logicalActionId),
+          hasLongEvidenceBefore: Boolean(longEvidenceBefore),
+          shadowCandidateCount: Array.isArray(result.shadowCandidatesV2) ? result.shadowCandidatesV2.length : 0,
+        });
         lastRunDiagnosticsRef.current = {
           ...lastRunDiagnosticsRef.current,
           candidateCount: lastRunDiagnosticsRef.current.candidateCount
@@ -418,6 +456,17 @@ export function useChatMemoryExtraction({
               },
               sourceEnvelope: result.sourceEnvelope,
               recordedAt: Date.now(),
+            });
+            recordDirectChatMemoryEvidenceTrace({
+              stage: "shadow_result_present",
+              timestamp: Date.now(),
+              longEvidenceEnabled,
+              collectorActive: getDirectChatMemoryLongEvidenceSummary().enabled,
+              hasWindow: getDirectChatMemoryLongEvidenceSummary().windowState === "active",
+              hasLogicalActionId: Boolean(logicalActionId),
+              hasLongEvidenceBefore: Boolean(longEvidenceBefore),
+              hasShadowResult: true,
+              shadowCandidateCount: Array.isArray(result.shadowCandidatesV2) ? result.shadowCandidatesV2.length : 0,
             });
             if (admissionShadowEnabled) {
               recordDirectChatMemoryAdmissionShadowEvidence({
@@ -556,8 +605,50 @@ export function useChatMemoryExtraction({
         archiveStats.rejectedCandidateCount += result.rejectedCandidateCount + canarySuppressedCount;
         totalExtracted += canaryFilteredAcceptedClaims.length;
         const cursorAdvanced = await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
-        if (longEvidenceEnabled && logicalActionId && longEvidenceBefore && shadowResult) {
+        const observerGateReason = !longEvidenceEnabled
+          ? "long_evidence_disabled" as const
+          : !logicalActionId
+            ? "logical_action_missing" as const
+            : !longEvidenceBefore
+              ? "before_snapshot_missing" as const
+              : !shadowResult
+                ? "shadow_result_missing" as const
+                : undefined;
+        if (observerGateReason) {
+          recordDirectChatMemoryEvidenceTrace({
+            stage: "observer_skipped",
+            timestamp: Date.now(),
+            reason: observerGateReason,
+            longEvidenceEnabled,
+            collectorActive: getDirectChatMemoryLongEvidenceSummary().enabled,
+            hasWindow: getDirectChatMemoryLongEvidenceSummary().windowState === "active",
+            hasLogicalActionId: Boolean(logicalActionId),
+            hasLongEvidenceBefore: Boolean(longEvidenceBefore),
+            hasShadowResult: Boolean(shadowResult),
+          });
+        } else {
+          recordDirectChatMemoryEvidenceTrace({
+            stage: "observer_call_attempted",
+            timestamp: Date.now(),
+            longEvidenceEnabled: true,
+            collectorActive: getDirectChatMemoryLongEvidenceSummary().enabled,
+            hasWindow: getDirectChatMemoryLongEvidenceSummary().windowState === "active",
+            hasLogicalActionId: true,
+            hasLongEvidenceBefore: true,
+            hasShadowResult: true,
+          });
           const canonicalAfter = await readDirectChatMemoryCanonicalReadback(extractionScope).catch(() => undefined);
+          recordDirectChatMemoryEvidenceTrace({
+            stage: "canonical_after_present",
+            timestamp: Date.now(),
+            longEvidenceEnabled: true,
+            collectorActive: getDirectChatMemoryLongEvidenceSummary().enabled,
+            hasWindow: getDirectChatMemoryLongEvidenceSummary().windowState === "active",
+            hasLogicalActionId: true,
+            hasLongEvidenceBefore: true,
+            hasShadowResult: true,
+            hasCanonicalAfter: Boolean(canonicalAfter),
+          });
           if (canonicalAfter) {
             await observeDirectChatMemoryLongEvidenceRuntime({
               scope: extractionScope,
@@ -573,6 +664,19 @@ export function useChatMemoryExtraction({
               cursorAdvanced,
               logicalActionId,
               extractionLatencyMs: extractionStartedAt === undefined ? undefined : Date.now() - extractionStartedAt,
+            });
+          } else {
+            recordDirectChatMemoryEvidenceTrace({
+              stage: "observer_skipped",
+              timestamp: Date.now(),
+              reason: "canonical_after_missing",
+              longEvidenceEnabled: true,
+              collectorActive: getDirectChatMemoryLongEvidenceSummary().enabled,
+              hasWindow: getDirectChatMemoryLongEvidenceSummary().windowState === "active",
+              hasLogicalActionId: true,
+              hasLongEvidenceBefore: true,
+              hasShadowResult: true,
+              hasCanonicalAfter: false,
             });
           }
         }

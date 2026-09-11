@@ -245,6 +245,8 @@ export interface DirectChatMemoryLongEvidenceDebugApi {
   finishWindow: () => void;
   clearWindow: () => void;
   createWindowToken: () => string;
+  /** Dev-only diagnostic identity; contains no request, scope, or token data. */
+  instanceOrdinal: number;
 }
 
 const SAFE_VALIDATOR_REASONS = new Set([
@@ -641,6 +643,15 @@ function emptyCounts(): Record<LongEvidenceClassification, number> {
     INVALID_SAMPLE: 0,
     SAFETY_INCIDENT: 0,
   };
+}
+
+const COLLECTOR_INSTANCE_COUNTER = "__fanfanjiMemoryAdmissionLongEvidenceInstanceCounter" as const;
+const collectorRoot = globalThis as typeof globalThis & { [COLLECTOR_INSTANCE_COUNTER]?: number };
+const collectorInstanceOrdinal = (collectorRoot[COLLECTOR_INSTANCE_COUNTER] || 0) + 1;
+collectorRoot[COLLECTOR_INSTANCE_COUNTER] = collectorInstanceOrdinal;
+
+export function getDirectChatMemoryLongEvidenceCollectorInstanceOrdinal(): number {
+  return collectorInstanceOrdinal;
 }
 
 let configured = false;
@@ -1102,12 +1113,14 @@ export function combineLongEvidenceExports(
   return review;
 }
 
-function installDevApi(): void {
-  if (!isDevBuild()) return;
+function installDevApi(force = false): void {
+  if (!isDevBuild() && !force) return;
   const root = globalThis as typeof globalThis & {
     __fanfanjiMemoryAdmissionLongEvidence?: DirectChatMemoryLongEvidenceDebugApi;
   };
-  if (root.__fanfanjiMemoryAdmissionLongEvidence) return;
+  // Vite HMR can re-evaluate this module while preserving the global dev
+  // helper. Rebind the helper on every module evaluation so it never keeps
+  // closures over a stale Collector instance.
   root.__fanfanjiMemoryAdmissionLongEvidence = {
     enable: () => configureDirectChatMemoryLongEvidenceCollector({ enabled: true }),
     disable: () => configureDirectChatMemoryLongEvidenceCollector({ enabled: false }),
@@ -1120,7 +1133,13 @@ function installDevApi(): void {
     finishWindow: finishDirectChatMemoryLongEvidenceWindow,
     clearWindow: clearDirectChatMemoryLongEvidenceWindow,
     createWindowToken: createDirectChatMemoryLongEvidenceWindowToken,
+    instanceOrdinal: collectorInstanceOrdinal,
   };
+}
+
+/** Test-only hook for exercising the HMR rebind contract without a runtime turn. */
+export function refreshDirectChatMemoryLongEvidenceDevApiForTests(): void {
+  if (isTestInjection()) installDevApi(true);
 }
 
 installDevApi();

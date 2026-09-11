@@ -10,6 +10,9 @@ import {
   clearDirectChatMemoryLongEvidenceCollector,
   configureDirectChatMemoryLongEvidenceCollector,
   getDirectChatMemoryLongEvidenceRecords,
+  getDirectChatMemoryLongEvidenceSummary,
+  isDirectChatMemoryLongEvidenceCollectorEnabled,
+  startDirectChatMemoryLongEvidenceWindow,
 } from "../src/features/chat/services/directChatMemoryLongEvidenceCollector";
 import {
   observeDirectChatMemoryLongEvidenceRuntime,
@@ -18,6 +21,10 @@ import {
 } from "../src/features/chat/services/directChatMemoryLongEvidenceRuntime";
 import { observeDirectChatMemoryAdmissionShadow } from "../src/features/chat/services/directChatMemoryAdmissionShadow";
 import { storageKeys } from "../src/core/storage/storageKeys";
+import {
+  clearDirectChatMemoryEvidenceTrace,
+  getDirectChatMemoryEvidenceTrace,
+} from "../src/features/chat/services/directChatMemoryEvidenceTrace";
 
 const extractionHookSource = readFileSync(new URL("../src/features/chat/hooks/useChatMemoryExtraction.ts", import.meta.url), "utf8");
 assert.match(extractionHookSource, /isDirectChatMemoryLongEvidenceCollectorEnabled/);
@@ -29,6 +36,8 @@ assert.match(extractionHookSource, /observeDirectChatMemoryLongEvidenceRuntime/)
 assert.match(extractionHookSource, /const admissionObservationEnabled =/);
 assert.match(extractionHookSource, /\|\| longEvidenceEnabled;/);
 assert.match(extractionHookSource, /if \(admissionObservationEnabled\)/);
+assert.match(extractionHookSource, /recordDirectChatMemoryEvidenceTrace/);
+assert.match(extractionHookSource, /observerGateReason/);
 
 const originalWindow = (globalThis as { window?: unknown }).window;
 const storage = new Map<string, string>();
@@ -184,6 +193,8 @@ try {
     return observeDirectChatMemoryLongEvidenceRuntime(canonicalInput());
   })();
   assert.equal((await disabled).recorded.length, 0, "disabled collector must be a no-op");
+  assert.ok(getDirectChatMemoryEvidenceTrace().some((entry) =>
+    entry.stage === "observer_skipped" && entry.reason === "collector_inactive"));
   reset();
 
   // A normal automatic batch is one logical request, one physical attempt,
@@ -286,6 +297,44 @@ try {
   assert.equal(zero.recorded[0]?.candidateCount, 0);
   assert.equal(zero.recorded[0]?.batchZeroCandidates, true);
   assert.equal(zero.recorded[0]?.canonicalWriteCountDelta, 0);
+
+  // A callback created while the Collector is disabled must observe the
+  // latest enablement when it executes after a fresh Window starts.
+  reset();
+  clearDirectChatMemoryEvidenceTrace();
+  configureDirectChatMemoryLongEvidenceCollector({ enabled: false });
+  const lateEnabledAutomaticCallback = async () => {
+    if (!isDirectChatMemoryLongEvidenceCollectorEnabled()) return { recorded: [] };
+    return observeDirectChatMemoryLongEvidenceRuntime(canonicalInput({
+      logicalActionId: "late-enabled-action",
+      extraction: zeroExtraction,
+      admissionShadow: automaticAdmissionShadow,
+    }));
+  };
+  configureDirectChatMemoryLongEvidenceCollector({ enabled: true, explicitDebug: true });
+  assert.equal(startDirectChatMemoryLongEvidenceWindow("window-late-enable-9f23a1b7c4d8e650"), 1);
+  recordAiRequest(envelope("late-enabled-request", "late-enabled-action"));
+  const lateEnabled = await lateEnabledAutomaticCallback();
+  assert.equal(lateEnabled.recorded.length, 1);
+  assert.equal(lateEnabled.recorded[0]?.classification, "ZERO_CANDIDATE_BATCH");
+  assert.ok(getDirectChatMemoryEvidenceTrace().some((entry) => entry.stage === "observer_entered"));
+
+  // The fallback-shaped zero-candidate result keeps one logical action and
+  // two physical attempts while still producing one batch-level record.
+  reset();
+  startDirectChatMemoryLongEvidenceWindow("window-fallback-zero-9f23a1b7c4d8e650");
+  recordAiRequest(envelope("fallback-zero-default", "fallback-zero-action"));
+  recordAiRequest(envelope("fallback-zero-selected", "fallback-zero-action"));
+  const fallbackZero = await observeDirectChatMemoryLongEvidenceRuntime(canonicalInput({
+    logicalActionId: "fallback-zero-action",
+    extraction: zeroExtraction,
+    admissionShadow: automaticAdmissionShadow,
+  }));
+  assert.equal(fallbackZero.recorded.length, 1);
+  assert.equal(fallbackZero.recorded[0]?.classification, "ZERO_CANDIDATE_BATCH");
+  assert.equal(fallbackZero.accounting.providerLogicalRequestCount, 1);
+  assert.equal(fallbackZero.accounting.providerPhysicalAttemptCount, 2);
+  assert.equal(getDirectChatMemoryLongEvidenceSummary().zeroCandidateBatchCount, 1);
 
   // Scope mismatch is metadata-only and cannot become valid suppression.
   reset();
