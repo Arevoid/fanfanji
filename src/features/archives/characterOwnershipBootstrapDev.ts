@@ -5,7 +5,7 @@ import type { Character, UserIdentity, UserSettings } from "../../types";
 
 export const CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL = "__fanfanjiCharacterOwnershipBootstrap" as const;
 
-const SYNTHETIC_IDENTITY_BIO = "仅用于本地开发证据验证的合成身份，不代表真实用户。";
+export const SYNTHETIC_IDENTITY_BIO = "仅用于本地开发证据验证的合成身份，不代表真实用户。";
 const SYNTHETIC_CHARACTER_NAME = "Stage4D11OR4B Owned Character";
 const DEFAULT_SYNTHETIC_AVATAR = "https://img.remit.ee/api/file/BQACAgUAAyEGAASHRsPbAAEW4T5qT0zAjLfrXvRikuEGegScd-tWAQAC4yIAAuHegVbmzmM_t9RkTDwE.jpg";
 

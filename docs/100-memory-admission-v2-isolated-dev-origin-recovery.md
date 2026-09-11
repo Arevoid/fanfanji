@@ -141,4 +141,39 @@ current helper and trace globals, then prove helper/runtime Collector ordinal
 alignment. Until that succeeds, do not create a Window, send a turn, call the
 Provider, or run Memory evidence. Do not clear site data or replace the
 fixture. The next governed stage remains R3D-R1 only after this blocker is
+
+## Fast-Track portable synthetic fixture checkpoint
+
+The browser-profile dependency was removed for the next runtime attempt by
+adding the dev-only `portableDirectChatFixture` bootstrap. It uses the
+existing character-ownership and dedicated relation/exact-scope repositories;
+it does not seed messages, Memory, Campaign, Window, suppression, or any
+historical evidence. The fixture lineage is `Stage4D3Portable` with the
+following immutable labels in its manifest:
+
+```text
+synthetic = true
+portableFixture = true
+historicalEvidenceImported = false
+evidenceMode = mechanism_characterization
+defaultBehaviorRepresentative = false
+summaryTriggerRound = 10
+```
+
+The bootstrap is invoked only by the development query
+`?portableDirectChatFixture=1`, creates at most one matching synthetic
+identity/Character/Relation, and persists only privacy-safe fingerprints in
+the dev manifest key. `?inspectPortableDirectChatFixture=1` is read-only. A
+conflicting synthetic identity or duplicate portable identity is rejected;
+the existing Stage4D3 lineage is never imported or rewritten.
+
+In the isolated Edge/CDP profile the bootstrap returned
+`PORTABLE_FIXTURE_READY_VALIDATED`, with exact scope healthy, zero eligible
+messages, trigger count 20, distance 20, no archive marker, and zero Memory.
+A reload and read-only inspection returned the same fingerprints and manifest,
+proving fixture persistence without relying on a previous browser profile.
+
+The next R3D attempt is still blocked until this portable profile has an
+available Provider credential. No credential was copied from a real user
+profile or written by this checkpoint.
 resolved.

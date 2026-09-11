@@ -78,6 +78,8 @@ export const storageKeys = {
   offlineStoryEntryStoreEnabled: "phone_offline_story_entry_store_enabled",
   lastBackupAt: "phone_last_backup_at",
   runtimeErrorMetrics: "phone_runtime_error_metrics_v1",
+  /** Dev-only manifest for a portable synthetic Direct Chat fixture. */
+  devPortableFixtureManifest: "fanfanji_dev_portable_fixture_manifest_v1",
     backgroundSchedulerTasks: "phone_background_scheduler_tasks",
     backgroundSchedulerLeases: "phone_background_scheduler_leases",
     backgroundSchedulerClock: "phone_background_scheduler_clock",

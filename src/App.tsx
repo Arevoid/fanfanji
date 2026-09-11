@@ -134,8 +134,9 @@ import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
 import { listByRelation as listCharacterEventsByRelation, retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
-import { CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL, installCharacterOwnershipBootstrapDevApi, isCharacterOwnershipBootstrapDevRuntime, readCharacterRepositoryForOwnershipBootstrap } from "./features/archives/characterOwnershipBootstrapDev";
-import { DEDICATED_RELATION_BOOTSTRAP_GLOBAL, installDedicatedRelationBootstrapDevApi, readRelationshipRepositoryForDedicatedBootstrap } from "./features/archives/dedicatedRelationBootstrapDev";
+import { CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL, installCharacterOwnershipBootstrapDevApi, isCharacterOwnershipBootstrapDevRuntime, readCharacterRepositoryForOwnershipBootstrap, type CharacterOwnershipBootstrapResult } from "./features/archives/characterOwnershipBootstrapDev";
+import { DEDICATED_RELATION_BOOTSTRAP_GLOBAL, installDedicatedRelationBootstrapDevApi, readRelationshipRepositoryForDedicatedBootstrap, type DedicatedRelationInspectorResult } from "./features/archives/dedicatedRelationBootstrapDev";
+import { PORTABLE_DIRECT_CHAT_FIXTURE_GLOBAL, installPortableDirectChatFixtureDevApi } from "./features/archives/portableDirectChatFixtureDev";
 import { removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
 import { loadMomentTopicRecords, removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
 import { removeProactiveTopicsForRelations, removeProactiveTopicsForCharacters } from "./core/storage/repositories/proactiveTopicRepository";
@@ -2722,6 +2723,77 @@ export default function App() {
         : await api.inspectDedicatedEvidenceFixture();
       if (!cancelled) {
         console.info("[dev] dedicated relation fixture result", JSON.stringify(result));
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => installPortableDirectChatFixtureDevApi({
+    getSettings: () => settingsRef.current,
+    saveSettings: setSettings,
+    bootstrapCharacter: async () => {
+      const runtime = globalThis as typeof globalThis & {
+        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { bootstrap: () => Promise<CharacterOwnershipBootstrapResult> };
+      };
+      const api = runtime[CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL];
+      if (!api) throw new Error("owned Character bootstrap API unavailable");
+      return api.bootstrap();
+    },
+    inspectCharacter: async () => {
+      const runtime = globalThis as typeof globalThis & {
+        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { inspect: () => Promise<CharacterOwnershipBootstrapResult> };
+      };
+      const api = runtime[CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL];
+      if (!api) throw new Error("owned Character bootstrap API unavailable");
+      return api.inspect();
+    },
+    bootstrapRelation: async () => {
+      const runtime = globalThis as typeof globalThis & {
+        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: { bootstrap: () => Promise<DedicatedRelationInspectorResult> };
+      };
+      const api = runtime[DEDICATED_RELATION_BOOTSTRAP_GLOBAL];
+      if (!api) throw new Error("dedicated relation bootstrap API unavailable");
+      return api.bootstrap();
+    },
+    inspectRelation: async () => {
+      const runtime = globalThis as typeof globalThis & {
+        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: { inspectDedicatedEvidenceFixture: () => Promise<DedicatedRelationInspectorResult> };
+      };
+      const api = runtime[DEDICATED_RELATION_BOOTSTRAP_GLOBAL];
+      if (!api) throw new Error("dedicated relation bootstrap API unavailable");
+      return api.inspectDedicatedEvidenceFixture();
+    },
+  }), []);
+
+  useEffect(() => {
+    const bootstrapQuery = new URLSearchParams(window.location.search);
+    const requestedAction = bootstrapQuery.get("portableDirectChatFixture") === "1"
+      ? "bootstrap"
+      : bootstrapQuery.get("inspectPortableDirectChatFixture") === "1"
+        ? "inspect"
+        : null;
+    if (!isCharacterOwnershipBootstrapDevRuntime() || !requestedAction) return;
+    let cancelled = false;
+    const run = async () => {
+      for (let attempt = 0; attempt < 100 && !charactersRepositoryHydrated.current; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      }
+      if (cancelled) return;
+      const runtime = globalThis as typeof globalThis & {
+        [PORTABLE_DIRECT_CHAT_FIXTURE_GLOBAL]?: {
+          bootstrap: () => Promise<unknown>;
+          inspect: () => Promise<unknown>;
+        };
+      };
+      const api = runtime[PORTABLE_DIRECT_CHAT_FIXTURE_GLOBAL];
+      if (!api) return;
+      const result = requestedAction === "bootstrap" ? await api.bootstrap() : await api.inspect();
+      if (!cancelled) {
+        console.info("[dev] portable Direct Chat fixture result", JSON.stringify(result));
         window.history.replaceState({}, "", window.location.pathname);
       }
     };
