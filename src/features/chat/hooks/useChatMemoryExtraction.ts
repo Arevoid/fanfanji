@@ -191,6 +191,14 @@ export function useChatMemoryExtraction({
         : 100;
       const archiveBatchSize = Math.min(200, Math.max(10, configuredBatchSize));
       const archiveBatches = splitChatArchiveBatches(unarchivedMessages, archiveBatchSize);
+      // A formal long-evidence window needs the same admission observation
+      // seam even when the standalone Shadow/Canary toggles are off. This is
+      // dev-only metadata ingestion; it does not grant write authority or
+      // alter the production extraction result.
+      const longEvidenceEnabled = !activeCharacter.isGroupChat
+        && activeDirectScope !== undefined
+        && manualMessagesOverride === undefined
+        && isDirectChatMemoryLongEvidenceCollectorEnabled();
       let totalExtracted = 0;
       const archiveStats: MemoryArchiveStats = {
         sourceMessageCount: 0,
@@ -213,6 +221,10 @@ export function useChatMemoryExtraction({
       const admissionShadowEnabled = manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled();
       const safetyShadowEnabled = manualMessagesOverride === undefined
         && (isDirectChatMemorySafetyVetoShadowEnabled() || canaryEnabled);
+      const admissionObservationEnabled = admissionShadowEnabled
+        || safetyShadowEnabled
+        || canaryEnabled
+        || longEvidenceEnabled;
       const markArchiveProgress = async (lastMessage: Message): Promise<boolean> => {
         if (activeCharacter.isGroupChat) {
           if (onUpdateCharacter) {
@@ -329,12 +341,6 @@ export function useChatMemoryExtraction({
         return 0;
       }
       const extractionScope = activeDirectScope;
-      // Long-evidence collection is a dev-only, automatic Direct Chat seam.
-      // It is completely bypassed for manual/group paths and when disabled.
-      const longEvidenceEnabled = manualMessagesOverride === undefined
-        && !activeCharacter.isGroupChat
-        && isDirectChatMemoryLongEvidenceCollectorEnabled();
-
       for (const messagesToCompress of archiveBatches) {
         archiveStats.sourceMessageCount += messagesToCompress.length;
         const longEvidenceBefore = longEvidenceEnabled
@@ -365,7 +371,7 @@ export function useChatMemoryExtraction({
             : {}),
           // Stage 4D-2 observation derives a V2 candidate from this same
           // response without changing the extraction Prompt or Provider call.
-          ...(admissionShadowEnabled || safetyShadowEnabled || canaryEnabled
+          ...(admissionObservationEnabled
             ? { enableAdmissionShadowObservation: true }
             : {}),
           apiKey: settings.apiKey,
@@ -401,7 +407,7 @@ export function useChatMemoryExtraction({
         let shadowResult: DirectChatMemoryAdmissionShadowResult | undefined;
         let safetyEvaluation: DirectChatMemorySafetyVetoShadowEvaluation | undefined;
         let canaryResult: DirectChatMemorySafetyVetoCanaryResult | undefined;
-        if (admissionShadowEnabled || safetyShadowEnabled || canaryEnabled) {
+        if (admissionObservationEnabled) {
           try {
             shadowResult = observeDirectChatMemoryAdmissionShadow({
               extraction: result,

@@ -16,6 +16,7 @@ import {
   readDirectChatMemoryCanonicalReadback,
   type DirectChatMemoryCanonicalReadback,
 } from "../src/features/chat/services/directChatMemoryLongEvidenceRuntime";
+import { observeDirectChatMemoryAdmissionShadow } from "../src/features/chat/services/directChatMemoryAdmissionShadow";
 import { storageKeys } from "../src/core/storage/storageKeys";
 
 const extractionHookSource = readFileSync(new URL("../src/features/chat/hooks/useChatMemoryExtraction.ts", import.meta.url), "utf8");
@@ -25,6 +26,9 @@ assert.match(extractionHookSource, /!activeCharacter\.isGroupChat/);
 assert.match(extractionHookSource, /apiExtractMemoriesWithModelFallback\(/);
 assert.match(extractionHookSource, /logicalActionId/);
 assert.match(extractionHookSource, /observeDirectChatMemoryLongEvidenceRuntime/);
+assert.match(extractionHookSource, /const admissionObservationEnabled =/);
+assert.match(extractionHookSource, /\|\| longEvidenceEnabled;/);
+assert.match(extractionHookSource, /if \(admissionObservationEnabled\)/);
 
 const originalWindow = (globalThis as { window?: unknown }).window;
 const storage = new Map<string, string>();
@@ -250,23 +254,28 @@ try {
   const unknown = await observeDirectChatMemoryLongEvidenceRuntime(canonicalInput({ logicalActionId: "unknown-action" }));
   assert.equal(unknown.accounting.accountingShape, "unknown");
 
-  // Provider/parser success with an explicit empty shadow candidate array is
-  // retained as one auditable batch record without inventing a candidate.
+  // The automatic caller now enables the admission-observation seam whenever
+  // a formal Collector is active, even if standalone Shadow/Canary telemetry
+  // is disabled. A successful empty extraction therefore reaches the runtime
+  // observer as a completed batch rather than disappearing at the caller.
   reset();
   recordAiRequest(envelope("request-zero", "runtime-zero-action"));
+  const zeroExtraction = {
+    extractedMemories: [],
+    acceptedClaims: [],
+    rejectedCandidateCount: 0,
+    shadowCandidatesV2: [],
+  } as any;
+  const automaticAdmissionShadow = observeDirectChatMemoryAdmissionShadow({
+    extraction: zeroExtraction,
+    scope,
+    lineage: { parentActionId: "runtime-zero-parent" },
+    recordedAt: Date.now(),
+  });
   const zero = await observeDirectChatMemoryLongEvidenceRuntime(canonicalInput({
     logicalActionId: "runtime-zero-action",
-    extraction: {
-      extractedMemories: [],
-      acceptedClaims: [],
-      rejectedCandidateCount: 0,
-      shadowCandidatesV2: [],
-    } as any,
-    admissionShadow: {
-      failedOpen: false,
-      observations: [],
-      bridgeShadow: { failedOpen: false, metrics: {}, observations: [], pairCandidateMatrix: [] },
-    } as any,
+    extraction: zeroExtraction,
+    admissionShadow: automaticAdmissionShadow,
     canonicalBefore: readback(),
     canonicalAfter: readback(),
     canonicalWriteSucceeded: true,
