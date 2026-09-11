@@ -44,6 +44,7 @@ function makeRecord(input: {
   day: string;
   classification?: DirectChatMemoryLongEvidenceRecord["classification"];
   privacyStatus?: DirectChatMemoryLongEvidenceRecord["privacyStatus"];
+  correlationClass?: DirectChatMemoryLongEvidenceRecord["correlationClass"];
 }): DirectChatMemoryLongEvidenceRecord {
   return {
     ...baseRecord,
@@ -65,7 +66,7 @@ function makeRecord(input: {
     cursorLoop: false,
     replayLoop: false,
     v2OnlyWrite: false,
-    correlationClass: "shared_unique",
+    correlationClass: input.correlationClass || "shared_unique",
     candidateSuppressed: input.classification === "VALID_ELIGIBLE_SUPPRESSION",
     canaryReason: input.classification === "VALID_ELIGIBLE_SUPPRESSION" ? "SAFETY_VETO_CANCELLED_PLAN" : "none",
     validatorResult: input.classification === "VALID_ELIGIBLE_SUPPRESSION" ? "allow_veto" : "deny_veto",
