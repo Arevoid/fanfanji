@@ -128,6 +128,7 @@ import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
 import { listByRelation as listCharacterEventsByRelation, retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
+import { CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL, installCharacterOwnershipBootstrapDevApi, isCharacterOwnershipBootstrapDevRuntime, readCharacterRepositoryForOwnershipBootstrap } from "./features/archives/characterOwnershipBootstrapDev";
 import { removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
 import { loadMomentTopicRecords, removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
 import { removeProactiveTopicsForRelations, removeProactiveTopicsForCharacters } from "./core/storage/repositories/proactiveTopicRepository";
@@ -2614,6 +2615,51 @@ export default function App() {
     const persisted = await flushCharacters();
     return persisted.success;
   };
+
+  useEffect(() => installCharacterOwnershipBootstrapDevApi({
+    getSettings: () => settingsRef.current,
+    getCharacters: () => charactersRef.current,
+    saveCharacter: handleSaveCharacter,
+    readCharacters: readCharacterRepositoryForOwnershipBootstrap,
+  }), []);
+
+  useEffect(() => {
+    const bootstrapQuery = new URLSearchParams(window.location.search);
+    const requestedAction = bootstrapQuery.get("characterOwnershipBootstrap") === "1"
+      ? "bootstrap"
+      : bootstrapQuery.get("characterOwnershipInspect") === "1"
+        ? "inspect"
+        : null;
+    if (!isCharacterOwnershipBootstrapDevRuntime() || !requestedAction) {
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      // Wait for the normal repository hydration before allowing the explicit
+      // developer action to create anything. This prevents a reload from
+      // racing an IndexedDB read and creating a second Character.
+      for (let attempt = 0; attempt < 100 && !charactersRepositoryHydrated.current; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      }
+      if (cancelled) return;
+      const runtime = globalThis as typeof globalThis & {
+        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { bootstrap: () => Promise<unknown>; inspect: () => Promise<unknown> };
+      };
+      const api = runtime[CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL];
+      if (!api) return;
+      const result = requestedAction === "bootstrap"
+        ? await api.bootstrap()
+        : await api.inspect();
+      if (!cancelled) {
+        console.info("[dev] owned Character bootstrap result", JSON.stringify(result));
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleUpdateCharacter = async (
     characterId: string,
