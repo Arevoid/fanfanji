@@ -8,7 +8,7 @@ import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storag
 import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
-import { initializeMessages, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
+import { initializeMessages, loadMessageWindow, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
 import { flushMoments, initializeMomentRepository, loadMoments, saveMoments } from "./core/storage/repositories/momentRepository";
 import { recordDeletedCharacterMoment } from "./features/moments/services/momentGenerationGuard";
 import { removeMemoriesForMoment } from "./features/moments/services/momentMemory";
@@ -129,6 +129,7 @@ import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
 import { listByRelation as listCharacterEventsByRelation, retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
 import { CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL, installCharacterOwnershipBootstrapDevApi, isCharacterOwnershipBootstrapDevRuntime, readCharacterRepositoryForOwnershipBootstrap } from "./features/archives/characterOwnershipBootstrapDev";
+import { DEDICATED_RELATION_BOOTSTRAP_GLOBAL, installDedicatedRelationBootstrapDevApi, readRelationshipRepositoryForDedicatedBootstrap } from "./features/archives/dedicatedRelationBootstrapDev";
 import { removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
 import { loadMomentTopicRecords, removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
 import { removeProactiveTopicsForRelations, removeProactiveTopicsForCharacters } from "./core/storage/repositories/proactiveTopicRepository";
@@ -718,6 +719,8 @@ export default function App() {
       : loadMessages(DEFAULT_MESSAGES).value;
     return normalizeCharacterPhoneProactiveMessages(initial.filter((message) => !(message.sender === "character" && isInternalDeliveryMarkerOnly(message.content))));
   });
+  const messagesRef = useRef<Message[]>(messages);
+  messagesRef.current = messages;
 
   useEffect(() => {
     let active = true;
@@ -805,6 +808,8 @@ export default function App() {
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => hydrateRelationshipNetworkRelationships(loadRelationships([]).value));
+  const relationshipsRef = useRef<CharacterRelationship[]>(relationships);
+  relationshipsRef.current = relationships;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2652,6 +2657,72 @@ export default function App() {
         : await api.inspect();
       if (!cancelled) {
         console.info("[dev] owned Character bootstrap result", JSON.stringify(result));
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => installDedicatedRelationBootstrapDevApi({
+    getSettings: () => settingsRef.current,
+    readCharacters: readCharacterRepositoryForOwnershipBootstrap,
+    getRelationships: () => relationshipsRef.current,
+    persistRelationships: async (nextRelationships) => {
+      const normalized = [...nextRelationships];
+      const saved = saveRelationships(normalized);
+      if (!saved.success) return false;
+      relationshipsRef.current = normalized;
+      setRelationships(normalized);
+      return true;
+    },
+    readRelationships: readRelationshipRepositoryForDedicatedBootstrap,
+    readMessages: async (scope) => {
+      try {
+        return await loadMessageWindow({
+          characterId: scope.characterId,
+          relationId: scope.relationId,
+          conversationId: scope.conversationId,
+          limit: 10000,
+        });
+      } catch {
+        return messagesRef.current.filter((message) => messageMatchesMutationScope(message, scope));
+      }
+    },
+    captureRelationshipCreatedEvent: (relationship) => {
+      captureRelationshipCreatedEvent(relationship);
+    },
+  }), []);
+
+  useEffect(() => {
+    const bootstrapQuery = new URLSearchParams(window.location.search);
+    const requestedAction = bootstrapQuery.get("dedicatedRelationBootstrap") === "1"
+      ? "bootstrap"
+      : bootstrapQuery.get("inspectDedicatedEvidenceFixture") === "1"
+        ? "inspect"
+        : null;
+    if (!isCharacterOwnershipBootstrapDevRuntime() || !requestedAction) return;
+    let cancelled = false;
+    const run = async () => {
+      for (let attempt = 0; attempt < 100 && !charactersRepositoryHydrated.current; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      }
+      if (cancelled) return;
+      const runtime = globalThis as typeof globalThis & {
+        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: {
+          bootstrap: () => Promise<unknown>;
+          inspectDedicatedEvidenceFixture: () => Promise<unknown>;
+        };
+      };
+      const api = runtime[DEDICATED_RELATION_BOOTSTRAP_GLOBAL];
+      if (!api) return;
+      const result = requestedAction === "bootstrap"
+        ? await api.bootstrap()
+        : await api.inspectDedicatedEvidenceFixture();
+      if (!cancelled) {
+        console.info("[dev] dedicated relation fixture result", JSON.stringify(result));
         window.history.replaceState({}, "", window.location.pathname);
       }
     };

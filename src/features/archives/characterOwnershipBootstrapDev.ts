@@ -65,7 +65,7 @@ const unavailableResult = (characterCountBefore: number, status: CharacterOwners
  * deterministic fallback keeps the dev seam usable on non-secure localhost
  * partitions without becoming an ID generator.
  */
-async function fingerprintCanonicalId(value: string): Promise<string> {
+export async function fingerprintCanonicalId(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   if (globalThis.crypto?.subtle) {
     const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
@@ -81,7 +81,7 @@ async function fingerprintCanonicalId(value: string): Promise<string> {
   return [first, second].map((part) => (part >>> 0).toString(16).padStart(8, "0")).join("");
 }
 
-function findSyntheticIdentity(identities: readonly UserIdentity[]): UserIdentity | undefined {
+export function findSyntheticIdentity(identities: readonly UserIdentity[]): UserIdentity | undefined {
   const matches = identities.filter((identity) => identity.kind !== "alias"
     && !identity.archived
     && identity.bio.trim() === SYNTHETIC_IDENTITY_BIO);
