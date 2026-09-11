@@ -496,7 +496,6 @@ export function reviewMemoryAdmissionCampaignEvidence(input: CampaignReviewInput
       }
     }
     let windowPrivacyViolationCount = 0;
-    let windowSafetyIncidentCount = review.safetyIncidentCount;
     for (const [evidenceFingerprint, record] of windowRecords) {
       const prior = allRecords.get(evidenceFingerprint);
       if (prior && !prior.windows.has(windowFingerprint)) {
@@ -521,11 +520,13 @@ export function reviewMemoryAdmissionCampaignEvidence(input: CampaignReviewInput
       if (record.classification === "SAFETY_INCIDENT") safetyIncidentCount += 1;
       if (record.correlationClass === "cross_scope" || record.v2OnlyWrite || record.cursorLoop || record.replayLoop) {
         safetyIncidentCount += 1;
-        windowSafetyIncidentCount += 1;
       }
     }
+    // The closure snapshot records classifier-level incidents exactly once.
+    // Additional structural safety heuristics above remain sticky campaign
+    // failures but must not double-count the same record in the closure.
     if (window.closure.privacyViolationCount !== windowPrivacyViolationCount
-      || window.closure.safetyIncidentCount !== windowSafetyIncidentCount) errors.push("closure_snapshot_mismatch");
+      || window.closure.safetyIncidentCount !== review.safetyIncidentCount) errors.push("closure_snapshot_mismatch");
     accountingConflictCount += review.accountingConflictCount;
   }
 

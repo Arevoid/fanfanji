@@ -404,6 +404,30 @@ assert.equal(stickyReview.status, "blocked");
 assert.equal(stickyReview.stickyFailure, true);
 assert.equal(stickyReview.promotionEligible, false);
 
+// A cross-scope safety incident is classified once in the closure snapshot;
+// structural heuristics still block the campaign without double-counting it.
+const crossScopeSafetyRecord = makeRecord({
+  window: windowB,
+  session: 21,
+  evidence: 21,
+  scope: 2,
+  action: 21,
+  batch: 21,
+  day: "2026-09-11",
+  classification: "SAFETY_INCIDENT",
+  correlationClass: "cross_scope",
+});
+const crossScopeClosureReview = reviewMemoryAdmissionCampaignEvidence({
+  manifest: makeManifest(campaign, [windowB], [
+    { windowFingerprint: windowB, localScopeFingerprint: "scope-00000002", promotionScopeFingerprint: "promotion-scope-two" },
+  ]),
+  windows: [windowInput(campaign, windowB, [crossScopeSafetyRecord], {
+    safetyIncidentCount: 1,
+  })],
+});
+assert.equal(crossScopeClosureReview.errors.includes("closure_snapshot_mismatch"), false);
+assert.equal(crossScopeClosureReview.stickyFailure, true);
+
 const thresholdRecords: DirectChatMemoryLongEvidenceRecord[] = Array.from({ length: 20 }, (_, index) => makeRecord({
   window: windowA,
   session: (index % 5) + 1,
