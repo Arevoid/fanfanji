@@ -144,7 +144,8 @@ clearDirectChatMemoryAdmissionShadowEvidence();
 
 const hookSource = readFileSync(new URL("../src/features/chat/hooks/useChatMemoryExtraction.ts", import.meta.url), "utf8");
 assert.match(hookSource, /recordDirectChatMemoryAdmissionShadowEvidence/u);
-assert.match(hookSource, /manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled/u);
+assert.match(hookSource, /observationPathEligible = isAutomaticDirectChat \|\| manualMessagesOverride === undefined/u);
+assert.match(hookSource, /admissionShadowEnabled = observationPathEligible && isDirectChatMemoryAdmissionShadowEvidenceEnabled/u);
 assert.doesNotMatch(hookSource, /localStorage|indexedDB|fetch\(/iu, "runtime observation has no persistence or network sink");
 const telemetrySource = readFileSync(new URL("../src/features/chat/services/directChatMemoryAdmissionShadowTelemetry.ts", import.meta.url), "utf8");
 assert.doesNotMatch(telemetrySource, /localStorage|indexedDB|fetch\(/iu);
