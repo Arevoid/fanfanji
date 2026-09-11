@@ -50,6 +50,7 @@ export interface MemoryAdmissionLongEvidenceArtifactReview {
   extractionBatchCount: number;
   validSuppressionCount: number;
   validControlCount: number;
+  zeroCandidateBatchCount: number;
   failOpenCount: number;
   invalidSampleCount: number;
   safetyIncidentCount: number;
@@ -165,6 +166,7 @@ function projectReview(review: DirectChatMemoryLongEvidenceCombinedReview): Omit
     extractionBatchCount: review.extractionBatchCount,
     validSuppressionCount: review.validSuppressionCount,
     validControlCount: review.validControlCount,
+    zeroCandidateBatchCount: review.zeroCandidateBatchCount,
     failOpenCount: review.countsByClassification.FAIL_OPEN_OBSERVATION,
     invalidSampleCount: review.countsByClassification.INVALID_SAMPLE,
     safetyIncidentCount: review.safetyIncidentCount,

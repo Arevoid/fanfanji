@@ -250,6 +250,34 @@ try {
   const unknown = await observeDirectChatMemoryLongEvidenceRuntime(canonicalInput({ logicalActionId: "unknown-action" }));
   assert.equal(unknown.accounting.accountingShape, "unknown");
 
+  // Provider/parser success with an explicit empty shadow candidate array is
+  // retained as one auditable batch record without inventing a candidate.
+  reset();
+  recordAiRequest(envelope("request-zero", "runtime-zero-action"));
+  const zero = await observeDirectChatMemoryLongEvidenceRuntime(canonicalInput({
+    logicalActionId: "runtime-zero-action",
+    extraction: {
+      extractedMemories: [],
+      acceptedClaims: [],
+      rejectedCandidateCount: 0,
+      shadowCandidatesV2: [],
+    } as any,
+    admissionShadow: {
+      failedOpen: false,
+      observations: [],
+      bridgeShadow: { failedOpen: false, metrics: {}, observations: [], pairCandidateMatrix: [] },
+    } as any,
+    canonicalBefore: readback(),
+    canonicalAfter: readback(),
+    canonicalWriteSucceeded: true,
+    cursorAdvanced: true,
+  }));
+  assert.equal(zero.recorded.length, 1);
+  assert.equal(zero.recorded[0]?.classification, "ZERO_CANDIDATE_BATCH");
+  assert.equal(zero.recorded[0]?.candidateCount, 0);
+  assert.equal(zero.recorded[0]?.batchZeroCandidates, true);
+  assert.equal(zero.recorded[0]?.canonicalWriteCountDelta, 0);
+
   // Scope mismatch is metadata-only and cannot become valid suppression.
   reset();
   const crossScope = await observeDirectChatMemoryLongEvidenceRuntime(canonicalInput({

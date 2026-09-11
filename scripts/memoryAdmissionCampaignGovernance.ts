@@ -18,6 +18,7 @@ export type WindowClosureReason =
   | "raw_token_continuity_lost"
   | "intentional_window_rotation"
   | "campaign_completed"
+  | "collector_gap"
   | "safety_stop"
   | "privacy_stop"
   | "accounting_stop";
@@ -130,6 +131,8 @@ export interface CampaignReviewResult extends CampaignCounts {
   crossWindowCopyCount: number;
   conflictingScopeMappingCount: number;
   missingScopeMappingCount: number;
+  /** Informational only: contributes to batches, never controls/suppressions. */
+  zeroCandidateBatchCount: number;
   errors: string[];
 }
 
@@ -145,6 +148,7 @@ const CLOSURE_REASONS = new Set<WindowClosureReason>([
   "raw_token_continuity_lost",
   "intentional_window_rotation",
   "campaign_completed",
+  "collector_gap",
   "safety_stop",
   "privacy_stop",
   "accounting_stop",
@@ -380,8 +384,15 @@ function emptyResult(errors: string[], manifest?: MemoryAdmissionCampaignManifes
     crossWindowCopyCount: 0,
     conflictingScopeMappingCount: 0,
     missingScopeMappingCount: 0,
+    zeroCandidateBatchCount: 0,
     errors,
   };
+}
+
+function isAuthoritativeEvidenceRecord(record: DirectChatMemoryLongEvidenceRecord): boolean {
+  return record.classification === "VALID_ELIGIBLE_SUPPRESSION"
+    || record.classification === "VALID_CONTROL"
+    || record.classification === "ZERO_CANDIDATE_BATCH";
 }
 
 export function reviewMemoryAdmissionCampaignEvidence(input: CampaignReviewInput): CampaignReviewResult {
@@ -437,6 +448,24 @@ export function reviewMemoryAdmissionCampaignEvidence(input: CampaignReviewInput
     errors.push(...closureErrors);
     if (!manifest.closedWindows.includes(windowFingerprint)) errors.push("window_not_closed");
     if (window.closure.authoritativeArtifactCount < 0) errors.push("closure_count_invalid");
+
+    // A collector-gap closure is an explicit non-success audit trail. It is
+    // approved/closed for governance continuity but has no authoritative
+    // artifact and must not contribute promotion evidence counts.
+    const isCollectorGapClosure = window.closure.windowStatus === "closed_unrecoverable"
+      && window.closure.closureReason === "collector_gap";
+    if (isCollectorGapClosure) {
+      if (window.artifacts.length !== 0
+        || window.closure.authoritativeArtifactCount !== 0
+        || window.closure.lastAuthoritativeEvidenceDay !== null) {
+        errors.push("collector_gap_closure_snapshot_mismatch");
+      }
+      continue;
+    }
+    if (window.artifacts.length === 0) {
+      errors.push("window_artifacts_missing");
+      continue;
+    }
 
     const artifactStrings = window.artifacts.map(artifactRaw);
     const uniqueArtifacts = artifactStrings.filter((raw, index) => artifactStrings.findIndex((candidate) => stableArtifactFingerprint(candidate) === stableArtifactFingerprint(raw)) === index);
@@ -506,8 +535,7 @@ export function reviewMemoryAdmissionCampaignEvidence(input: CampaignReviewInput
   if (crossWindowCopyCount > 0) errors.push("cross_window_copy_detected");
 
   const uniqueRecords = [...allRecords.values()].map((entry) => entry.record);
-  const eligibleRecords = uniqueRecords.filter((record) =>
-    record.classification === "VALID_ELIGIBLE_SUPPRESSION" || record.classification === "VALID_CONTROL");
+  const eligibleRecords = uniqueRecords.filter(isAuthoritativeEvidenceRecord);
   const actionGroups = new Map<string, { logical: number; physical: number; shape: string; conflict: boolean; records: DirectChatMemoryLongEvidenceRecord[] }>();
   for (const record of eligibleRecords) {
     const key = record.logicalActionFingerprint;
@@ -541,6 +569,7 @@ export function reviewMemoryAdmissionCampaignEvidence(input: CampaignReviewInput
   const evidenceDays = new Set<string>();
   let validControlCount = 0;
   let validSuppressionCount = 0;
+  let zeroCandidateBatchCount = 0;
   let physicalAttemptTotal = 0;
   const countedActions = new Set<string>();
   const countedDays = new Set<string>();
@@ -562,6 +591,7 @@ export function reviewMemoryAdmissionCampaignEvidence(input: CampaignReviewInput
     }
     if (record.classification === "VALID_CONTROL") validControlCount += 1;
     if (record.classification === "VALID_ELIGIBLE_SUPPRESSION") validSuppressionCount += 1;
+    if (record.classification === "ZERO_CANDIDATE_BATCH") zeroCandidateBatchCount += 1;
   }
   if (missingScopeMappingCount > 0) errors.push("missing_scope_mapping");
 
@@ -614,6 +644,7 @@ export function reviewMemoryAdmissionCampaignEvidence(input: CampaignReviewInput
     crossWindowCopyCount,
     conflictingScopeMappingCount,
     missingScopeMappingCount,
+    zeroCandidateBatchCount,
     errors: [...new Set(errors)],
   };
 }

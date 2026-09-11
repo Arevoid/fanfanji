@@ -220,6 +220,85 @@ assert.equal(oneWindowReview.logicalActionTotal, 1);
 assert.equal(oneWindowReview.physicalAttemptTotal, 1);
 assert.equal(oneWindowReview.distinctEvidenceDayCount, 1);
 
+const zeroCandidateRecord = makeRecord({
+  window: windowA,
+  session: 3,
+  evidence: 30,
+  scope: 1,
+  action: 30,
+  batch: 30,
+  day: "2026-09-10",
+  classification: "ZERO_CANDIDATE_BATCH",
+});
+Object.assign(zeroCandidateRecord, {
+  recordKind: "batch",
+  candidateCount: 0,
+  legacyAccepted: false,
+  legacyWriteEligible: false,
+  candidateSuppressed: false,
+  pairUnique: false,
+  validatorResult: "not_evaluated",
+  validatorReason: "legacy_or_v2_candidate_missing",
+  bridgeState: "reject",
+  bridgeReason: "v2_candidate_missing",
+  correlationClass: "unknown",
+  lineageStatus: "missing",
+  metadataSource: "unknown",
+  semanticKind: "unknown",
+  planLifecycle: "not_applicable",
+  batchAcceptedBefore: 0,
+  batchAcceptedAfter: 0,
+  batchZeroCandidates: true,
+  survivingCanonicalWritesExpected: false,
+  survivingCanonicalWritesObserved: true,
+  canonicalWriteCountDelta: 0,
+  summaryDelta: 0,
+  projectionDelta: 0,
+});
+const zeroCandidateReview = reviewMemoryAdmissionCampaignEvidence({
+  manifest: oneWindowManifest,
+  windows: [windowInput(campaign, windowA, [zeroCandidateRecord])],
+});
+assert.equal(zeroCandidateReview.status, "ok");
+assert.equal(zeroCandidateReview.formalSessionCount, 1);
+assert.equal(zeroCandidateReview.extractionBatchCount, 1);
+assert.equal(zeroCandidateReview.validControlCount, 0);
+assert.equal(zeroCandidateReview.validSuppressionCount, 0);
+assert.equal(zeroCandidateReview.logicalActionTotal, 1);
+assert.equal(zeroCandidateReview.physicalAttemptTotal, 1);
+const zeroChildReview = reviewMemoryAdmissionCampaignEvidence({
+  manifest: oneWindowManifest,
+  windows: [windowInput(campaign, windowA, [
+    zeroCandidateRecord,
+    { ...zeroCandidateRecord, evidenceRecordFingerprint: "evidence-3333333333333333" },
+  ])],
+});
+assert.equal(zeroChildReview.status, "ok");
+assert.equal(zeroChildReview.extractionBatchCount, 1, "zero batch records with one action do not double-count a batch");
+assert.equal(zeroChildReview.logicalActionTotal, 1);
+assert.equal(zeroChildReview.physicalAttemptTotal, 1);
+
+const collectorGapManifest = {
+  ...oneWindowManifest,
+  approvedWindows: [{ windowFingerprint: windowA, artifactPaths: [], closurePath: "window-closure.json" }],
+};
+const collectorGapClosure = makeClosure(campaign, windowA, {
+  windowStatus: "closed_unrecoverable",
+  closureReason: "collector_gap",
+  authoritativeArtifactCount: 0,
+  lastAuthoritativeEvidenceDay: null,
+});
+assert.deepEqual(validateWindowClosureManifest(collectorGapClosure, campaign, windowA), []);
+const collectorGapReview = reviewMemoryAdmissionCampaignEvidence({
+  manifest: collectorGapManifest,
+  windows: [{ windowFingerprint: windowA, artifacts: [], closure: collectorGapClosure }],
+});
+assert.equal(collectorGapReview.status, "ok");
+assert.equal(collectorGapReview.authoritativeArtifactCount, 0);
+assert.equal(collectorGapReview.extractionBatchCount, 0);
+assert.equal(collectorGapReview.zeroCandidateBatchCount, 0);
+assert.equal(collectorGapReview.stickyFailure, false);
+
 const unapprovedReview = reviewMemoryAdmissionCampaignEvidence({
   manifest: oneWindowManifest,
   windows: [

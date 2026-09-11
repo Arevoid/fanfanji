@@ -11,9 +11,12 @@ export const LONG_EVIDENCE_MAX_RECORDS = 100 as const;
 export type LongEvidenceClassification =
   | "VALID_ELIGIBLE_SUPPRESSION"
   | "VALID_CONTROL"
+  | "ZERO_CANDIDATE_BATCH"
   | "FAIL_OPEN_OBSERVATION"
   | "INVALID_SAMPLE"
   | "SAFETY_INCIDENT";
+
+export type LongEvidenceRecordKind = "candidate" | "batch";
 
 export type LongEvidenceValidatorResult = "allow_veto" | "deny_veto" | "not_evaluated" | "unknown";
 export type LongEvidencePrivacyStatus = "metadata_only" | "violation";
@@ -87,6 +90,10 @@ export interface DirectChatMemoryLongEvidenceInput {
   batch: DirectChatMemoryLongEvidenceBatchInput;
   accounting: DirectChatMemoryLongEvidenceAccountingInput;
   performance: DirectChatMemoryLongEvidencePerformanceInput;
+  /** Candidate records are the historical default; batch records are additive. */
+  recordKind?: LongEvidenceRecordKind;
+  /** Required to be zero for a ZERO_CANDIDATE_BATCH record. */
+  candidateCount?: number;
   /** Raw lineage is consumed only to create an opaque, in-memory-safe token. */
   logicalActionId?: string;
   /** Optional bounded candidate-local ordinal; never a raw candidate identifier. */
@@ -98,6 +105,10 @@ export type LongEvidenceFilteringLatencyBucket = "0_10ms" | "10_50ms" | "50_250m
 
 export interface DirectChatMemoryLongEvidenceRecord {
   schemaVersion: typeof LONG_EVIDENCE_SCHEMA_VERSION;
+  /** Optional for backward compatibility with pre-RG1 candidate artifacts. */
+  recordKind?: LongEvidenceRecordKind;
+  /** Present on new batch-level records; never contains candidate content. */
+  candidateCount?: number;
   timeBucket: string;
   featureScope: "automatic_direct_chat" | "unknown";
   sessionOrdinal: number;
@@ -174,6 +185,7 @@ export interface DirectChatMemoryLongEvidenceSummary {
   extractionBatchCount: number;
   validSuppressionCount: number;
   validControlCount: number;
+  zeroCandidateBatchCount: number;
   controlCount: number;
   failOpenCount: number;
   invalidSampleCount: number;
@@ -209,6 +221,7 @@ export interface DirectChatMemoryLongEvidenceCombinedReview {
   extractionBatchCount: number;
   validSuppressionCount: number;
   validControlCount: number;
+  zeroCandidateBatchCount: number;
   controlCount: number;
   logicalActionTotal: number;
   physicalAttemptTotal: number;
@@ -443,6 +456,36 @@ function validSuppressionBatch(record: DirectChatMemoryLongEvidenceRecord): bool
   return partial || allVeto;
 }
 
+function isZeroCandidateBatch(record: DirectChatMemoryLongEvidenceRecord): boolean {
+  return record.recordKind === "batch";
+}
+
+function validZeroCandidateBatch(record: DirectChatMemoryLongEvidenceRecord): boolean {
+  return record.featureScope === "automatic_direct_chat"
+    && isZeroCandidateBatch(record)
+    && record.candidateCount === 0
+    && record.batchZeroCandidates
+    && record.batchAcceptedBefore === 0
+    && record.batchAcceptedAfter === 0
+    && !record.candidateSuppressed
+    && !record.legacyAccepted
+    && !record.legacyWriteEligible
+    && !record.v2OnlyWrite
+    && record.exactScope
+    && record.provenanceTrusted
+    && record.survivingCanonicalWritesObserved
+    && record.cursorAdvanced
+    && !record.cursorLoop
+    && !record.replayLoop
+    && record.canonicalWriteCountDelta === 0
+    && record.summaryDelta === 0
+    && record.projectionDelta === 0
+    && record.providerLogicalRequestCount > 0
+    && record.providerPhysicalAttemptCount > 0
+    && record.accountingShape !== "unknown"
+    && record.privacyStatus === "metadata_only";
+}
+
 function hasSafetyIncident(record: DirectChatMemoryLongEvidenceRecord): boolean {
   if (record.privacyStatus !== "metadata_only"
     || record.promptDelta > 0
@@ -463,6 +506,7 @@ export function classifyLongEvidenceRecord(record: DirectChatMemoryLongEvidenceR
   if (!record || typeof record !== "object") return "INVALID_SAMPLE";
   if (hasSafetyIncident(record)) return "SAFETY_INCIDENT";
   if (record.failOpen) return "FAIL_OPEN_OBSERVATION";
+  if (isZeroCandidateBatch(record)) return validZeroCandidateBatch(record) ? "ZERO_CANDIDATE_BATCH" : "INVALID_SAMPLE";
   if (record.candidateSuppressed) {
     return validSuppressionCandidate(record) && validSuppressionBatch(record)
       ? "VALID_ELIGIBLE_SUPPRESSION"
@@ -505,6 +549,8 @@ function sanitizeInput(
     : nextObservationOrdinal;
   const record: DirectChatMemoryLongEvidenceRecord = {
     schemaVersion: LONG_EVIDENCE_SCHEMA_VERSION,
+    ...(input.recordKind ? { recordKind: input.recordKind } : {}),
+    ...(input.recordKind ? { candidateCount: clampCount(input.candidateCount) } : {}),
     timeBucket: coarseTimeBucket(),
     evidenceDay: currentEvidenceDay(),
     featureScope: candidate.featureScope === "automatic_direct_chat" ? "automatic_direct_chat" : "unknown",
@@ -590,6 +636,7 @@ function emptyCounts(): Record<LongEvidenceClassification, number> {
   return {
     VALID_ELIGIBLE_SUPPRESSION: 0,
     VALID_CONTROL: 0,
+    ZERO_CANDIDATE_BATCH: 0,
     FAIL_OPEN_OBSERVATION: 0,
     INVALID_SAMPLE: 0,
     SAFETY_INCIDENT: 0,
@@ -749,6 +796,12 @@ interface AccountingGroup {
   conflict: boolean;
 }
 
+function isAuthoritativeRecord(record: DirectChatMemoryLongEvidenceRecord): boolean {
+  return record.classification === "VALID_ELIGIBLE_SUPPRESSION"
+    || record.classification === "VALID_CONTROL"
+    || record.classification === "ZERO_CANDIDATE_BATCH";
+}
+
 function aggregateFormalRecords(formalRecords: readonly DirectChatMemoryLongEvidenceRecord[]): {
   logicalActionTotal: number;
   physicalAttemptTotal: number;
@@ -758,12 +811,13 @@ function aggregateFormalRecords(formalRecords: readonly DirectChatMemoryLongEvid
   distinctExactScopeCount: number;
   validSuppressionCount: number;
   validControlCount: number;
+  zeroCandidateBatchCount: number;
   formalSessionCount: number;
 } {
   const groups = new Map<string, AccountingGroup>();
   let unknownGroupingCount = 0;
   for (const record of formalRecords) {
-    if (record.classification !== "VALID_ELIGIBLE_SUPPRESSION" && record.classification !== "VALID_CONTROL") continue;
+    if (!isAuthoritativeRecord(record)) continue;
     if (record.logicalActionFingerprint === "unknown" || record.accountingShape === "unknown") {
       unknownGroupingCount += 1;
       continue;
@@ -798,8 +852,7 @@ function aggregateFormalRecords(formalRecords: readonly DirectChatMemoryLongEvid
     physicalAttemptTotal += group.physical;
   });
   const authoritativeRecords = formalRecords.filter((record) =>
-    (record.classification === "VALID_ELIGIBLE_SUPPRESSION" || record.classification === "VALID_CONTROL")
-    && authoritativeActionFingerprints.has(record.logicalActionFingerprint));
+    isAuthoritativeRecord(record) && authoritativeActionFingerprints.has(record.logicalActionFingerprint));
   const scopeFingerprints = new Set(
     authoritativeRecords
       .filter((record) => record.exactScope && record.privacyStatus === "metadata_only" && record.scopeFingerprint !== "unknown")
@@ -818,6 +871,7 @@ function aggregateFormalRecords(formalRecords: readonly DirectChatMemoryLongEvid
     distinctExactScopeCount: scopeFingerprints.size,
     validSuppressionCount: authoritativeRecords.filter((record) => record.classification === "VALID_ELIGIBLE_SUPPRESSION").length,
     validControlCount: authoritativeRecords.filter((record) => record.classification === "VALID_CONTROL").length,
+    zeroCandidateBatchCount: authoritativeRecords.filter((record) => record.classification === "ZERO_CANDIDATE_BATCH").length,
     formalSessionCount: sessionFingerprints.size,
   };
 }
@@ -910,7 +964,31 @@ function isSanitizedEvidenceRecord(value: unknown): value is DirectChatMemoryLon
     || (logicalActionFingerprintValue !== "unknown" && !/^action-[0-9a-f]{8}$/.test(logicalActionFingerprintValue))) return false;
   if (typeof batchActionFingerprintValue !== "string"
     || (batchActionFingerprintValue !== "unknown" && !/^batch-[0-9a-f]{8}$/.test(batchActionFingerprintValue))) return false;
-  if (!["VALID_ELIGIBLE_SUPPRESSION", "VALID_CONTROL", "FAIL_OPEN_OBSERVATION", "INVALID_SAMPLE", "SAFETY_INCIDENT"].includes(classificationValue as string)) return false;
+  if (!["VALID_ELIGIBLE_SUPPRESSION", "VALID_CONTROL", "ZERO_CANDIDATE_BATCH", "FAIL_OPEN_OBSERVATION", "INVALID_SAMPLE", "SAFETY_INCIDENT"].includes(classificationValue as string)) return false;
+  const recordKind = value.recordKind === undefined ? "candidate" : value.recordKind;
+  if (recordKind !== "candidate" && recordKind !== "batch") return false;
+  if (recordKind === "batch" && (classificationValue !== "ZERO_CANDIDATE_BATCH"
+    || value.candidateCount !== 0
+    || value.batchZeroCandidates !== true
+    || value.candidateSuppressed !== false
+    || value.legacyAccepted !== false
+    || value.legacyWriteEligible !== false
+    || value.survivingCanonicalWritesExpected !== false
+    || value.canonicalWriteCountDelta !== 0
+    || value.summaryDelta !== 0
+    || value.projectionDelta !== 0
+    || value.cursorAdvanced !== true
+    || value.exactScope !== true
+    || value.provenanceTrusted !== true
+    || value.survivingCanonicalWritesObserved !== true
+    || typeof value.providerLogicalRequestCount !== "number"
+    || value.providerLogicalRequestCount < 1
+    || typeof value.providerPhysicalAttemptCount !== "number"
+    || value.providerPhysicalAttemptCount < 1
+    || (value.accountingShape !== "single_row" && value.accountingShape !== "fallback_split_rows")
+    || value.v2OnlyWrite !== false
+    || value.privacyStatus !== "metadata_only")) return false;
+  if (recordKind === "candidate" && classificationValue === "ZERO_CANDIDATE_BATCH") return false;
   return true;
 }
 
@@ -936,6 +1014,7 @@ function emptyCombinedReview(status: DirectChatMemoryLongEvidenceCombinedReview[
     extractionBatchCount: 0,
     validSuppressionCount: 0,
     validControlCount: 0,
+    zeroCandidateBatchCount: 0,
     controlCount: 0,
     logicalActionTotal: 0,
     physicalAttemptTotal: 0,

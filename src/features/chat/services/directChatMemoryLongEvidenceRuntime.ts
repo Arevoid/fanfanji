@@ -222,6 +222,71 @@ export async function observeDirectChatMemoryLongEvidenceRuntime(
       ? input.admissionShadow.bridgeShadow.observations
       : input.admissionShadow.failedOpen ? [undefined] : [];
     const recorded: DirectChatMemoryLongEvidenceRecord[] = [];
+
+    // MemoryExtractor deliberately represents a successful, honest empty
+    // extraction as an empty shadowCandidatesV2 array with no rejected
+    // candidates and no apiError. Preserve that batch-level fact without
+    // manufacturing a candidate observation or a control/suppression result.
+    const legitimateZeroCandidate = !input.extraction.apiError
+      && Array.isArray(input.extraction.shadowCandidatesV2)
+      && input.extraction.shadowCandidatesV2.length === 0
+      && input.extraction.acceptedClaims.length === 0
+      && input.extraction.rejectedCandidateCount === 0
+      && observations.length === 0
+      && !input.admissionShadow.failedOpen;
+    if (legitimateZeroCandidate) {
+      const zeroRecord = recordDirectChatMemoryLongEvidence({
+        scope: input.scope,
+        recordKind: "batch",
+        candidateCount: 0,
+        logicalActionId: input.logicalActionId,
+        candidate: {
+          featureScope: "automatic_direct_chat",
+          canaryReason: "none",
+          validatorResult: "not_evaluated",
+          validatorReason: "legacy_or_v2_candidate_missing",
+          bridgeState: "reject",
+          bridgeReason: "v2_candidate_missing",
+          correlationClass: "unknown",
+          lineageStatus: "missing",
+          pairUnique: false,
+          exactScope: true,
+          provenanceTrusted: true,
+          metadataSource: "unknown",
+          semanticKind: "unknown",
+          planLifecycle: "not_applicable",
+          legacyAccepted: false,
+          legacyWriteEligible: false,
+          candidateSuppressed: false,
+          vetoedCandidateCanonicalAbsent: false,
+          failOpen: false,
+        },
+        batch: {
+          batchAcceptedBefore: 0,
+          batchAcceptedAfter: 0,
+          batchZeroCandidates: true,
+          survivingCanonicalWritesExpected: false,
+          survivingCanonicalWritesObserved: input.canonicalWriteSucceeded,
+          cursorAdvanced: input.cursorAdvanced,
+          canonicalWriteCountDelta: Math.max(0, input.canonicalAfter.activeClaimCount - input.canonicalBefore.activeClaimCount),
+          summaryDelta: Math.max(0, input.canonicalAfter.activeSummaryCount - input.canonicalBefore.activeSummaryCount),
+          projectionDelta: Math.max(0, input.canonicalAfter.projectionCount - input.canonicalBefore.projectionCount),
+          v2OnlyWrite: false,
+          cursorLoop: false,
+          replayLoop: false,
+          blockingMaterialUserRegression: false,
+        },
+        accounting,
+        performance: {
+          extractionLatencyBucket: extractionLatencyBucket(input.extractionLatencyMs),
+          canaryFilteringLatencyBucket: filteringLatencyBucket(input.canaryFilteringLatencyMs),
+          privacyStatus: "metadata_only",
+        },
+      });
+      if (zeroRecord) recorded.push(zeroRecord);
+      return { recorded, accounting };
+    }
+
     observations.forEach((observation, index) => {
       const safety = safetyEvaluation[index];
       const canary = canaryRecords[index];

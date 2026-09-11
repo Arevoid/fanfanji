@@ -17,11 +17,17 @@
         "docs/evidence/memory-admission-v2/window-1c673ae85a3ee3ba/2026-09-11__session-51b03d3bc8e9b879.json"
       ],
       "closurePath": "docs/evidence/memory-admission-v2/window-1c673ae85a3ee3ba/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-1352524908ffd837",
+      "artifactPaths": [],
+      "closurePath": "docs/evidence/memory-admission-v2/window-1352524908ffd837/window-closure.json"
     }
   ],
   "closedWindows": [
     "window-8817672802574c9a",
-    "window-1c673ae85a3ee3ba"
+    "window-1c673ae85a3ee3ba",
+    "window-1352524908ffd837"
   ],
   "createdAtUtc": "2026-09-10T15:46:57.912Z",
   "promotionScopeMappings": [

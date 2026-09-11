@@ -223,9 +223,60 @@ try {
   assert.equal(unknownReason?.validatorReason, "unknown");
   assert.equal(unknownReason?.classification, "INVALID_SAMPLE");
 
+  // A successful automatic extraction with an explicitly empty candidate
+  // array is a batch-level observation, not a candidate/control/suppression.
+  clearDirectChatMemoryLongEvidenceCollector();
+  clearDirectChatMemoryLongEvidenceWindow();
+  assert.equal(startDirectChatMemoryLongEvidenceWindow(WINDOW_TOKEN_A), 1);
+  const zeroCandidate = recordDirectChatMemoryLongEvidence(input({
+    recordKind: "batch",
+    candidateCount: 0,
+    logicalActionId: "zero-candidate-action",
+    candidate: {
+      featureScope: "automatic_direct_chat",
+      canaryReason: "none",
+      validatorResult: "not_evaluated",
+      validatorReason: "legacy_or_v2_candidate_missing",
+      bridgeState: "reject",
+      bridgeReason: "v2_candidate_missing",
+      correlationClass: "unknown",
+      lineageStatus: "missing",
+      pairUnique: false,
+      exactScope: true,
+      provenanceTrusted: true,
+      metadataSource: "unknown",
+      semanticKind: "unknown",
+      planLifecycle: "not_applicable",
+      legacyAccepted: false,
+      legacyWriteEligible: false,
+      candidateSuppressed: false,
+      vetoedCandidateCanonicalAbsent: false,
+      failOpen: false,
+    },
+    batch: {
+      batchAcceptedBefore: 0,
+      batchAcceptedAfter: 0,
+      batchZeroCandidates: true,
+      survivingCanonicalWritesExpected: false,
+      survivingCanonicalWritesObserved: true,
+      cursorAdvanced: true,
+      canonicalWriteCountDelta: 0,
+      summaryDelta: 0,
+      projectionDelta: 0,
+    },
+  }));
+  assert.equal(zeroCandidate?.classification, "ZERO_CANDIDATE_BATCH");
+  assert.equal(zeroCandidate?.recordKind, "batch");
+  assert.equal(zeroCandidate?.candidateCount, 0);
+  const zeroSummary = getDirectChatMemoryLongEvidenceSummary();
+  assert.equal(zeroSummary.zeroCandidateBatchCount, 1);
+  assert.equal(zeroSummary.extractionBatchCount, 1);
+  assert.equal(zeroSummary.validControlCount, 0);
+  assert.equal(zeroSummary.validSuppressionCount, 0);
+
   // Formal-window accounting is extraction-level, while suppression/control counts remain candidate-level.
   const firstWindow = startDirectChatMemoryLongEvidenceWindow(WINDOW_TOKEN_A);
-  assert.equal(firstWindow, 1);
+  assert.equal(firstWindow, 2);
   clearDirectChatMemoryLongEvidenceCollector();
   const actionFirst = recordDirectChatMemoryLongEvidence(input({
     logicalActionId: "raw-logical-action-secret",
@@ -311,7 +362,7 @@ try {
   const priorScopeFingerprint = actionFirst?.scopeFingerprint;
   clearDirectChatMemoryLongEvidenceWindow();
   assert.equal(getDirectChatMemoryLongEvidenceSummary().recordCount, 0);
-  assert.equal(startDirectChatMemoryLongEvidenceWindow(WINDOW_TOKEN_B), 2);
+  assert.equal(startDirectChatMemoryLongEvidenceWindow(WINDOW_TOKEN_B), 3);
   const secondWindowRecord = recordDirectChatMemoryLongEvidence(input({ logicalActionId: "window-b-action" }));
   assert.notEqual(secondWindowRecord?.scopeFingerprint, priorScopeFingerprint);
   recordDirectChatMemoryLongEvidence(input());

@@ -140,6 +140,58 @@ assert.equal(single.authoritativeArtifactCount, 1);
 assert.equal(single.rejectedArtifactCount, 0);
 assert.equal(single.privacyViolationCount, 0);
 
+const zeroCandidate = record({
+  recordKind: "batch",
+  candidateCount: 0,
+  classification: "ZERO_CANDIDATE_BATCH",
+  legacyAccepted: false,
+  legacyWriteEligible: false,
+  candidateSuppressed: false,
+  pairUnique: false,
+  validatorResult: "not_evaluated",
+  validatorReason: "legacy_or_v2_candidate_missing",
+  bridgeState: "reject",
+  bridgeReason: "v2_candidate_missing",
+  correlationClass: "unknown",
+  lineageStatus: "missing",
+  metadataSource: "unknown",
+  semanticKind: "unknown",
+  planLifecycle: "not_applicable",
+  batchAcceptedBefore: 0,
+  batchAcceptedAfter: 0,
+  batchZeroCandidates: true,
+  survivingCanonicalWritesExpected: false,
+  survivingCanonicalWritesObserved: true,
+  canonicalWriteCountDelta: 0,
+  summaryDelta: 0,
+  projectionDelta: 0,
+});
+const zeroCandidateRecordForReview = (overrides: Partial<DirectChatMemoryLongEvidenceRecord> = {}) => ({
+  ...zeroCandidate,
+  ...overrides,
+});
+const zeroReview = review([exportJson([zeroCandidate])]);
+assert.equal(zeroReview.status, "ok");
+assert.equal(zeroReview.rawRecordCount, 1);
+assert.equal(zeroReview.dedupedRecordCount, 1);
+assert.equal(zeroReview.zeroCandidateBatchCount, 1);
+assert.equal(zeroReview.extractionBatchCount, 1);
+assert.equal(zeroReview.validControlCount, 0);
+assert.equal(zeroReview.validSuppressionCount, 0);
+const zeroDuplicateReview = review([exportJson([zeroCandidate]), exportJson([zeroCandidate])]);
+assert.equal(zeroDuplicateReview.rawRecordCount, 2);
+assert.equal(zeroDuplicateReview.dedupedRecordCount, 1);
+assert.equal(zeroDuplicateReview.zeroCandidateBatchCount, 1);
+const fakeZeroReview = review([exportJson([record({
+  classification: "ZERO_CANDIDATE_BATCH",
+  candidateCount: 1,
+})])]);
+assert.equal(fakeZeroReview.status, "malformed");
+const unsafeZeroReview = review([exportJson([zeroCandidateRecordForReview({
+  canonicalWriteCountDelta: 1,
+})])]);
+assert.equal(unsafeZeroReview.status, "malformed");
+
 const duplicate = review([valid, valid]);
 assert.equal(duplicate.status, "ok");
 assert.equal(duplicate.rawRecordCount, 2);
