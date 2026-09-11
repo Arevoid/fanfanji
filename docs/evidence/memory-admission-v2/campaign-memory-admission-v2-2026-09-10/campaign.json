@@ -27,13 +27,19 @@
       "windowFingerprint": "window-d3ece74319ea2f4d",
       "artifactPaths": [],
       "closurePath": "docs/evidence/memory-admission-v2/window-d3ece74319ea2f4d/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-3233cb04d44d8dde",
+      "artifactPaths": [],
+      "closurePath": "docs/evidence/memory-admission-v2/window-3233cb04d44d8dde/window-closure.json"
     }
   ],
   "closedWindows": [
     "window-8817672802574c9a",
     "window-1c673ae85a3ee3ba",
     "window-1352524908ffd837",
-    "window-d3ece74319ea2f4d"
+    "window-d3ece74319ea2f4d",
+    "window-3233cb04d44d8dde"
   ],
   "createdAtUtc": "2026-09-10T15:46:57.912Z",
   "promotionScopeMappings": [
