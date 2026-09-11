@@ -63,6 +63,8 @@ export interface MemoryExtractionRunOptions {
   persistenceMode?: MemoryExtractionPersistenceMode;
   /** Dev-only characterization may opt into the additive V2 prompt. */
   enableV2Metadata?: boolean;
+  /** Internal marker for the normal automatic Direct Chat completion path. */
+  automatic?: boolean;
 }
 
 export interface MemoryExtractionRunDiagnostics {
@@ -153,6 +155,7 @@ export function useChatMemoryExtraction({
     runOptions: MemoryExtractionRunOptions = {},
   ) => {
     const persistenceMode = runOptions.persistenceMode || "production_equivalent_write";
+    const isAutomaticDirectChat = runOptions.automatic === true;
     const scopeAvailable = Boolean(activeDirectScope && activeCharacter && !activeCharacter.isGroupChat);
     if (!activeChatCharId || !activeCharacter) {
       lastRunDiagnosticsRef.current = {
@@ -208,9 +211,9 @@ export function useChatMemoryExtraction({
       // seam even when the standalone Shadow/Canary toggles are off. This is
       // dev-only metadata ingestion; it does not grant write authority or
       // alter the production extraction result.
-      const longEvidenceEnabled = !activeCharacter.isGroupChat
+      const longEvidenceEnabled = isAutomaticDirectChat
+        && !activeCharacter.isGroupChat
         && activeDirectScope !== undefined
-        && manualMessagesOverride === undefined
         && isDirectChatMemoryLongEvidenceCollectorEnabled();
       const longEvidenceCollectorSummary = getDirectChatMemoryLongEvidenceSummary();
       recordDirectChatMemoryEvidenceTrace({
@@ -230,9 +233,10 @@ export function useChatMemoryExtraction({
         compatibilityCount: 0,
         rejectedCandidateCount: 0,
       };
+      const observationPathEligible = isAutomaticDirectChat || manualMessagesOverride === undefined;
       const canaryEnabled = !activeCharacter.isGroupChat
         && activeDirectScope !== undefined
-        && manualMessagesOverride === undefined
+        && observationPathEligible
         && isDirectChatMemorySafetyVetoCanaryEnabled();
       if (canaryEnabled) {
         // A developer/local Canary opt-in requires the existing fail-open
@@ -240,8 +244,8 @@ export function useChatMemoryExtraction({
         // configuration is dev-gated and has no effect in production builds.
         configureDirectChatMemorySafetyVetoShadow({ enabled: true });
       }
-      const admissionShadowEnabled = manualMessagesOverride === undefined && isDirectChatMemoryAdmissionShadowEvidenceEnabled();
-      const safetyShadowEnabled = manualMessagesOverride === undefined
+      const admissionShadowEnabled = observationPathEligible && isDirectChatMemoryAdmissionShadowEvidenceEnabled();
+      const safetyShadowEnabled = observationPathEligible
         && (isDirectChatMemorySafetyVetoShadowEnabled() || canaryEnabled);
       const admissionObservationEnabled = admissionShadowEnabled
         || safetyShadowEnabled
@@ -515,7 +519,6 @@ export function useChatMemoryExtraction({
           continue;
         }
         let finalCanonicalClaims = canaryFilteredAcceptedClaims;
-        const isAutomaticDirectChat = manualMessagesOverride === undefined;
         let canonicalSnapshotAvailable = false;
         let finalCanonicalSnapshot: CanonicalMemoryCommitSnapshot | undefined;
         let extractedSummary: ConversationSummaryRecord | undefined;

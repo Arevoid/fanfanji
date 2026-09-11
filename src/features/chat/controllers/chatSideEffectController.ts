@@ -13,10 +13,14 @@ export interface ChatReplySideEffectInput {
   activeOfflineStoryId?: string | null;
 }
 
+export interface AutomaticMemoryExtractionOptions {
+  automatic?: boolean;
+}
+
 export interface ChatSideEffectControllerDependencies {
   offlineStories: OfflineStory[];
   onSaveOfflineStory?: (story: OfflineStory) => void;
-  extractMemories: (messages: Message[]) => Promise<number>;
+  extractMemories: (messages: Message[], options?: AutomaticMemoryExtractionOptions) => Promise<number>;
   onSaveRelationships: (relationships: CharacterRelationship[]) => void;
   updateRelationships?: (update: (previous: CharacterRelationship[]) => CharacterRelationship[]) => void;
   onSaveCharacter: (character: Character) => void;
@@ -124,7 +128,7 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
             autoSummaryInFlight.add(summaryScopeKey);
             schedule(async () => {
               try {
-                const count = await dependencies.extractMemories(eligibleMessages);
+                const count = await dependencies.extractMemories(eligibleMessages, { automatic: true });
                 // A successful extraction with no durable facts is still a
                 // completed archive pass. Advance the marker so the same
                 // range is not sent to the model again after every reply.

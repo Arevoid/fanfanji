@@ -29,6 +29,7 @@ import {
 const extractionHookSource = readFileSync(new URL("../src/features/chat/hooks/useChatMemoryExtraction.ts", import.meta.url), "utf8");
 assert.match(extractionHookSource, /isDirectChatMemoryLongEvidenceCollectorEnabled/);
 assert.match(extractionHookSource, /manualMessagesOverride === undefined/);
+assert.match(extractionHookSource, /runOptions\.automatic/);
 assert.match(extractionHookSource, /!activeCharacter\.isGroupChat/);
 assert.match(extractionHookSource, /apiExtractMemoriesWithModelFallback\(/);
 assert.match(extractionHookSource, /logicalActionId/);

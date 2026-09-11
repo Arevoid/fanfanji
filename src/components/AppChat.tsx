@@ -2903,7 +2903,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const chatSideEffectController = createChatSideEffectController({
     offlineStories,
     onSaveOfflineStory,
-    extractMemories: (messagesToCompress) => handleExtractMemories(messagesToCompress),
+    extractMemories: (messagesToCompress) => handleExtractMemories(messagesToCompress, { automatic: true }),
     onSaveRelationships,
     updateRelationships: onSaveRelationships,
     onSaveCharacter,

@@ -42,6 +42,7 @@ const previousMessages = Array.from({ length: 18 }, (_, index) => ({
 const scheduled: Array<() => void | Promise<void>> = [];
 let savedOfflineStory: OfflineStory | undefined;
 let extractedMessages: Message[] = [];
+let extractionOptions: { automatic?: boolean } | undefined;
 let savedRelationships: CharacterRelationship[] = [];
 const offlineStory = {
   id: "offline-1",
@@ -53,8 +54,9 @@ const controller = createChatSideEffectController({
   onSaveOfflineStory: (story) => {
     savedOfflineStory = story;
   },
-  extractMemories: async (messages) => {
+  extractMemories: async (messages, options) => {
     extractedMessages = messages;
+    extractionOptions = options;
     return 1;
   },
   onSaveRelationships: (nextRelationships) => {
@@ -93,6 +95,7 @@ assert.equal(scheduled.length, 1);
 await scheduled[0]();
 assert.equal(extractedMessages.length, 20);
 assert.deepEqual(extractedMessages.slice(-2).map((message) => message.id), ["user-1", "assistant-1"]);
+assert.equal(extractionOptions?.automatic, true, "automatic archive must preserve its invocation kind");
 assert.equal(savedRelationships[0]?.lastImmediateSummaryMsgId, "assistant-1");
 
 const duplicateScheduled: Array<() => void | Promise<void>> = [];
