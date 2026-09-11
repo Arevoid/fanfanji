@@ -20,6 +20,8 @@ const baseCandidateContext = (rawText: string) => ({
 
 let normalizeCount = 0;
 let requestCount = 0;
+let candidateContextCount = 0;
+let deliveryCount = 0;
 let deliveryOrder: string[] = [];
 const normal = await executeDirectReplyTurn({
   request: {
@@ -34,14 +36,20 @@ const normal = await executeDirectReplyTurn({
     return response;
   },
   hasReplyText: (response) => Boolean(response.text),
-  createCandidateContext: (response) => baseCandidateContext(response.text),
+  createCandidateContext: (response) => {
+    candidateContextCount += 1;
+    return baseCandidateContext(response.text);
+  },
   deliver: async ({ candidates }) => {
+    deliveryCount += 1;
     deliveryOrder = candidates.messages.map((message) => message.id);
     return candidates.messages;
   },
 });
 assert.equal(requestCount, 1, "normal turn must use one provider request");
 assert.equal(normalizeCount, 1, "normal turn must normalize once");
+assert.equal(candidateContextCount, 1, "successful turn must build candidates exactly once");
+assert.equal(deliveryCount, 1, "successful turn must deliver exactly once");
 assert.equal(normal.status, "delivered");
 assert.deepEqual(deliveryOrder, ["reply-0", "reply-1"], "candidate order must reach delivery unchanged");
 assert.deepEqual(normal.generatedCandidateIds, ["reply-0", "reply-1"]);

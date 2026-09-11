@@ -59,6 +59,36 @@ assert.equal(formatRecovered.text, "格式恢复后的回复");
 assert.deepEqual(formatRecovered.innerVoice, { content: "暂未说出口", emotionalState: "平静" });
 assert.match(formatRecoveryInstruction, /只返回一个合法 JSON 对象/);
 
+let emptyReplyRecoveryAttempts = 0;
+const emptyReplyRecovered = await requestDirectChatTurn({
+  prompt,
+  settings,
+  includeInnerVoice: true,
+  requestAi: async () => {
+    emptyReplyRecoveryAttempts += 1;
+    return emptyReplyRecoveryAttempts === 1
+      ? { text: '{"reply":"","innerVoice":{"content":"未说出口","emotionalState":"平静"}}' }
+      : { text: '{"reply":"空回复修复成功","innerVoice":{"content":"仍未说出口","emotionalState":"平静"}}' };
+  },
+});
+assert.equal(emptyReplyRecoveryAttempts, 2);
+assert.equal(emptyReplyRecovered.text, "空回复修复成功");
+
+let plainTextRepairAttempts = 0;
+const plainTextRepairRecovered = await requestDirectChatTurn({
+  prompt,
+  settings,
+  includeInnerVoice: true,
+  requestAi: async () => {
+    plainTextRepairAttempts += 1;
+    return plainTextRepairAttempts === 1
+      ? { text: '{"innerVoice":{"content":"未说出口","emotionalState":"平静"}}' }
+      : { text: "纯文本格式修复成功" };
+  },
+});
+assert.equal(plainTextRepairAttempts, 2);
+assert.equal(plainTextRepairRecovered.text, "纯文本格式修复成功");
+
 assert.equal(isContextLengthError(Object.assign(new Error("request too long"), { code: "context_too_large" })), true);
 assert.equal(isContextLengthError(new Error("invalid api key")), false);
 const contextHistory = Array.from({ length: 8 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", text: `历史消息 ${index}` }));

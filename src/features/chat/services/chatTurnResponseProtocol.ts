@@ -173,6 +173,13 @@ export function parseChatTurnResponse(text: string): ParsedChatTurnResponse {
   if (value && Array.isArray(value.replies)) {
     return { reply: JSON.stringify({ replies: value.replies }), innerVoice: undefined };
   }
+  if (value && (
+    Object.prototype.hasOwnProperty.call(value, "innerVoice")
+    || Object.prototype.hasOwnProperty.call(value, "translation")
+    || ["data", "response", "result", "output"].some((key) => Object.prototype.hasOwnProperty.call(value, key))
+  )) {
+    return { reply: "", formatIssue: "invalid-structured-response" };
+  }
   if (/^\s*\{[\s\S]*\}?\s*$/u.test(candidate) && /["']reply["']\s*:/u.test(candidate)) {
     return { reply: "", formatIssue: "invalid-structured-response" };
   }

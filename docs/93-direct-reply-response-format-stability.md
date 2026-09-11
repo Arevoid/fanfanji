@@ -5,7 +5,7 @@ Date: 2026-09-11
 Starting refactor HEAD: `111742c0a055d81b1b231536611b96dc07588a1d`  
 Stable original repository: `f515f7408cfe19da145f15a8ddffceae06e608d`
 
-Readiness: `DIRECT_REPLY_FORMAT_DIAGNOSTICS_READY_NEEDS_RUNTIME`
+Readiness: `DIRECT_REPLY_RESPONSE_FORMAT_FIX_LOCAL_VALIDATED`
 
 ## 1. Runtime fact and safety boundary
 
@@ -47,7 +47,10 @@ object is accepted when a recursively readable non-empty `reply`, `content`,
 optional at the parser boundary and is retained only when both `content` and
 `emotionalState` are non-empty strings. A structured-looking object with a
 `reply` key but no usable reply is marked `invalid-structured-response`;
-malformed/empty structured output therefore enters repair. The existing
+malformed/empty structured output therefore enters repair. R2A also fixed the
+same classification gap for valid JSON envelopes that expose only
+`innerVoice`, `translation`, or a nested envelope key without a usable reply:
+these are now format failures rather than raw JSON fallback text. The existing
 candidate builder can still return zero messages after a parser-successful
 text is cleaned, and the executor reports that separately as `no_response`.
 
@@ -59,10 +62,10 @@ that branch. It does not create a duplicate assistant bubble.
 
 ## 3. Blocker classification
 
-The current runtime evidence is category **G (insufficient safe metadata to
-separate two explicit code paths)**. It proves an initial format-validation
-repair occurred and that no assistant was delivered, but it does not persist a
-lifecycle outcome that distinguishes:
+The historical runtime evidence remains category **G (insufficient safe
+metadata to separate two explicit code paths)**. It proves an initial
+format-validation repair occurred and that no assistant was delivered, but it
+does not persist a lifecycle outcome that distinguishes:
 
 * **C:** the repair response still violated the same format contract, causing
   terminal `response_format`; or
@@ -80,10 +83,13 @@ existing user-facing error, bounded repair to one request, and added tests for
 valid output, repair success, exhausted repair, zero-candidate normalization,
 and user-message durability. R2A confirms those contracts still hold locally.
 
-No deterministic parser, repair, delivery, or Prompt/validator mismatch bug is
-proven by the safe runtime evidence. Consequently R2A makes no production code
-change and does not broaden the plain-text or structured contract. A future
-controlled runtime probe should expose only metadata-only lifecycle stage
+The static audit did identify and fix one deterministic parser bug in
+`parseChatTurnResponse`: valid JSON with structured-envelope signals but no
+usable reply previously fell through as raw text. The fix is deliberately
+narrow; it does not broaden plain-text compatibility or change the structured
+contract. The safe runtime evidence cannot prove that this exact shape was the
+historical Provider output, so a future controlled runtime probe should expose
+only metadata-only lifecycle stage
 (`initial_parse`, `repair_parse`, `terminal_response_format`, or
 `candidate_no_response`) so the C/E distinction can be made without recording
 response text.
@@ -101,8 +107,10 @@ The following focused tests passed without changing production semantics:
 
 No new runtime turn was sent after the R2 blocker. The inherited baseline is
 595/595 tests, lint pass, build pass, and dependency gate pass (105
-allowlisted edges / 3 baseline cycles). No production or dev source code was
-modified in R2A; only this documentation was added.
+allowlisted edges / 3 baseline cycles). R2A changed only the parser's
+structured-missing-reply classification and its focused tests; Memory,
+Provider, Prompt, retry policy, delivery policy, and storage behavior were not
+changed.
 
 Next stage: `Stage 4D-11O-R2B — Direct Reply Runtime Revalidation + Bounded
 Accumulation Resume`, beginning with one controlled probe only after the

@@ -26,6 +26,18 @@ const invalidStructuredReply = parseChatTurnResponse('{"reply": {"unexpected": t
 assert.equal(invalidStructuredReply.reply, "");
 assert.equal(invalidStructuredReply.formatIssue, "invalid-structured-response");
 
+const emptyStructuredReply = parseChatTurnResponse('{"reply":"", "innerVoice":{"content":"没有说出口","emotionalState":"平静"}}');
+assert.equal(emptyStructuredReply.reply, "");
+assert.equal(emptyStructuredReply.formatIssue, "invalid-structured-response");
+
+const innerVoiceOnly = parseChatTurnResponse('{"innerVoice":{"content":"没有说出口","emotionalState":"平静"}}');
+assert.equal(innerVoiceOnly.reply, "");
+assert.equal(innerVoiceOnly.formatIssue, "invalid-structured-response");
+
+const translationOnly = parseChatTurnResponse('{"translation":"只是一段翻译"}');
+assert.equal(translationOnly.reply, "");
+assert.equal(translationOnly.formatIssue, "invalid-structured-response");
+
 const parsedProviderEnvelope = parseChatTurnResponse('{"data":{"message":{"content":"中转接口回复"}}}');
 assert.equal(parsedProviderEnvelope.reply, "中转接口回复");
 
