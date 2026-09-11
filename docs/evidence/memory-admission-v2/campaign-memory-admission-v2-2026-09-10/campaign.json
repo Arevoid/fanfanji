@@ -10,10 +10,18 @@
         "docs/evidence/memory-admission-v2/window-8817672802574c9a/2026-09-10__session-2febd71437e7d77e.json"
       ],
       "closurePath": "docs/evidence/memory-admission-v2/window-8817672802574c9a/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-1c673ae85a3ee3ba",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-1c673ae85a3ee3ba/2026-09-11__session-51b03d3bc8e9b879.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-1c673ae85a3ee3ba/window-closure.json"
     }
   ],
   "closedWindows": [
-    "window-8817672802574c9a"
+    "window-8817672802574c9a",
+    "window-1c673ae85a3ee3ba"
   ],
   "createdAtUtc": "2026-09-10T15:46:57.912Z",
   "promotionScopeMappings": [
@@ -21,19 +29,24 @@
       "windowFingerprint": "window-8817672802574c9a",
       "localScopeFingerprint": "scope-bbb51957",
       "promotionScopeFingerprint": "promotion-scope-001"
+    },
+    {
+      "windowFingerprint": "window-1c673ae85a3ee3ba",
+      "localScopeFingerprint": "scope-e75fd317",
+      "promotionScopeFingerprint": "promotion-scope-001"
     }
   ],
   "cumulativeAuthoritativeCounts": {
-    "authoritativeArtifactCount": 1,
-    "formalSessionCount": 1,
+    "authoritativeArtifactCount": 2,
+    "formalSessionCount": 2,
     "distinctExactScopeCount": 1,
-    "extractionBatchCount": 1,
-    "validControlCount": 1,
+    "extractionBatchCount": 2,
+    "validControlCount": 2,
     "validSuppressionCount": 0,
-    "logicalActionTotal": 1,
-    "physicalAttemptTotal": 2,
-    "distinctEvidenceDayCount": 1,
-    "fallbackBatchCount": 1,
+    "logicalActionTotal": 2,
+    "physicalAttemptTotal": 4,
+    "distinctEvidenceDayCount": 2,
+    "fallbackBatchCount": 2,
     "safetyIncidentCount": 0,
     "privacyViolationCount": 0,
     "accountingConflictCount": 0
@@ -44,10 +57,10 @@
     "accounting": true
   },
   "firstEvidenceDay": "2026-09-10",
-  "lastEvidenceDay": "2026-09-10",
+  "lastEvidenceDay": "2026-09-11",
   "thresholdProgress": {
     "sessions": {
-      "current": 1,
+      "current": 2,
       "minimum": 5
     },
     "suppressions": {
@@ -59,11 +72,11 @@
       "minimum": 3
     },
     "days": {
-      "current": 1,
+      "current": 2,
       "minimum": 7
     },
     "batches": {
-      "current": 1,
+      "current": 2,
       "minimum": 20
     },
     "allMinimumsSatisfied": false,
