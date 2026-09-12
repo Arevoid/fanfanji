@@ -2,8 +2,11 @@ import type { Message } from "../../../types";
 import { formatLocalTimeContext } from "../../../domain/prompt/timeContext";
 import { CHAT_BUBBLE_SEMANTIC_RULES } from "./chatPromptPolicy";
 
-export const NEW_DAY_CONVERSATION_BOUNDARY_PROMPT = `[NEW-DAY CONVERSATION BOUNDARY]
-Time awareness is enabled, and the user's newest message was sent on a later calendar date than the preceding chat history.
+/** A pause this long is enough to stop treating the previous live scene as an unfinished turn. */
+export const DIRECT_CHAT_LONG_GAP_MS = 30 * 60 * 1000;
+
+export const NEW_DAY_CONVERSATION_BOUNDARY_PROMPT = `[CONVERSATION BOUNDARY]
+Time awareness is enabled, and the user's newest message is separated from the preceding live chat by a later calendar date or a prolonged same-day gap.
 - Treat the earlier messages as dated historical reference, not automatically as a live unfinished turn happening now.
 - First understand how the newest message relates to that history. It may answer, explain, postpone, update, or naturally continue an earlier topic even without repeating its keywords. In that case, respond to the combined meaning naturally.
 - Do not mechanically resume an older topic when the newest message is unrelated, and do not ignore the newest message in order to continue an expired or irrelevant thread.
@@ -20,14 +23,25 @@ export function partitionDirectChatHistoryByCurrentDay<T extends { timestamp: nu
     return { liveMessages: [...input.messages], historicalMessages: [], hasCrossDayHistory: false };
   }
   const current = new Date(input.currentMessageAt);
+  const latestHistoryAt = input.messages.length > 0
+    ? Math.max(...input.messages.map((message) => message.timestamp))
+    : undefined;
+  const hasLongGap = shouldUseLongGapHistoryBoundary({
+    enableTimeAwareness: input.enableTimeAwareness,
+    currentMessageAt: input.currentMessageAt,
+    latestHistoryMessageAt: latestHistoryAt,
+  });
+  const longGapCutoff = hasLongGap
+    ? input.currentMessageAt - DIRECT_CHAT_LONG_GAP_MS
+    : Number.NEGATIVE_INFINITY;
   const isCurrentDay = (timestamp: number) => {
     const date = new Date(timestamp);
     return date.getFullYear() === current.getFullYear()
       && date.getMonth() === current.getMonth()
       && date.getDate() === current.getDate();
   };
-  const liveMessages = input.messages.filter((message) => isCurrentDay(message.timestamp));
-  const olderMessages = input.messages.filter((message) => !isCurrentDay(message.timestamp));
+  const liveMessages = input.messages.filter((message) => isCurrentDay(message.timestamp) && message.timestamp >= longGapCutoff);
+  const olderMessages = input.messages.filter((message) => !isCurrentDay(message.timestamp) || message.timestamp < longGapCutoff);
   const historicalLimit = Math.max(1, input.historicalLimit ?? 6);
   return {
     liveMessages,
@@ -39,7 +53,7 @@ export function partitionDirectChatHistoryByCurrentDay<T extends { timestamp: nu
 export function buildCrossDayHistoricalReferencePrompt(lines: readonly string[]): string {
   if (lines.length === 0) return "";
   return `[CLOSED HISTORICAL CHAT REFERENCE / 已结束的旧聊天片段]
-以下内容发生在当前日期之前，只能帮助理解用户明确提到的旧事，不是当前仍在进行的现场：
+以下内容发生在当前日期之前，或发生在同一天但已经经过较长间隔；只能帮助理解用户明确提到的旧事，不是当前仍在进行的现场：
 ${lines.join("\n")}
 - 当前地点、正在路上、到楼下、等待、准备见面、正在做某事等即时状态均已过期，除非今天的消息或中间已确认事件重新建立。
 - 不得因为这些旧句子继续催促用户到达、声称自己仍在等待，或把昨晚/旧日期称为现在的“大晚上”。
@@ -74,6 +88,20 @@ export function shouldUseCrossDayHistoryBoundary(input: {
   return current.getFullYear() !== previous.getFullYear()
     || current.getMonth() !== previous.getMonth()
     || current.getDate() !== previous.getDate();
+}
+
+/**
+ * Long same-day pauses need the same closed-scene treatment as a new day.
+ * Related follow-ups remain possible because the old messages stay available
+ * as historical reference rather than being deleted from the prompt context.
+ */
+export function shouldUseLongGapHistoryBoundary(input: {
+  enableTimeAwareness: boolean;
+  currentMessageAt?: number;
+  latestHistoryMessageAt?: number;
+}): boolean {
+  if (!input.enableTimeAwareness || !input.currentMessageAt || !input.latestHistoryMessageAt) return false;
+  return input.currentMessageAt - input.latestHistoryMessageAt >= DIRECT_CHAT_LONG_GAP_MS;
 }
 
 export function buildDirectChatMainPrompt(input: {

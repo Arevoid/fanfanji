@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { buildDirectChatHistoryContext } from "../src/features/chat/services/directChatHistoryContext";
+import { DIRECT_CHAT_LONG_GAP_MS } from "../src/features/chat/prompts/directChatTurnPrompt";
 
 const messages = [
   { id: "m1", sender: "user", content: "旧消息", timestamp: 1 },
@@ -36,4 +37,22 @@ const budgeted = buildDirectChatHistoryContext({
   userName: "用户",
 });
 assert.deepEqual(budgeted.recentMessages.map((message) => message.id), ["b3"], "上下文应按字符预算保留最新完整消息");
+
+const longGapCurrentAt = new Date("2026-08-12T14:19:00+08:00").getTime();
+const longGap = buildDirectChatHistoryContext({
+  messages: [
+    { id: "old-topic", sender: "character", content: "旧话题现场", timestamp: longGapCurrentAt - DIRECT_CHAT_LONG_GAP_MS - 1 },
+    { id: "current", sender: "user", content: "data:image/png;base64,TEST_IMAGE", timestamp: longGapCurrentAt },
+  ] as any,
+  userMessageId: "current",
+  userMessageAt: longGapCurrentAt,
+  enableTimeAwareness: true,
+  contextLimit: 10,
+  characterName: "范千",
+  userName: "用户",
+  requestTime: new Date(longGapCurrentAt),
+});
+assert.deepEqual(longGap.recentMessages.map((message) => message.id), []);
+assert.match(longGap.crossDayHistoricalReference, /旧话题现场/);
+assert.equal(longGap.hasCrossDayHistory, true, "same-day long gaps should close the old live scene");
 console.log("PASS direct chat history context deduplicates, excludes the current turn, and applies the bounded window");

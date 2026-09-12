@@ -10,10 +10,12 @@ import {
   buildVoiceIntervalPrompt,
   CURRENT_SCENE_CONTINUITY_PROMPT,
   CHINESE_SEMANTIC_CONTINUITY_PROMPT,
+  DIRECT_CHAT_LONG_GAP_MS,
   detectCallTopicShift,
   NEW_DAY_CONVERSATION_BOUNDARY_PROMPT,
   partitionDirectChatHistoryByCurrentDay,
   shouldUseCrossDayHistoryBoundary,
+  shouldUseLongGapHistoryBoundary,
 } from "../src/features/chat/prompts/directChatTurnPrompt";
 
 const mainPrompt = buildDirectChatMainPrompt({ characterName: "测试角色", disableBracketActions: false });
@@ -31,6 +33,7 @@ assert.match(timePrompt, /不要强制追问行程、表达想念/);
 assert.doesNotMatch(timePrompt, /绝对要表现得像过完一夜/);
 
 assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /dated historical reference/);
+assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /prolonged same-day gap/);
 assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /answer, explain, postpone, update, or naturally continue/);
 assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /must never be reinterpreted relative to today/);
 assert.match(NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, /outcome may be unknown/);
@@ -48,6 +51,16 @@ const currentMessageAt = new Date("2026-08-12T14:19:00+08:00").getTime();
 assert.equal(shouldUseCrossDayHistoryBoundary({ enableTimeAwareness: true, currentMessageAt, latestHistoryMessageAt: oldMessageAt }), true);
 assert.equal(shouldUseCrossDayHistoryBoundary({ enableTimeAwareness: false, currentMessageAt, latestHistoryMessageAt: oldMessageAt }), false);
 assert.equal(shouldUseCrossDayHistoryBoundary({ enableTimeAwareness: true, currentMessageAt, latestHistoryMessageAt: currentMessageAt - 60_000 }), false);
+assert.equal(shouldUseLongGapHistoryBoundary({
+  enableTimeAwareness: true,
+  currentMessageAt,
+  latestHistoryMessageAt: currentMessageAt - DIRECT_CHAT_LONG_GAP_MS,
+}), true);
+assert.equal(shouldUseLongGapHistoryBoundary({
+  enableTimeAwareness: true,
+  currentMessageAt,
+  latestHistoryMessageAt: currentMessageAt - DIRECT_CHAT_LONG_GAP_MS + 1,
+}), false);
 const partitioned = partitionDirectChatHistoryByCurrentDay({
   messages: [
     { id: "old", timestamp: oldMessageAt },
@@ -59,6 +72,16 @@ const partitioned = partitionDirectChatHistoryByCurrentDay({
 assert.deepEqual(partitioned.liveMessages.map((message) => message.id), ["today"]);
 assert.deepEqual(partitioned.historicalMessages.map((message) => message.id), ["old"]);
 assert.equal(partitioned.hasCrossDayHistory, true);
+const sameDayLongGapPartition = partitionDirectChatHistoryByCurrentDay({
+  messages: [
+    { id: "stale-same-day", timestamp: currentMessageAt - DIRECT_CHAT_LONG_GAP_MS - 1 },
+  ],
+  currentMessageAt,
+  enableTimeAwareness: true,
+});
+assert.deepEqual(sameDayLongGapPartition.liveMessages.map((message) => message.id), []);
+assert.deepEqual(sameDayLongGapPartition.historicalMessages.map((message) => message.id), ["stale-same-day"]);
+assert.equal(sameDayLongGapPartition.hasCrossDayHistory, true);
 const historicalReference = buildCrossDayHistoricalReferencePrompt(["- 2026/8/11 23:45｜角色：你到楼下了告诉我"]);
 assert.match(historicalReference, /不是当前仍在进行的现场/);
 assert.match(historicalReference, /到楼下、等待、准备见面.*即时状态均已过期/);
