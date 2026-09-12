@@ -126,6 +126,7 @@ export interface CampaignReviewResult extends CampaignCounts {
   allMinimumsSatisfied: boolean;
   promotionEligible: boolean;
   manifestSnapshotMatchesDerived: boolean;
+  manifestThresholdProgressMatchesDerived: boolean;
   unapprovedWindowCount: number;
   duplicateWindowCount: number;
   crossWindowCopyCount: number;
@@ -363,6 +364,24 @@ function compareCounts(left: unknown, right: CampaignCounts): boolean {
   return (Object.keys(right) as (keyof CampaignCounts)[]).every((key) => left[key] === right[key]);
 }
 
+function compareThresholdProgress(left: unknown, right: CampaignThresholdProgress): boolean {
+  if (!isObject(left)) return false;
+  const dimensions: (keyof Pick<CampaignThresholdProgress, "sessions" | "suppressions" | "scopes" | "days" | "batches">)[] = [
+    "sessions",
+    "suppressions",
+    "scopes",
+    "days",
+    "batches",
+  ];
+  for (const dimension of dimensions) {
+    const actual = left[dimension];
+    const expected = right[dimension];
+    if (!isObject(actual) || actual.current !== expected.current || actual.minimum !== expected.minimum) return false;
+  }
+  return left.allMinimumsSatisfied === right.allMinimumsSatisfied
+    && left.promotionEligible === right.promotionEligible;
+}
+
 function emptyResult(errors: string[], manifest?: MemoryAdmissionCampaignManifest): CampaignReviewResult {
   return {
     ...emptyCounts(),
@@ -379,6 +398,7 @@ function emptyResult(errors: string[], manifest?: MemoryAdmissionCampaignManifes
     allMinimumsSatisfied: false,
     promotionEligible: false,
     manifestSnapshotMatchesDerived: false,
+    manifestThresholdProgressMatchesDerived: false,
     unapprovedWindowCount: 0,
     duplicateWindowCount: 0,
     crossWindowCopyCount: 0,
@@ -624,6 +644,9 @@ export function reviewMemoryAdmissionCampaignEvidence(input: CampaignReviewInput
     || manifest.zeroErrorState.accounting === false;
   if (stickyFailure) errors.push("sticky_failure");
   const thresholdProgress = deriveThresholdProgress(counts, stickyFailure);
+  const manifestThresholdProgressMatchesDerived = compareThresholdProgress(manifest.thresholdProgress, thresholdProgress);
+  const manifestSnapshotMatchesDerived = compareCounts(manifest.cumulativeAuthoritativeCounts, counts)
+    && manifestThresholdProgressMatchesDerived;
   const status: CampaignReviewStatus = errors.length > 0 ? "blocked" : "ok";
   return {
     ...counts,
@@ -639,7 +662,8 @@ export function reviewMemoryAdmissionCampaignEvidence(input: CampaignReviewInput
     stickyFailure,
     allMinimumsSatisfied: thresholdProgress.allMinimumsSatisfied,
     promotionEligible: status === "ok" && thresholdProgress.promotionEligible,
-    manifestSnapshotMatchesDerived: compareCounts(manifest.cumulativeAuthoritativeCounts, counts),
+    manifestSnapshotMatchesDerived,
+    manifestThresholdProgressMatchesDerived,
     unapprovedWindowCount,
     duplicateWindowCount,
     crossWindowCopyCount,

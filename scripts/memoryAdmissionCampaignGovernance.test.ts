@@ -497,11 +497,32 @@ const generatedManifest = buildCampaignManifest({
   campaignFingerprint: campaign,
   campaignStatus: "paused",
   promotionPolicyVersion: PROMOTION_POLICY_VERSION,
-  approvedWindows: [],
-  closedWindows: [],
+  approvedWindows: [{ windowFingerprint: windowA, artifactPaths: ["fixture.json"], closurePath: "window-closure.json" }],
+  closedWindows: [windowA],
   createdAtUtc: "2026-09-10T00:00:00.000Z",
-  promotionScopeMappings: [],
+  promotionScopeMappings: mappingsFor(campaign, [windowA], [1, 2, 3]),
 }, thresholdReview);
 assert.equal(generatedManifest.cumulativeAuthoritativeCounts.validSuppressionCount, thresholdReview.validSuppressionCount);
+
+assert.equal(reviewMemoryAdmissionCampaignEvidence({
+  manifest: generatedManifest,
+  windows: [windowInput(campaign, windowA, thresholdRecords)],
+}).manifestSnapshotMatchesDerived, true);
+
+const thresholdSnapshotTamperedManifest = {
+  ...generatedManifest,
+  thresholdProgress: {
+    ...generatedManifest.thresholdProgress,
+    days: { ...generatedManifest.thresholdProgress.days, current: generatedManifest.thresholdProgress.batches.current },
+    batches: { ...generatedManifest.thresholdProgress.batches, current: generatedManifest.thresholdProgress.days.current },
+  },
+};
+const thresholdSnapshotReview = reviewMemoryAdmissionCampaignEvidence({
+  manifest: thresholdSnapshotTamperedManifest,
+  windows: [windowInput(campaign, windowA, thresholdRecords)],
+});
+assert.equal(thresholdSnapshotReview.status, "ok");
+assert.equal(thresholdSnapshotReview.manifestSnapshotMatchesDerived, false);
+assert.equal(thresholdSnapshotReview.manifestThresholdProgressMatchesDerived, false);
 
 console.log("PASS campaign governance: closure schema, explicit membership, strict Level-1 boundary, Level-2 aggregation, stable scope mapping, dedup, sticky failures, thresholds, privacy, and real-artifact review");
