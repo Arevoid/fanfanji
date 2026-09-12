@@ -834,7 +834,7 @@ ${text}
       plugins: [react(), tailwindcss()],
       optimizeDeps: {
         noDiscovery: true,
-        include: ["react", "react-dom", "react-dom/client", "framer-motion", "lucide-react"],
+        include: ["react", "react-dom", "react-dom/client", "framer-motion", "lucide-react", "lz-string"],
       },
       server: { middlewareMode: true },
       appType: "spa",

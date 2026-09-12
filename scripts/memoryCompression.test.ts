@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { compressMemoriesForStorage, MEMORY_COMPRESSION_PREFIX } from "../src/core/storage/memoryCompression";
+import {
+  compressMemoryContent,
+  compressMemoriesForStorage,
+  decompressMemoryContent,
+  MEMORY_COMPRESSION_PREFIX,
+} from "../src/core/storage/memoryCompression";
 import { compressStoredMemories, loadMemories, saveMemories } from "../src/core/storage/repositories/memoryRepository";
 import { storageKeys } from "../src/core/storage/storageKeys";
 
@@ -22,6 +27,10 @@ const memories = [
   { id: "manual", characterId: "character-a", relationId: "relation-a", content: oldContent, timestamp: now - 60 * 24 * 60 * 60 * 1000, importance: 5, isManual: true },
   { id: "recent", characterId: "character-a", relationId: "relation-a", content: oldContent, timestamp: now, importance: 5 },
 ] as const;
+
+const encoded = compressMemoryContent(oldContent);
+assert.ok(encoded.startsWith(MEMORY_COMPRESSION_PREFIX));
+assert.equal(decompressMemoryContent(encoded), oldContent);
 
 const prepared = compressMemoriesForStorage(memories, now);
 assert.equal(prepared.result.compressed, 1);

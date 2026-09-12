@@ -1,7 +1,5 @@
-import * as LZStringModule from "lz-string";
+import LZString from "lz-string";
 import type { MemoryItem } from "../../types";
-
-const LZString = ((LZStringModule as typeof LZStringModule & { default?: typeof LZStringModule }).default ?? LZStringModule) as typeof import("lz-string");
 
 export const MEMORY_COMPRESSION_PREFIX = "__fanfanji_memory_lz_v1__:";
 export const DEFAULT_MEMORY_COMPRESSION_AGE_MS = 30 * 24 * 60 * 60 * 1000;
