@@ -223,6 +223,8 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
             const isShortTextImageDescription = isShortMomentImageDescription(textImageDescription || "");
             const isGeneratingMomentImage = Boolean(generatingMomentIds[moment.id]);
             const hasMomentPhoto = Boolean(moment.image || moment.imageAssetId);
+            const momentContextText = renderMomentContent(moment.content) || textImageDescription || "朋友圈图片";
+            const isOwnMoment = moment.characterId === undefined || moment.characterId === null;
             const momentImageAction = character && onGenerateMomentImage && textImageDescription ? (
               <button
                 type="button"
@@ -242,7 +244,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                 <img src={authorAvatar} alt="" className="w-10 h-10 rounded-[6px] object-cover bg-slate-50 shrink-0 border border-slate-100" />
                 <div className="flex-1 min-w-0">
                   <h4 className="text-xs font-bold text-[#576b95] hover:underline cursor-pointer">{authorName}</h4>
-                  <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative" title="长按/右键 弹出菜单" onContextMenu={(event) => onMomentTextContextMenu(event, moment.id, renderMomentContent(moment.content), authorName, authorAvatar, moment.characterId === undefined || moment.characterId === null, moment.timestamp)} onPointerDown={(event) => onMomentTextPointerDown(event, moment.id, renderMomentContent(moment.content), authorName, authorAvatar, moment.characterId === undefined || moment.characterId === null, moment.timestamp)} onPointerUp={onMomentTextPointerUpOrLeave} onPointerLeave={onMomentTextPointerUpOrLeave} onPointerMove={onMomentTextPointerMove}>
+                  <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative" title="长按/右键 弹出菜单" onContextMenu={(event) => onMomentTextContextMenu(event, moment.id, momentContextText, authorName, authorAvatar, isOwnMoment, moment.timestamp)} onPointerDown={(event) => onMomentTextPointerDown(event, moment.id, momentContextText, authorName, authorAvatar, isOwnMoment, moment.timestamp)} onPointerUp={onMomentTextPointerUpOrLeave} onPointerLeave={onMomentTextPointerUpOrLeave} onPointerMove={onMomentTextPointerMove}>
                     {renderMomentContent(moment.content)}
                   </p>
                   {translations[moment.id] && (
@@ -255,7 +257,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                     </div>
                   )}
                   {textImageDescription && !hasMomentPhoto && (
-                    <div className="moment-media-placeholder relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-[0_2px_8px_rgba(15,23,42,0.08)]">
+                    <div className="moment-media-placeholder relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-[var(--border)] bg-[var(--media-placeholder-bg)] px-4 py-3 text-left shadow-[0_2px_8px_rgba(15,23,42,0.08)]" title="长按/右键 弹出菜单" onContextMenu={(event) => onMomentTextContextMenu(event, moment.id, momentContextText, authorName, authorAvatar, isOwnMoment, moment.timestamp)} onPointerDown={(event) => onMomentTextPointerDown(event, moment.id, momentContextText, authorName, authorAvatar, isOwnMoment, moment.timestamp)} onPointerUp={onMomentTextPointerUpOrLeave} onPointerLeave={onMomentTextPointerUpOrLeave} onPointerMove={onMomentTextPointerMove}>
                       <span className="absolute left-4 top-2 text-[10px] leading-5 text-[var(--media-placeholder-text)]">文字图</span>
                       <button type="button" onClick={() => setViewingDescription(textImageDescription)} className={`block w-full ${isShortTextImageDescription ? "flex min-h-[5rem] items-center justify-center pt-5 text-center" : "pt-5 text-left"}`}>
                         <p className={`text-xs leading-relaxed text-[var(--text-primary)] line-clamp-3 ${isShortTextImageDescription ? "text-center" : ""}`}>{textImageDescription}</p>

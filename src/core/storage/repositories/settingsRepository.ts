@@ -46,7 +46,25 @@ const IDENTITY_DATA_VERSION = 2;
 export function normalizeIdentitySettings(settings: UserSettings): { settings: UserSettings; changed: boolean } {
   const identities = settings.identities;
   if (!identities || identities.length === 0) {
-    return { settings, changed: false };
+    const legacyPrimary = {
+      id: "identity-1",
+      name: settings.name || "",
+      avatar: settings.avatar || "",
+      signature: settings.signature || "",
+      bio: settings.bio || "",
+      kind: "primary" as const,
+      rootIdentityId: "identity-1",
+      sortOrder: 0,
+    };
+    return {
+      settings: {
+        ...settings,
+        identities: [legacyPrimary],
+        identityDataVersion: Math.max(IDENTITY_DATA_VERSION, Number(settings.identityDataVersion) || 0),
+        activeIdentityId: "identity-1",
+      },
+      changed: true,
+    };
   }
 
   const usedIds = new Set<string>();
@@ -85,7 +103,9 @@ export function normalizeIdentitySettings(settings: UserSettings): { settings: U
   };
 
   const normalizedIdentities = idNormalizedIdentities.map((identity, index) => {
-    const kind = identity.kind || "primary";
+    // Unknown legacy kinds are treated as primary rather than hidden from the
+    // main persona list. Only the explicit alias marker keeps its old meaning.
+    const kind = identity.kind === "alias" ? "alias" : "primary";
     // Legacy aliases without an explicit parent remain their own root. This is
     // deliberately conservative: it preserves boundaries instead of guessing
     // ownership from a shared name, avatar, or profile text.

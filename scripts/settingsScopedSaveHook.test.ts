@@ -10,7 +10,7 @@ assert.match(hook, /updatedFields\.name !== undefined/);
 assert.match(hook, /updatedFields\.avatar !== undefined/);
 assert.match(hook, /updatedFields\.signature !== undefined/);
 assert.match(hook, /updatedFields\.bio !== undefined/);
-assert.match(hook, /identities: updatedIdentities/);
+assert.match(hook, /updateIdentityProfile/);
 assert.match(page, /useSettingsScopedSave\(\{ onSaveSettings \}\)/);
 assert.doesNotMatch(page, /const handleSave = \(updatedFields: Partial<UserSettings>\)/);
 

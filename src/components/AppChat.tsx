@@ -97,6 +97,7 @@ import { buildRelationForumContext } from "../domain/prompt/forumContext";
 import { buildRelationDiaryContext } from "../domain/prompt/diaryContext";
 import { getAvailableCanonicalCharacterIds } from "../domain/character/characterIdentity";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
+import { updateIdentityProfile } from "../domain/identity/identityProfile";
 import { createRelationship, DEFAULT_IDENTITY_ID, findPrimaryIdentityForIdentity, findRelationship, findRelationshipForCanonicalCharacter, getConversationId, getOfflineModeStorageKey, getOfflineStoryStorageKey, getRootIdentityId, listIdentitiesForRoot, listIdentityRoots, listRelationshipsForIdentityWorkspace, sortIdentitiesForDisplay, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { findInnerVoiceByMessage, loadInnerVoiceRecords, removeInnerVoicesByRelation, saveInnerVoiceRecords } from "../core/storage/repositories/innerVoiceRepository";
 import { createInlineInnerVoiceRecord } from "../features/chat/services/innerVoiceService";
@@ -105,6 +106,7 @@ import { generateCharacterImageForDelivery } from "../features/chat/services/cha
 import { imageDataUrlToBlob, parseCharacterSaveUserImageDirective } from "../features/chat/services/userImageMemoryService";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
+import { ensureDirectReplyTranslation } from "../features/chat/services/directReplyTranslation";
 import { resolveChatRoutine, resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
 import { createChatSideEffectController, touchRelationshipSession } from "../features/chat/controllers/chatSideEffectController";
 import { createPostReplyCoordinator } from "../features/chat/controllers/postReplyCoordinator";
@@ -2537,7 +2539,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         proactiveOfflineResponseParse?: ReturnType<typeof parseProactiveOfflineResponseDirective>;
         proactiveOfflineParse?: ReturnType<typeof parseProactiveOfflineInvitationDirective>;
       };
-      const normalizeDirectReplyResponse = (rawData: Awaited<ReturnType<typeof requestDirectChatTurn>>): PreparedDirectReplyResponse => {
+      const normalizeDirectReplyResponse = async (rawData: Awaited<ReturnType<typeof requestDirectChatTurn>>): Promise<PreparedDirectReplyResponse> => {
         const data = { ...rawData };
         let proactiveOfflineResponseParse: PreparedDirectReplyResponse["proactiveOfflineResponseParse"];
         let proactiveOfflineParse: PreparedDirectReplyResponse["proactiveOfflineParse"];
@@ -2585,12 +2587,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           data.text = data.text.replace(/\[\s*发送时间\s*:\s*[^\]]+\]/gi, "").trim();
           data.text = stripInternalDeliveryMarkers(data.text);
         }
-        return { data, proactiveOfflineResponseParse, proactiveOfflineParse };
+        const translatedData = await ensureDirectReplyTranslation(data, {
+          enabled: Boolean(turnCharacter.enableAutoTranslate),
+          settings,
+          translate: apiTranslate,
+        });
+        return { data: translatedData, proactiveOfflineResponseParse, proactiveOfflineParse };
       };
       const directTurnRequest = preparedDirectReply.request;
 
       if (isOfflineModeActive) {
-        const prepared = normalizeDirectReplyResponse(await requestDirectChatTurn(directTurnRequest));
+        const prepared = await normalizeDirectReplyResponse(await requestDirectChatTurn(directTurnRequest));
         lifecyclePhase = "parsed";
         if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
         const data = prepared.data;
@@ -9158,7 +9165,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               className="sr-only"
                               aria-label="更换头像"
                               onChange={async (event) => {
+                                const input = event.currentTarget;
                                 const file = event.target.files?.[0];
+                                input.value = "";
                                 if (!file) return;
                                 try {
                                   const avatar = await compressImage(file, 400, 400, 0.75);
@@ -9421,13 +9430,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     }
                     const avatar = editMyAvatar || identity.avatar;
                     const bio = editMyBio.trim();
-                    onSaveSettings((previous) => ({
-                      ...previous,
-                      identities: (previous.identities || []).map((item) => item.id === identity.id ? { ...item, name, avatar, bio } : item),
-                      ...(findPrimaryIdentityForIdentity(previous.activeIdentityId || DEFAULT_IDENTITY_ID, previous.identities || [])?.id === identity.id
-                        ? { name, avatar, bio }
-                        : {}),
-                    }));
+                    onSaveSettings((previous) => updateIdentityProfile(previous, identity.id, { name, avatar, bio }));
                     return true;
                   };
 
@@ -9481,7 +9484,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             ) : (
                               <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-lg font-bold text-[var(--text-secondary)]">{editMyName.slice(0, 1) || "头"}</div>
                             )}
-                            <label className="cursor-pointer text-xs font-medium text-[var(--text-secondary)]">更换头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setEditMyAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
+                            <label className="cursor-pointer text-xs font-medium text-[var(--text-secondary)]">更换头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const input = event.currentTarget; const file = event.target.files?.[0]; input.value = ""; if (!file) return; setEditMyAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
                           </div>
                           <label className="block text-xs font-bold text-[var(--text-primary)]">名称<input value={editMyName} maxLength={40} onChange={(event) => setEditMyName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" /></label>
                           <label className="block text-xs font-bold text-[var(--text-primary)]">人设设定<textarea value={editMyBio} onChange={(event) => setEditMyBio(event.target.value)} className="mt-1 h-36 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm leading-relaxed text-[var(--text-primary)] outline-none" placeholder="填写这个人设的背景、性格和说话方式" /></label>
@@ -10201,6 +10204,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     const textImageDescription = mom.imageDescription || cleanAndExtractMoment(mom.content).imageDescription;
                     const isShortTextImageDescription = isShortMomentImageDescription(textImageDescription || "");
                     const isGeneratingMomentImage = Boolean(momentImageGenerationIds[mom.id]);
+                    const momentContextText = renderMomentContent(mom.content) || textImageDescription || "朋友圈图片";
                     const momentImageAction = momChar && textImageDescription ? (
                       <button
                         type="button"
@@ -10237,7 +10241,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             onContextMenu={(e) => handleMomentTextContextMenu(
                               e,
                               mom.id,
-                              renderMomentContent(mom.content),
+                              momentContextText,
                               momAuthorName,
                               momAuthorAvatar,
                               mom.characterId === undefined || mom.characterId === null,
@@ -10246,7 +10250,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             onPointerDown={(e) => handleMomentTextPointerDown(
                               e,
                               mom.id,
-                              renderMomentContent(mom.content),
+                              momentContextText,
                               momAuthorName,
                               momAuthorAvatar,
                               mom.characterId === undefined || mom.characterId === null,
@@ -10272,7 +10276,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
                           {/* Photo if attached */}
                           {textImageDescription && !mom.image && (
-                            <div className="relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-[0_2px_8px_rgba(15,23,42,0.08)]">
+                            <div className="relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-[0_2px_8px_rgba(15,23,42,0.08)]" title="长按/右键 弹出菜单" onContextMenu={(event) => handleMomentTextContextMenu(event, mom.id, momentContextText, momAuthorName, momAuthorAvatar, mom.characterId === undefined || mom.characterId === null, mom.timestamp)} onPointerDown={(event) => handleMomentTextPointerDown(event, mom.id, momentContextText, momAuthorName, momAuthorAvatar, mom.characterId === undefined || mom.characterId === null, mom.timestamp)} onPointerUp={handleMomentTextPointerUpOrLeave} onPointerLeave={handleMomentTextPointerUpOrLeave} onPointerMove={handleMomentTextPointerMove}>
                               <span className="absolute left-4 top-2 text-[10px] leading-5 text-slate-400">文字图</span>
                               <button type="button" onClick={() => setViewingImageDescription(textImageDescription)} className={`block w-full ${isShortTextImageDescription ? "flex min-h-[5rem] items-center justify-center pt-5 text-center" : "pt-5 text-left"}`}>
                                 <p className={`text-xs leading-relaxed text-slate-600 line-clamp-3 ${isShortTextImageDescription ? "text-center" : ""}`}>{textImageDescription}</p>
@@ -10479,7 +10483,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       type="file"
                       accept="image/*"
                       onChange={async (e) => {
+                        const input = e.currentTarget;
                         const file = e.target.files?.[0];
+                        input.value = "";
                         if (file) {
                           try {
                             const compressed = await compressImage(file, 400, 400, 0.75);
@@ -10572,22 +10578,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               </button>
               <button
                 onClick={() => {
-                  onSaveSettings((previous) => ({
+                  onSaveSettings((previous) => updateIdentityProfile({
                     ...previous,
+                    globalChatStylePreset: editGlobalChatStylePreset,
+                  }, previous.activeIdentityId || DEFAULT_IDENTITY_ID, {
                     name: editMyName,
                     avatar: editMyAvatar,
                     signature: editMySignature,
                     bio: editMyBio,
-                    globalChatStylePreset: editGlobalChatStylePreset,
-                    identities: (previous.identities || []).map((idty) => idty.id === (previous.activeIdentityId || "identity-1")
-                      ? {
-                          ...idty,
-                          name: editMyName,
-                          avatar: editMyAvatar,
-                          signature: editMySignature,
-                          bio: editMyBio,
-                        }
-                      : idty),
                   }));
                   setIsEditingProfile(false);
                 }}

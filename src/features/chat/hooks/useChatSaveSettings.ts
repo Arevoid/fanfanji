@@ -140,7 +140,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
     // Automatically translate existing non-Chinese messages in current chat
     if (isEnablingAutoTranslate && onUpdateMessage) {
       const currentChatMessages = messages.filter(
-        (m) => (activeRelationship ? m.relationId === activeRelationship.id : m.characterId === activeCharacter.id && activeCharacter.isGroupChat)
+        (m) => (activeRelationship ? m.relationId === activeRelationship.id : m.characterId === activeCharacter.id)
           && m.sender === "character" && !m.isNarration && !m.translation
       );
 

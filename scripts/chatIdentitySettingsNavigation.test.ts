@@ -50,7 +50,7 @@ assert.match(detailSource, /deleteIdentity/);
 assert.match(detailSource, /bg-\[var\(--surface\)\]/);
 assert.doesNotMatch(detailSource, /border-b border-\[var\(--divider\)\] pb-4/);
 assert.doesNotMatch(detailSource, /个性签名/);
-assert.match(detailSource, /item\.id === identity\.id \? \{ \.\.\.item, name, avatar, bio \} : item/);
+assert.match(detailSource, /updateIdentityProfile\(previous, identity\.id, \{ name, avatar, bio \}\)/);
 assert.match(app, /key="chat"/);
 
 console.log("Me profile persona cards select in place and edit only through the trailing arrow");

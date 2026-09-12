@@ -19,7 +19,9 @@ export function useSettingsAssetActions({
   onIconStatusChange,
 }: UseSettingsAssetActionsOptions) {
   const handleAvatarUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
     const file = event.target.files?.[0];
+    input.value = "";
     if (!file) return;
     try {
       const compressed = await compressImage(file, 400, 400, 0.75);
@@ -31,7 +33,9 @@ export function useSettingsAssetActions({
   };
 
   const handleWallpaperUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
     const file = event.target.files?.[0];
+    input.value = "";
     if (!file) return;
     try {
       const compressed = await compressImage(file, 1000, 1000, 0.7);
