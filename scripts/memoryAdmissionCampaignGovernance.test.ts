@@ -477,15 +477,15 @@ if (existsSync(realCampaignPath)) {
     loadCampaignWindowInput(projectRoot, entry, path.dirname(realCampaignPath), realManifest.campaignFingerprint));
   const realReview = reviewMemoryAdmissionCampaignEvidence({ manifest: realManifest, windows: realWindows });
   assert.equal(realReview.status, "ok");
-  assert.equal(realReview.authoritativeArtifactCount, 2);
-  assert.equal(realReview.formalSessionCount, 2);
-  assert.equal(realReview.distinctExactScopeCount, 1);
-  assert.equal(realReview.extractionBatchCount, 2);
+  assert.equal(realReview.authoritativeArtifactCount, 5);
+  assert.equal(realReview.formalSessionCount, 4);
+  assert.equal(realReview.distinctExactScopeCount, 3);
+  assert.equal(realReview.extractionBatchCount, 4);
   assert.equal(realReview.validControlCount, 2);
   assert.equal(realReview.validSuppressionCount, 0);
-  assert.equal(realReview.logicalActionTotal, 2);
-  assert.equal(realReview.physicalAttemptTotal, 4);
-  assert.equal(realReview.distinctEvidenceDayCount, 2);
+  assert.equal(realReview.logicalActionTotal, 4);
+  assert.equal(realReview.physicalAttemptTotal, 6);
+  assert.equal(realReview.distinctEvidenceDayCount, 3);
   assert.equal(realReview.promotionEligible, false);
 }
 
