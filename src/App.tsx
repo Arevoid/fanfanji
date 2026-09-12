@@ -8,7 +8,7 @@ import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storag
 import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
-import { flushMessages, initializeMessages, loadMessageWindow, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
+import { flushMessages, initializeMessages, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
 import {
   consumeMessagePersistenceDecision,
   createMessagePersistenceLifecycle,
@@ -134,10 +134,6 @@ import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
 import { listByRelation as listCharacterEventsByRelation, retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
-import { CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL, installCharacterOwnershipBootstrapDevApi, isCharacterOwnershipBootstrapDevRuntime, readCharacterRepositoryForOwnershipBootstrap, type CharacterOwnershipBootstrapOptions, type CharacterOwnershipBootstrapResult } from "./features/archives/characterOwnershipBootstrapDev";
-import { DEDICATED_RELATION_BOOTSTRAP_GLOBAL, installDedicatedRelationBootstrapDevApi, readRelationshipRepositoryForDedicatedBootstrap, type DedicatedRelationBootstrapOptions, type DedicatedRelationInspectorResult } from "./features/archives/dedicatedRelationBootstrapDev";
-import { PORTABLE_DIRECT_CHAT_FIXTURE_GLOBAL, installPortableDirectChatFixtureDevApi } from "./features/archives/portableDirectChatFixtureDev";
-import { installMultiScopeFixtureDevApi } from "./features/archives/multiScopeFixtureDev";
 import { removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
 import { loadMomentTopicRecords, removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
 import { removeProactiveTopicsForRelations, removeProactiveTopicsForCharacters } from "./core/storage/repositories/proactiveTopicRepository";
@@ -2622,301 +2618,37 @@ export default function App() {
     return persisted.success;
   };
 
-  useEffect(() => installCharacterOwnershipBootstrapDevApi({
-    getSettings: () => settingsRef.current,
-    getCharacters: () => charactersRef.current,
-    saveCharacter: handleSaveCharacter,
-    readCharacters: readCharacterRepositoryForOwnershipBootstrap,
-  }), []);
-
   useEffect(() => {
-    const bootstrapQuery = new URLSearchParams(window.location.search);
-    const requestedAction = bootstrapQuery.get("characterOwnershipBootstrap") === "1"
-      ? "bootstrap"
-      : bootstrapQuery.get("characterOwnershipInspect") === "1"
-        ? "inspect"
-        : null;
-    if (!isCharacterOwnershipBootstrapDevRuntime() || !requestedAction) {
-      return;
-    }
+    if (!import.meta.env.DEV) return;
     let cancelled = false;
-    const run = async () => {
-      // Wait for the normal repository hydration before allowing the explicit
-      // developer action to create anything. This prevents a reload from
-      // racing an IndexedDB read and creating a second Character.
-      for (let attempt = 0; attempt < 100 && !charactersRepositoryHydrated.current; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 50));
-      }
+    let dispose: (() => void) | undefined;
+    // Keep the development-only control surface out of the production module graph.
+    // Vite still serves this relative source module in dev, while production never
+    // evaluates the guarded import and therefore has no dev-control chunk.
+    void import(/* @vite-ignore */ "./features/archives/devRuntimeControls").then(({ installDevRuntimeControls }) => {
       if (cancelled) return;
-      const runtime = globalThis as typeof globalThis & {
-        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { bootstrap: () => Promise<unknown>; inspect: () => Promise<unknown> };
-      };
-      const api = runtime[CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL];
-      if (!api) return;
-      const result = requestedAction === "bootstrap"
-        ? await api.bootstrap()
-        : await api.inspect();
-      if (!cancelled) {
-        console.info("[dev] owned Character bootstrap result", JSON.stringify(result));
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    };
-    void run();
+      dispose = installDevRuntimeControls({
+        getSettings: () => settingsRef.current,
+        saveSettings: setSettings,
+        getCharacters: () => charactersRef.current,
+        saveCharacter: handleSaveCharacter,
+        getRelationships: () => relationshipsRef.current,
+        persistRelationships: async (nextRelationships) => {
+          const normalized = [...nextRelationships];
+          const saved = saveRelationships(normalized);
+          if (!saved.success) return false;
+          relationshipsRef.current = normalized;
+          setRelationships(normalized);
+          return true;
+        },
+        getMessages: () => messagesRef.current,
+        captureRelationshipCreatedEvent,
+        isCharactersRepositoryHydrated: () => charactersRepositoryHydrated.current,
+      });
+    });
     return () => {
       cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => installDedicatedRelationBootstrapDevApi({
-    getSettings: () => settingsRef.current,
-    readCharacters: readCharacterRepositoryForOwnershipBootstrap,
-    getRelationships: () => relationshipsRef.current,
-    persistRelationships: async (nextRelationships) => {
-      const normalized = [...nextRelationships];
-      const saved = saveRelationships(normalized);
-      if (!saved.success) return false;
-      relationshipsRef.current = normalized;
-      setRelationships(normalized);
-      return true;
-    },
-    readRelationships: readRelationshipRepositoryForDedicatedBootstrap,
-    readMessages: async (scope) => {
-      try {
-        return await loadMessageWindow({
-          characterId: scope.characterId,
-          relationId: scope.relationId,
-          conversationId: scope.conversationId,
-          limit: 10000,
-        });
-      } catch {
-        return messagesRef.current.filter((message) => messageMatchesMutationScope(message, scope));
-      }
-    },
-    captureRelationshipCreatedEvent: (relationship) => {
-      captureRelationshipCreatedEvent(relationship);
-    },
-  }), []);
-
-  useEffect(() => {
-    const bootstrapQuery = new URLSearchParams(window.location.search);
-    const requestedAction = bootstrapQuery.get("dedicatedRelationBootstrap") === "1"
-      ? "bootstrap"
-      : bootstrapQuery.get("inspectDedicatedEvidenceFixture") === "1"
-        ? "inspect"
-        : null;
-    if (!isCharacterOwnershipBootstrapDevRuntime() || !requestedAction) return;
-    let cancelled = false;
-    const run = async () => {
-      for (let attempt = 0; attempt < 100 && !charactersRepositoryHydrated.current; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 50));
-      }
-      if (cancelled) return;
-      const runtime = globalThis as typeof globalThis & {
-        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: {
-          bootstrap: () => Promise<unknown>;
-          inspectDedicatedEvidenceFixture: () => Promise<unknown>;
-        };
-      };
-      const api = runtime[DEDICATED_RELATION_BOOTSTRAP_GLOBAL];
-      if (!api) return;
-      const result = requestedAction === "bootstrap"
-        ? await api.bootstrap()
-        : await api.inspectDedicatedEvidenceFixture();
-      if (!cancelled) {
-        console.info("[dev] dedicated relation fixture result", JSON.stringify(result));
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => installPortableDirectChatFixtureDevApi({
-    getSettings: () => settingsRef.current,
-    saveSettings: setSettings,
-    bootstrapCharacter: async (options?: CharacterOwnershipBootstrapOptions) => {
-      const runtime = globalThis as typeof globalThis & {
-        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { bootstrap: (options?: CharacterOwnershipBootstrapOptions) => Promise<CharacterOwnershipBootstrapResult> };
-      };
-      const api = runtime[CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL];
-      if (!api) throw new Error("owned Character bootstrap API unavailable");
-      return api.bootstrap(options);
-    },
-    inspectCharacter: async (options?: CharacterOwnershipBootstrapOptions) => {
-      const runtime = globalThis as typeof globalThis & {
-        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { inspect: (options?: CharacterOwnershipBootstrapOptions) => Promise<CharacterOwnershipBootstrapResult> };
-      };
-      const api = runtime[CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL];
-      if (!api) throw new Error("owned Character bootstrap API unavailable");
-      return api.inspect(options);
-    },
-    bootstrapRelation: async (options?: DedicatedRelationBootstrapOptions) => {
-      const runtime = globalThis as typeof globalThis & {
-        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: { bootstrap: (options?: DedicatedRelationBootstrapOptions) => Promise<DedicatedRelationInspectorResult> };
-      };
-      const api = runtime[DEDICATED_RELATION_BOOTSTRAP_GLOBAL];
-      if (!api) throw new Error("dedicated relation bootstrap API unavailable");
-      return api.bootstrap(options);
-    },
-    inspectRelation: async (options?: DedicatedRelationBootstrapOptions) => {
-      const runtime = globalThis as typeof globalThis & {
-        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: { inspectDedicatedEvidenceFixture: (options?: DedicatedRelationBootstrapOptions) => Promise<DedicatedRelationInspectorResult> };
-      };
-      const api = runtime[DEDICATED_RELATION_BOOTSTRAP_GLOBAL];
-      if (!api) throw new Error("dedicated relation bootstrap API unavailable");
-      return api.inspectDedicatedEvidenceFixture(options);
-    },
-  }), []);
-
-  useEffect(() => installMultiScopeFixtureDevApi({
-    getSettings: () => settingsRef.current,
-    saveSettings: setSettings,
-    bootstrapCharacter: async (options?: CharacterOwnershipBootstrapOptions) => {
-      const runtime = globalThis as typeof globalThis & {
-        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { bootstrap: (options?: CharacterOwnershipBootstrapOptions) => Promise<CharacterOwnershipBootstrapResult> };
-      };
-      const api = runtime[CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL];
-      if (!api) throw new Error("owned Character bootstrap API unavailable");
-      return api.bootstrap(options);
-    },
-    inspectCharacter: async (options?: CharacterOwnershipBootstrapOptions) => {
-      const runtime = globalThis as typeof globalThis & {
-        [CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL]?: { inspect: (options?: CharacterOwnershipBootstrapOptions) => Promise<CharacterOwnershipBootstrapResult> };
-      };
-      const api = runtime[CHARACTER_OWNERSHIP_BOOTSTRAP_GLOBAL];
-      if (!api) throw new Error("owned Character bootstrap API unavailable");
-      return api.inspect(options);
-    },
-    bootstrapRelation: async (options?: DedicatedRelationBootstrapOptions) => {
-      const runtime = globalThis as typeof globalThis & {
-        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: { bootstrap: (options?: DedicatedRelationBootstrapOptions) => Promise<DedicatedRelationInspectorResult> };
-      };
-      const api = runtime[DEDICATED_RELATION_BOOTSTRAP_GLOBAL];
-      if (!api) throw new Error("dedicated relation bootstrap API unavailable");
-      return api.bootstrap(options);
-    },
-    inspectRelation: async (options?: DedicatedRelationBootstrapOptions) => {
-      const runtime = globalThis as typeof globalThis & {
-        [DEDICATED_RELATION_BOOTSTRAP_GLOBAL]?: { inspectDedicatedEvidenceFixture: (options?: DedicatedRelationBootstrapOptions) => Promise<DedicatedRelationInspectorResult> };
-      };
-      const api = runtime[DEDICATED_RELATION_BOOTSTRAP_GLOBAL];
-      if (!api) throw new Error("dedicated relation bootstrap API unavailable");
-      return api.inspectDedicatedEvidenceFixture(options);
-    },
-  }), []);
-
-  useEffect(() => {
-    const bootstrapQuery = new URLSearchParams(window.location.search);
-    const fixtureId = bootstrapQuery.get("multiScopeFixture");
-    const action = bootstrapQuery.get("multiScopeAction") === "inspect" ? "inspect" : "bootstrap";
-    if (!isCharacterOwnershipBootstrapDevRuntime() || !fixtureId) return;
-    let cancelled = false;
-    const run = async () => {
-      for (let attempt = 0; attempt < 100 && !charactersRepositoryHydrated.current; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 50));
-      }
-      if (cancelled) return;
-      const runtime = globalThis as typeof globalThis & {
-        __fanfanjiMultiScopeFixture?: {
-          bootstrap: (options: { fixtureId: string }) => Promise<unknown>;
-          inspect: (options: { fixtureId: string }) => Promise<unknown>;
-        };
-      };
-      const api = runtime.__fanfanjiMultiScopeFixture;
-      if (!api) return;
-      const result = action === "inspect"
-        ? await api.inspect({ fixtureId })
-        : await api.bootstrap({ fixtureId });
-      if (!cancelled) {
-        console.info("[dev] multi-scope fixture result", JSON.stringify(result));
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    const evidenceQuery = new URLSearchParams(window.location.search);
-    const action = evidenceQuery.get("memoryEvidence");
-    if (!isCharacterOwnershipBootstrapDevRuntime() || !action) return;
-    let cancelled = false;
-    const run = async () => {
-      const module = await import("./features/chat/services/directChatMemoryLongEvidenceCollector");
-      if (cancelled) return;
-      const runtime = globalThis as typeof globalThis & {
-        __fanfanjiMemoryAdmissionLongEvidence?: {
-          clear: () => void;
-          enable: () => void;
-          disable: () => void;
-          clearWindow: () => void;
-          createWindowToken: () => string;
-          startWindow: (windowToken: string) => number | null;
-          finishWindow: () => void;
-          summary: () => unknown;
-          exportJson: () => string;
-        };
-      };
-      const api = runtime.__fanfanjiMemoryAdmissionLongEvidence;
-      if (!api) return;
-      if (action === "start") {
-        api.clearWindow();
-        api.clear();
-        api.enable();
-        const windowFingerprint = api.startWindow(api.createWindowToken());
-        console.info("[dev] memory evidence window started", JSON.stringify({ started: windowFingerprint !== null }));
-      } else if (action === "finish") {
-        api.finishWindow();
-        api.disable();
-        console.info("[dev] memory evidence window finished", JSON.stringify(api.summary()));
-      } else if (action === "summary") {
-        console.info("[dev] memory evidence summary", JSON.stringify(api.summary()));
-      } else if (action === "export") {
-        console.info("[dev] memory evidence export", api.exportJson());
-      }
-      window.history.replaceState({}, "", window.location.pathname);
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    const bootstrapQuery = new URLSearchParams(window.location.search);
-    const requestedAction = bootstrapQuery.get("portableDirectChatFixture") === "1"
-      ? "bootstrap"
-      : bootstrapQuery.get("inspectPortableDirectChatFixture") === "1"
-        ? "inspect"
-        : null;
-    if (!isCharacterOwnershipBootstrapDevRuntime() || !requestedAction) return;
-    let cancelled = false;
-    const run = async () => {
-      for (let attempt = 0; attempt < 100 && !charactersRepositoryHydrated.current; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 50));
-      }
-      if (cancelled) return;
-      const runtime = globalThis as typeof globalThis & {
-        [PORTABLE_DIRECT_CHAT_FIXTURE_GLOBAL]?: {
-          bootstrap: () => Promise<unknown>;
-          inspect: () => Promise<unknown>;
-        };
-      };
-      const api = runtime[PORTABLE_DIRECT_CHAT_FIXTURE_GLOBAL];
-      if (!api) return;
-      const result = requestedAction === "bootstrap" ? await api.bootstrap() : await api.inspect();
-      if (!cancelled) {
-        console.info("[dev] portable Direct Chat fixture result", JSON.stringify(result));
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
+      dispose?.();
     };
   }, []);
 
