@@ -2841,6 +2841,52 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const evidenceQuery = new URLSearchParams(window.location.search);
+    const action = evidenceQuery.get("memoryEvidence");
+    if (!isCharacterOwnershipBootstrapDevRuntime() || !action) return;
+    let cancelled = false;
+    const run = async () => {
+      const module = await import("./features/chat/services/directChatMemoryLongEvidenceCollector");
+      if (cancelled) return;
+      const runtime = globalThis as typeof globalThis & {
+        __fanfanjiMemoryAdmissionLongEvidence?: {
+          clear: () => void;
+          enable: () => void;
+          disable: () => void;
+          clearWindow: () => void;
+          createWindowToken: () => string;
+          startWindow: (windowToken: string) => number | null;
+          finishWindow: () => void;
+          summary: () => unknown;
+          exportJson: () => string;
+        };
+      };
+      const api = runtime.__fanfanjiMemoryAdmissionLongEvidence;
+      if (!api) return;
+      if (action === "start") {
+        api.clearWindow();
+        api.clear();
+        api.enable();
+        const windowFingerprint = api.startWindow(api.createWindowToken());
+        console.info("[dev] memory evidence window started", JSON.stringify({ started: windowFingerprint !== null }));
+      } else if (action === "finish") {
+        api.finishWindow();
+        api.disable();
+        console.info("[dev] memory evidence window finished", JSON.stringify(api.summary()));
+      } else if (action === "summary") {
+        console.info("[dev] memory evidence summary", JSON.stringify(api.summary()));
+      } else if (action === "export") {
+        console.info("[dev] memory evidence export", api.exportJson());
+      }
+      window.history.replaceState({}, "", window.location.pathname);
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const bootstrapQuery = new URLSearchParams(window.location.search);
     const requestedAction = bootstrapQuery.get("portableDirectChatFixture") === "1"
       ? "bootstrap"
