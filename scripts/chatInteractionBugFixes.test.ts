@@ -27,6 +27,10 @@ assert.deepEqual(
 const appChat = readFileSync("src/components/AppChat.tsx", "utf8");
 assert.match(appChat, /sendCustomMessage\(compressed, capturedContext, \{ triggerReply: false \}\)/);
 assert.match(appChat, /isExplicitCharacterAvatarChangeRequest/);
+assert.match(appChat, /onUserMessageCreated: \(message, context\)/, "normal composer sends must reach avatar intent handling");
+assert.match(appChat, /const saved = onSaveSettings\(\(previous\) => updateIdentityProfile\(previous, identity\.id, \{ name, avatar, bio \}\)\)/, "identity detail save must check persistence result");
+const chatController = readFileSync("src/features/chat/hooks/useChatController.ts", "utf8");
+assert.match(chatController, /onUserMessageCreated\?\.\(userMessage, runtimeContext\)/, "send-only and send-and-reply must expose the created message");
 const appSettings = readFileSync("src/components/AppSettings.tsx", "utf8");
 assert.match(appSettings, /aria-label="键盘回车换行"/);
 assert.match(appSettings, /聊天页设置/);

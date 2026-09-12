@@ -2930,6 +2930,24 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     signal?: AbortSignal,
   ) => chatReplyController.generate({ userMsg, customHistoryOverride, signal });
 
+  const sharedImageScopeKey = (context: ChatRuntimeContext) =>
+    `${context.userIdentityId}:${context.characterId}:${context.relationId || context.conversationId || "group"}`;
+
+  const handleExplicitCharacterAvatarChangeRequest = (
+    contentString: string,
+    capturedContext: ChatRuntimeContext,
+    character: Character | undefined = latestActiveCharacterRef.current || activeCharacter,
+  ) => {
+    if (!character || character.isGroupChat || !isCapturedRuntimeCurrent(capturedContext)) return;
+    if (!isExplicitCharacterAvatarChangeRequest(contentString)) return;
+    const requestedAvatar = recentSharedImageByScopeRef.current[sharedImageScopeKey(capturedContext)];
+    if (!requestedAvatar || !onUpdateCharacter) return;
+    delete recentSharedImageByScopeRef.current[sharedImageScopeKey(capturedContext)];
+    void Promise.resolve(onUpdateCharacter(character.id, { avatar: requestedAvatar })).catch((error) => {
+      console.warn("Failed to apply explicitly requested character avatar:", error);
+    });
+  };
+
   const sendCustomMessage = (
     contentString: string,
     capturedContext = activeRuntimeContext,
@@ -2949,19 +2967,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     });
     const normalizedUserMsg = { ...userMsg, content: normalizePaymentMarkup(userMsg.content) };
     onSendMessage(normalizedUserMsg);
-    const scopeKey = `${capturedContext.userIdentityId}:${capturedContext.characterId}:${capturedContext.relationId || capturedContext.conversationId || "group"}`;
+    const scopeKey = sharedImageScopeKey(capturedContext);
     if (/^data:image\//i.test(contentString.trim())) {
       // Keep the image only in memory until the user explicitly asks for an
       // avatar change; an ordinary shared image must never mutate a profile.
       recentSharedImageByScopeRef.current[scopeKey] = contentString.trim();
-    } else if (!activeCharacter.isGroupChat && isExplicitCharacterAvatarChangeRequest(contentString)) {
-      const requestedAvatar = recentSharedImageByScopeRef.current[scopeKey];
-      if (requestedAvatar && onUpdateCharacter) {
-        delete recentSharedImageByScopeRef.current[scopeKey];
-        void Promise.resolve(onUpdateCharacter(activeCharacter.id, { avatar: requestedAvatar })).catch((error) => {
-          console.warn("Failed to apply explicitly requested character avatar:", error);
-        });
-      }
+    } else {
+      handleExplicitCharacterAvatarChangeRequest(contentString, capturedContext, activeCharacter);
     }
     if (!capturedContext.isGroup && capturedContext.relationId && capturedContext.conversationId && capturedContext.userIdentityId) {
       const claim = createDeterministicArtifactClaim({
@@ -3135,6 +3147,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     runtimeContext: activeRuntimeContext,
     activeIdentityName,
     activeIdentityAvatar,
+    onUserMessageCreated: (message, context) => {
+      if (message.sender === "user" && !/^data:image\//i.test(message.content.trim())) {
+        handleExplicitCharacterAvatarChangeRequest(message.content, context);
+      }
+    },
     onReplyStopped: () => {
       setIsTyping(false);
       setImageGenerationActive(false);
@@ -9188,7 +9205,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                                 if (!file) return;
                                 try {
                                   const avatar = await compressImage(file, 400, 400, 0.75);
-                                  onSaveSettings((previous) => {
+                                  const saved = onSaveSettings((previous) => {
                                     const profileIdentity = findPrimaryIdentityForIdentity(previous.activeIdentityId || DEFAULT_IDENTITY_ID, previous.identities || [])
                                       || previous.identities?.find((identity) => identity.id === (previous.activeIdentityId || DEFAULT_IDENTITY_ID));
                                     return {
@@ -9197,7 +9214,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                                       identities: (previous.identities || []).map((identity) => identity.id === profileIdentity?.id ? { ...identity, avatar } : identity),
                                     };
                                   });
-                                  showToast("头像已更新");
+                                  showToast(saved ? "头像已更新" : "头像保存失败，请检查浏览器存储空间后重试");
                                 } catch (error) {
                                   console.error("Profile avatar compression failed:", error);
                                   showToast("头像上传失败，请重试");
@@ -9447,7 +9464,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     }
                     const avatar = editMyAvatar || identity.avatar;
                     const bio = editMyBio.trim();
-                    onSaveSettings((previous) => updateIdentityProfile(previous, identity.id, { name, avatar, bio }));
+                    const saved = onSaveSettings((previous) => updateIdentityProfile(previous, identity.id, { name, avatar, bio }));
+                    if (!saved) {
+                      showToast("人设保存失败，请检查浏览器存储空间后重试");
+                      return false;
+                    }
                     return true;
                   };
 

@@ -27,6 +27,9 @@ export interface UseChatControllerOptions {
   getQuotedSenderName?: (message: Message) => string | undefined;
   currentChatMessages: Message[];
   onSendMessage: (message: Message) => void;
+  /** Allows the host surface to observe a user-authored message without
+   * moving feature-specific side effects into this controller. */
+  onUserMessageCreated?: (message: Message, context: ChatRuntimeContext) => void;
   onMessagePersistenceComplete?: () => boolean | Promise<boolean>;
   generateResponseForUserMessage: ChatResponseHandler;
   generateAndSendCharacterImage: CharacterImageHandler;
@@ -52,6 +55,7 @@ export function useChatController({
   getQuotedSenderName,
   currentChatMessages,
   onSendMessage,
+  onUserMessageCreated,
   onMessagePersistenceComplete,
   generateResponseForUserMessage,
   generateAndSendCharacterImage,
@@ -128,6 +132,7 @@ export function useChatController({
       authorAvatarSnapshot: activeIdentityAvatar,
     });
     onSendMessage(userMessage);
+    onUserMessageCreated?.(userMessage, runtimeContext);
     await confirmMessagePersistence();
     appendChatUserMessageToOfflineStory({
       userMessage,
@@ -175,6 +180,7 @@ export function useChatController({
         authorAvatarSnapshot: activeIdentityAvatar,
       });
       onSendMessage(userMessage);
+      onUserMessageCreated?.(userMessage, runtimeContext);
 
       // An explicit image request is an image-only turn: the real image must be
       // persisted before any character text is allowed.
