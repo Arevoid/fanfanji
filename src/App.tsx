@@ -2809,6 +2809,39 @@ export default function App() {
 
   useEffect(() => {
     const bootstrapQuery = new URLSearchParams(window.location.search);
+    const fixtureId = bootstrapQuery.get("multiScopeFixture");
+    const action = bootstrapQuery.get("multiScopeAction") === "inspect" ? "inspect" : "bootstrap";
+    if (!isCharacterOwnershipBootstrapDevRuntime() || !fixtureId) return;
+    let cancelled = false;
+    const run = async () => {
+      for (let attempt = 0; attempt < 100 && !charactersRepositoryHydrated.current; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      }
+      if (cancelled) return;
+      const runtime = globalThis as typeof globalThis & {
+        __fanfanjiMultiScopeFixture?: {
+          bootstrap: (options: { fixtureId: string }) => Promise<unknown>;
+          inspect: (options: { fixtureId: string }) => Promise<unknown>;
+        };
+      };
+      const api = runtime.__fanfanjiMultiScopeFixture;
+      if (!api) return;
+      const result = action === "inspect"
+        ? await api.inspect({ fixtureId })
+        : await api.bootstrap({ fixtureId });
+      if (!cancelled) {
+        console.info("[dev] multi-scope fixture result", JSON.stringify(result));
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const bootstrapQuery = new URLSearchParams(window.location.search);
     const requestedAction = bootstrapQuery.get("portableDirectChatFixture") === "1"
       ? "bootstrap"
       : bootstrapQuery.get("inspectPortableDirectChatFixture") === "1"
