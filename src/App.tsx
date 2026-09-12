@@ -477,6 +477,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   customIcons: {},
   dockApps: ["chat", "music", "archives", "settings"],
   globalChatStylePreset: "default",
+  chatEnterKeyNewline: false,
   bubbleCss: "",
   globalCss: ``,
   chatGlobalCSS: ``,

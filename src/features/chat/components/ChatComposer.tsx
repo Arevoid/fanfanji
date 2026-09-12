@@ -17,12 +17,28 @@ interface ChatInputBarProps {
   placeholder: string;
   isTyping: boolean;
   isReplyInFlight: boolean;
+  /** Enter sends a send-only message by default; this opt-in restores newline behavior. */
+  chatEnterKeyNewline?: boolean;
   showAttachPanel: boolean;
   onToggleAttach: () => void;
   onSendOnly: (inputText: string, event?: FormEvent) => void | Promise<void>;
   onSendAndReply: (inputText: string, event?: FormEvent) => void | Promise<void>;
   onStopReply: () => void;
   getChatIcon: (key: "plus" | "sendOnly" | "sendReply" | "stop") => string | undefined;
+}
+
+export function shouldSendChatInputOnEnter(input: {
+  key: string;
+  shiftKey?: boolean;
+  chatEnterKeyNewline?: boolean;
+  hasText: boolean;
+  isTyping: boolean;
+}): boolean {
+  return input.key === "Enter"
+    && input.shiftKey !== true
+    && input.chatEnterKeyNewline !== true
+    && input.hasText
+    && !input.isTyping;
 }
 
 /**
@@ -33,6 +49,7 @@ export function ChatInputBar({
   placeholder,
   isTyping,
   isReplyInFlight,
+  chatEnterKeyNewline = false,
   showAttachPanel,
   onToggleAttach,
   onSendOnly,
@@ -81,6 +98,17 @@ export function ChatInputBar({
       <textarea
         value={inputText}
         onChange={(event) => setInputText(event.target.value)}
+        onKeyDown={(event) => {
+          if (!shouldSendChatInputOnEnter({
+            key: event.key,
+            shiftKey: event.shiftKey,
+            chatEnterKeyNewline,
+            hasText,
+            isTyping,
+          })) return;
+          event.preventDefault();
+          submitOnly();
+        }}
         placeholder={placeholder}
         rows={1}
         className="min-w-0 w-0 flex-1 h-10 min-h-10 max-h-24 resize-none overflow-y-auto px-4 text-xs chat-input chat-composer__input"

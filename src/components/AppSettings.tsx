@@ -315,6 +315,7 @@ export default function AppSettings({
   const { themeMode, resolvedTheme, setThemeMode } = useTheme();
   const effectiveBubbleStylePreset = bubbleStylePreset || settings.globalChatStylePreset || "default";
   const [iconUploadMessage, setIconUploadMessage] = React.useState("");
+  const [chatEnterKeyNewline, setChatEnterKeyNewline] = React.useState(settings.chatEnterKeyNewline === true);
 
   const { isPwaInstallable, isStandalone, handlePwaInstall } = usePwaInstall();
 
@@ -522,6 +523,10 @@ export default function AppSettings({
     setSignature(settings.signature);
     setBio(settings.bio);
   }, [settings.activeIdentityId, settings.name, settings.avatar, settings.signature, settings.bio]);
+
+  useEffect(() => {
+    setChatEnterKeyNewline(settings.chatEnterKeyNewline === true);
+  }, [settings.chatEnterKeyNewline]);
 
   const { handleAvatarUpload, handleWallpaperUpload, handleIconUpload, handleRestoreAllIcons } = useSettingsAssetActions({
     settings,
@@ -1462,6 +1467,35 @@ export default function AppSettings({
               {/* 2. 聊天页面模块 */}
               {beautySubTab === "chat" && (
                 <div className="space-y-4 animate-fade-in">
+                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-xs font-bold text-slate-700">聊天页设置</h3>
+                        <p className="mt-1 text-[10px] leading-relaxed text-slate-400">选择聊天页的经典或液态玻璃样式，下面的预览会实时更新。</p>
+                      </div>
+                      <span className="text-[9px] font-semibold text-slate-400">全局</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2" role="group" aria-label="聊天页样式">
+                      {([
+                        { value: "default" as const, label: "经典模式", detail: "标准聊天气泡" },
+                        { value: "liquid-glass" as const, label: "液态玻璃", detail: "半透明毛玻璃" },
+                      ]).map((option) => {
+                        const selected = effectiveBubbleStylePreset === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => handleSave({ globalChatStylePreset: option.value })}
+                            className={`rounded-[14px] border px-3 py-2 text-left transition-colors ${selected ? "border-neutral-950 bg-neutral-950 text-white" : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"}`}
+                          >
+                            <span className="block text-[11px] font-bold">{option.label}</span>
+                            <span className={`mt-0.5 block text-[9px] ${selected ? "text-white/70" : "text-slate-400"}`}>{option.detail}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                   {/* 实时预览窗口 */}
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                     <div className="flex items-center justify-between gap-2 pb-1 border-b border-slate-50">
@@ -2485,6 +2519,29 @@ export default function AppSettings({
                     className={`settings-compact-toggle relative flex shrink-0 items-center border-0 p-0 transition-colors ${hideStatusBar ? "bg-neutral-950" : "bg-slate-200"}`}
                   >
                     <span className={`absolute left-0.5 bg-white shadow-sm transition-transform ${hideStatusBar ? "translate-x-[18px]" : "translate-x-0"}`} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 tracking-wide">键盘回车换行</h4>
+                    <p className="text-[10px] text-slate-400 mt-1 leading-normal">关闭时，聊天输入框按 Enter 直接仅发送；开启后 Enter 插入换行。</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-label="键盘回车换行"
+                    aria-checked={chatEnterKeyNewline}
+                    onClick={() => {
+                      const nextValue = !chatEnterKeyNewline;
+                      setChatEnterKeyNewline(nextValue);
+                      handleSave({ chatEnterKeyNewline: nextValue });
+                    }}
+                    className={`settings-compact-toggle relative flex shrink-0 items-center border-0 p-0 transition-colors ${chatEnterKeyNewline ? "bg-neutral-950" : "bg-slate-200"}`}
+                  >
+                    <span className={`absolute left-0.5 bg-white shadow-sm ${chatEnterKeyNewline ? "translate-x-[18px]" : "translate-x-0"}`} />
                   </button>
                 </div>
               </div>

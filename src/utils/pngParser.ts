@@ -390,6 +390,19 @@ export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = fal
       return;
     }
 
+    // Models sometimes use single newlines for a run of independent short
+    // messages even though the prompt reserves blank lines for bubbles. When
+    // every line is a complete, terminal-punctuated thought, preserve those
+    // clear semantic boundaries instead of merging unrelated lines into one
+    // large bubble. Sentence fragments and ordinary multiline prose still
+    // stay together.
+    if (paragraph.length >= 2
+      && paragraph.every((line) => line.length <= 80 && /[。！？!?]$/u.test(line))) {
+      paragraph.forEach((line) => results.push(normalizeBubbleText(line)));
+      paragraph = [];
+      return;
+    }
+
     const paragraphText = paragraph.join("\n").trim();
     if (paragraphText.length <= MAX_BUBBLE_LENGTH) {
       results.push(normalizeBubbleText(paragraphText));

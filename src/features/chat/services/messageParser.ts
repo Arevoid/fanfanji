@@ -62,6 +62,19 @@ export const cleanAiReplyText = (text: string, disableBracketActions: boolean): 
 export const splitAiReplyBubbles = splitIntoWeChatBubbles;
 
 /**
+ * A few providers append a full stop to every short bubble. Keep punctuation
+ * for a persona that explicitly requires it, and otherwise remove only the
+ * repeated trailing Chinese stops from a multi-bubble turn. A single coherent
+ * paragraph is left untouched so meaningful sentence punctuation is preserved.
+ */
+export function normalizeDirectReplyBubbles(bubbles: readonly string[], keepPeriods: boolean): string[] {
+  if (keepPeriods || bubbles.length < 2) return [...bubbles];
+  const periodCount = bubbles.filter((bubble) => /。+$/u.test(bubble.trim())).length;
+  if (periodCount < 2 || periodCount < Math.ceil(bubbles.length * 0.6)) return [...bubbles];
+  return bubbles.map((bubble) => bubble.replace(/。+$/u, "").trim());
+}
+
+/**
  * Remove accidental same-turn re-statements before bubbles are persisted.
  * Models sometimes answer an arrival/hand-off question twice using slightly
  * different wording (for example “哥下来了” followed by “哥下楼了”).  These

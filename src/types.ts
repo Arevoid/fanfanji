@@ -754,6 +754,8 @@ export interface UserSettings {
   showHomeButton?: boolean;
   /** Hide the simulated phone status bar when enabled. */
   hideStatusBar?: boolean;
+  /** When enabled, Enter inserts a line break in the chat composer; otherwise it sends only. */
+  chatEnterKeyNewline?: boolean;
   dockColor?: string;
   dockOpacity?: number;
   widgetOpacity?: number;

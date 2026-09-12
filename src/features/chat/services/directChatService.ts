@@ -1,5 +1,5 @@
 import { createCharacterTextMessage } from "./messageFactory";
-import { cleanAiReplyText, normalizePaymentMarkup, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripSimulatedUserTurns } from "./messageParser";
+import { cleanAiReplyText, normalizeDirectReplyBubbles, normalizePaymentMarkup, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripSimulatedUserTurns } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatServiceTypes";
 import { containsNonChineseText } from "../../../utils/textLanguage";
@@ -12,7 +12,7 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
   // Never fall back to rawText here: it may consist solely of a model's fake
   // “sent a photo” claim that the parser intentionally removed.
   const bubbles = cleanedText
-    ? removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup))
+    ? normalizeDirectReplyBubbles(removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup)), context.keepPeriods)
     : [];
   const translatedBubbles = context.translationText
     ? splitAiReplyBubbles(context.translationText, context.keepPeriods).map(normalizePaymentMarkup)

@@ -21,6 +21,6 @@ export function StoredChatImage({ assetId, alt, generated = false }: StoredChatI
   }, [assetId]);
 
   return url
-    ? <img src={url} alt={alt} className={`chat-message--image max-w-[160px] rounded-lg object-cover cursor-zoom-in bg-stone-100 ${generated ? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"}`} />
+    ? <img src={url} alt={alt} className={`chat-message--image max-w-[160px] rounded-lg object-cover cursor-zoom-in bg-stone-100 ${generated ? "shadow-none outline-none ring-0" : "shadow-sm"}`} />
     : <div className="chat-message--image-placeholder h-24 w-28 animate-pulse rounded-lg bg-slate-100" />;
 }

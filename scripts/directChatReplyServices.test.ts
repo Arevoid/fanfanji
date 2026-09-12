@@ -29,6 +29,8 @@ assert.equal(response.text, "你好。再见！");
 assert.deepEqual(createDirectReplyCandidates(candidateContext("你好")).messages.map((message) => message.content), ["你好"]);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("你好。再见！")).messages.map((message) => message.content), ["你好。再见！"]);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句。第二句。第三句。第四句。")).messages.map((message) => message.content), ["第一句。第二句。第三句。第四句。"]);
+assert.deepEqual(createDirectReplyCandidates(candidateContext("第一条。\n\n第二条。\n\n第三条。")).messages.map((message) => message.content), ["第一条", "第二条", "第三条"], "repeated trailing stops are normalized only across multiple short bubbles");
+assert.deepEqual(createDirectReplyCandidates({ ...candidateContext("第一条。\n\n第二条。"), keepPeriods: true }).messages.map((message) => message.content), ["第一条。", "第二条。"], "persona punctuation preference is preserved");
 assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句\n[15:10]\n第二句\n【15：10】")).messages.map((message) => message.content), ["第一句", "第二句"]);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句\n[消息发送于 2026-08-02 18:11]\n第二句\n[消息发送于 2026-08-02 18:11]")).messages.map((message) => message.content), ["第一句", "第二句"]);
 assert.equal(createDirectReplyCandidates(candidateContext("引用回复")).messages[0].content, "引用回复");

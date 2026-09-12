@@ -104,6 +104,7 @@ import { createInlineInnerVoiceRecord } from "../features/chat/services/innerVoi
 import { INLINE_INNER_VOICE_INSTRUCTION, isChatResponseFormatError } from "../features/chat/services/chatTurnResponseProtocol";
 import { generateCharacterImageForDelivery } from "../features/chat/services/characterImageDeliveryService";
 import { imageDataUrlToBlob, parseCharacterSaveUserImageDirective } from "../features/chat/services/userImageMemoryService";
+import { isExplicitCharacterAvatarChangeRequest } from "../features/chat/services/characterAvatarChangeIntent";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
 import { ensureDirectReplyTranslation } from "../features/chat/services/directReplyTranslation";
@@ -715,6 +716,7 @@ export default function AppChat({
   const latestMemoriesRef = useRef<MemoryItem[]>(memories || []);
   const consumedGroupWelcomeIdsRef = useRef(new Set<string>());
   const processedRedPacketClaimNoticeIdsRef = useRef(new Set<string>());
+  const recentSharedImageByScopeRef = useRef<Record<string, string>>({});
   latestActiveCharacterRef.current = activeCharacter;
   latestActiveRelationshipRef.current = activeRelationship;
   latestMemoriesRef.current = memories || [];
@@ -2947,6 +2949,20 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     });
     const normalizedUserMsg = { ...userMsg, content: normalizePaymentMarkup(userMsg.content) };
     onSendMessage(normalizedUserMsg);
+    const scopeKey = `${capturedContext.userIdentityId}:${capturedContext.characterId}:${capturedContext.relationId || capturedContext.conversationId || "group"}`;
+    if (/^data:image\//i.test(contentString.trim())) {
+      // Keep the image only in memory until the user explicitly asks for an
+      // avatar change; an ordinary shared image must never mutate a profile.
+      recentSharedImageByScopeRef.current[scopeKey] = contentString.trim();
+    } else if (!activeCharacter.isGroupChat && isExplicitCharacterAvatarChangeRequest(contentString)) {
+      const requestedAvatar = recentSharedImageByScopeRef.current[scopeKey];
+      if (requestedAvatar && onUpdateCharacter) {
+        delete recentSharedImageByScopeRef.current[scopeKey];
+        void Promise.resolve(onUpdateCharacter(activeCharacter.id, { avatar: requestedAvatar })).catch((error) => {
+          console.warn("Failed to apply explicitly requested character avatar:", error);
+        });
+      }
+    }
     if (!capturedContext.isGroup && capturedContext.relationId && capturedContext.conversationId && capturedContext.userIdentityId) {
       const claim = createDeterministicArtifactClaim({
         message: normalizedUserMsg,
@@ -7212,7 +7228,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         <img
                           src={msg.content}
                           alt="chat-pic"
-                          className="chat-message--image max-w-[160px] rounded-lg border object-cover cursor-zoom-in shadow-sm bg-stone-100"
+                          className="chat-message--image max-w-[160px] rounded-lg object-cover cursor-zoom-in shadow-sm bg-stone-100"
                         />
                       ) : parseTextImageDescription(msg.content) ? (() => {
                         const description = parseTextImageDescription(msg.content)!;
@@ -7741,6 +7757,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               }
               isTyping={isTyping}
               isReplyInFlight={isReplyInFlight}
+              chatEnterKeyNewline={settings.chatEnterKeyNewline === true}
               showAttachPanel={showAttachPanel}
               onToggleAttach={() => {
                 setShowAttachPanel(!showAttachPanel);
@@ -7778,7 +7795,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             showToast("关系已切换，已取消发送图片。");
                             return;
                           }
-                          sendCustomMessage(compressed, capturedContext);
+                          sendCustomMessage(compressed, capturedContext, { triggerReply: false });
                           setShowAttachPanel(false);
                         } catch (err) {
                           console.error("Custom chat image compression failed:", err);

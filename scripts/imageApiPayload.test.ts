@@ -41,7 +41,8 @@ const imageSettings = settingsPage.slice(settingsPage.indexOf('activeTab === "im
 assert.doesNotMatch(imageSettings, /Provider Protocol|认证方式|OpenAI Images|Gemini Native|Imagen text-to-image|模型已验证|未验证/);
 const storedChatImage = readFileSync(new URL("../src/features/chat/components/StoredChatImage.tsx", import.meta.url), "utf8");
 const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
-assert.match(storedChatImage, /generated \? "border-0 shadow-none outline-none ring-0" : "border shadow-sm"/);
+assert.match(storedChatImage, /chat-message--image[\s\S]*generated \? "shadow-none outline-none ring-0" : "shadow-sm"/);
+assert.doesNotMatch(storedChatImage, /generated \? "[^"]*border|: "border shadow-sm"/);
 assert.match(settingsPage, /useSettingsImageApiActions/);
 assert.match(imageApiActions, /const updateCurrentImageModel = \(model: string\)/);
 assert.match(imageApiActions, /const persistImagePresetDraft =/);

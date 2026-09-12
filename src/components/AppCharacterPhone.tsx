@@ -943,7 +943,15 @@ export default function AppCharacterPhone({
   const [musicProgress, setMusicProgress] = useState(0.42);
   const [input, setInput] = useState("");
   const [selectedContactId, setSelectedContactId] = useState("");
-  const [draft, setDraft] = useState("");
+  // Keep an unsent draft per contact. Menu/remark actions replace the phone
+  // snapshot, and a single component-wide draft used to be lost when that
+  // snapshot temporarily re-rendered or the selected contact changed.
+  const [draftsByContact, setDraftsByContact] = useState<Record<string, string>>({});
+  const draft = selectedContactId ? (draftsByContact[selectedContactId] || "") : "";
+  const setDraft = (value: string) => {
+    if (!selectedContactId) return;
+    setDraftsByContact((previous) => ({ ...previous, [selectedContactId]: value }));
+  };
   const [postDraft, setPostDraft] = useState("");
   const [postVisibility, setPostVisibility] = useState<MomentVisibility>("public");
   const [postVisibilityTargetIds, setPostVisibilityTargetIds] = useState<string[]>([]);
@@ -1054,6 +1062,7 @@ export default function AppCharacterPhone({
     setNotice("");
     setPhoneNotice("");
     setPhoneDataNotice("");
+    setDraftsByContact({});
   }, [characters, userIdentityId]);
   const currentPhone = useMemo(
     () =>
@@ -1365,7 +1374,7 @@ export default function AppCharacterPhone({
     setContactRemarkEditing(false);
     setContactRemarkDraft("");
     setInput("");
-    setDraft("");
+    setDraftsByContact({});
     setPostDraft("");
     setPostVisibility("public");
     setPostVisibilityTargetIds([]);

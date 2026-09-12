@@ -103,7 +103,9 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
       ...activeCharacter,
       name: activeCharacter.isGroupChat ? (draftRemark.trim() || activeCharacter.name) : activeCharacter.name,
       remark: activeCharacter.isGroupChat ? undefined : (draftRemark.trim() || undefined),
-      avatar: activeCharacter.isGroupChat ? (draftAvatar || activeCharacter.avatar) : activeCharacter.avatar,
+      // The avatar draft belongs to every character profile, not only group
+      // chats. The old branch silently discarded direct-chat avatar edits.
+      avatar: draftAvatar || activeCharacter.avatar,
       isPinned: draftIsPinned,
       chatBg: draftChatBg,
       customCss: draftCustomCss,
