@@ -4,7 +4,7 @@ import { subscribeOfflineMemorySyncNotifications } from "./features/offline/serv
 import { createId } from "./core/id/createId";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
-import { loadSettings, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
+import { applySettingsDurableOverlay, clearSettingsDurableOverlay, loadSettings, loadSettingsDurableOverlay, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
@@ -706,6 +706,22 @@ export default function App() {
   });
   useGlobalTypography(settings);
   const settingsRef = useRef<UserSettings>(settings);
+
+  // A quota fallback is intentionally hydrated after the synchronous
+  // localStorage bootstrap. It contains only profile/keyboard fields and is
+  // used to recover edits that could not fit in the legacy settings blob.
+  useEffect(() => {
+    let active = true;
+    void loadSettingsDurableOverlay().then((overlay) => {
+      if (!active || !overlay) return;
+      const hydrated = applySettingsDurableOverlay(settingsRef.current, overlay);
+      settingsRef.current = hydrated;
+      setSettingsState(hydrated);
+      void clearSettingsDurableOverlay();
+    });
+    return () => { active = false; };
+  }, []);
+
   const setSettings = (update: UserSettingsUpdate): boolean => {
     const nextSettings = applyLiquidGlassTextDefaults(resolveSettingsUpdate(settingsRef.current, update));
     const result = saveSettings(nextSettings);
@@ -2658,9 +2674,22 @@ export default function App() {
     patch: Partial<Character>,
   ): Promise<boolean> => {
     const currentCharacters = charactersRef.current;
-    if (!currentCharacters.some((candidate) => candidate.id === characterId)) return false;
+    // Chat can still be opened from a legacy contact instance. Persist profile
+    // edits against the canonical archive record so the visible conversation
+    // and every other contact surface observe the same avatar.
+    const canonicalCharacterId = resolveCanonicalCharacterId(characterId, currentCharacters);
+    // A legacy contact may retain a stale profileSourceId after its archive
+    // record was removed by an older import. Keep that historical contact
+    // editable instead of reporting a false save failure; valid mappings still
+    // always use the canonical archive record above.
+    const targetCharacterId = currentCharacters.some((candidate) => candidate.id === canonicalCharacterId)
+      ? canonicalCharacterId
+      : currentCharacters.some((candidate) => candidate.id === characterId)
+        ? characterId
+        : null;
+    if (!targetCharacterId) return false;
     const nextCharacters = currentCharacters.map((candidate) =>
-      candidate.id === characterId ? { ...candidate, ...patch } : candidate,
+      candidate.id === targetCharacterId ? { ...candidate, ...patch } : candidate,
     );
     charactersRef.current = nextCharacters;
     setCharacters(nextCharacters);

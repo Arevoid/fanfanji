@@ -80,6 +80,11 @@ export function ChatInputBar({
     <form
       onSubmit={(event) => {
         event.preventDefault();
+        // Some mobile browsers submit the surrounding form when the IME
+        // action is pressed even though the textarea keydown did not expose a
+        // normal `Enter` event. In newline mode this must remain an editing
+        // action, never a send action.
+        if (chatEnterKeyNewline) return;
         submitOnly(event);
       }}
       className="w-full min-w-0 max-w-full box-border px-3 py-2 flex items-center gap-2 chat-composer__form"

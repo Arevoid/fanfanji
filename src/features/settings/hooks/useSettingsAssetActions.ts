@@ -24,9 +24,12 @@ export function useSettingsAssetActions({
     input.value = "";
     if (!file) return;
     try {
-      const compressed = await compressImage(file, 400, 400, 0.75);
-      setAvatar(compressed);
-      handleSave({ avatar: compressed });
+      // Profile avatars are rendered at small sizes. Keeping the persisted
+      // data URL bounded prevents a large upload from exhausting the legacy
+      // monolithic settings record (which now has an IndexedDB fallback).
+      const compressed = await compressImage(file, 256, 256, 0.72);
+      const saved = handleSave({ avatar: compressed });
+      if (saved) setAvatar(compressed);
     } catch (error) {
       console.error("Avatar compression failed:", error);
     }

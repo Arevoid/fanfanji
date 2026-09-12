@@ -1,4 +1,4 @@
-const CACHE_NAME = "fanfan-phone-0.0.0-728d20cdab44";
+const CACHE_NAME = "fanfan-phone-0.0.0-a692df8a6b8c";
 const ASSETS_TO_CACHE = [
   "/",
   "/index.html",

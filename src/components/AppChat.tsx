@@ -2940,11 +2940,37 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   ) => {
     if (!character || character.isGroupChat || !isCapturedRuntimeCurrent(capturedContext)) return;
     if (!isExplicitCharacterAvatarChangeRequest(contentString)) return;
-    const requestedAvatar = recentSharedImageByScopeRef.current[sharedImageScopeKey(capturedContext)];
+    const scopeKey = sharedImageScopeKey(capturedContext);
+    // The ref is the immediate-send path. The message fallback covers a
+    // render boundary where React has not yet exposed the just-sent image in
+    // currentChatMessages, without ever looking outside this exact relation.
+    const requestedAvatar = recentSharedImageByScopeRef.current[scopeKey]
+      || [...currentChatMessages].reverse().find((message) =>
+        message.sender === "user"
+        && /^data:image\//i.test(message.content.trim())
+        && message.characterId === capturedContext.characterId
+        && message.relationId === capturedContext.relationId
+        && (!message.conversationId || message.conversationId === capturedContext.conversationId)
+        && Date.now() - message.timestamp <= 10 * 60 * 1000,
+      )?.content.trim();
     if (!requestedAvatar || !onUpdateCharacter) return;
-    delete recentSharedImageByScopeRef.current[sharedImageScopeKey(capturedContext)];
-    void Promise.resolve(onUpdateCharacter(character.id, { avatar: requestedAvatar })).catch((error) => {
+    const canonicalCharacterId = resolveCanonicalCharacterId(character.id, characters);
+    const targetCharacterId = characters.some((candidate) => candidate.id === canonicalCharacterId)
+      ? canonicalCharacterId
+      : character.id;
+    void Promise.resolve(onUpdateCharacter(targetCharacterId, { avatar: requestedAvatar })).then((saved) => {
+      // Keep the pending image available if IndexedDB persistence rejects the
+      // update, so a later explicit request can retry without changing the
+      // ordinary image-sharing behavior.
+      if (saved === false) {
+        showToast("角色头像保存失败，请检查浏览器存储空间后重试");
+        return;
+      }
+      delete recentSharedImageByScopeRef.current[scopeKey];
+      showToast("角色头像已更新");
+    }).catch((error) => {
       console.warn("Failed to apply explicitly requested character avatar:", error);
+      showToast("角色头像保存失败，请重试");
     });
   };
 
@@ -6083,7 +6109,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             const file = e.target.files?.[0];
                             if (file) {
                               try {
-                                const compressed = await compressImage(file, 400, 400, 0.75);
+                                const compressed = await compressImage(file, 256, 256, 0.72);
                                 setDraftAvatar(compressed);
                               } catch (err) {
                                 console.error("Group avatar compression failed:", err);
@@ -8857,7 +8883,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                                 <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-lg font-bold text-[var(--text-secondary)]">{aliasDraftName.slice(0, 1) || "头"}</div>
                               )}
                               <span className="text-xs font-medium text-[var(--text-secondary)]">点击更换头像</span>
-                              <input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setAliasDraftAvatar(await compressImage(file, 400, 400, 0.75)); }} />
+                              <input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setAliasDraftAvatar(await compressImage(file, 256, 256, 0.72)); }} />
                             </label>
                             <label className="block text-xs font-bold text-[var(--text-primary)]">名称<input value={aliasDraftName} maxLength={40} onChange={(event) => setAliasDraftName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" /></label>
                             <label className="block text-xs font-bold text-[var(--text-primary)]">人设<textarea value={aliasDraftBio} onChange={(event) => setAliasDraftBio(event.target.value)} className="mt-1 h-36 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm leading-relaxed text-[var(--text-primary)] outline-none" placeholder="这个身份对外呈现的性格、背景和说话方式" /></label>
@@ -8946,7 +8972,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       <h3 className="text-sm font-bold">{aliasEditTargetId ? "编辑马甲" : "新建马甲"}</h3>
                       <div className="mt-3 flex flex-col items-center gap-2">
                         <img src={aliasDraftAvatar || settings.avatar} alt="" className="h-16 w-16 rounded-full border border-[var(--border)] object-cover" />
-                        <label className="cursor-pointer text-[10px] text-[var(--text-secondary)]">选择头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setAliasDraftAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
+                        <label className="cursor-pointer text-[10px] text-[var(--text-secondary)]">选择头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setAliasDraftAvatar(await compressImage(file, 256, 256, 0.72)); }} /></label>
                       </div>
                       <label className="mt-3 block text-xs text-[var(--text-secondary)]">昵称<input required value={aliasDraftName} onChange={(event) => setAliasDraftName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" placeholder="例如：小雨" /></label>
                       <label className="mt-3 block text-xs text-[var(--text-secondary)]">人设<textarea value={aliasDraftBio} onChange={(event) => setAliasDraftBio(event.target.value)} className="mt-1 h-20 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none" placeholder="这个身份对外呈现的性格、背景和说话方式" /></label>
@@ -9204,7 +9230,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                                 input.value = "";
                                 if (!file) return;
                                 try {
-                                  const avatar = await compressImage(file, 400, 400, 0.75);
+                                  const avatar = await compressImage(file, 256, 256, 0.72);
                                   const saved = onSaveSettings((previous) => {
                                     const profileIdentity = findPrimaryIdentityForIdentity(previous.activeIdentityId || DEFAULT_IDENTITY_ID, previous.identities || [])
                                       || previous.identities?.find((identity) => identity.id === (previous.activeIdentityId || DEFAULT_IDENTITY_ID));
@@ -9435,7 +9461,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                           ) : (
                             <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]">头像</div>
                           )}
-                          <label className="cursor-pointer text-[10px] text-[var(--text-secondary)]">选择头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setIdentityDraftAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
+                          <label className="cursor-pointer text-[10px] text-[var(--text-secondary)]">选择头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setIdentityDraftAvatar(await compressImage(file, 256, 256, 0.72)); }} /></label>
                         </div>
                         <label className="mt-3 block text-xs text-[var(--text-secondary)]">名称<input required value={identityDraftName} onChange={(event) => setIdentityDraftName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" placeholder="例如：工作号" /></label>
                         <label className="mt-3 block text-xs text-[var(--text-secondary)]">人设设定<textarea value={identityDraftBio} onChange={(event) => setIdentityDraftBio(event.target.value)} className="mt-1 h-20 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none" placeholder="这个身份的背景和说话方式" /></label>
@@ -9522,7 +9548,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             ) : (
                               <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-lg font-bold text-[var(--text-secondary)]">{editMyName.slice(0, 1) || "头"}</div>
                             )}
-                            <label className="cursor-pointer text-xs font-medium text-[var(--text-secondary)]">更换头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const input = event.currentTarget; const file = event.target.files?.[0]; input.value = ""; if (!file) return; setEditMyAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
+                            <label className="cursor-pointer text-xs font-medium text-[var(--text-secondary)]">更换头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const input = event.currentTarget; const file = event.target.files?.[0]; input.value = ""; if (!file) return; setEditMyAvatar(await compressImage(file, 256, 256, 0.72)); }} /></label>
                           </div>
                           <label className="block text-xs font-bold text-[var(--text-primary)]">名称<input value={editMyName} maxLength={40} onChange={(event) => setEditMyName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" /></label>
                           <label className="block text-xs font-bold text-[var(--text-primary)]">人设设定<textarea value={editMyBio} onChange={(event) => setEditMyBio(event.target.value)} className="mt-1 h-36 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--input-bg)] px-3 py-2 text-sm leading-relaxed text-[var(--text-primary)] outline-none" placeholder="填写这个人设的背景、性格和说话方式" /></label>
@@ -9609,7 +9635,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">每个主人设拥有独立的好友与聊天空间，可继续创建任意数量的马甲。</p>
                         <div className="mt-3 flex flex-col items-center gap-2">
                           <img src={identityDraftAvatar || settings.avatar} alt="" className="h-16 w-16 rounded-full border border-[var(--border)] object-cover" />
-                          <label className="cursor-pointer text-[10px] text-[var(--text-secondary)]">选择头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setIdentityDraftAvatar(await compressImage(file, 400, 400, 0.75)); }} /></label>
+                          <label className="cursor-pointer text-[10px] text-[var(--text-secondary)]">选择头像<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setIdentityDraftAvatar(await compressImage(file, 256, 256, 0.72)); }} /></label>
                         </div>
                         <label className="mt-3 block text-xs text-[var(--text-secondary)]">昵称<input required value={identityDraftName} onChange={(event) => setIdentityDraftName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" placeholder="例如：工作号" /></label>
                         <label className="mt-3 block text-xs text-[var(--text-secondary)]">人设<textarea value={identityDraftBio} onChange={(event) => setIdentityDraftBio(event.target.value)} className="mt-1 h-20 w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none" placeholder="这个主人设的背景和说话方式" /></label>
@@ -10526,7 +10552,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         input.value = "";
                         if (file) {
                           try {
-                            const compressed = await compressImage(file, 400, 400, 0.75);
+                            const compressed = await compressImage(file, 256, 256, 0.72);
                             setEditMyAvatar(compressed);
                           } catch (err) {
                             console.error("My avatar compression failed:", err);

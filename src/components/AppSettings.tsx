@@ -2536,8 +2536,11 @@ export default function AppSettings({
                     aria-checked={chatEnterKeyNewline}
                     onClick={() => {
                       const nextValue = !chatEnterKeyNewline;
-                      setChatEnterKeyNewline(nextValue);
-                      handleSave({ chatEnterKeyNewline: nextValue });
+                      const saved = handleSave({ chatEnterKeyNewline: nextValue });
+                      // Keep the visual switch aligned with the durable
+                      // settings value. A quota/unavailable-storage failure
+                      // must not make an unsaved opt-in look enabled.
+                      if (saved) setChatEnterKeyNewline(nextValue);
                     }}
                     className={`settings-compact-toggle relative flex shrink-0 items-center border-0 p-0 transition-colors ${chatEnterKeyNewline ? "bg-neutral-950" : "bg-slate-200"}`}
                   >

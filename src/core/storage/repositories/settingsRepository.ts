@@ -3,8 +3,115 @@ import { findPrimaryIdentityForIdentity } from "../../../domain/relationship/cha
 import { readJson, writeJson } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
+import { readingAssetDb } from "../readingAssetDb";
 
 type SettingsRecord = Record<string, unknown>;
+
+/**
+ * A deliberately small IndexedDB fallback for the fields that are needed to
+ * keep profile edits usable when the legacy monolithic phone_settings value
+ * has reached localStorage quota. It never contains API credentials or other
+ * settings, and it is only written after the normal settings write fails.
+ */
+export interface SettingsDurableOverlay {
+  version: 1;
+  identities?: UserSettings["identities"];
+  activeIdentityId?: string;
+  name?: string;
+  avatar?: string;
+  signature?: string;
+  bio?: string;
+  chatEnterKeyNewline?: boolean;
+}
+
+const SETTINGS_DURABLE_OVERLAY_KEY = "user-settings-durable-overlay-v1";
+let settingsOverlayWriteChain: Promise<void> = Promise.resolve();
+let settingsOverlayHydrated = false;
+const SETTINGS_OVERLAY_FIELDS = new Set([
+  "identities",
+  "activeIdentityId",
+  "name",
+  "avatar",
+  "signature",
+  "bio",
+  "chatEnterKeyNewline",
+]);
+
+const buildSettingsDurableOverlay = (settings: UserSettings): SettingsDurableOverlay => ({
+  version: 1,
+  identities: settings.identities,
+  activeIdentityId: settings.activeIdentityId,
+  name: settings.name,
+  avatar: settings.avatar,
+  signature: settings.signature,
+  bio: settings.bio,
+  chatEnterKeyNewline: settings.chatEnterKeyNewline,
+});
+
+const hasOnlyDurableOverlayChanges = (settings: UserSettings): boolean => {
+  const previous = readJson<unknown>(storageKeys.settings, null);
+  if (!previous.found || !previous.valid || !isRecord(previous.value)) return false;
+  const currentRecord = settings as unknown as SettingsRecord;
+  const previousRecord = previous.value;
+  const keys = new Set([...Object.keys(currentRecord), ...Object.keys(previousRecord)]);
+  return [...keys].every((key) => SETTINGS_OVERLAY_FIELDS.has(key)
+    || JSON.stringify(currentRecord[key]) === JSON.stringify(previousRecord[key]));
+};
+
+const enqueueSettingsOverlayWrite = (operation: () => Promise<void>): void => {
+  settingsOverlayWriteChain = settingsOverlayWriteChain
+    .catch(() => undefined)
+    .then(operation)
+    .catch((error) => {
+      // Monitoring/settings fallback must never turn a local save into a UI
+      // error. The original localStorage value remains untouched on failure.
+      console.warn("[settings] Durable profile fallback was unavailable.", error);
+    });
+};
+
+/** Loads the quota fallback written by saveSettings, if IndexedDB is usable. */
+export async function loadSettingsDurableOverlay(): Promise<SettingsDurableOverlay | null> {
+  if (typeof indexedDB === "undefined") return null;
+  await settingsOverlayWriteChain;
+  try {
+    const value = await readingAssetDb.loadMetadataValue<SettingsDurableOverlay>(SETTINGS_DURABLE_OVERLAY_KEY);
+    settingsOverlayHydrated = true;
+    if (!value || value.version !== 1 || typeof value !== "object") return null;
+    return value;
+  } catch (error) {
+    console.warn("[settings] Failed to load durable profile fallback.", error);
+    return null;
+  }
+}
+
+/** Applies only the small profile/keyboard overlay; all other settings stay unchanged. */
+export function applySettingsDurableOverlay(settings: UserSettings, overlay: SettingsDurableOverlay): UserSettings {
+  if (overlay.version !== 1) return settings;
+  return {
+    ...settings,
+    ...(overlay.identities ? { identities: overlay.identities } : {}),
+    ...(overlay.activeIdentityId ? { activeIdentityId: overlay.activeIdentityId } : {}),
+    ...(overlay.name !== undefined ? { name: overlay.name } : {}),
+    ...(overlay.avatar !== undefined ? { avatar: overlay.avatar } : {}),
+    ...(overlay.signature !== undefined ? { signature: overlay.signature } : {}),
+    ...(overlay.bio !== undefined ? { bio: overlay.bio } : {}),
+    ...(overlay.chatEnterKeyNewline !== undefined ? { chatEnterKeyNewline: overlay.chatEnterKeyNewline } : {}),
+  };
+}
+
+/** Removes a consumed fallback after the in-memory settings have been hydrated. */
+export async function clearSettingsDurableOverlay(): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  await new Promise<void>((resolve) => {
+    enqueueSettingsOverlayWrite(async () => {
+      try {
+        await readingAssetDb.deleteMetadataValue(SETTINGS_DURABLE_OVERLAY_KEY);
+      } finally {
+        resolve();
+      }
+    });
+  });
+}
 
 function isRecord(value: unknown): value is SettingsRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -188,7 +295,30 @@ export function loadSettings(defaultSettings: UserSettings): StorageResult<UserS
 }
 
 export function saveSettings(settings: UserSettings): StorageWriteResult {
-  return writeJson(storageKeys.settings, settings);
+  const result = writeJson(storageKeys.settings, settings);
+  if (result.success) {
+    // Once startup has inspected the fallback, a later successful monolithic
+    // save supersedes it. Queue the removal behind any pending overlay write.
+    if (settingsOverlayHydrated && typeof indexedDB !== "undefined") {
+      enqueueSettingsOverlayWrite(() => readingAssetDb.deleteMetadataValue(SETTINGS_DURABLE_OVERLAY_KEY));
+    }
+    return result;
+  }
+
+  // Keep the existing monolithic localStorage record as the source of truth
+  // whenever it fits. When a large legacy settings object has exhausted that
+  // quota, queue only profile/keyboard fields in the already-used IndexedDB
+  // metadata store so an avatar or Enter-mode edit is not silently lost.
+  if ((result.error === "quota" || result.error === "unavailable")
+    && typeof indexedDB !== "undefined"
+    && hasOnlyDurableOverlayChanges(settings)) {
+    enqueueSettingsOverlayWrite(() => readingAssetDb.saveMetadataValue(
+      SETTINGS_DURABLE_OVERLAY_KEY,
+      buildSettingsDurableOverlay(settings),
+    ));
+    return { success: true };
+  }
+  return result;
 }
 
 export function resolveSettingsUpdate(previous: UserSettings, update: UserSettingsUpdate): UserSettings {
