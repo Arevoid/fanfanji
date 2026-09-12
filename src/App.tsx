@@ -4017,6 +4017,49 @@ export default function App() {
     }))
     .filter((item): item is { relationship: CharacterRelationship; character: Character } =>
       Boolean(item.character && !item.character.isGroupChat));
+
+  const runMemoryEvidenceControl = (action: "start" | "finish" | "summary" | "export") => {
+    const runtime = globalThis as typeof globalThis & {
+      __fanfanjiMemoryAdmissionLongEvidence?: {
+        clear: () => void;
+        enable: () => void;
+        disable: () => void;
+        clearWindow: () => void;
+        createWindowToken: () => string;
+        startWindow: (windowToken: string) => number | null;
+        finishWindow: () => void;
+        summary: () => unknown;
+        exportJson: () => string;
+      };
+    };
+    const api = runtime.__fanfanjiMemoryAdmissionLongEvidence;
+    if (!api) {
+      console.warn("[dev] memory evidence collector is unavailable");
+      return;
+    }
+    if (action === "start") {
+      api.clearWindow();
+      api.clear();
+      api.enable();
+      console.info("[dev] memory evidence window started", JSON.stringify({ started: api.startWindow(api.createWindowToken()) !== null }));
+    } else if (action === "finish") {
+      api.finishWindow();
+      api.disable();
+      console.info("[dev] memory evidence window finished", JSON.stringify(api.summary()));
+    } else if (action === "summary") {
+      console.info("[dev] memory evidence summary", JSON.stringify(api.summary()));
+    } else {
+      console.info("[dev] memory evidence export", api.exportJson());
+    }
+  };
+
+  let memoryEvidenceDevBuild = false;
+  try {
+    memoryEvidenceDevBuild = Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV);
+  } catch {
+    memoryEvidenceDevBuild = false;
+  }
+
   return (
     <div
       className="app-viewport-root min-h-0 md:min-h-screen w-full bg-[#f3f4f6] flex items-start md:items-center justify-center p-0 md:p-6 select-none bg-gradient-to-br from-[#f5f5f7] to-[#e5e5eb] overflow-hidden"
@@ -4031,6 +4074,14 @@ export default function App() {
         minHeight: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
       }}
     >
+      {memoryEvidenceDevBuild && (
+        <div className="fixed bottom-2 left-2 z-[9999] flex gap-1 rounded bg-black/80 p-1 text-[10px] text-white" data-memory-evidence-controls>
+          <button type="button" onClick={() => runMemoryEvidenceControl("start")}>Evidence start</button>
+          <button type="button" onClick={() => runMemoryEvidenceControl("summary")}>Evidence summary</button>
+          <button type="button" onClick={() => runMemoryEvidenceControl("finish")}>Evidence finish</button>
+          <button type="button" onClick={() => runMemoryEvidenceControl("export")}>Evidence export</button>
+        </div>
+      )}
       
       {/* Live Custom CSS Styling injection */}
       <style>{`
