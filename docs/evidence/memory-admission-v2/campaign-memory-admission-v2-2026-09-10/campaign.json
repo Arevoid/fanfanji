@@ -32,6 +32,27 @@
       "windowFingerprint": "window-3233cb04d44d8dde",
       "artifactPaths": [],
       "closurePath": "docs/evidence/memory-admission-v2/window-3233cb04d44d8dde/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-a61899010f0bd27f",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-a61899010f0bd27f/2026-09-12__session-0bb6d746b5656d60.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-a61899010f0bd27f/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-b35d2518e274284a",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-b35d2518e274284a/2026-09-12__session-ed440b6afce514f8.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-b35d2518e274284a/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-70e757c23c675e44",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-70e757c23c675e44/2026-09-12__session-1b48d1a3e1332271.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-70e757c23c675e44/window-closure.json"
     }
   ],
   "closedWindows": [
@@ -39,7 +60,10 @@
     "window-1c673ae85a3ee3ba",
     "window-1352524908ffd837",
     "window-d3ece74319ea2f4d",
-    "window-3233cb04d44d8dde"
+    "window-3233cb04d44d8dde",
+    "window-a61899010f0bd27f",
+    "window-b35d2518e274284a",
+    "window-70e757c23c675e44"
   ],
   "createdAtUtc": "2026-09-10T15:46:57.912Z",
   "promotionScopeMappings": [
@@ -52,18 +76,28 @@
       "windowFingerprint": "window-1c673ae85a3ee3ba",
       "localScopeFingerprint": "scope-e75fd317",
       "promotionScopeFingerprint": "promotion-scope-001"
+    },
+    {
+      "windowFingerprint": "window-a61899010f0bd27f",
+      "localScopeFingerprint": "scope-e24bf8ec",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-a"
+    },
+    {
+      "windowFingerprint": "window-70e757c23c675e44",
+      "localScopeFingerprint": "scope-9675ed17",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-c"
     }
   ],
   "cumulativeAuthoritativeCounts": {
-    "authoritativeArtifactCount": 2,
-    "formalSessionCount": 2,
-    "distinctExactScopeCount": 1,
-    "extractionBatchCount": 2,
+    "authoritativeArtifactCount": 5,
+    "formalSessionCount": 4,
+    "distinctExactScopeCount": 3,
+    "extractionBatchCount": 4,
     "validControlCount": 2,
     "validSuppressionCount": 0,
-    "logicalActionTotal": 2,
-    "physicalAttemptTotal": 4,
-    "distinctEvidenceDayCount": 2,
+    "logicalActionTotal": 4,
+    "physicalAttemptTotal": 6,
+    "distinctEvidenceDayCount": 3,
     "fallbackBatchCount": 2,
     "safetyIncidentCount": 0,
     "privacyViolationCount": 0,
@@ -75,10 +109,10 @@
     "accounting": true
   },
   "firstEvidenceDay": "2026-09-10",
-  "lastEvidenceDay": "2026-09-11",
+  "lastEvidenceDay": "2026-09-12",
   "thresholdProgress": {
     "sessions": {
-      "current": 2,
+      "current": 4,
       "minimum": 5
     },
     "suppressions": {
@@ -86,15 +120,15 @@
       "minimum": 10
     },
     "scopes": {
-      "current": 1,
+      "current": 3,
       "minimum": 3
     },
     "days": {
-      "current": 2,
+      "current": 4,
       "minimum": 7
     },
     "batches": {
-      "current": 2,
+      "current": 3,
       "minimum": 20
     },
     "allMinimumsSatisfied": false,
