@@ -15,6 +15,20 @@ try {
   assert.equal(await callTextProvider({ message: "translate", apiKey: "key", model: selectedModel, apiEndpoint: "https://provider.example/v1" }), "译文");
   assert.equal(providerPayload.model, selectedModel, "text helpers must preserve the selected custom-endpoint model");
 
+  globalThis.fetch = async () => Response.json({ choices: [{ message: { content: "" } }] });
+  assert.equal(await callTextProvider({
+    message: "empty extraction",
+    apiKey: "key",
+    model: selectedModel,
+    apiEndpoint: "https://provider.example/v1",
+    allowEmptyText: true,
+  }), "", "memory extraction may represent an honest zero-candidate batch as empty text");
+  await assert.rejects(
+    () => callTextProvider({ message: "empty chat", apiKey: "key", model: selectedModel, apiEndpoint: "https://provider.example/v1" }),
+    /没有可用的文本内容/u,
+    "ordinary chat must continue rejecting empty provider text",
+  );
+
   let calls = 0;
   globalThis.fetch = async (_input, init) => {
     calls += 1;

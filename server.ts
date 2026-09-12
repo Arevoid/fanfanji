@@ -469,6 +469,7 @@ ${historyText}
           temperature,
           timeoutMs: API_REQUEST_TIMEOUTS.memoryTask,
           systemInstruction: "你是结构化长期知识提取器。只输出可验证的 JSONL，不要解释。",
+          allowEmptyText: true,
         });
       };
 

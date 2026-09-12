@@ -234,15 +234,18 @@ export default {
           history, sourceReferenceMode: body.sourceReferenceMode === "local" ? "local" : "canonical",
           templateType: body.templateType === "delicate" ? "delicate" : "refined", scenario: body.scenario === "offline" ? "offline" : undefined,
         });
-        const text = await callTextProvider(textInput(body, prompt, "你是长期记忆提取器，严格按要求输出结构化候选。", 0.5));
+        const text = await callTextProvider({
+          ...textInput(body, prompt, "你是长期记忆提取器，严格按要求输出结构化候选。", 0.5),
+          allowEmptyText: true,
+        });
         const repaired = await parseOrRepairKnowledgeExtractionOutput({
           rawText: text,
           allowedMessageIds: new Set(history.map((item) => String(item.id))),
           originalPrompt: prompt,
           preserveUnvalidatedSourceHints: body.sourceReferenceMode === "local",
-          repair: (repairPrompt) => callTextProvider(textInput(body, repairPrompt, body.sourceReferenceMode === "local"
+          repair: (repairPrompt) => callTextProvider({ ...textInput(body, repairPrompt, body.sourceReferenceMode === "local"
             ? "你是结构化记忆修复器。只输出使用本次 M# source refs 且可验证的 JSONL，不要解释。"
-            : "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。", 0.2)),
+            : "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。", 0.2), allowEmptyText: true }),
         });
         return json({
           text: repaired.text,

@@ -44,6 +44,8 @@ export interface TextProviderInput {
   /** Maximum provider output tokens for workflows that intentionally generate in segments. */
   maxOutputTokens?: number;
   imageDataUrl?: string;
+  /** Extraction may legitimately return an empty candidate set. */
+  allowEmptyText?: boolean;
 }
 
 function resolveTextGenerationTimeout(timeoutMs?: number): number {
@@ -128,6 +130,7 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
       throw new TextApiError(response.status, details.message, details.code, details.reason);
     }
     const text = parseOpenAiText(raw);
+    if (!text.trim() && input.allowEmptyText === true) return text;
     if (!text.trim()) {
       const details = emptyTextApiErrorDetails();
       throw new TextApiError(502, details.message, details.code, details.reason);
@@ -173,6 +176,7 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
   let parsed: any;
   try { parsed = JSON.parse(raw); } catch { throw new TextApiError(502, "Gemini 返回了无法解析的响应。", "provider_invalid_response"); }
   const text = parsed.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || "").join("") || "";
+  if (!text.trim() && input.allowEmptyText === true) return text;
   if (!text.trim()) {
     const reason = parsed.candidates?.[0]?.finishReason || parsed.promptFeedback?.blockReason;
     const details = emptyTextApiErrorDetails(502, reason || "");
