@@ -12,3 +12,30 @@ export function isExplicitCharacterAvatarChangeRequest(text: string): boolean {
   const hasCoupleRequest = /(?:情侣头像|情头|couple\s*(?:avatar|profile\s*photo)|配对头像)/iu.test(normalized);
   return hasAvatarTarget && (hasChangeAction || hasCoupleRequest);
 }
+
+export interface CharacterAvatarChangeTiming {
+  /** Ordinary personas may update shortly after the explicit request. */
+  delayMs: number;
+  /** Persona cues that call for a reply before the profile update. */
+  waitForReply: boolean;
+}
+
+/**
+ * Keeps avatar changes from looking like an instantaneous UI mutation while
+ * giving clearly marked tsundere/guarded personas room to react first. This
+ * is intentionally a small, deterministic presentation policy: it does not
+ * inspect or rewrite prompts and it never turns an ordinary image into a
+ * profile change.
+ */
+export function resolveCharacterAvatarChangeTiming(personality = "", backstory = ""): CharacterAvatarChangeTiming {
+  const persona = `${personality}\n${backstory}`;
+  const waitsForReply = /(?:傲娇|嘴硬|口是心非|别扭|不坦率|高冷|傲慢|毒舌|傲气)/iu.test(persona);
+  return waitsForReply
+    ? { delayMs: 12_000, waitForReply: true }
+    : { delayMs: 900, waitForReply: false };
+}
+
+/** Detect an explicit refusal so a guarded persona can change a little later. */
+export function characterAvatarReplyRefusesChange(text: string): boolean {
+  return /(?:才不换|不换(?:头像)?|不想换|不要换|偏不|休想|别想|才不会|不可能)/iu.test(text);
+}

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { shouldSendChatInputOnEnter } from "../src/features/chat/components/ChatComposer";
-import { isExplicitCharacterAvatarChangeRequest } from "../src/features/chat/services/characterAvatarChangeIntent";
+import { characterAvatarReplyRefusesChange, isExplicitCharacterAvatarChangeRequest, resolveCharacterAvatarChangeTiming } from "../src/features/chat/services/characterAvatarChangeIntent";
 import { splitIntoWeChatBubbles } from "../src/utils/pngParser";
 
 assert.equal(shouldSendChatInputOnEnter({ key: "Enter", hasText: true, isTyping: false }), true);
@@ -14,6 +14,10 @@ assert.equal(isExplicitCharacterAvatarChangeRequest("你换一个头像吧"), tr
 assert.equal(isExplicitCharacterAvatarChangeRequest("我们用情侣头像"), true);
 assert.equal(isExplicitCharacterAvatarChangeRequest("这张照片好看吗"), false);
 assert.equal(isExplicitCharacterAvatarChangeRequest("我换个话题"), false);
+assert.deepEqual(resolveCharacterAvatarChangeTiming("温柔、爽快", ""), { delayMs: 900, waitForReply: false });
+assert.deepEqual(resolveCharacterAvatarChangeTiming("嘴硬又傲娇", ""), { delayMs: 12_000, waitForReply: true });
+assert.equal(characterAvatarReplyRefusesChange("才不换呢"), true);
+assert.equal(characterAvatarReplyRefusesChange("好呀，这就换上"), false);
 
 assert.deepEqual(
   splitIntoWeChatBubbles("第一件事已经办好了。\n第二件事等明天再说。"),
@@ -27,9 +31,10 @@ assert.deepEqual(
 const appChat = readFileSync("src/components/AppChat.tsx", "utf8");
 assert.match(appChat, /sendCustomMessage\(compressed, capturedContext, \{ triggerReply: false \}\)/);
 assert.match(appChat, /isExplicitCharacterAvatarChangeRequest/);
+assert.match(appChat, /settlePendingCharacterAvatarChangeAfterReply/);
 assert.match(appChat, /onUserMessageCreated: \(message, context\)/, "normal composer sends must reach avatar intent handling");
 assert.match(appChat, /const saved = onSaveSettings\(\(previous\) => updateIdentityProfile\(previous, identity\.id, \{ name, avatar, bio \}\)\)/, "identity detail save must check persistence result");
-assert.match(appChat, /resolveCanonicalCharacterId\(character\.id, characters\)/, "avatar changes must target the canonical character archive");
+assert.match(appChat, /resolveCanonicalCharacterId\(pending\.characterId, characters\)/, "avatar changes must target the canonical character archive");
 assert.match(appChat, /角色头像已更新/, "successful explicit avatar changes should be visible to the user");
 const chatController = readFileSync("src/features/chat/hooks/useChatController.ts", "utf8");
 assert.match(chatController, /onUserMessageCreated\?\.\(userMessage, runtimeContext\)/, "send-only and send-and-reply must expose the created message");

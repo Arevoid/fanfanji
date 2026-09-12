@@ -104,7 +104,7 @@ import { createInlineInnerVoiceRecord } from "../features/chat/services/innerVoi
 import { INLINE_INNER_VOICE_INSTRUCTION, isChatResponseFormatError } from "../features/chat/services/chatTurnResponseProtocol";
 import { generateCharacterImageForDelivery } from "../features/chat/services/characterImageDeliveryService";
 import { imageDataUrlToBlob, parseCharacterSaveUserImageDirective } from "../features/chat/services/userImageMemoryService";
-import { isExplicitCharacterAvatarChangeRequest } from "../features/chat/services/characterAvatarChangeIntent";
+import { characterAvatarReplyRefusesChange, isExplicitCharacterAvatarChangeRequest, resolveCharacterAvatarChangeTiming, type CharacterAvatarChangeTiming } from "../features/chat/services/characterAvatarChangeIntent";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
 import { ensureDirectReplyTranslation } from "../features/chat/services/directReplyTranslation";
@@ -716,7 +716,15 @@ export default function AppChat({
   const latestMemoriesRef = useRef<MemoryItem[]>(memories || []);
   const consumedGroupWelcomeIdsRef = useRef(new Set<string>());
   const processedRedPacketClaimNoticeIdsRef = useRef(new Set<string>());
-  const recentSharedImageByScopeRef = useRef<Record<string, string>>({});
+  const recentSharedImageByScopeRef = useRef<Record<string, { dataUrl: string; timestamp: number }>>({});
+  const pendingCharacterAvatarChangesRef = useRef<Record<string, {
+    avatar: string;
+    context: ChatRuntimeContext;
+    characterId: string;
+    timing: CharacterAvatarChangeTiming;
+    applying: boolean;
+  }>>({});
+  const characterAvatarChangeTimersRef = useRef<Record<string, number>>({});
   latestActiveCharacterRef.current = activeCharacter;
   latestActiveRelationshipRef.current = activeRelationship;
   latestMemoriesRef.current = memories || [];
@@ -2645,6 +2653,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           }
         }
         lifecyclePhase = "delivered";
+        settlePendingCharacterAvatarChangeAfterReply(replyContext, newMsgs);
         postReplyResult = postReplyCoordinator.schedule({
           mode: "send", policy: "normal_send",
           sideEffects: { userMsg, currentChatMessages, createdMessages: newMsgs, activeCharacter, activeRelationship, relationships, isOffline: true, activeOfflineStoryId },
@@ -2741,6 +2750,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             });
           }
 
+          settlePendingCharacterAvatarChangeAfterReply(replyContext, createdMessages);
           postReplyResult = postReplyCoordinator.schedule({
             mode: "send", policy: "normal_send",
             sideEffects: { userMsg, currentChatMessages, createdMessages: [...createdMessages], activeCharacter, activeRelationship, relationships, isOffline: false, activeOfflineStoryId },
@@ -2933,6 +2943,73 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const sharedImageScopeKey = (context: ChatRuntimeContext) =>
     `${context.userIdentityId}:${context.characterId}:${context.relationId || context.conversationId || "group"}`;
 
+  const clearCharacterAvatarChangeTimer = (scopeKey: string) => {
+    const timer = characterAvatarChangeTimersRef.current[scopeKey];
+    if (timer === undefined) return;
+    window.clearTimeout(timer);
+    delete characterAvatarChangeTimersRef.current[scopeKey];
+  };
+
+  const applyPendingCharacterAvatarChange = (scopeKey: string) => {
+    const pending = pendingCharacterAvatarChangesRef.current[scopeKey];
+    if (!pending || pending.applying) return;
+    clearCharacterAvatarChangeTimer(scopeKey);
+    if (!isCapturedRuntimeCurrent(pending.context)) {
+      delete pendingCharacterAvatarChangesRef.current[scopeKey];
+      return;
+    }
+
+    pending.applying = true;
+    const canonicalCharacterId = resolveCanonicalCharacterId(pending.characterId, characters);
+    const targetCharacterId = characters.some((candidate) => candidate.id === canonicalCharacterId)
+      ? canonicalCharacterId
+      : pending.characterId;
+    if (!onUpdateCharacter) {
+      pending.applying = false;
+      return;
+    }
+    void Promise.resolve(onUpdateCharacter(targetCharacterId, { avatar: pending.avatar })).then((saved) => {
+      if (pendingCharacterAvatarChangesRef.current[scopeKey] !== pending) return;
+      if (saved === false) {
+        pending.applying = false;
+        showToast("角色头像保存失败，请检查浏览器存储空间后重试");
+        return;
+      }
+      delete pendingCharacterAvatarChangesRef.current[scopeKey];
+      delete recentSharedImageByScopeRef.current[scopeKey];
+      if (isCapturedRuntimeCurrent(pending.context)) showToast("角色头像已更新");
+    }).catch((error) => {
+      if (pendingCharacterAvatarChangesRef.current[scopeKey] !== pending) return;
+      pending.applying = false;
+      console.warn("Failed to apply explicitly requested character avatar:", error);
+      showToast("角色头像保存失败，请重试");
+    });
+  };
+
+  const schedulePendingCharacterAvatarChange = (scopeKey: string, delayMs: number) => {
+    clearCharacterAvatarChangeTimer(scopeKey);
+    characterAvatarChangeTimersRef.current[scopeKey] = window.setTimeout(() => {
+      delete characterAvatarChangeTimersRef.current[scopeKey];
+      applyPendingCharacterAvatarChange(scopeKey);
+    }, delayMs);
+  };
+
+  const settlePendingCharacterAvatarChangeAfterReply = (
+    context: ChatRuntimeContext,
+    replyMessages: readonly Message[],
+  ) => {
+    const scopeKey = sharedImageScopeKey(context);
+    const pending = pendingCharacterAvatarChangesRef.current[scopeKey];
+    if (!pending || !pending.timing.waitForReply || pending.applying) return;
+    const replyText = replyMessages
+      .filter((message) => message.sender === "character")
+      .map((message) => message.content)
+      .join("\n");
+    // A guarded persona gets a visible beat after saying no; an accepting
+    // reply changes the profile shortly after the reply has been delivered.
+    schedulePendingCharacterAvatarChange(scopeKey, characterAvatarReplyRefusesChange(replyText) ? 4_500 : 1_200);
+  };
+
   const handleExplicitCharacterAvatarChangeRequest = (
     contentString: string,
     capturedContext: ChatRuntimeContext,
@@ -2944,8 +3021,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     // The ref is the immediate-send path. The message fallback covers a
     // render boundary where React has not yet exposed the just-sent image in
     // currentChatMessages, without ever looking outside this exact relation.
-    const requestedAvatar = recentSharedImageByScopeRef.current[scopeKey]
-      || [...currentChatMessages].reverse().find((message) =>
+    const recentImage = recentSharedImageByScopeRef.current[scopeKey];
+    const requestedAvatar = recentImage && Date.now() - recentImage.timestamp <= 10 * 60 * 1000
+      ? recentImage.dataUrl
+      : [...currentChatMessages].reverse().find((message) =>
         message.sender === "user"
         && /^data:image\//i.test(message.content.trim())
         && message.characterId === capturedContext.characterId
@@ -2954,24 +3033,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         && Date.now() - message.timestamp <= 10 * 60 * 1000,
       )?.content.trim();
     if (!requestedAvatar || !onUpdateCharacter) return;
-    const canonicalCharacterId = resolveCanonicalCharacterId(character.id, characters);
-    const targetCharacterId = characters.some((candidate) => candidate.id === canonicalCharacterId)
-      ? canonicalCharacterId
-      : character.id;
-    void Promise.resolve(onUpdateCharacter(targetCharacterId, { avatar: requestedAvatar })).then((saved) => {
-      // Keep the pending image available if IndexedDB persistence rejects the
-      // update, so a later explicit request can retry without changing the
-      // ordinary image-sharing behavior.
-      if (saved === false) {
-        showToast("角色头像保存失败，请检查浏览器存储空间后重试");
-        return;
-      }
-      delete recentSharedImageByScopeRef.current[scopeKey];
-      showToast("角色头像已更新");
-    }).catch((error) => {
-      console.warn("Failed to apply explicitly requested character avatar:", error);
-      showToast("角色头像保存失败，请重试");
-    });
+    const timing = resolveCharacterAvatarChangeTiming(character.personality, character.backstory);
+    pendingCharacterAvatarChangesRef.current[scopeKey] = {
+      avatar: requestedAvatar,
+      context: capturedContext,
+      characterId: character.id,
+      timing,
+      applying: false,
+    };
+    // Non-guarded personas receive a small, visible pause. Guarded personas
+    // wait for their reply; the longer delay is only a no-reply fallback.
+    schedulePendingCharacterAvatarChange(scopeKey, timing.delayMs);
   };
 
   const sendCustomMessage = (
@@ -2997,7 +3069,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     if (/^data:image\//i.test(contentString.trim())) {
       // Keep the image only in memory until the user explicitly asks for an
       // avatar change; an ordinary shared image must never mutate a profile.
-      recentSharedImageByScopeRef.current[scopeKey] = contentString.trim();
+      recentSharedImageByScopeRef.current[scopeKey] = { dataUrl: contentString.trim(), timestamp: Date.now() };
     } else {
       handleExplicitCharacterAvatarChangeRequest(contentString, capturedContext, activeCharacter);
     }
