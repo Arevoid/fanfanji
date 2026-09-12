@@ -248,6 +248,8 @@ export default {
           text: repaired.text,
           items: repaired.candidates,
           candidates: repaired.candidates,
+          structuredCandidatesV2: repaired.structuredCandidatesV2,
+          v2MetadataPresent: repaired.v2MetadataPresent,
           runtimeLineageTransport: repaired.runtimeLineageTransport,
           repaired: repaired.repaired,
         });

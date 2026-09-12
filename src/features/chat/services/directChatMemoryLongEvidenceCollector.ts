@@ -500,7 +500,13 @@ function hasSafetyIncident(record: DirectChatMemoryLongEvidenceRecord): boolean 
     || record.replayLoop
     || record.blockingMaterialUserRegression) return true;
   if (record.candidateSuppressed && (!record.exactScope || record.correlationClass === "cross_scope" || !record.vetoedCandidateCanonicalAbsent)) return true;
-  if (!record.legacyAccepted && record.canonicalWriteCountDelta > 0) return true;
+  // canonicalWriteCountDelta is a batch-level readback metric repeated on
+  // each candidate row.  It cannot prove that this particular legacy-rejected
+  // or V2-only candidate was written when accepted survivors also exist;
+  // actual mixed-batch unauthorized writes are captured by v2OnlyWrite above.
+  // Keep the all-rejected case strict: any positive write delta there is an
+  // unauthorized write because no accepted candidate could account for it.
+  if (!record.legacyAccepted && record.batchAcceptedAfter === 0 && record.canonicalWriteCountDelta > 0) return true;
   return false;
 }
 

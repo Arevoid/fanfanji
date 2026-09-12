@@ -203,7 +203,10 @@ const relationshipConflict = oneBridgeObservation(observe({ claims: [objectiveCl
 assert.equal(relationshipConflict.bridgeState, "safety_veto");
 
 // 15–17. V2-only, legacy-only, ambiguous and duplicate cases are explicit.
-assert.equal(oneBridgeObservation(observe({ v2Candidates: [v2()] })).bridgeCorrelation, "v2_only");
+const v2OnlyObservation = oneBridgeObservation(observe({ v2Candidates: [v2()] }));
+assert.equal(v2OnlyObservation.bridgeCorrelation, "v2_only");
+assert.equal(v2OnlyObservation.v2Identity?.scopeExact, true, "V2-only retains runtime exact scope even without a legacy pair");
+assert.equal(v2OnlyObservation.bridgeState, "review", "V2-only remains review-only and cannot gain write authority");
 assert.equal(oneBridgeObservation(observe({ claims: [objectiveClaim] })).bridgeCorrelation, "legacy_only");
 const ambiguous = observe({
   claims: [objectiveClaim],

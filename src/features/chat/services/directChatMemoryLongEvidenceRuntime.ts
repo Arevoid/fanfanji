@@ -142,7 +142,11 @@ function correlationClass(observation: BridgeObservation): "shared_unique" | "sh
   const scopeMismatch = observation.bridgeReason === "scope_mismatch"
     || observation.legacyIdentity?.scopeExact === false
     || observation.v2Identity?.scopeExact === false;
-  if (scopeMismatch || observation.bridgeCorrelation === "unmatched_legacy" || observation.bridgeCorrelation === "unmatched_v2") return "cross_scope";
+  // An unmatched side is a missing/ambiguous counterpart, not evidence that
+  // either candidate belongs to another scope.  Reserve cross_scope for an
+  // explicit runtime-scope mismatch; unmatched V2/legacy remains fail-safe as
+  // unknown and cannot become a write or suppression.
+  if (scopeMismatch) return "cross_scope";
   if (observation.bridgeCorrelation === "conflict" && observation.pairUnique && observation.lineageStatus === "shared") return "shared_unique";
   if (observation.bridgeCorrelation === "exact" && observation.pairUnique) return "shared_unique";
   if (observation.bridgeCorrelation === "ambiguous" || observation.bridgeCorrelation === "duplicate" || observation.bridgeCorrelation === "conflict") return "shared_non_unique";

@@ -186,6 +186,66 @@ try {
   }));
   assert.equal(control?.classification, "VALID_CONTROL");
 
+  // Candidate rows repeat batch-level write deltas. A missing legacy/V2 pair
+  // in a mixed batch is therefore not proof that this row was written; it is
+  // an invalid sample, while an all-rejected batch with a positive delta stays
+  // a strict safety incident.
+  const mixedMissingPair = recordDirectChatMemoryLongEvidence(input({
+    candidate: {
+      ...suppressionCandidate,
+      canaryReason: "none",
+      validatorResult: "deny_veto",
+      validatorReason: "legacy_or_v2_candidate_missing",
+      bridgeState: "review",
+      bridgeReason: "v2_candidate_missing",
+      correlationClass: "unknown",
+      lineageStatus: "missing",
+      pairUnique: false,
+      exactScope: false,
+      provenanceTrusted: false,
+      metadataSource: "v2_model_native",
+      semanticKind: "unknown",
+      planLifecycle: "unknown",
+      legacyAccepted: false,
+      legacyWriteEligible: false,
+      candidateSuppressed: false,
+    },
+    batch: {
+      ...allVetoBatch,
+      batchAcceptedBefore: 1,
+      batchAcceptedAfter: 1,
+      batchZeroCandidates: false,
+      survivingCanonicalWritesExpected: true,
+      canonicalWriteCountDelta: 1,
+      summaryDelta: 0,
+      projectionDelta: 1,
+    },
+  }));
+  assert.equal(mixedMissingPair?.classification, "INVALID_SAMPLE");
+  const allRejectedWrite = recordDirectChatMemoryLongEvidence(input({
+    candidate: {
+      ...suppressionCandidate,
+      canaryReason: "none",
+      validatorResult: "deny_veto",
+      validatorReason: "legacy_or_v2_candidate_missing",
+      bridgeState: "review",
+      bridgeReason: "v2_candidate_missing",
+      correlationClass: "unknown",
+      lineageStatus: "missing",
+      pairUnique: false,
+      exactScope: false,
+      provenanceTrusted: false,
+      metadataSource: "v2_model_native",
+      semanticKind: "unknown",
+      planLifecycle: "unknown",
+      legacyAccepted: false,
+      legacyWriteEligible: false,
+      candidateSuppressed: false,
+    },
+    batch: { ...allVetoBatch, canonicalWriteCountDelta: 1 },
+  }));
+  assert.equal(allRejectedWrite?.classification, "SAFETY_INCIDENT");
+
   const failOpen = recordDirectChatMemoryLongEvidence(input({
     candidate: { ...suppressionCandidate, failOpen: true },
   }));

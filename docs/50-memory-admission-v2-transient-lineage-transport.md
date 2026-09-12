@@ -97,7 +97,7 @@ Stage 4D-10E 的 Tier-1 现在可以真正消费跨 backend 的 shared lineage�
 - actor/target unknown 仍是唯一且其他字段严格相等的受控兼容；
 - lineage mismatch 不会 fallback 到 same-window、array index、statement 或 fuzzy matcher；
 - duplicate legacy/V2 lineage 仍是 ambiguous/conflict，不能 exact；
-- partial lineage 可继续使用严格 structural fallback，并在 pair matrix 的 `lineageStatus=partial` 中显式记录；
+- partial lineage 不再使用 structural fallback；它在 pair matrix 的 `lineageStatus=partial` 中显式记录，并保持 unmatched/review fail-safe；
 - 无 sidecar 时保持原 structural compatibility。
 
 pair matrix 仍只包含 ordinal 与布尔/类别诊断，不产生 score，不决定写入。
@@ -133,7 +133,7 @@ pair matrix 仍只包含 ordinal 与布尔/类别诊断，不产生 score，不�
 7. different lineage -> no exact；
 8. duplicate legacy lineage -> conflict/ambiguous；
 9. duplicate V2 lineage -> conflict/ambiguous；
-10. partial lineage -> strict structural fallback；
+10. partial lineage -> unmatched/review fail-safe（no structural fallback）；
 11. sidecar absent -> legacy behavior unchanged；
 12. KnowledgeClaim 无 lineage；
 13. MemoryItem 无 lineage；

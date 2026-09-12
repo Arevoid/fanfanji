@@ -667,8 +667,17 @@ export function matchDirectChatMemoryCandidates(input: {
   });
   const validLegacy = (candidate: DirectChatMemoryLegacyCandidate): boolean => sameScope(candidate.scope, input.runtime.scope) && candidate.provenanceTrusted;
   const validV2 = (candidate: DirectChatMemoryV2Candidate): boolean => sameScope(candidate.candidate.scope, input.runtime.scope) && trustedCandidate(candidate);
-  const lineageCompatible = (legacy: DirectChatMemoryLegacyCandidate, v2: DirectChatMemoryV2Candidate): boolean =>
-    !legacy.runtimeLineageId || !v2.candidate.runtimeLineageId || legacy.runtimeLineageId === v2.candidate.runtimeLineageId;
+  const lineageCompatible = (legacy: DirectChatMemoryLegacyCandidate, v2: DirectChatMemoryV2Candidate): boolean => {
+    const legacyLineage = legacy.runtimeLineageId;
+    const v2Lineage = v2.candidate.runtimeLineageId;
+    // A one-sided lineage is not a safe structural fallback.  If either
+    // projection carries the parser-owned operation token, the pair is valid
+    // only when the other projection carries the same token.  This keeps a
+    // missing transport entry fail-safe instead of silently pairing by source
+    // references alone.
+    if (legacyLineage || v2Lineage) return Boolean(legacyLineage && v2Lineage && legacyLineage === v2Lineage);
+    return true;
+  };
   const annotate = (match: DirectChatMemoryMatch): DirectChatMemoryMatch => {
     const legacyIdentity = match.legacy[0] ? identityForLegacy(match.legacy[0]) : undefined;
     const v2Identity = match.v2[0] ? identityForV2(match.v2[0]) : undefined;

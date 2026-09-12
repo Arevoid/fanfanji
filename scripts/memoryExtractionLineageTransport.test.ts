@@ -142,7 +142,8 @@ const duplicate = matchDirectChatMemoryCandidates({
 });
 assert.equal(duplicate.matches.some((item) => item.correlation === "conflict" || item.correlation === "ambiguous"), true, "duplicate lineage is fail-safe");
 const partial = matchDirectChatMemoryCandidates({ legacy: [legacyCandidates[0]!], v2: [{ ...matched.matches.find((item) => item.v2.length > 0)!.v2[0]!, candidate: { ...matched.matches.find((item) => item.v2.length > 0)!.v2[0]!.candidate, runtimeLineageId: undefined } }], runtime });
-assert.equal(partial.matches.some((item) => item.correlation === "exact"), true, "partial lineage may use strict structural fallback");
+assert.equal(partial.matches.some((item) => item.correlation === "exact"), false, "partial lineage must not use structural fallback");
+assert.equal(partial.matches.some((item) => item.correlation === "unmatched_legacy" || item.correlation === "unmatched_v2"), true, "partial lineage remains fail-safe and unmatched");
 assert.equal(partial.pairCandidateMatrix[0]?.lineageStatus, "partial", "partial lineage is explicitly diagnosed");
 const noSidecar = matchDirectChatMemoryCandidates({ legacy: [{ ...legacyCandidates[0]!, runtimeLineageId: undefined }], v2: [{ ...matched.matches.find((item) => item.v2.length > 0)!.v2[0]!, candidate: { ...matched.matches.find((item) => item.v2.length > 0)!.v2[0]!.candidate, runtimeLineageId: undefined } }], runtime });
 assert.equal(noSidecar.matches.some((item) => item.correlation === "exact"), true, "absent transport preserves legacy structural behavior");
@@ -174,6 +175,9 @@ assert.equal(prompt.includes("runtimeLineage"), false, "lineage is absent from P
 assert.equal(JSON.stringify({ history: context.recentMessages, message: prompt }).includes(legacyLineage0!), false, "lineage is absent from Provider request material");
 const ledgerSource = fs.readFileSync(path.join(process.cwd(), "src/core/monitoring/aiRequestLedger.ts"), "utf8");
 assert.equal(ledgerSource.includes("runtimeLineage"), false, "persistent Ledger implementation has no lineage field");
+const workerSource = fs.readFileSync(path.join(process.cwd(), "src/cloudflare/worker.ts"), "utf8");
+assert.match(workerSource, /structuredCandidatesV2:\s*repaired\.structuredCandidatesV2/u, "Cloudflare extraction DTO preserves additive V2 projections");
+assert.match(workerSource, /v2MetadataPresent:\s*repaired\.v2MetadataPresent/u, "Cloudflare extraction DTO preserves V2 presence marker");
 
 // 17–20: bounded sidecar, no user-visible token export, and architecture
 // isolation from canonical/UI/other feature authorities.

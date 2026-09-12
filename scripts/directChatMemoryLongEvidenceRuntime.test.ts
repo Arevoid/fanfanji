@@ -351,6 +351,37 @@ try {
   assert.equal(crossScope.recorded[0]?.correlationClass, "cross_scope");
   assert.notEqual(crossScope.recorded[0]?.classification, "VALID_ELIGIBLE_SUPPRESSION");
 
+  // A V2-only candidate with a runtime-valid scope is missing its legacy
+  // counterpart, not proven to belong to another scope. It remains review /
+  // invalid evidence and must not be promoted or counted as a safety incident
+  // merely because this batch also wrote other accepted claims.
+  reset();
+  recordAiRequest(envelope("request-v2-only", "runtime-v2-only-action"));
+  const v2Only = await observeDirectChatMemoryLongEvidenceRuntime(canonicalInput({
+    admissionShadow: shadow(bridgeObservation({
+      bridgeCorrelation: "unmatched_v2",
+      lineageStatus: "partial",
+      pairUnique: false,
+      legacyAccepted: false,
+      legacyWriteEligibility: "unknown",
+      legacyProvenanceTrusted: false,
+      v2ProvenanceTrusted: true,
+      bridgeState: "review",
+      bridgeReason: "v2_only_not_write_enabled",
+      legacyIdentity: undefined,
+      v2Identity: { scopeExact: true },
+    })),
+    acceptedClaimsBefore: [claim("claim-survivor") as any],
+    filteredAcceptedClaims: [claim("claim-survivor") as any],
+    canonicalAfter: readback({ activeClaimIds: ["claim-survivor"], activeClaimCount: 1 }),
+    logicalActionId: "runtime-v2-only-action",
+  }));
+  assert.equal(v2Only.recorded[0]?.correlationClass, "unknown");
+  assert.equal(v2Only.recorded[0]?.exactScope, false);
+  assert.equal(v2Only.recorded[0]?.provenanceTrusted, false);
+  assert.equal(v2Only.recorded[0]?.classification, "INVALID_SAMPLE");
+  assert.equal(getDirectChatMemoryLongEvidenceSummary().safetyIncidentCount, 0);
+
   // Readback uses exact scope for claims/summaries and does not leak source text.
   storage.set(storageKeys.characterKnowledgeClaims, JSON.stringify([
     claim("claim-exact"),
