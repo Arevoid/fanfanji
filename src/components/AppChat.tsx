@@ -2659,6 +2659,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         }
         lifecyclePhase = "delivered";
         settlePendingCharacterAvatarChangeAfterReply(replyContext, newMsgs);
+        if (imageDataUrl) delete recentSharedImageByScopeRef.current[imageScopeKey];
         postReplyResult = postReplyCoordinator.schedule({
           mode: "send", policy: "normal_send",
           sideEffects: { userMsg, currentChatMessages, createdMessages: newMsgs, activeCharacter, activeRelationship, relationships, isOffline: true, activeOfflineStoryId },
@@ -2756,6 +2757,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           }
 
           settlePendingCharacterAvatarChangeAfterReply(replyContext, createdMessages);
+          if (imageDataUrl) delete recentSharedImageByScopeRef.current[imageScopeKey];
           postReplyResult = postReplyCoordinator.schedule({
             mode: "send", policy: "normal_send",
             sideEffects: { userMsg, currentChatMessages, createdMessages: [...createdMessages], activeCharacter, activeRelationship, relationships, isOffline: false, activeOfflineStoryId },

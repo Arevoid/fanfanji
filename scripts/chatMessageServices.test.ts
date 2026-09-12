@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../src/features/chat/services/messageFactory";
-import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, expandCallRecordHistory, formatCallRecordHistory, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
+import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, expandCallRecordHistory, formatCallRecordHistory, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizeDirectReplyBubbles, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
 
 const clean = (text: string) => cleanAiReplyText(text, false);
 
@@ -27,6 +27,21 @@ assert.equal(isCallRecordMarkup("[通话记录]|语音通话|00:02|%5B%5D"), tru
 assert.deepEqual(splitAiReplyBubbles("成员A：你好。\n成员B：收到！", false), ["成员A：你好。", "成员B：收到！"]);
 assert.deepEqual(splitAiReplyBubbles("", false), []);
 assert.deepEqual(splitAiReplyBubbles("普通文本。\n[红包]|1|hi\n结束！", false), ["普通文本。", "[红包]|1|hi", "结束！"]);
+assert.deepEqual(
+  splitAiReplyBubbles(["啊啊啊啊啊", "救命救命救命!", "老婆你仔细看看那个指甲!!", "那个指甲缝里的黑泥都能种菜了吧!!", "好恶心好恶心好恶心", "我不买我不买我不买 打死我也不吃!"].join("\n"), false),
+  ["啊啊啊啊啊", "救命救命救命!", "老婆你仔细看看那个指甲!!", "那个指甲缝里的黑泥都能种菜了吧!!", "好恶心好恶心好恶心", "我不买我不买我不买 打死我也不吃!"],
+  "independent short chat lines become separate bubbles even when a provider used single newlines",
+);
+assert.deepEqual(
+  normalizeDirectReplyBubbles(["好。", "真的。", "你确定吗？"], false),
+  ["好", "真的", "你确定吗？"],
+  "repeated full stops are removed while question meaning remains",
+);
+assert.deepEqual(
+  normalizeDirectReplyBubbles(["救命!!", "别这样!", "我看看"], false),
+  ["救命", "别这样", "我看看"],
+  "repeated exclamation marks are not persisted on every bubble",
+);
 assert.deepEqual(removeRedundantCharacterBubbles(["好，哥下来了", "嗯，哥下楼了", "外面有点凉"]), ["好，哥下来了", "外面有点凉"]);
 assert.equal(stripInternalDeliveryMarkers("第一句\n[15:10]\n第二句\n【下午 3：10】"), "第一句\n\n第二句");
 assert.equal(stripInternalDeliveryMarkers("催什么催\n[消息发送时间：2026年8月2日星期日\n17:52]"), "催什么催");

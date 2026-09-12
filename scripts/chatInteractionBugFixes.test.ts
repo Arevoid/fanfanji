@@ -53,6 +53,7 @@ const characterSaveSettings = readFileSync("src/features/chat/hooks/useChatSaveS
 assert.match(characterSaveSettings, /avatar: draftAvatar \|\| activeCharacter\.avatar/);
 const imageContext = readFileSync("src/features/chat/services/recentUserImageContext.ts", "utf8");
 assert.match(appChat, /resolveRecentUserImageForTurn\(\{/i, "direct turns must resolve an explicitly referenced recent image");
+assert.match(appChat, /if \(imageDataUrl\) delete recentSharedImageByScopeRef\.current\[imageScopeKey\]/, "consumed image context must not leak into later unrelated turns");
 assert.match(imageContext, /isLikelyImageReference/);
 const regenerationSource = readFileSync("src/features/chat/hooks/useChatRegenerationAction.ts", "utf8");
 const regenerationScope = readFileSync("src/features/chat/services/regenerationTurnScope.ts", "utf8");

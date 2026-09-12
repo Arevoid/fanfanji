@@ -62,16 +62,24 @@ export const cleanAiReplyText = (text: string, disableBracketActions: boolean): 
 export const splitAiReplyBubbles = splitIntoWeChatBubbles;
 
 /**
- * A few providers append a full stop to every short bubble. Keep punctuation
- * for a persona that explicitly requires it, and otherwise remove only the
- * repeated trailing Chinese stops from a multi-bubble turn. A single coherent
- * paragraph is left untouched so meaningful sentence punctuation is preserved.
+ * A few providers append the same terminal mark to every short bubble. Keep
+ * punctuation for a persona that explicitly requires it, and otherwise remove
+ * only repeated trailing full stops/exclamation marks from a turn. Question
+ * marks remain intact because they carry sentence meaning.
  */
 export function normalizeDirectReplyBubbles(bubbles: readonly string[], keepPeriods: boolean): string[] {
   if (keepPeriods || bubbles.length < 2) return [...bubbles];
-  const periodCount = bubbles.filter((bubble) => /。+$/u.test(bubble.trim())).length;
-  if (periodCount < 2 || periodCount < Math.ceil(bubbles.length * 0.6)) return [...bubbles];
-  return bubbles.map((bubble) => bubble.replace(/。+$/u, "").trim());
+  const repeatedMarkCount = (pattern: RegExp): number => bubbles.filter((bubble) => pattern.test(bubble.trim())).length;
+  const threshold = Math.ceil(bubbles.length * 0.6);
+  const stripPeriods = repeatedMarkCount(/(?:。)+$/u) >= 2
+    && repeatedMarkCount(/(?:。)+$/u) >= threshold;
+  const stripExclamations = repeatedMarkCount(/[！!]+$/u) >= 2
+    && repeatedMarkCount(/[！!]+$/u) >= threshold;
+  if (!stripPeriods && !stripExclamations) return [...bubbles];
+  return bubbles.map((bubble) => bubble
+    .replace(stripPeriods ? /。+$/u : /$^/u, "")
+    .replace(stripExclamations ? /[！!]+$/u : /$^/u, "")
+    .trim());
 }
 
 /**

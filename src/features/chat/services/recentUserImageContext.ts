@@ -2,8 +2,9 @@ import type { Message } from "../../../types";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 
 /**
- * A short-lived image reference is enough to make a follow-up text turn
- * multimodal without attaching an unrelated old photo to every request.
+ * A same-scope image immediately preceding a follow-up text turn remains
+ * multimodal even when the provider takes a long time to answer. Older images
+ * still require an explicit image reference and the bounded age check below.
  * The message itself remains the durable source of truth; this helper only
  * selects an image that is already present in the current direct-chat scope.
  */
@@ -48,8 +49,9 @@ export interface RecentUserImageForTurnInput {
  * An image message is always eligible for its own request. A text message sent
  * immediately after a same-scope image is also eligible; this supports the
  * common “send photo, then explain/ask about it” UI flow even when the text
- * does not literally say “图片”. Older images require an explicit image
- * reference. Another relation and stale images never acquire binary input.
+ * does not literally say “图片” or the reply is delayed. Older images require
+ * an explicit image reference. Another relation and stale unrelated images
+ * never acquire binary input.
  */
 export function resolveRecentUserImageForTurn(input: RecentUserImageForTurnInput): string | undefined {
   const userMessage = input.userMessage;
@@ -66,13 +68,11 @@ export function resolveRecentUserImageForTurn(input: RecentUserImageForTurnInput
   const immediatelyPreviousMessage = scopedUserMessages.find((message) => message.id !== userMessage.id);
   const immediatelyPreviousImage = immediatelyPreviousMessage ? readImageDataUrl(immediatelyPreviousMessage) : undefined;
   if (immediatelyPreviousImage
-    && nowMs - immediatelyPreviousMessage.timestamp >= 0
-    && nowMs - immediatelyPreviousMessage.timestamp <= maxAgeMs) {
+    && nowMs - immediatelyPreviousMessage.timestamp >= 0) {
     return immediatelyPreviousImage;
   }
   const recentImageIsCurrentFollowUp = input.recentImage
     && input.recentImage.timestamp <= nowMs
-    && nowMs - input.recentImage.timestamp <= maxAgeMs
     && !scopedUserMessages.some((message) => message.id !== userMessage.id && message.timestamp > input.recentImage!.timestamp);
   if (recentImageIsCurrentFollowUp) return input.recentImage.dataUrl;
   if (!isLikelyImageReference(userMessage.content)) return undefined;

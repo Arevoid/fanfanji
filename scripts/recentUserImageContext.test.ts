@@ -44,6 +44,11 @@ assert.equal(resolveRecentUserImageForTurn({
   userMessage: { ...followUp, content: "朋友说这个很好吃", id: "text-about-image" },
   scope,
 }), image, "an immediately following text turn keeps the preceding photo visible to the model");
+assert.equal(resolveRecentUserImageForTurn({
+  messages: [imageMessage, { ...followUp, id: "text-long-delay", content: "你还没看清楚这张图吗？", timestamp: 1_000 + 2 * 60 * 60 * 1000 }],
+  userMessage: { ...followUp, id: "text-long-delay", content: "你还没看清楚这张图吗？", timestamp: 1_000 + 2 * 60 * 60 * 1000 },
+  scope,
+}), image, "the same unbroken image turn survives a delayed provider reply");
 const unrelatedEarlierText = { ...followUp, id: "text-between", content: "先聊点别的", timestamp: 1_500 };
 const unrelatedCurrentText = { ...followUp, id: "text-unrelated", content: "今天吃什么？", timestamp: 2_000 };
 assert.equal(resolveRecentUserImageForTurn({
@@ -57,8 +62,12 @@ assert.equal(resolveRecentUserImageForTurn({
   scope,
 }), undefined, "an image from another relation must never cross the scope boundary");
 assert.equal(resolveRecentUserImageForTurn({
-  messages: [{ ...imageMessage, timestamp: 1_000 }, followUp],
-  userMessage: { ...followUp, timestamp: 1_000 + RECENT_USER_IMAGE_MAX_AGE_MS + 1 },
+  messages: [
+    { ...imageMessage, timestamp: 1_000 },
+    { ...followUp, id: "text-between-stale-image", content: "先聊点别的", timestamp: 2_000 },
+    { ...followUp, id: "text-stale-reference", timestamp: 1_000 + RECENT_USER_IMAGE_MAX_AGE_MS + 1 },
+  ],
+  userMessage: { ...followUp, id: "text-stale-reference", timestamp: 1_000 + RECENT_USER_IMAGE_MAX_AGE_MS + 1 },
   scope,
 }), undefined, "stale images must not be attached");
 assert.equal(resolveRecentUserImageForTurn({

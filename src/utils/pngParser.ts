@@ -375,6 +375,10 @@ export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = fal
     && !line.startsWith("【")
     && /^[^：:\n]{1,24}\s*[：:](?=\s*\S)/u.test(line);
   const isStructuredFieldLine = (line: string): boolean => /^【[^】\n]+】\s*[：:]/u.test(line);
+  const isContinuationLine = (line: string): boolean => /^(?:而且|但是|不过|所以|因为|如果|然后|接着|再|也|还|都|保证|给你|让你|我自己|自己|并且|以及|这个|那个|它|他|她|只是|就是|说明|要是|虽然|尤其|顺便)/u.test(line);
+  const isStandaloneChatLine = (line: string): boolean => line.length <= 20
+    && /(?:吗|呢|吧|啊|呀|哦|哎|诶|救命|不对|不是|等等|快点|好看|怎么样|在哪|什么|怎么|为什么)[。！？!?]*$/u.test(line);
+  const startsIndependentChatLine = (line: string): boolean => /^(?:啊|呀|哎|唉|哦|噢|呃|嗯|诶|救命|天啊|不是|不对|不行|好恶心|好烦|我不|我才|我就|你到底|快点|老婆|宝宝|等等)/u.test(line);
   const normalizeBubbleText = (value: string): string => value.trim();
   const results: string[] = [];
   let paragraph: string[] = [];
@@ -391,16 +395,35 @@ export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = fal
     }
 
     // Models sometimes use single newlines for a run of independent short
-    // messages even though the prompt reserves blank lines for bubbles. When
-    // every line is a complete, terminal-punctuated thought, preserve those
-    // clear semantic boundaries instead of merging unrelated lines into one
-    // large bubble. Sentence fragments and ordinary multiline prose still
-    // stay together.
+    // messages even though the prompt reserves blank lines for bubbles. Keep
+    // those boundaries when there are enough short chat-like lines and at
+    // least two clear sentence endings. Continuation lines such as “保证…”
+    // remain attached to the preceding thought, while short reactions and
+    // lines after a terminal sentence start a new bubble.
     if (paragraph.length >= 2
-      && paragraph.every((line) => line.length <= 80 && /[。！？!?]$/u.test(line))) {
-      paragraph.forEach((line) => results.push(normalizeBubbleText(line)));
-      paragraph = [];
-      return;
+      && paragraph.every((line) => line.length <= 80)
+      && paragraph.filter((line) => /[。！？!?]$/u.test(line)).length >= 2
+      && (paragraph.length >= 3 || paragraph.every((line) => /[。！？!?]$/u.test(line)))) {
+      const grouped: string[] = [];
+      let currentLines: string[] = [];
+      paragraph.forEach((line, index) => {
+        const previousLine = paragraph[index - 1];
+        const startsNewBubble = index > 0
+          && Boolean(previousLine && /[。！？!?]$/u.test(previousLine))
+          || (index > 0 && !isContinuationLine(line)
+            && (isStandaloneChatLine(line) || startsIndependentChatLine(line)));
+        if (startsNewBubble && currentLines.length > 0) {
+          grouped.push(normalizeBubbleText(currentLines.join("\n")));
+          currentLines = [];
+        }
+        currentLines.push(line);
+      });
+      if (currentLines.length > 0) grouped.push(normalizeBubbleText(currentLines.join("\n")));
+      if (grouped.length > 1) {
+        results.push(...grouped);
+        paragraph = [];
+        return;
+      }
     }
 
     const paragraphText = paragraph.join("\n").trim();
