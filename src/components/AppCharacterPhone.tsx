@@ -3045,36 +3045,47 @@ export default function AppCharacterPhone({
           </div>
 
           <div className="space-y-2 px-3 pb-6 pt-3">
-            {selectedBrowserDetail.results.map((result, index) => (
-              <article key={`${result.platform}-${result.title}-${index}`} className="rounded-[18px] bg-white px-3 py-3 shadow-[0_1px_3px_rgba(60,64,67,0.16)]">
-                <div className="flex items-start gap-2">
-                  <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${index === 0 ? "bg-[#f1f3f4] text-[#5f6368]" : index === 1 ? "bg-[#fff1e6] text-[#e05a2a]" : "bg-[#e8f0fe] text-[#1967d2]"}`}>
-                    {result.platform.slice(0, 1)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[11px] font-semibold text-[#3c4043]">{result.platform}</p>
-                    <p className="truncate text-[9px] text-[#70757a]">AI 整理 · 相关结果</p>
-                  </div>
-                  <MoreHorizontal className="h-4 w-4 shrink-0 text-[#70757a]" />
-                </div>
-                <h2 className="mt-2 text-[15px] font-semibold leading-5 text-[#1a73e8]">{result.title}</h2>
-                <p className="mt-1 text-[11px] leading-5 text-[#4d5156]">{result.snippet}</p>
-              </article>
-            ))}
+            {selectedBrowserDetail.error ? (
+              <section role="status" aria-live="polite" aria-label="网页访问状态" className="rounded-[18px] border border-[#f3d3a2] bg-[#fff8e8] px-4 py-5 text-center shadow-[0_1px_3px_rgba(60,64,67,0.12)]">
+                <p className="text-[11px] font-semibold text-[#9a6700]">{selectedBrowserDetail.sourceLabel}</p>
+                <h2 className="mt-2 text-[15px] font-semibold text-[#3c4043]">暂时无法打开该网页</h2>
+                <p className="mt-2 text-[12px] leading-5 text-[#5f6368]">{selectedBrowserDetail.summary}</p>
+                <p className="mt-1 text-[11px] leading-5 text-[#70757a]">请稍后重试，或换一个搜索词。</p>
+              </section>
+            ) : (
+              <>
+                {selectedBrowserDetail.results.map((result, index) => (
+                  <article key={`${result.platform}-${result.title}-${index}`} className="rounded-[18px] bg-white px-3 py-3 shadow-[0_1px_3px_rgba(60,64,67,0.16)]">
+                    <div className="flex items-start gap-2">
+                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${index === 0 ? "bg-[#f1f3f4] text-[#5f6368]" : index === 1 ? "bg-[#fff1e6] text-[#e05a2a]" : "bg-[#e8f0fe] text-[#1967d2]"}`}>
+                        {result.platform.slice(0, 1)}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[11px] font-semibold text-[#3c4043]">{result.platform}</p>
+                        <p className="truncate text-[9px] text-[#70757a]">AI 整理 · 相关结果</p>
+                      </div>
+                      <MoreHorizontal className="h-4 w-4 shrink-0 text-[#70757a]" />
+                    </div>
+                    <h2 className="mt-2 text-[15px] font-semibold leading-5 text-[#1a73e8]">{result.title}</h2>
+                    <p className="mt-1 text-[11px] leading-5 text-[#4d5156]">{result.snippet}</p>
+                  </article>
+                ))}
 
-            <section aria-label="角色心声" className="rounded-[18px] border border-[#ffd9df] bg-[#fff1f3] px-3 py-3 shadow-[0_1px_3px_rgba(60,64,67,0.12)]">
-              <div className="flex items-start gap-2.5">
-                <img src={selectedCharacter.avatar} alt="" className="h-11 w-11 shrink-0 rounded-xl border border-white/80 bg-white object-cover shadow-sm" referrerPolicy="no-referrer" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <p className="truncate text-[11px] font-semibold text-[#3c4043]">{selectedCharacter.name}</p>
-                    <span className="rounded-full bg-[#ff6f83] px-1.5 py-0.5 text-[9px] font-bold text-white">心声</span>
+                <section aria-label="角色心声" className="rounded-[18px] border border-[#ffd9df] bg-[#fff1f3] px-3 py-3 shadow-[0_1px_3px_rgba(60,64,67,0.12)]">
+                  <div className="flex items-start gap-2.5">
+                    <img src={selectedCharacter.avatar} alt="" className="h-11 w-11 shrink-0 rounded-xl border border-white/80 bg-white object-cover shadow-sm" referrerPolicy="no-referrer" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className="truncate text-[11px] font-semibold text-[#3c4043]">{selectedCharacter.name}</p>
+                        <span className="rounded-full bg-[#ff6f83] px-1.5 py-0.5 text-[9px] font-bold text-white">心声</span>
+                      </div>
+                      <p className="mt-1 rounded-2xl rounded-tl-md bg-white/85 px-3 py-2 text-[12px] leading-5 text-[#4f3c43]">“{selectedBrowserDetail.reflection}”</p>
+                    </div>
                   </div>
-                  <p className="mt-1 rounded-2xl rounded-tl-md bg-white/85 px-3 py-2 text-[12px] leading-5 text-[#4f3c43]">“{selectedBrowserDetail.reflection}”</p>
-                </div>
-              </div>
-              <p className="mt-2 pl-[53px] text-[10px] leading-4 text-[#a05e69]">角色刚刚留下的私人备注</p>
-            </section>
+                  <p className="mt-2 pl-[53px] text-[10px] leading-4 text-[#a05e69]">角色刚刚留下的私人备注</p>
+                </section>
+              </>
+            )}
           </div>
         </div>
       ) : (

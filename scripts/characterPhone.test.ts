@@ -160,6 +160,8 @@ assert.match(component, /selectedBrowserEntryId/);
 assert.match(component, /setSelectedBrowserEntryId\(item\.id\)/);
 assert.match(component, /角色心声/);
 assert.match(component, /selectedBrowserDetail\.results\.map/);
+assert.match(component, /role="status" aria-live="polite"/);
+assert.match(component, /暂时无法打开该网页/);
 assert.match(component, /AI 整理/);
 assert.match(component, /返回历史搜索/);
 assert.doesNotMatch(component, /简易答案/);

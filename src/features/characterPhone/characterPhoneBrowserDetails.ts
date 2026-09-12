@@ -1,5 +1,18 @@
 import type { CharacterPhoneBrowserEntry, CharacterPhoneBrowserResult } from "../../domain/characterPhone/types";
 
+export type CharacterPhoneBrowserErrorCode =
+  | "cloudflare_block"
+  | "http_403"
+  | "http_429"
+  | "http_5xx"
+  | "http_error"
+  | "html_error";
+
+export interface CharacterPhoneBrowserError {
+  code: CharacterPhoneBrowserErrorCode;
+  status?: number;
+}
+
 export interface CharacterPhoneBrowserDetail {
   summary: string;
   reflection: string;
@@ -7,6 +20,8 @@ export interface CharacterPhoneBrowserDetail {
   /** Legacy compatibility fields; the UI intentionally does not render an external link. */
   sourceUrl: string;
   sourceLabel: string;
+  /** Present only when a saved/generated response is an access/error page. */
+  error?: CharacterPhoneBrowserError;
 }
 
 type BrowserTopicRule = {
@@ -154,6 +169,145 @@ function normalizeResult(value: unknown): CharacterPhoneBrowserResult | null {
   return { platform, title, snippet };
 }
 
+const CLOUDFLARE_BLOCK_PATTERN = /(?:attention required|just a moment|you(?:'|’)ve been blocked|you have been blocked|checking your browser|cf-chl-|cf-error-details|ray\s+id|enable javascript and cookies|error\s*(?:1006|1007|1008|1015|1020)|(?:blocked|denied|challenged)\s+by\s+cloudflare|cloudflare\s+(?:has\s+)?(?:blocked|denied))/i;
+const HTTP_403_PATTERN = /(?:\b403\b\s*(?:error|forbidden|denied|blocked)|(?:http|status|error|response|code)\s*["']?\s*[:#=-]?\s*["']?\s*403\b|\bforbidden\b|\baccess\s+denied\b)/i;
+const HTTP_429_PATTERN = /(?:\b429\b\s*(?:error|too\s+many\s+requests|rate\s*limit)|(?:http|status|error|response|code)\s*["']?\s*[:#=-]?\s*["']?\s*429\b|\btoo\s+many\s+requests\b|\brate\s*limit(?:ed|ing)?\b)/i;
+const HTTP_5XX_PATTERN = /(?:\b5\d{2}\b\s*(?:error|server|service|gateway|unknown)|(?:http|status|error|response|code)\s*["']?\s*[:#=-]?\s*["']?\s*5\d{2}\b|\binternal\s+server\s+error\b|\bbad\s+gateway\b|\bservice\s+unavailable\b|\bgateway\s+timeout\b|\bweb\s+server\s+is\s+down\b|\borigin\s+(?:is\s+)?unreachable\b|\bconnection\s+(?:timed\s+out|timeout)\b)/i;
+const GENERIC_HTTP_ERROR_PATTERN = /(?:\b(?:4\d{2}|5\d{2})\b\s*(?:error|http|status|response)|(?:http|status|error|response|code)\s*["']?\s*[:#=-]?\s*["']?\s*[45]\d{2}\b)/i;
+const HTML_ERROR_PATTERN = /(?:<!doctype\s+html|&lt;!doctype\s+html|<\/?(?:html|head|body|title|script|style|meta|iframe|form)\b|&lt;\/?(?:html|head|body|title|script|style|meta|iframe|form)\b)/i;
+
+function readStatusCode(entry: CharacterPhoneBrowserEntry): number | undefined {
+  const record = entry as unknown as Record<string, unknown>;
+  for (const key of ["status", "statusCode", "httpStatus"]) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isInteger(value) && value >= 400 && value <= 599) return value;
+    if (typeof value === "string" && /^\d{3}$/.test(value)) {
+      const status = Number(value);
+      if (status >= 400 && status <= 599) return status;
+    }
+  }
+  return undefined;
+}
+
+function classifyBrowserErrorText(value: string): CharacterPhoneBrowserError | undefined {
+  // Keep this scan bounded because persisted entries may come from older or
+  // externally generated data. The original text is never returned to UI.
+  const text = value.slice(0, 12000);
+  const bareStatus = text.match(/^\s*(?:http\s*)?([45]\d{2})\s*$/i);
+  if (bareStatus) {
+    const status = Number(bareStatus[1]);
+    return status === 403
+      ? { code: "http_403", status }
+      : status === 429
+        ? { code: "http_429", status }
+        : status >= 500
+          ? { code: "http_5xx", status }
+          : { code: "http_error", status };
+  }
+  const cloudflare = CLOUDFLARE_BLOCK_PATTERN.test(text);
+  if (cloudflare) return { code: "cloudflare_block" };
+  if (HTTP_403_PATTERN.test(text)) return { code: "http_403", status: 403 };
+  if (HTTP_429_PATTERN.test(text)) return { code: "http_429", status: 429 };
+  if (HTTP_5XX_PATTERN.test(text)) {
+    const statusMatch = text.match(/\b(5\d{2})\b/);
+    const status = statusMatch ? Number(statusMatch[1]) : undefined;
+    return { code: "http_5xx", status };
+  }
+  if (GENERIC_HTTP_ERROR_PATTERN.test(text)) return { code: "http_error" };
+  if (HTML_ERROR_PATTERN.test(text)) return { code: "html_error" };
+  return undefined;
+}
+
+function findBrowserError(entry: CharacterPhoneBrowserEntry): CharacterPhoneBrowserError | undefined {
+  const record = entry as unknown as Record<string, unknown>;
+  const status = readStatusCode(entry);
+  if (status !== undefined) {
+    if (status === 403) return { code: "http_403", status };
+    if (status === 429) return { code: "http_429", status };
+    if (status >= 500) return { code: "http_5xx", status };
+    return { code: "http_error", status };
+  }
+
+  // Error details are derived at render time. Generated phone records keep
+  // only this existing, safe source label (not the new `error` object), so a
+  // later render still shows the friendly state without a storage migration.
+  const persistedLabel = entry.sourceLabel?.trim();
+  if (persistedLabel === "请求频率受限") return { code: "http_429", status: 429 };
+  if (persistedLabel === "网页服务暂时不可用") return { code: "http_5xx" };
+  if (persistedLabel === "网页访问受限") return { code: "cloudflare_block" };
+  if (persistedLabel === "网页暂时无法打开") return { code: "html_error" };
+
+  // Titles are normally derived from the search query, but older/generated
+  // records may have copied an error document title. Only strong HTML/HTTP
+  // markers are considered here so a normal search for a site name is safe.
+  if (typeof entry.title === "string") {
+    const title = entry.title.slice(0, 12000);
+    if (CLOUDFLARE_BLOCK_PATTERN.test(title) || HTTP_403_PATTERN.test(title) || HTTP_429_PATTERN.test(title) || HTTP_5XX_PATTERN.test(title) || GENERIC_HTTP_ERROR_PATTERN.test(title) || HTML_ERROR_PATTERN.test(title)) {
+      return classifyBrowserErrorText(title);
+    }
+  }
+
+  const responseTexts: string[] = [];
+  for (const value of [entry.summary, entry.sourceLabel, entry.sourceUrl]) {
+    if (typeof value === "string" && value.trim()) responseTexts.push(value);
+  }
+  if (Array.isArray(entry.results)) {
+    for (const result of entry.results) {
+      if (!result || typeof result !== "object") continue;
+      const resultRecord = result as unknown as Record<string, unknown>;
+      for (const key of ["platform", "title", "snippet", "summary", "answer"]) {
+        const value = resultRecord[key];
+        if (typeof value === "string" && value.trim()) responseTexts.push(value);
+      }
+    }
+  }
+
+  for (const value of responseTexts) {
+    const error = classifyBrowserErrorText(value);
+    if (error) return error;
+  }
+
+  // A normal role reflection can mention the search term (including
+  // “Cloudflare”), so only treat it as an error source for unmistakable HTML
+  // or HTTP error content, never for a bare provider/site name.
+  if (typeof record.reflection === "string") {
+    const reflection = record.reflection.slice(0, 12000);
+    if (HTML_ERROR_PATTERN.test(reflection) || GENERIC_HTTP_ERROR_PATTERN.test(reflection) || HTTP_403_PATTERN.test(reflection) || HTTP_429_PATTERN.test(reflection) || HTTP_5XX_PATTERN.test(reflection)) {
+      return classifyBrowserErrorText(reflection);
+    }
+  }
+  return undefined;
+}
+
+function buildFriendlyBrowserError(error: CharacterPhoneBrowserError): Pick<CharacterPhoneBrowserDetail, "summary" | "reflection" | "sourceLabel"> {
+  if (error.code === "http_429") {
+    return {
+      summary: "目标网站当前请求过于频繁，搜索结果暂时未能加载。",
+      reflection: "网页暂时不肯回应，我先不把它返回的错误页面内容显示出来。稍后再试会更稳妥。",
+      sourceLabel: "请求频率受限",
+    };
+  }
+  if (error.code === "http_5xx") {
+    return {
+      summary: "目标网站暂时出现服务错误，搜索结果未能加载。",
+      reflection: "对方网页现在像是出了点故障，我先把原始错误页挡住，免得它占满屏幕。",
+      sourceLabel: "网页服务暂时不可用",
+    };
+  }
+  if (error.code === "http_403" || error.code === "cloudflare_block") {
+    return {
+      summary: "目标网站暂时拒绝访问，搜索结果未能加载。",
+      reflection: "网页返回了访问限制，我先不把原始错误页面显示出来。可以稍后重试或换个搜索词。",
+      sourceLabel: "网页访问受限",
+    };
+  }
+  return {
+    summary: "目标网页返回了无法显示的内容，搜索结果未能加载。",
+    reflection: "这次网页没有正常打开，我先把原始错误页面挡住。可以稍后重试或换个搜索词。",
+    sourceLabel: "网页暂时无法打开",
+  };
+}
+
 function buildLegacyResults(topic: string, summary: string): CharacterPhoneBrowserResult[] {
   const compactSummary = summary.trim().replace(/\s+/g, " ").slice(0, 220);
   return [
@@ -169,6 +323,19 @@ export function buildCharacterPhoneBrowserDetail(
   characterContext = "",
 ): CharacterPhoneBrowserDetail {
   const topic = findTopic(entry);
+  const cachedSourceUrl = entry.sourceUrl?.trim();
+  const sourceUrl = cachedSourceUrl && /^https?:\/\//i.test(cachedSourceUrl)
+    ? cachedSourceUrl
+    : `https://zh.wikipedia.org/w/index.php?search=${encodeURIComponent(topic)}`;
+  const error = findBrowserError(entry);
+  if (error) {
+    return {
+      ...buildFriendlyBrowserError(error),
+      results: [],
+      sourceUrl,
+      error,
+    };
+  }
   const normalized = topic.toLocaleLowerCase();
   const matched = BROWSER_TOPIC_RULES.find((rule) =>
     rule.keywords.some((keyword) => normalized.includes(keyword.toLocaleLowerCase())),
@@ -183,14 +350,11 @@ export function buildCharacterPhoneBrowserDetail(
   const generatedResults = Array.isArray(entry.results)
     ? entry.results.map(normalizeResult).filter((result): result is CharacterPhoneBrowserResult => Boolean(result)).slice(0, 3)
     : [];
-  const cachedSourceUrl = entry.sourceUrl?.trim();
   return {
     summary,
     reflection,
     results: generatedResults.length >= 2 ? generatedResults : buildLegacyResults(topic, summary),
-    sourceUrl: cachedSourceUrl && /^https?:\/\//i.test(cachedSourceUrl)
-      ? cachedSourceUrl
-      : `https://zh.wikipedia.org/w/index.php?search=${encodeURIComponent(topic)}`,
+    sourceUrl,
     sourceLabel: entry.sourceLabel?.trim() || "中文维基百科检索入口",
   };
 }

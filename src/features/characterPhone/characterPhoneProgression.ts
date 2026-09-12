@@ -1062,13 +1062,20 @@ export async function advanceCharacterPhoneWithResult(
       ...(draft.results.length >= 2 ? { results: draft.results } : {}),
       ...(draft.reflection ? { reflection: draft.reflection } : {}),
     };
+    const browserDetail = buildCharacterPhoneBrowserDetail(
+      entryBase,
+      roleName,
+      `${input.character.personality || ""}\n${input.character.backstory || ""}`,
+    );
     const entry = {
       ...entryBase,
-      ...buildCharacterPhoneBrowserDetail(
-        entryBase,
-        roleName,
-        `${input.character.personality || ""}\n${input.character.backstory || ""}`,
-      ),
+      // Keep the existing browser-entry storage shape. `error` is a
+      // display-time detail and must not become a persisted schema field.
+      summary: browserDetail.summary,
+      reflection: browserDetail.reflection,
+      results: browserDetail.results,
+      sourceUrl: browserDetail.sourceUrl,
+      sourceLabel: browserDetail.sourceLabel,
     };
     pushArtifact("browser", next.browserHistory, entry, (value) => `${normalizeArtifactText(value.query)}|${normalizeArtifactText(value.title)}`);
   });

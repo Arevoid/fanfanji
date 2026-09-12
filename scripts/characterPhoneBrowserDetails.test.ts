@@ -82,4 +82,67 @@ const unsafeSourceDetail = buildCharacterPhoneBrowserDetail({
 }, "步随影");
 assert.match(unsafeSourceDetail.sourceUrl, /^https:\/\/zh\.wikipedia\.org\//);
 
+const cloudflareDocsDetail = buildCharacterPhoneBrowserDetail({
+  id: "search-cloudflare-docs",
+  query: "Cloudflare 使用教程",
+  title: "关于“Cloudflare 使用教程”的搜索结果",
+  summary: "Cloudflare 可用于缓存和保护网站，配置时应先确认域名与 DNS 设置。",
+  results: [
+    { platform: "官方文档", title: "Cloudflare 配置指南", snippet: "先确认域名状态，再按文档完成 DNS 配置。" },
+    { platform: "技术社区", title: "常见配置问题", snippet: "逐项核对缓存和证书设置即可。" },
+  ],
+  timestamp: 5.5,
+}, "步随影");
+assert.equal(cloudflareDocsDetail.error, undefined, "normal Cloudflare documentation must remain a normal result");
+assert.equal(cloudflareDocsDetail.results.length, 2);
+
+const cloudflareDetail = buildCharacterPhoneBrowserDetail({
+  id: "search-cloudflare",
+  query: "最新资讯",
+  title: "关于“最新资讯”的搜索结果",
+  summary: "<!doctype html><html><head><title>Attention Required! | Cloudflare</title></head><body>Sorry, you have been blocked. Ray ID: abc123</body></html>",
+  reflection: "Cloudflare 暂时挡住了网页。",
+  results: [
+    { platform: "Cloudflare", title: "Attention Required", snippet: "<html><body>Checking your browser before accessing...</body></html>" },
+  ],
+  timestamp: 6,
+}, "步随影");
+assert.equal(cloudflareDetail.error?.code, "cloudflare_block");
+assert.equal(cloudflareDetail.results.length, 0, "blocked HTML must not reach result cards");
+assert.equal(cloudflareDetail.sourceLabel, "网页访问受限");
+assert.match(cloudflareDetail.summary, /拒绝访问|未能加载/);
+assert.doesNotMatch(`${cloudflareDetail.summary}\n${cloudflareDetail.reflection}\n${cloudflareDetail.sourceLabel}`, /Cloudflare|Ray ID|<html|blocked/i);
+
+const htmlErrorDetail = buildCharacterPhoneBrowserDetail({
+  id: "search-html-error",
+  query: "网页",
+  title: "关于“网页”的搜索结果",
+  summary: "<html><body>Unexpected HTML error document</body></html>",
+  timestamp: 7,
+}, "步随影");
+assert.equal(htmlErrorDetail.error?.code, "html_error");
+assert.equal(htmlErrorDetail.results.length, 0);
+
+const statusErrorCases = [
+  ["403 Forbidden", "http_403", 403],
+  ["429 Too Many Requests", "http_429", 429],
+  ["500 Internal Server Error", "http_5xx", 500],
+  ["502 Bad Gateway", "http_5xx", 502],
+  ["503 Service Unavailable", "http_5xx", 503],
+  ["504 Gateway Timeout", "http_5xx", 504],
+] as const;
+for (const [message, code, status] of statusErrorCases) {
+  const detail = buildCharacterPhoneBrowserDetail({
+    id: `search-${status}`,
+    query: "目标网站",
+    title: "关于“目标网站”的搜索结果",
+    summary: message,
+    timestamp: status,
+  }, "步随影");
+  assert.equal(detail.error?.code, code);
+  assert.equal(detail.error?.status, status);
+  assert.equal(detail.results.length, 0);
+  assert.doesNotMatch(detail.summary, new RegExp(String(status)));
+}
+
 console.log("character phone browser detail tests passed");
