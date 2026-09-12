@@ -8,6 +8,11 @@ import { DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT, MAX_CHAT_CONTEXT_MEMORY_LIMIT } from
 const DEFAULT_HISTORY_CHARACTER_LIMIT = 16_000;
 const DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT = 6_000;
 
+const isUserImageMessage = (message: Message): boolean => message.sender === "user"
+  && (Boolean(message.imageAssetId)
+    || /^data:image\//iu.test(message.content.trim())
+    || /^\[图片\](?:$|\|)/u.test(message.content.trim()));
+
 function selectRecentMessagesWithinBudget(
   messages: readonly Message[],
   characterLimit: number,
@@ -69,16 +74,25 @@ export function buildDirectChatHistoryContext(input: {
     if (excludedIds.has(message.id)) return false;
     return !(input.userMessageId && latestMessage?.id === input.userMessageId && message.id === input.userMessageId);
   });
+  const latestImage = [...messagesForHistory].reverse().find(isUserImageMessage);
+  const latestNonImage = messagesForHistory.filter((message) => !isUserImageMessage(message)).at(-1);
+  // An image sent after a long pause is a new live turn. Keep the image in
+  // history, but use the prior non-image message as the continuity anchor so
+  // stale scene text is moved to the historical reference section.
+  const boundaryReferenceAt = latestImage && latestNonImage && latestImage.timestamp > latestNonImage.timestamp
+    ? latestNonImage.timestamp
+    : undefined;
   const isCrossDayNewSession = shouldUseCrossDayHistoryBoundary({
     enableTimeAwareness: input.enableTimeAwareness,
     currentMessageAt: input.userMessageAt,
-    latestHistoryMessageAt: messagesForHistory[messagesForHistory.length - 1]?.timestamp,
+    latestHistoryMessageAt: boundaryReferenceAt ?? messagesForHistory[messagesForHistory.length - 1]?.timestamp,
   });
   const requestTime = input.requestTime || new Date();
   const historyPartition = partitionDirectChatHistoryByCurrentDay({
     messages: messagesForHistory,
     currentMessageAt: input.userMessageAt,
     enableTimeAwareness: input.enableTimeAwareness,
+    boundaryReferenceAt,
   });
   const liveWindow = historyPartition.liveMessages.slice(-Math.min(MAX_CHAT_CONTEXT_MEMORY_LIMIT, Math.max(0, input.contextLimit ?? DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT)));
   const recentMessages = selectRecentMessagesWithinBudget(

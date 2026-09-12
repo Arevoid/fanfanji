@@ -12,9 +12,16 @@ assert.equal(request.history[0].role, "system");
 assert.equal((request as Record<string, unknown>).diagnostics, undefined);
 
 let capturedMessage = "";
-const directAi = (async (input) => { capturedMessage = input.message; return { text: "回复" }; }) as typeof apiChat;
+let capturedImageDataUrl: string | undefined;
+const directAi = (async (input) => { capturedMessage = input.message; capturedImageDataUrl = input.imageDataUrl; return { text: "回复" }; }) as typeof apiChat;
 assert.equal((await requestDirectChatTurn({ prompt, settings, requestAi: directAi })).text, "回复");
 assert.equal(capturedMessage, "当前");
+await requestDirectChatTurn({
+  prompt: { ...prompt, imageDataUrl: "data:image/png;base64,IMAGE" },
+  settings,
+  requestAi: directAi,
+});
+assert.equal(capturedImageDataUrl, "data:image/png;base64,IMAGE", "direct provider requests preserve selected visual input");
 
 let aliasGuardAttempts = 0;
 let aliasGuardInstruction = "";

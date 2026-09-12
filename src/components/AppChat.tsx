@@ -105,6 +105,8 @@ import { INLINE_INNER_VOICE_INSTRUCTION, isChatResponseFormatError } from "../fe
 import { generateCharacterImageForDelivery } from "../features/chat/services/characterImageDeliveryService";
 import { imageDataUrlToBlob, parseCharacterSaveUserImageDirective } from "../features/chat/services/userImageMemoryService";
 import { characterAvatarReplyRefusesChange, isExplicitCharacterAvatarChangeRequest, resolveCharacterAvatarChangeTiming, type CharacterAvatarChangeTiming } from "../features/chat/services/characterAvatarChangeIntent";
+import { resolveRecentUserImageForTurn } from "../features/chat/services/recentUserImageContext";
+import { resolveChatMessageAvatar } from "../features/chat/services/messageAvatarResolver";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
 import { ensureDirectReplyTranslation } from "../features/chat/services/directReplyTranslation";
@@ -2500,12 +2502,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           ? `\n\n[本轮隐性归因提醒] 历史中的“角色手机代发消息”不是${activeCharacter.name}本人说的。用户当前只是在对这条消息作反应；回复第一句必须先自然地质疑或否认作者身份（例如“分手？我什么时候说过这句？”），再回应用户，不要先道歉、认领、说成玩笑或把代发内容归因于模型抽风。不要把代发内容改写成${activeCharacter.name}刚刚主动说过的话，也不要主动告诉用户是谁操作的。`
           : ""}`
         : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
-      const imageDataUrl = userMsg?.sender === "user"
-        && /^data:image\//i.test(userMsg.content.trim())
-        ? userMsg.content.trim()
-        : undefined;
+      const imageScopeKey = `${replyContext.userIdentityId}:${replyContext.characterId}:${replyContext.relationId || replyContext.conversationId || "group"}`;
+      const imageDataUrl = resolveRecentUserImageForTurn({
+        messages: sourceMsgs,
+        userMessage: userMsg,
+        scope: replyContext,
+        recentImage: recentSharedImageByScopeRef.current[imageScopeKey],
+      });
       const imageInstruction = imageDataUrl
-        ? `\n【当前用户消息包含真实图片】请先直接观察并识别图片中的主体、物品和场景，再回答；不要仅凭‘发送图片’这段文字猜测，也不要把包、袋子等物品擅自判断成衣服。
+        ? `\n【本轮请求包含真实图片】请先直接观察并识别图片中的主体、物品和场景，再回答；图片可能是当前消息随附的，也可能是用户刚刚发送后正在追问的同一张图片。不要仅凭‘发送图片’这段文字猜测，也不要把包、袋子等物品擅自判断成衣服。
 【用户图片留存判断】这张图片是否值得放进你的私人相册，由你根据当前关系、情绪、图片内容和这次对话自然判断。不要每张都保存，只有少数确实有纪念意义、对你重要或你明确想留着的图片才保存。若决定保存，请在整段回复末尾单独输出内部标记 ${"[[SAVE_USER_IMAGE]]"}，不要解释标记；若不保存，不要输出该标记。该标记不会展示给用户。`
         : "";
       const preparedDirectReply = prepareDirectReplyTurn({
@@ -7247,7 +7252,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 : undefined;
               const userNameSnapshot = msg.authorNameSnapshot || messageIdentity?.name || activeIdentityName;
               const userAvatarSnapshot = msg.authorAvatarSnapshot || messageIdentity?.avatar || activeIdentityAvatar;
-              const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? userAvatarSnapshot : activeCharacter.avatar);
+              const displayedUserAvatar = resolveChatMessageAvatar({
+                isSelf,
+                isGroupChat: activeCharacter.isGroupChat,
+                messageAvatarSnapshot: userAvatarSnapshot,
+                messageAuthorIdentityId: msg.authorIdentityId,
+                currentIdentityId: activeIdentityId,
+                currentIdentityAvatar: activeIdentityAvatar,
+              });
+              const msgAvatar = groupSenderChar ? groupSenderChar.avatar : (isSelf ? displayedUserAvatar : activeCharacter.avatar);
               const msgName = groupSenderChar ? (groupSenderChar.remark || groupSenderChar.name) : (isSelf ? userNameSnapshot : activeCharacterDisplayName);
               // A direct AI turn can be split into several consecutive bubbles,
               // while the collapsed avatar is rendered only on the first one.

@@ -1,6 +1,8 @@
 import type { Message, OfflineStory } from "../../../types";
 import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../services/chatMemoryRetrievalSettings";
 import { buildAliasIdentityBoundaryPrompt, buildAliasIdentityFinalGuardPrompt } from "../../../domain/prompt/aliasIdentityBoundary";
+import { resolveRecentUserImageForTurn } from "../services/recentUserImageContext";
+import { resolveRegenerationTurnScope } from "../services/regenerationTurnScope";
 
 /** Mechanical extraction of the existing regeneration path; dependencies stay explicit in the page context. */
 export function useChatRegenerationAction(context: Record<string, any>) {
@@ -39,10 +41,12 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     // 1. Delete target message
     if (onDeleteMessage) deleteMessageAndLinkedImage(targetMsg.id);
 
-    // 2. Find the chat history excluding the targetMsg
-      const previousMessages = currentChatMessages.filter((m) => m.id !== targetMsg.id);
-    // Find the last user message
-      const lastUserMsg = [...previousMessages].reverse().find((m) => m.sender === "user");
+    // 2. Scope regeneration to the selected reply's own turn. Later user
+    // messages belong to a different turn and must not become the prompt for
+    // an older regenerated reply.
+    const regenerationTurn = resolveRegenerationTurnScope(currentChatMessages, targetMsg);
+    const previousMessages = regenerationTurn.messagesBeforeTarget;
+    const lastUserMsg = regenerationTurn.userMessage;
       if (!lastUserMsg) return;
       const regenerationCognitiveContext = activeRelationship && !activeCharacter.isGroupChat
         ? (() => {
@@ -391,8 +395,19 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         userName: promptUserName,
         characterName: activeCharacter.name,
       });
+      const imageDataUrl = resolveRecentUserImageForTurn({
+        messages: previousMessages,
+        userMessage: lastUserMsg,
+        scope: {
+          characterId: activeChatCharId,
+          relationId: activeRelationship?.id || null,
+          conversationId: activeRelationship?.conversationId || (activeRelationship ? getConversationId(activeRelationship.id) : null),
+          userIdentityId: activeIdentityId,
+          isGroup: activeCharacter.isGroupChat,
+        },
+      });
       const { data, candidates: replyCandidates } = await generateRegeneratedChatTurn({
-        prompt: { scenario: "regenerate", message: promptMessage, history, systemInstruction, historyInjections: wbBlocks.at_depth },
+        prompt: { scenario: "regenerate", message: promptMessage, history, systemInstruction, imageDataUrl, historyInjections: wbBlocks.at_depth },
         settings,
         candidateContext: {
           disableBracketActions: turnSettings.disableBracketActions,

@@ -18,14 +18,16 @@ export function partitionDirectChatHistoryByCurrentDay<T extends { timestamp: nu
   currentMessageAt?: number;
   enableTimeAwareness: boolean;
   historicalLimit?: number;
+  /** Optional continuity anchor when the newest event is a new media turn. */
+  boundaryReferenceAt?: number;
 }): { liveMessages: T[]; historicalMessages: T[]; hasCrossDayHistory: boolean } {
   if (!input.enableTimeAwareness || !input.currentMessageAt) {
     return { liveMessages: [...input.messages], historicalMessages: [], hasCrossDayHistory: false };
   }
   const current = new Date(input.currentMessageAt);
-  const latestHistoryAt = input.messages.length > 0
+  const latestHistoryAt = input.boundaryReferenceAt ?? (input.messages.length > 0
     ? Math.max(...input.messages.map((message) => message.timestamp))
-    : undefined;
+    : undefined);
   const hasLongGap = shouldUseLongGapHistoryBoundary({
     enableTimeAwareness: input.enableTimeAwareness,
     currentMessageAt: input.currentMessageAt,

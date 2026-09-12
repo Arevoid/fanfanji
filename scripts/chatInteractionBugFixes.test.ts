@@ -51,5 +51,15 @@ const phone = readFileSync("src/components/AppCharacterPhone.tsx", "utf8");
 assert.match(phone, /draftsByContact/);
 const characterSaveSettings = readFileSync("src/features/chat/hooks/useChatSaveSettings.ts", "utf8");
 assert.match(characterSaveSettings, /avatar: draftAvatar \|\| activeCharacter\.avatar/);
+const imageContext = readFileSync("src/features/chat/services/recentUserImageContext.ts", "utf8");
+assert.match(appChat, /resolveRecentUserImageForTurn\(\{/i, "direct turns must resolve an explicitly referenced recent image");
+assert.match(imageContext, /isLikelyImageReference/);
+const regenerationSource = readFileSync("src/features/chat/hooks/useChatRegenerationAction.ts", "utf8");
+const regenerationScope = readFileSync("src/features/chat/services/regenerationTurnScope.ts", "utf8");
+assert.match(regenerationSource, /resolveRegenerationTurnScope/);
+assert.match(regenerationScope, /messagesBeforeTarget/);
+const avatarResolver = readFileSync("src/features/chat/services/messageAvatarResolver.ts", "utf8");
+assert.match(appChat, /resolveChatMessageAvatar\(\{/);
+assert.match(avatarResolver, /isGroupChat/);
 
 console.log("PASS chat keyboard, media, avatar intent, bubble formatting, settings and draft safeguards");
