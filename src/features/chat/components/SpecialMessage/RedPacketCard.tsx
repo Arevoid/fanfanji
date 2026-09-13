@@ -25,16 +25,16 @@ export function RedPacketCard({ amount, greeting, status, isSelf, onClick }: Red
           <span className="wechat-redpacket__icon-symbol">🧧</span>
         </span>
         <div className="wechat-redpacket__content">
-          <span className="special-payment-card__title wechat-redpacket__title">红包</span>
+          <span className="special-payment-card__title redpacket-card__legacy-title" aria-hidden="true">红包</span>
+          <div className="special-payment-card__note wechat-redpacket__title">{greeting}</div>
           <span className="special-payment-card__status wechat-redpacket__status">{action}</span>
         </div>
       </div>
       <div className="special-payment-card__money wechat-redpacket__money">¥{amount}</div>
-      <div className="special-payment-card__note">{greeting}</div>
       <span
         className="special-payment-card__brand redpacket-card__brand wechat-redpacket__footer"
       >
-        Pay
+        微信红包
       </span>
     </button>
   );

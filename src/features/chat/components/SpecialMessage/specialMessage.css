@@ -14,6 +14,7 @@
 }
 
 .message-quote__content {
+  display: block;
   background: transparent;
   border: 2px solid var(--quote-border);
   border-radius: 1.35rem;
@@ -119,6 +120,10 @@
 .wechat-transfer__icon { display: none; }
 .wechat-redpacket__content,
 .wechat-transfer__content { display: contents; }
+
+/* The legacy title remains a real, independently hideable label.  The
+ * WeChat hook next to it is the greeting and carries the semantic title. */
+.redpacket-card__legacy-title { display: inline; }
 
 .redpacket-card .special-payment-card__title {
   font-size: 0.66rem;

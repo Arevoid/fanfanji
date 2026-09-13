@@ -34,6 +34,13 @@ for (const selector of [
 assert.match(redPacketSource, /chat-message--payment chat-message--red-packet special-payment-card redpacket-card cv-transfer/);
 assert.match(transferSource, /chat-message--payment chat-message--transfer special-payment-card transfer-card cv-transfer/);
 assert.match(forumShareSource, /chat-message--forum-share/);
+const quoteReplyBodyIndex = chatSource.indexOf("message-quote__reply-body px-3");
+const quoteBlockIndex = chatSource.indexOf("message-quote message-quote__header");
+assert.ok(quoteReplyBodyIndex >= 0 && quoteBlockIndex > quoteReplyBodyIndex, "quote body must precede the combined quote block");
+assert.match(chatSource, /message-quote message-quote__header[\s\S]*message-quote__prefix[\s\S]*message-quote__author[\s\S]*message-quote__separator[\s\S]*message-quote__content/);
+assert.match(redPacketSource, /special-payment-card__note wechat-redpacket__title/);
+assert.match(redPacketSource, /wechat-redpacket__footer[\s\S]*微信红包/);
+assert.match(redPacketSource, /redpacket-card__legacy-title/);
 for (const hook of [
   "message-quote__author",
   "message-quote__separator",

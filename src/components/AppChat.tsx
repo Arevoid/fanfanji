@@ -7622,19 +7622,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               : quoteReply?.author;
                             return quoteReply ? (
                               <>
-                                <div className="message-quote__header">
-                                  <span className="message-quote__prefix">↩ {isSelf ? "你回复了" : "回复了"}</span>{" "}
-                                  <span className="message-quote__author">{quoteAuthor}</span>
-                                  <span className="message-quote__separator" aria-hidden="true">：</span>
-                                </div>
-                                <div className="message-quote text-left text-[11px]">
-                                  <div className="message-quote__content px-3 py-2">{quoteReply.content}</div>
-                                </div>
                                 <div className={`chat-message--text message-quote__reply-body px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                                   isSelf
                                     ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self pr-6")
                                     : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other border border-slate-100 pr-6")
                                 } ${messageGroupClass}`}>{quoteReply.body}</div>
+                                <div className="message-quote message-quote__header text-left text-[11px]">
+                                  <span className="message-quote__prefix">↩ {isSelf ? "你回复了" : "回复了"}</span>{" "}
+                                  <span className="message-quote__author">{quoteAuthor}</span>
+                                  <span className="message-quote__separator" aria-hidden="true">：</span>
+                                  <span className="message-quote__content px-3 py-2">{quoteReply.content}</span>
+                                </div>
                               </>
                             ) : <div className="text-left">{msg.content}</div>;
                           })()}

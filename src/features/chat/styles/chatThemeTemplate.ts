@@ -251,7 +251,8 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 .wechat-redpacket__title,
 .wechat-redpacket__status,
 .wechat-redpacket__money,
-.wechat-redpacket__footer { }
+.wechat-redpacket__footer,
+.redpacket-card__legacy-title { }
 
 /* ==================== 转账语义接口（仅钩子，不写默认微信视觉） ==================== */
 .wechat-transfer__main,
