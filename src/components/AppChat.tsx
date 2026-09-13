@@ -710,12 +710,6 @@ export default function AppChat({
   // bubbleCss remains a scoped legacy compatibility source.
   const userCustomChatCssSources = [settings.bubbleCss, settings.chatGlobalCSS, characterCustomChatCss];
   const hasUserCustomChatCss = userCustomChatCssSources.some((css) => Boolean(css && css.trim()));
-  // Avatar selectors are an explicit visual override for the built-in
-  // consecutive-avatar setting. Keep this narrow so unrelated custom CSS does
-  // not change message grouping, while avatar themes can opt into every row.
-  const customCssTargetsAvatar = userCustomChatCssSources.some((css) =>
-    /\.(?:ai-avatar|user-avatar)\b/.test(css || ""),
-  );
   useChatCustomCss(userCustomChatCssSources, activeCharacter?.chatBg);
 
   // Long-lived callbacks can outlive the render in which they were created.
@@ -7261,8 +7255,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               const showAvatar = isPhoneAwarenessMessage
                 || Boolean(msg.sentFromCharacterPhone)
                 || !isConsecutivePrev
-                || !shouldCollapse
-                || customCssTargetsAvatar;
+                || !shouldCollapse;
               const isAvatarCollapsed = !showAvatar;
               const avatarVisibilityClass = isAvatarCollapsed ? "cv-avatar-collapsed invisible" : "cv-avatar-visible";
               const avatarCollapseState = isAvatarCollapsed ? "true" : "false";
