@@ -10,5 +10,9 @@ assert.match(hook, /createProactiveOfflinePreferencePatch/);
 assert.match(hook, /updateRelationshipSession\(activeRelationship\.id/);
 assert.match(hook, /apiTranslate\(/);
 assert.match(hook, /setIsShowingCardModal\(false\)/);
+assert.match(hook, /enableProactiveCall: draftEnableProactiveCall/);
+assert.match(hook, /disableBracketActions: draftDisableBracketActions/);
+assert.match(hook, /enableTimeAwareness: draftEnableTimeAwareness/);
+assert.match(hook, /enableAutoTranslate: draftEnableAutoTranslate/);
 
 console.log("PASS chat settings save and auto-translation are isolated behind a behavior-preserving hook");

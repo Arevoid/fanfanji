@@ -30,6 +30,8 @@ export interface UseChatControllerOptions {
   /** Allows the host surface to observe a user-authored message without
    * moving feature-specific side effects into this controller. */
   onUserMessageCreated?: (message: Message, context: ChatRuntimeContext) => void;
+  /** Allows a host surface to route an explicit call request to its real call UI. */
+  onExplicitVoiceCallRequest?: (message: Message, context: ChatRuntimeContext) => boolean;
   onMessagePersistenceComplete?: () => boolean | Promise<boolean>;
   generateResponseForUserMessage: ChatResponseHandler;
   generateAndSendCharacterImage: CharacterImageHandler;
@@ -56,6 +58,7 @@ export function useChatController({
   currentChatMessages,
   onSendMessage,
   onUserMessageCreated,
+  onExplicitVoiceCallRequest,
   onMessagePersistenceComplete,
   generateResponseForUserMessage,
   generateAndSendCharacterImage,
@@ -181,6 +184,15 @@ export function useChatController({
       });
       onSendMessage(userMessage);
       onUserMessageCreated?.(userMessage, runtimeContext);
+
+      // A direct, explicit call request must enter the existing voice-call
+      // lifecycle instead of asking the text model to simulate a telephone
+      // conversation. The user message is retained in chat history, while the
+      // call UI owns the subsequent transcript and provider requests.
+      if (onExplicitVoiceCallRequest?.(userMessage, runtimeContext)) {
+        await confirmMessagePersistence();
+        return;
+      }
 
       // An explicit image request is an image-only turn: the real image must be
       // persisted before any character text is allowed.

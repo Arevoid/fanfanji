@@ -37,6 +37,7 @@ import { completeVoiceCall } from "../features/chat/services/voiceCallCompletion
 import { buildDirectChatContextSnapshot } from "../features/chat/services/directChatContextSnapshotBuilder";
 import { prepareDirectReplyContext, prepareDirectReplyTurn, type DirectReplyPromptPreparationInput } from "../features/chat/services/directReplyPreparation";
 import { useProactiveCallScheduler } from "../features/chat/hooks/useProactiveCallScheduler";
+import { isExplicitVoiceCallRequest } from "../features/chat/services/voiceCallIntent";
 import { useChatPaymentState } from "../features/chat/hooks/useChatPaymentState";
 import { useChatProfileState } from "../features/chat/hooks/useChatProfileState";
 import { useChatGroupState } from "../features/chat/hooks/useChatGroupState";
@@ -3256,6 +3257,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       if (message.sender === "user" && !/^data:image\//i.test(message.content.trim())) {
         handleExplicitCharacterAvatarChangeRequest(message.content, context);
       }
+    },
+    onExplicitVoiceCallRequest: (message, context) => {
+      if (context.isGroup || activeCharacter?.isGroupChat || !activeVoiceCallScope) return false;
+      if (!isExplicitVoiceCallRequest(message.content)) return false;
+      beginVoiceCall(false);
+      return true;
     },
     onReplyStopped: () => {
       setIsTyping(false);

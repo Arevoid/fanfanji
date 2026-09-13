@@ -60,7 +60,10 @@ export function useChatSettingsDraft() {
     setDraftContextMemoryLimit(resolveChatContextMemoryLimit(character.contextMemoryLimit));
     setDraftRetrievalHistoryLimit(resolveChatLongTermMemoryLimit(character.retrievalHistoryLimit));
     setDraftArchiveTemplateType(character.archiveTemplateType || "refined");
-    setDraftEnableTimeAwareness(character.enableTimeAwareness || false);
+    // Chat runtime treats an absent value as enabled for legacy characters.
+    // Keep the draft aligned with that compatibility default so merely
+    // opening and saving settings does not silently turn time awareness off.
+    setDraftEnableTimeAwareness(character.enableTimeAwareness !== false);
     setDraftEnableAutoTranslate(character.enableAutoTranslate || false);
     setDraftMinimaxVoiceId(character.minimaxVoiceId || "");
     setDraftMosslandVoiceId(character.mosslandVoiceId || "");

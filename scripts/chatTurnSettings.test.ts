@@ -13,4 +13,6 @@ assert.equal(resolveChatTurnSettings(character).disableBracketActions, false);
 const routine = { timezone: "Asia/Shanghai", sleepStart: "22:00", sleepEnd: "07:00" } as any;
 assert.equal(resolveChatRoutine(routine, true), routine);
 assert.equal(resolveChatRoutine(routine, false), undefined, "disabled time awareness must not leak routine state");
+
+assert.equal(resolveChatTurnSettings({}).enableTimeAwareness, true, "legacy characters keep the runtime default enabled");
 console.log("chatTurnSettings.test.ts passed");
