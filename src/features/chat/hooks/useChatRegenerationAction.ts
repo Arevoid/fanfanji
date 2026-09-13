@@ -147,6 +147,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
         timeLogString,
         isCrossDayNewSession,
         hasCrossDayHistory,
+        topicBoundary,
       } = historyContext;
       const msgsForHistory = normalizedMessagesForHistory;
       const historyPartition = { hasCrossDayHistory };
@@ -290,7 +291,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
         currentMessageContextText,
-        ...previousMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name }))
+        ...(topicBoundary.mode === "shift" ? [] : previousMessages.slice(-10)).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
       const characterBehaviorPrompt = buildCharacterBehaviorPrompt({

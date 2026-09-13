@@ -2144,7 +2144,7 @@ export default function AppChat({
         characterName: activeCharacter.name,
         userName: promptUserName,
       });
-      const { finalMessages: finalMsgs, messagesForHistory: msgsForHistory, recentMessages: slicedMsgs, history, crossDayHistoricalReference, timeLogString, isCrossDayNewSession } = historyContext;
+      const { finalMessages: finalMsgs, messagesForHistory: msgsForHistory, recentMessages: slicedMsgs, history, crossDayHistoricalReference, timeLogString, isCrossDayNewSession, topicBoundary } = historyContext;
       const historyPartition = { hasCrossDayHistory: historyContext.hasCrossDayHistory };
       const requestTime = historyContext.requestTime;
 
@@ -2343,7 +2343,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       // Context-aware trigger scanning: current message plus roughly ten recent messages.
       const scanContextParts = [
         currentMessageContextText,
-        ...currentChatMessages.slice(-10).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name }))
+        ...(topicBoundary.mode === "shift" ? [] : currentChatMessages.slice(-10)).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name }))
       ];
       const scanText = scanContextParts.filter(Boolean).join("\n");
       const characterBehaviorPrompt = buildCharacterBehaviorPrompt({

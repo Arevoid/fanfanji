@@ -4,6 +4,10 @@ import { buildCrossDayHistoricalReferencePrompt, partitionDirectChatHistoryByCur
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../prompts/messagePromptSerializer";
 import { formatWeChatTimestamp } from "./chatTime";
 import { DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT, MAX_CHAT_CONTEXT_MEMORY_LIMIT } from "./chatMemoryRetrievalSettings";
+import {
+  decideDirectChatTopicBoundary,
+  type DirectChatTopicBoundaryDecision,
+} from "./directChatTopicBoundary";
 
 const DEFAULT_HISTORY_CHARACTER_LIMIT = 16_000;
 const DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT = 6_000;
@@ -63,6 +67,7 @@ export function buildDirectChatHistoryContext(input: {
   timeLogString: string;
   isCrossDayNewSession: boolean;
   hasCrossDayHistory: boolean;
+  topicBoundary: DirectChatTopicBoundaryDecision;
   requestTime: Date;
 } {
   const uniqueMessages = new Map<string, Message>();
@@ -76,9 +81,9 @@ export function buildDirectChatHistoryContext(input: {
   });
   const latestImage = [...messagesForHistory].reverse().find(isUserImageMessage);
   const latestNonImage = messagesForHistory.filter((message) => !isUserImageMessage(message)).at(-1);
-  // An image sent after a long pause is a new live turn. Keep the image in
-  // history, but use the prior non-image message as the continuity anchor so
-  // stale scene text is moved to the historical reference section.
+  // Keep the image as the current turn while using the prior non-image
+  // message as the continuity anchor for the legacy time boundary. Topic
+  // boundary classification below decides whether stale prose is admitted.
   const boundaryReferenceAt = latestImage && latestNonImage && latestImage.timestamp > latestNonImage.timestamp
     ? latestNonImage.timestamp
     : undefined;
@@ -94,19 +99,30 @@ export function buildDirectChatHistoryContext(input: {
     enableTimeAwareness: input.enableTimeAwareness,
     boundaryReferenceAt,
   });
-  const liveWindow = historyPartition.liveMessages.slice(-Math.min(MAX_CHAT_CONTEXT_MEMORY_LIMIT, Math.max(0, input.contextLimit ?? DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT)));
+  const currentUserMessage = input.userMessageId
+    ? finalMessages.find((message) => message.id === input.userMessageId && message.sender === "user")
+    : undefined;
+  const topicBoundary = decideDirectChatTopicBoundary({
+    currentMessage: currentUserMessage,
+    previousMessages: messagesForHistory,
+    enableTimeAwareness: input.enableTimeAwareness,
+  });
+  const topicLiveMessages = topicBoundary.mode === "shift" ? [] : historyPartition.liveMessages;
+  const liveWindow = topicLiveMessages.slice(-Math.min(MAX_CHAT_CONTEXT_MEMORY_LIMIT, Math.max(0, input.contextLimit ?? DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT)));
   const recentMessages = selectRecentMessagesWithinBudget(
     liveWindow,
     Math.max(1, input.historyCharacterLimit ?? DEFAULT_HISTORY_CHARACTER_LIMIT),
     input.characterName,
     input.userName,
   );
-  const historicalMessages = selectRecentMessagesWithinBudget(
-    historyPartition.historicalMessages,
-    Math.max(1, input.historicalReferenceCharacterLimit ?? DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT),
-    input.characterName,
-    input.userName,
-  );
+  const historicalMessages = topicBoundary.mode === "shift"
+    ? []
+    : selectRecentMessagesWithinBudget(
+      historyPartition.historicalMessages,
+      Math.max(1, input.historicalReferenceCharacterLimit ?? DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT),
+      input.characterName,
+      input.userName,
+    );
   const historicalReferenceLines = historicalMessages.map((message) => {
     const speaker = message.sender === "user" ? "用户" : input.characterName;
     const content = serializeMessageContentForPrompt(message, {
@@ -159,6 +175,7 @@ export function buildDirectChatHistoryContext(input: {
     timeLogString,
     isCrossDayNewSession,
     hasCrossDayHistory: historyPartition.hasCrossDayHistory,
+    topicBoundary,
     requestTime,
   };
 }
