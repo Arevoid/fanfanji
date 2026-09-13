@@ -22,6 +22,15 @@
 
 .message-quote__author { color: var(--quote-author); }
 
+/* Sent quote headers used to render as one muted line.  Keep the new
+ * semantic author span on that same inherited color while preserving the
+ * composer preview's dedicated author color above. */
+.message-quote__header .message-quote__author { color: inherit; }
+
+/* Semantic hooks are present in the message DOM for custom themes.  Keep the
+ * legacy header presentation by hiding the optional delimiter by default. */
+.message-quote__separator { display: none; }
+
 .message-quote__reply-body {
   margin-top: 0.75rem;
 }
@@ -103,6 +112,13 @@
   align-items: center;
   gap: 8px;
 }
+
+/* The theme hooks add no default visual layer.  Flatten the semantic wrapper
+ * and hide its decorative icon so existing card geometry remains unchanged. */
+.wechat-redpacket__icon,
+.wechat-transfer__icon { display: none; }
+.wechat-redpacket__content,
+.wechat-transfer__content { display: contents; }
 
 .redpacket-card .special-payment-card__title {
   font-size: 0.66rem;

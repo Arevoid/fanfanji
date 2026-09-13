@@ -7622,7 +7622,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               : quoteReply?.author;
                             return quoteReply ? (
                               <>
-                                <div className="message-quote__header">↩ {isSelf ? "你回复了" : "回复了"} {quoteAuthor}</div>
+                                <div className="message-quote__header">
+                                  <span className="message-quote__prefix">↩ {isSelf ? "你回复了" : "回复了"}</span>{" "}
+                                  <span className="message-quote__author">{quoteAuthor}</span>
+                                  <span className="message-quote__separator" aria-hidden="true">：</span>
+                                </div>
                                 <div className="message-quote text-left text-[11px]">
                                   <div className="message-quote__content px-3 py-2">{quoteReply.content}</div>
                                 </div>

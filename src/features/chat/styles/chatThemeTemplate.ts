@@ -234,8 +234,34 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 .message-quote-reply-wrapper--self,
 .message-quote-reply-wrapper--other { color: var(--chat-text); }
 .message-quote__header,
+.message-quote__prefix,
+.message-quote__author,
+.message-quote__separator,
 .message-quote__content,
 .message-quote__reply-body { color: inherit; }
+
+/* Semantic quote hooks.  They intentionally carry no default visual rules;
+   use them from a custom theme without changing the default chat. */
+
+/* ==================== 红包语义接口（仅钩子，不写默认微信视觉） ==================== */
+.wechat-redpacket__main,
+.wechat-redpacket__icon,
+.wechat-redpacket__icon-symbol,
+.wechat-redpacket__content,
+.wechat-redpacket__title,
+.wechat-redpacket__status,
+.wechat-redpacket__money,
+.wechat-redpacket__footer { }
+
+/* ==================== 转账语义接口（仅钩子，不写默认微信视觉） ==================== */
+.wechat-transfer__main,
+.wechat-transfer__icon,
+.wechat-transfer__icon-symbol,
+.wechat-transfer__content,
+.wechat-transfer__amount,
+.wechat-transfer__status,
+.wechat-transfer__memo,
+.wechat-transfer__footer { }
 
 /* ==================== 展开工具栏 ==================== */
 .chat-composer__attachment-panel {

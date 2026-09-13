@@ -34,6 +34,28 @@ for (const selector of [
 assert.match(redPacketSource, /chat-message--payment chat-message--red-packet special-payment-card redpacket-card cv-transfer/);
 assert.match(transferSource, /chat-message--payment chat-message--transfer special-payment-card transfer-card cv-transfer/);
 assert.match(forumShareSource, /chat-message--forum-share/);
+for (const hook of [
+  "message-quote__author",
+  "message-quote__separator",
+  "wechat-redpacket__main",
+  "wechat-redpacket__icon",
+  "wechat-redpacket__icon-symbol",
+  "wechat-redpacket__content",
+  "wechat-redpacket__title",
+  "wechat-redpacket__status",
+  "wechat-redpacket__money",
+  "wechat-redpacket__footer",
+  "wechat-transfer__main",
+  "wechat-transfer__icon",
+  "wechat-transfer__icon-symbol",
+  "wechat-transfer__content",
+  "wechat-transfer__amount",
+  "wechat-transfer__status",
+  "wechat-transfer__memo",
+  "wechat-transfer__footer",
+]) {
+  assert.match(themeSource, new RegExp(hook), `${hook} must remain part of the semantic chat theme interface`);
+}
 for (const item of ["album", "text-image", "red-packet", "voice", "call", "location", "sticker"]) {
   assert.match(chatSource, new RegExp(`chat-attachment-item--${item}`), `${item} tool must expose a stable theme hook`);
 }
