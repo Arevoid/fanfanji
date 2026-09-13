@@ -710,6 +710,12 @@ export default function AppChat({
   // bubbleCss remains a scoped legacy compatibility source.
   const userCustomChatCssSources = [settings.bubbleCss, settings.chatGlobalCSS, characterCustomChatCss];
   const hasUserCustomChatCss = userCustomChatCssSources.some((css) => Boolean(css && css.trim()));
+  // Avatar selectors are an explicit visual override for the built-in
+  // consecutive-avatar setting. Keep this narrow so unrelated custom CSS does
+  // not change message grouping, while avatar themes can opt into every row.
+  const customCssTargetsAvatar = userCustomChatCssSources.some((css) =>
+    /\.(?:ai-avatar|user-avatar)\b/.test(css || ""),
+  );
   useChatCustomCss(userCustomChatCssSources, activeCharacter?.chatBg);
 
   // Long-lived callbacks can outlive the render in which they were created.
@@ -7245,13 +7251,21 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               // While an offline story is active, online messages remain a separate
               // live channel. Keep their avatars visible instead of treating them as
               // one collapsed story paragraph.
-              const shouldCollapse = settings.collapseConsecutiveAvatars !== false && !isOfflineStoryActiveFor(activeChatCharId);
+              const shouldCollapse = settings.collapseConsecutiveAvatars !== false
+                && !isOfflineStoryActiveFor(activeChatCharId);
               const isConsecutivePrev = hasPreviousInGroup;
               // Security-awareness messages are a distinct incoming event even
               // when they follow another character bubble. Keep the character
               // avatar visible so the sender is never visually ambiguous.
               const isPhoneAwarenessMessage = msg.id.startsWith("phone-awareness-");
-              const showAvatar = isPhoneAwarenessMessage || Boolean(msg.sentFromCharacterPhone) || !isConsecutivePrev || !shouldCollapse;
+              const showAvatar = isPhoneAwarenessMessage
+                || Boolean(msg.sentFromCharacterPhone)
+                || !isConsecutivePrev
+                || !shouldCollapse
+                || customCssTargetsAvatar;
+              const isAvatarCollapsed = !showAvatar;
+              const avatarVisibilityClass = isAvatarCollapsed ? "cv-avatar-collapsed invisible" : "cv-avatar-visible";
+              const avatarCollapseState = isAvatarCollapsed ? "true" : "false";
               
               const groupSenderChar = !isSelf && activeCharacter.isGroupChat && msg.senderId
                 ? (characters.find(c => c.id === msg.senderId) || characters.find(c => c.name === msg.senderId))
@@ -7675,10 +7689,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     } ${messageGroupClass} cv-msg-row message message-container`}
                   >
                     {/* Avatar + Meta Header */}
-                    {showAvatar && (
-                      <div className={`flex items-center gap-2.5 mb-1.5 select-none ${
+                    <div
+                      className={`cv-avatar-header flex items-center gap-2.5 mb-1.5 select-none ${
                         isSelf ? "flex-row-reverse" : "flex-row"
-                      }`}>
+                      } ${isAvatarCollapsed ? "cv-avatar-header--collapsed hidden" : "cv-avatar-header--visible"}`}
+                      data-avatar-collapsed={avatarCollapseState}
+                    >
                         <RenderAvatar
                           src={msgAvatar}
                           alt=""
@@ -7690,10 +7706,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                           }}
                           className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
                             isSelf ? "user-avatar" : "ai-avatar"
-                          } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
+                          } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"} ${avatarVisibilityClass}`}
                         />
                         <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 space-y-0.5 msg-meta-header`}>
-                          {!isSelf && !settings.hideNicknames && (
+                          {!isSelf && !settings.hideNicknames && !isAvatarCollapsed && (
                             <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider msg-meta-name">
                               <span>🖤</span>
                               <span>{msgName}</span>
@@ -7701,7 +7717,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                           )}
                         </div>
                       </div>
-                    )}
 
                     {/* Message Bubble Block */}
                     <div className="max-w-[85%]">
@@ -7719,8 +7734,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       (isConsecutivePrev && shouldCollapse) ? "chat-row-gap-consecutive" : "chat-row-gap-separated"
                     } ${messageGroupClass} cv-msg-row message message-container`}
                   >
-                    {/* Avatar */}
-                    {showAvatar ? (
+                    {/* Avatar. Keep a stable slot and node for every message;
+                        the collapsed marker is intentionally CSS-overridable. */}
+                    <div
+                      className={`cv-avatar-slot w-9 h-9 shrink-0 ${isAvatarCollapsed ? "cv-avatar-slot--collapsed" : "cv-avatar-slot--visible"}`}
+                      data-avatar-collapsed={avatarCollapseState}
+                    >
                       <RenderAvatar
                         src={msgAvatar}
                         alt=""
@@ -7732,15 +7751,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         }}
                         className={`w-9 h-9 bg-slate-100 object-cover cursor-pointer hover:opacity-90 transition-opacity border shrink-0 aspect-square avatar ${
                           isSelf ? "user-avatar" : "ai-avatar"
-                        } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
+                        } ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"} ${avatarVisibilityClass}`}
                       />
-                    ) : (
-                      <div className="w-9 h-9 shrink-0" />
-                    )}
+                    </div>
 
                     {/* Meta Header + Message Bubble Column */}
                     <div className={`flex flex-col max-w-[80%] ${isSelf ? "items-end" : "items-start"}`}>
-                      {showAvatar && !settings.hideNicknames && (
+                      {!isAvatarCollapsed && !settings.hideNicknames && (
                         <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 mb-1 space-y-0.5 msg-meta-header`}>
                           {!isSelf && (
                             <div className="flex items-center gap-1 font-bold text-slate-700/85 tracking-wider msg-meta-name">
