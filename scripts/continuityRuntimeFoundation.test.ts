@@ -7,6 +7,8 @@ import { applyEmotionDelta, createEmotionState, decayEmotion } from "../src/doma
 import { createBeliefRecord, listBeliefsForScope, upsertBelief } from "../src/domain/continuity/beliefRuntime";
 import { closeOpenLoop, createOpenLoop, listOpenLoops, upsertOpenLoop } from "../src/domain/continuity/openLoopRuntime";
 import { applyRelationshipGrowthEvent, createRelationshipDimensions } from "../src/domain/characterLife/relationshipGrowth";
+import { projectRelationshipState } from "../src/domain/characterLife/relationshipProjection";
+import type { CharacterEvent } from "../src/domain/characterLife/characterEventTypes";
 import { buildInnerVoiceContext } from "../src/domain/continuity/innerVoiceContract";
 import type { RelationshipState } from "../src/domain/characterLife/relationshipStateTypes";
 
@@ -39,6 +41,16 @@ topic = applyTopicRuntimeTransition(topic, { scope, mode: "shift", topic: "回�
 assert.equal(topic.activeTopic, "回到线上后的安排");
 assert.equal(topic.topicHistory.length, 1);
 assert.equal(applyTopicRuntimeTransition(topic, { scope: otherScope, mode: "shift", topic: "隔离", at: 300 }), topic, "topic state is scope isolated");
+assert.equal(
+  applyTopicRuntimeTransition(topic, {
+    scope: { ...scope, conversationId: "direct:another" },
+    mode: "shift",
+    topic: "另一会话",
+    at: 300,
+  }),
+  topic,
+  "topic state is conversation isolated when a conversation ID is present",
+);
 
 let emotion = createEmotionState(scope, 100);
 emotion = applyEmotionDelta(emotion, { scope, current: "开心", intensityDelta: 0.8, causeEventRefs: ["event-1"], at: 100 });
@@ -74,6 +86,23 @@ const relationship: RelationshipState = {
   updatedAt: 100,
   version: 1,
 };
+const conflictEvent: CharacterEvent = {
+  id: "conflict-event",
+  relationId: scope.relationId,
+  characterId: scope.characterId,
+  userIdentityId: scope.userIdentityId,
+  kind: "conflict",
+  summary: "冲突",
+  source: "explicit",
+  occurredAt: 120,
+  recordedAt: 120,
+  confidence: 1,
+  status: "active",
+  schemaVersion: 1,
+};
+const projectedOnce = projectRelationshipState(undefined, conflictEvent);
+const projectedTwice = projectRelationshipState(projectedOnce, conflictEvent);
+assert.equal(projectedTwice, projectedOnce, "relationship projection ignores a replayed event ID");
 const context = buildCrossAppContext({
   app: "chat",
   scope,

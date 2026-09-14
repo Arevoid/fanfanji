@@ -1,5 +1,6 @@
 import type { Message } from "../../../types";
 import { applyTopicRuntimeTransition, type TopicBoundaryMode } from "../../../domain/continuity/topicRuntime";
+import { sameContinuityScope } from "../../../domain/continuity/continuityTypes";
 import { updateContinuityRuntimeStore } from "../../../core/storage/repositories/continuityRuntimeRepository";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 import { decideDirectChatTopicBoundary } from "./directChatTopicBoundary";
@@ -36,9 +37,7 @@ export function persistDirectChatTopicRuntime(input: {
   const topic = cleanTopic(input.message.content) || "图片消息";
   try {
     updateContinuityRuntimeStore((store) => {
-      const current = store.topics.find((state) => state.scope.characterId === scope.characterId
-        && state.scope.relationId === scope.relationId
-        && state.scope.userIdentityId === scope.userIdentityId);
+      const current = store.topics.find((state) => sameContinuityScope(state.scope, scope));
       const next = applyTopicRuntimeTransition(current, {
         scope,
         mode,

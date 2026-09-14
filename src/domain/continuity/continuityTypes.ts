@@ -36,11 +36,12 @@ export const isContinuityScope = (value: unknown): value is ContinuityScope => {
 };
 
 export const sameContinuityScope = (
-  left: Pick<ContinuityScope, "characterId" | "relationId" | "userIdentityId">,
-  right: Pick<ContinuityScope, "characterId" | "relationId" | "userIdentityId">,
+  left: Pick<ContinuityScope, "characterId" | "relationId" | "userIdentityId" | "conversationId">,
+  right: Pick<ContinuityScope, "characterId" | "relationId" | "userIdentityId" | "conversationId">,
 ): boolean => left.characterId === right.characterId
   && left.relationId === right.relationId
-  && left.userIdentityId === right.userIdentityId;
+  && left.userIdentityId === right.userIdentityId
+  && (!left.conversationId || !right.conversationId || left.conversationId === right.conversationId);
 
 export const copyContinuityScope = (scope: ContinuityScope): ContinuityScope => ({
   characterId: scope.characterId,

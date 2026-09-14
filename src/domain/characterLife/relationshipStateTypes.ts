@@ -47,6 +47,8 @@ export interface RelationshipState {
   tone: RelationshipTone;
   /** Bounded internal growth dimensions; macro stage remains separate. */
   dimensions?: RelationshipDimensions;
+  /** Event IDs already folded into this read projection; prevents replay drift. */
+  appliedEventIds?: readonly string[];
   openLoops: readonly RelationshipOpenLoop[];
   boundaries: readonly string[];
   /** Optional for compatibility with pre-growth projections. */

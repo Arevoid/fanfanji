@@ -11,6 +11,8 @@ import { buildOfflineMemberKnowledgeSnapshots } from "../../offline/services/off
 import { buildOfflineHandoffFacts, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../../../domain/offlineStory/offlineHandoffContext";
 import { getLatestWorldBookEntries } from "../../../utils/worldBook";
 import { isWorldBookEntryForAnyCharacter } from "../../../domain/worldbook/worldBookVisibility";
+import { createHandoffCapsule } from "../../../domain/continuity/handoffCapsule";
+import { upsertHandoffCapsule } from "../../../core/storage/repositories/continuityRuntimeRepository";
 
 interface UseChatStartOfflineFromMessageOptions {
   activeChatCharId: string | null;
@@ -187,6 +189,24 @@ export function useChatStartOfflineFromMessage({
     if (activeRelationship) {
       writeString(getOfflineModeStorageKey(activeRelationship.id), "true");
       writeString(getOfflineStoryStorageKey(activeRelationship.id), newStory.id);
+      const capsule = createHandoffCapsule({
+        id: `handoff:${newStory.id}`,
+        scope: {
+          characterId: activeRelationship.characterId,
+          relationId: activeRelationship.id,
+          userIdentityId: activeRelationship.userIdentityId,
+          conversationId: activeRelationship.conversationId,
+        },
+        previousScene: "online_chat",
+        exitTimestamp: snapshotTimestamp,
+        recentInteractionSummary: `Online chat handoff with ${sourceMessages.length} recent interaction${sourceMessages.length === 1 ? "" : "s"}.`,
+        recentInteractionRefs: sourceMessages.map((item) => item.id),
+        unresolvedTopicRefs: [],
+        recentMeaningfulEventRefs: [],
+        relationshipContinuityRef: `relationship:${activeRelationship.id}`,
+        createdAt: snapshotTimestamp,
+      });
+      if (capsule) upsertHandoffCapsule(capsule);
     }
     
     showToast("已无痛切换到线下故事模式");

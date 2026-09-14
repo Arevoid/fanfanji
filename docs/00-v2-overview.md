@@ -36,3 +36,24 @@ AppChat 拆分、目录大搬迁、统一存储端口、Prompt/context/worldbook
 重构、Provider 改造、IndexedDB 迁移、完整 UI/观测面板，均留到后续 RFC 和
 独立小批次，并且每批都必须先有行为基线。
 
+## Parallel V2 continuity foundation
+
+在 Early Daily-Use Baseline 之后，连续性基础以增量方式落地，保持 Admission
+campaign 原样等待真实 Provider 与真实日历证据：
+
+- Online↔Offline 使用小型 `HandoffCapsule`，只携带 canonical character/relation/
+  identity scope、场景、退出时间、有限摘要和引用 ID；不复制 transcript、Prompt 或
+  Memory dump。
+- `Scene`、`Topic`、`Emotion`、`Belief/Impression`、关系内部成长维度与 `OpenLoop`
+  各自独立。Memory 不等于 Scene，主观印象不等于 Truth，短期 Emotion 不写回
+  Identity，内部关系维度不自动升级宏观 Relationship 标签。
+- Chat/Offline/Diary/Moments/Character Phone/Forum/Browser/Reading 的读取入口可
+  通过只读 Context Gateway 按 canonical scope 收窄；PRIVATE_TO_USER、
+  PRIVATE_TO_CHARACTER 与 OTHER_CHARACTER_PRIVATE 不跨角色泄漏。
+- Topic 边界复用现有多信号 `directChatTopicBoundary`，仅在用户消息被现有消息管线
+  接受后保存轻量状态，不增加每消息 AI 请求。Emotion、Belief、Relationship Growth
+  与 OpenLoop 同样优先由确定性规则和已有事件衍生。
+- 新状态通过现有 `continuityRuntimeRepository → storageAdapter` 保存，版本为可选、
+  空值安全的 v1；JSON reload 不会重复应用事件。Provider E2E 在配额恢复前明确标记
+  `PROVIDER E2E DEFERRED DUE TO QUOTA`，Admission campaign 仍保持 paused/shadow/
+  dev-gated。

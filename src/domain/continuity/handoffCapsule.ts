@@ -1,6 +1,7 @@
 import {
   CONTINUITY_RUNTIME_SCHEMA_VERSION,
   copyContinuityScope,
+  isContinuityScope,
   type ContinuityScene,
   type ContinuityScope,
 } from "./continuityTypes";
@@ -90,5 +91,5 @@ export const isHandoffCapsule = (value: unknown): value is HandoffCapsule => {
     && Array.isArray(candidate.recentInteractionRefs)
     && Array.isArray(candidate.unresolvedTopicRefs)
     && Array.isArray(candidate.recentMeaningfulEventRefs)
-    && Boolean(candidate.scope && typeof candidate.scope === "object");
+    && isContinuityScope(candidate.scope);
 };

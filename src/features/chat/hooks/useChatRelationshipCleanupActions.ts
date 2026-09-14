@@ -14,6 +14,7 @@ import { removeForumGenerationTasksByRelation } from "../../../domain/forum/foru
 import { removeCharacterLifeEventsForRelations } from "../../characterLife/services/characterEventCaptureService";
 import { removeCharacterTruthForRelations } from "../../characterKnowledge/services/characterTruthCleanupService";
 import { removeProactiveTopicsForRelations } from "../../../core/storage/repositories/proactiveTopicRepository";
+import { removeContinuityRuntimeForRelations } from "../../../core/storage/repositories/continuityRuntimeRepository";
 import { getMomentComments } from "../../moments/services/momentContent";
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, type RedPacketStatusMap } from "../services/paymentScope";
 import { USER_MEMO_MENTION_LEDGER_KEY } from "../prompts/userMemoContext";
@@ -67,6 +68,7 @@ export function useChatRelationshipCleanupActions({
     removeCharacterLifeEventsForRelations([relationId]);
     removeCharacterTruthForRelations([relationId]);
     removeProactiveTopicsForRelations([relationId]);
+    removeContinuityRuntimeForRelations([relationId]);
     onSaveRelationships(relationships.map((relation) => relation.id === relationId
       ? { ...relation, compressedMemory: undefined, lastImmediateSummaryMsgId: undefined, lastActiveTime: undefined, updatedAt: Date.now() }
       : relation));

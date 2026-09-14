@@ -28,6 +28,7 @@ const createInitialState = (event: CharacterEvent): RelationshipState => ({
   stage: event.kind === "relationship_created" ? "friend" : "unknown",
   tone: "neutral",
   dimensions: createRelationshipDimensions(),
+  appliedEventIds: [event.id],
   openLoops: [],
   boundaries: [],
   habitSummaries: [],
@@ -49,6 +50,7 @@ const getPromiseLoopId = (event: CharacterEvent): string => getPromiseReference(
 const updateMeaningfulEvent = (state: RelationshipState, event: CharacterEvent): RelationshipState => ({
   ...state,
   dimensions: applyRelationshipGrowthEvent(state.dimensions, event),
+  appliedEventIds: [...new Set([...(state.appliedEventIds || []), event.id])].slice(-256),
   lastMeaningfulEventId: event.id,
   lastMeaningfulEventAt: event.occurredAt,
   updatedAt: Math.max(state.updatedAt, event.recordedAt),
@@ -121,6 +123,7 @@ export const projectRelationshipState = (
   event: CharacterEvent,
 ): RelationshipState | undefined => {
   if (previousState && !isSameRelationshipScope(previousState, event)) return previousState;
+  if (previousState?.appliedEventIds?.includes(event.id)) return previousState;
   if (!previousState && !isTrustedExplicitEvent(event)) return undefined;
 
   let state = previousState || createInitialState(event);
