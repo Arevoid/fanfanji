@@ -53,6 +53,34 @@
         "docs/evidence/memory-admission-v2/window-70e757c23c675e44/2026-09-12__session-1b48d1a3e1332271.json"
       ],
       "closurePath": "docs/evidence/memory-admission-v2/window-70e757c23c675e44/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-30166722268919d0",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-30166722268919d0/2026-09-14__session-1ba0cf045569ee12.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-30166722268919d0/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-56f30e41b28c4a03",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-56f30e41b28c4a03/2026-09-14__session-950cb2983f9f705a.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-56f30e41b28c4a03/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-645b13eb732001c5",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-645b13eb732001c5/2026-09-14__session-942ab0a38bda8c41.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-645b13eb732001c5/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-0001c5fd5813d1f7",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-0001c5fd5813d1f7/2026-09-14__session-91ac18c9411180f3.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-0001c5fd5813d1f7/window-closure.json"
     }
   ],
   "closedWindows": [
@@ -63,7 +91,11 @@
     "window-3233cb04d44d8dde",
     "window-a61899010f0bd27f",
     "window-b35d2518e274284a",
-    "window-70e757c23c675e44"
+    "window-70e757c23c675e44",
+    "window-30166722268919d0",
+    "window-56f30e41b28c4a03",
+    "window-645b13eb732001c5",
+    "window-0001c5fd5813d1f7"
   ],
   "createdAtUtc": "2026-09-10T15:46:57.912Z",
   "promotionScopeMappings": [
@@ -86,19 +118,39 @@
       "windowFingerprint": "window-70e757c23c675e44",
       "localScopeFingerprint": "scope-9675ed17",
       "promotionScopeFingerprint": "promotion-scope-stage4d3-c"
+    },
+    {
+      "windowFingerprint": "window-30166722268919d0",
+      "localScopeFingerprint": "scope-5d604086",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-56f30e41b28c4a03",
+      "localScopeFingerprint": "scope-1388b4bb",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-645b13eb732001c5",
+      "localScopeFingerprint": "scope-043dacb5",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-0001c5fd5813d1f7",
+      "localScopeFingerprint": "scope-91d8da0f",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
     }
   ],
   "cumulativeAuthoritativeCounts": {
-    "authoritativeArtifactCount": 5,
-    "formalSessionCount": 4,
-    "distinctExactScopeCount": 3,
-    "extractionBatchCount": 4,
-    "validControlCount": 2,
+    "authoritativeArtifactCount": 9,
+    "formalSessionCount": 8,
+    "distinctExactScopeCount": 4,
+    "extractionBatchCount": 8,
+    "validControlCount": 11,
     "validSuppressionCount": 0,
-    "logicalActionTotal": 4,
-    "physicalAttemptTotal": 6,
-    "distinctEvidenceDayCount": 3,
-    "fallbackBatchCount": 2,
+    "logicalActionTotal": 8,
+    "physicalAttemptTotal": 14,
+    "distinctEvidenceDayCount": 4,
+    "fallbackBatchCount": 6,
     "safetyIncidentCount": 0,
     "privacyViolationCount": 0,
     "accountingConflictCount": 0
@@ -109,10 +161,10 @@
     "accounting": true
   },
   "firstEvidenceDay": "2026-09-10",
-  "lastEvidenceDay": "2026-09-12",
+  "lastEvidenceDay": "2026-09-14",
   "thresholdProgress": {
     "sessions": {
-      "current": 4,
+      "current": 8,
       "minimum": 5
     },
     "suppressions": {
@@ -120,15 +172,15 @@
       "minimum": 10
     },
     "scopes": {
-      "current": 3,
+      "current": 4,
       "minimum": 3
     },
     "days": {
-      "current": 3,
+      "current": 4,
       "minimum": 7
     },
     "batches": {
-      "current": 4,
+      "current": 8,
       "minimum": 20
     },
     "allMinimumsSatisfied": false,
