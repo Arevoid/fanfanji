@@ -175,6 +175,7 @@ import { createConversationSummaryRecord } from "../features/characterKnowledge/
 import { createDeterministicArtifactClaim } from "../features/characterKnowledge/services/deterministicKnowledgeCapture";
 import { buildRelationshipCognitiveProjection } from "../features/characterLife/services/relationshipCognitiveProjectionService";
 import { persistDirectChatTopicRuntime } from "../features/chat/services/directChatTopicRuntime";
+import { persistCharacterLifeInteraction } from "../features/characterLife/services/characterLifeRuntimeService";
 import { buildCharacterRoutine } from "../domain/characterLife/characterRoutine/characterRoutineBuilder";
 import { createMomentTopicRecord } from "../domain/moments/momentGeneration/momentTopicHistory";
 import { createProactiveTopicRecord } from "../domain/characterLife/proactive/proactiveTopicHistory";
@@ -3255,6 +3256,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     activeIdentityName,
     activeIdentityAvatar,
     onUserMessageCreated: (message, context) => {
+      persistCharacterLifeInteraction(message, context);
       persistDirectChatTopicRuntime({
         message,
         previousMessages: currentChatMessages,

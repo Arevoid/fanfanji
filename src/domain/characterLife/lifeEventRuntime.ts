@@ -24,9 +24,10 @@ export interface LifeEvent extends CharacterLifeScope {
   recordedAt: number;
 }
 
-export type LifeEventInput = Omit<LifeEvent, "schemaVersion" | "recordedAt"> & {
+export type LifeEventInput = Omit<LifeEvent, "schemaVersion" | "recordedAt" | "participants"> & {
   schemaVersion?: number;
   recordedAt?: number;
+  participants?: readonly string[];
 };
 
 const STATUSES = new Set<LifeEventStatus>(["planned", "ongoing", "completed", "cancelled", "missed"]);

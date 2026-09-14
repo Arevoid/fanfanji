@@ -28,6 +28,7 @@ import {
   type ProactiveIntentRecord,
 } from "../src/domain/characterLife/proactiveRuntime";
 import { buildCharacterLifeProjection } from "../src/domain/characterLife/lifeProjection";
+import { projectLifeEventToContinuity } from "../src/domain/characterLife/lifeContinuityBridge";
 import { buildCrossAppContext } from "../src/domain/continuity/contextGateway";
 import { createOpenLoop, listOpenLoops, transitionOpenLoop } from "../src/domain/continuity/openLoopRuntime";
 import {
@@ -96,6 +97,27 @@ assert.ok(event);
 assert.equal(deriveLifeEventStatus(event!, day + 2 * 60 * 60 * 1000), "missed");
 assert.equal(lifeEventToCharacterEvent(event!).kind, "offline_shared_event");
 assert.equal(transitionLifeEvent(event!, "ongoing", day + 10)?.status, "ongoing");
+
+const promiseEvent = createLifeEvent({
+  ...scope,
+  id: "promise-event",
+  type: "promise_made",
+  summary: "晚上告诉你结果",
+  timestamp: day,
+  source: "chat",
+  visibility: "character_private",
+  status: "completed",
+  refs: ["promise-loop"],
+});
+assert.ok(promiseEvent);
+const continuity = projectLifeEventToContinuity({ event: promiseEvent!, now: day + 100 });
+assert.equal(continuity.openLoops.length, 1);
+assert.equal(continuity.beliefs.length, 1);
+const kept = createLifeEvent({ ...promiseEvent!, id: "promise-kept", type: "promise_kept", summary: "已经告诉你结果", refs: ["promise-loop"], timestamp: day + 100 });
+assert.ok(kept);
+const closed = projectLifeEventToContinuity({ event: kept!, openLoops: continuity.openLoops, beliefs: continuity.beliefs, now: day + 200 });
+assert.equal(closed.openLoops[0].status, "fulfilled");
+assert.ok(closed.emotion);
 
 const loop = createOpenLoop({ id: "promise-1", scope, type: "promise", description: "晚上告诉你", createdAt: day, sourceRefs: ["event-1"] });
 assert.ok(loop);
