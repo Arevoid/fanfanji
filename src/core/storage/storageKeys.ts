@@ -61,6 +61,8 @@ export const storageKeys = {
   relationshipNetworkNpcAutomationStates: "phone_relationship_network_npc_automation_states_v1",
   momentTopicHistory: "phone_moment_topic_history",
   proactiveTopicHistory: "phone_proactive_topic_history",
+  /** Additive continuity runtime state; bounded metadata, never transcripts. */
+  continuityRuntime: "phone_continuity_runtime_v1",
   offlineStories: "phone_offline_stories",
   memoryVaultSettings: "phone_memory_vault_settings",
   scheduleStore: "phone_schedule_v1",
