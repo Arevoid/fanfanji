@@ -128,6 +128,7 @@ import { loadMusicPlaybackHistory, recordMusicPlayback } from "./core/storage/re
 import type { MusicPlaybackHistoryItem } from "./types";
 import type { NeteaseMusicQuality } from "./features/music/neteaseTypes";
 import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./features/music/services/musicPlayback";
+import { persistDirectChatMemoryLongEvidenceArtifact } from "./features/chat/services/directChatMemoryLongEvidencePersistenceClient";
 import { resolveDesktopBackground } from "./features/theme/desktopBackground";
 import { useTheme } from "./features/theme/ThemeProvider";
 import { useGlobalTypography } from "./features/theme/useGlobalTypography";
@@ -3780,7 +3781,7 @@ export default function App() {
     .filter((item): item is { relationship: CharacterRelationship; character: Character } =>
       Boolean(item.character && !item.character.isGroupChat));
 
-  const runMemoryEvidenceControl = (action: "start" | "finish" | "summary" | "export") => {
+  const runMemoryEvidenceControl = async (action: "start" | "finish" | "summary" | "export") => {
     const runtime = globalThis as typeof globalThis & {
       __fanfanjiMemoryAdmissionLongEvidence?: {
         clear: () => void;
@@ -3807,7 +3808,18 @@ export default function App() {
     } else if (action === "finish") {
       api.finishWindow();
       api.disable();
-      console.info("[dev] memory evidence window finished", JSON.stringify(api.summary()));
+      const summary = api.summary();
+      console.info("[dev] memory evidence window finished", JSON.stringify(summary));
+      const persistence = await persistDirectChatMemoryLongEvidenceArtifact(api.exportJson());
+      console.info("[dev] memory evidence persistence", JSON.stringify({
+        status: persistence.status,
+        reason: persistence.reason,
+        windowFingerprint: persistence.windowFingerprint,
+        artifactPath: persistence.artifactPath,
+        closurePath: persistence.closurePath,
+        reviewerBefore: persistence.reviewerBefore,
+        reviewerAfter: persistence.reviewerAfter,
+      }));
     } else if (action === "summary") {
       console.info("[dev] memory evidence summary", JSON.stringify(api.summary()));
     } else {

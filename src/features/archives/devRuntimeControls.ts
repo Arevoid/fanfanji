@@ -4,6 +4,7 @@ import { installCharacterOwnershipBootstrapDevApi, readCharacterRepositoryForOwn
 import { installDedicatedRelationBootstrapDevApi, readRelationshipRepositoryForDedicatedBootstrap, type DedicatedRelationBootstrapOptions, type DedicatedRelationInspectorResult } from "./dedicatedRelationBootstrapDev";
 import { installMultiScopeFixtureDevApi } from "./multiScopeFixtureDev";
 import { installPortableDirectChatFixtureDevApi } from "./portableDirectChatFixtureDev";
+import { persistDirectChatMemoryLongEvidenceArtifact } from "../chat/services/directChatMemoryLongEvidencePersistenceClient";
 import type { Character, Message, UserSettings, UserSettingsUpdate } from "../../types";
 import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
 
@@ -208,6 +209,14 @@ export function installDevRuntimeControls(dependencies: DevRuntimeControlsDepend
           api.finishWindow();
           api.disable();
           console.info("[dev] memory evidence window finished", JSON.stringify(api.summary()));
+          const persistence = await persistDirectChatMemoryLongEvidenceArtifact(api.exportJson());
+          console.info("[dev] memory evidence persistence", JSON.stringify({
+            status: persistence.status,
+            reason: persistence.reason,
+            windowFingerprint: persistence.windowFingerprint,
+            reviewerBefore: persistence.reviewerBefore,
+            reviewerAfter: persistence.reviewerAfter,
+          }));
         } else if (evidenceAction === "summary") {
           console.info("[dev] memory evidence summary", JSON.stringify(api.summary()));
         } else if (evidenceAction === "export") {

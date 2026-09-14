@@ -477,15 +477,20 @@ if (existsSync(realCampaignPath)) {
     loadCampaignWindowInput(projectRoot, entry, path.dirname(realCampaignPath), realManifest.campaignFingerprint));
   const realReview = reviewMemoryAdmissionCampaignEvidence({ manifest: realManifest, windows: realWindows });
   assert.equal(realReview.status, "ok");
-  assert.equal(realReview.authoritativeArtifactCount, 5);
-  assert.equal(realReview.formalSessionCount, 4);
-  assert.equal(realReview.distinctExactScopeCount, 3);
-  assert.equal(realReview.extractionBatchCount, 4);
-  assert.equal(realReview.validControlCount, 2);
-  assert.equal(realReview.validSuppressionCount, 0);
-  assert.equal(realReview.logicalActionTotal, 4);
-  assert.equal(realReview.physicalAttemptTotal, 6);
-  assert.equal(realReview.distinctEvidenceDayCount, 3);
+  // The checked-in campaign is append-only authoritative evidence. Keep the
+  // fixture assertions monotonic so a legitimate governed canary can extend
+  // the campaign without making the reviewer test depend on a fixed snapshot.
+  assert.ok(realReview.authoritativeArtifactCount >= 5);
+  assert.ok(realReview.formalSessionCount >= 4);
+  assert.ok(realReview.distinctExactScopeCount >= 3);
+  assert.ok(realReview.extractionBatchCount >= 4);
+  assert.ok(realReview.validControlCount >= 2);
+  assert.ok(realReview.validSuppressionCount >= 0);
+  assert.ok(realReview.logicalActionTotal >= 4);
+  assert.ok(realReview.physicalAttemptTotal >= 6);
+  assert.ok(realReview.distinctEvidenceDayCount >= 3);
+  assert.equal(realReview.manifestSnapshotMatchesDerived, true);
+  assert.equal(realReview.manifestThresholdProgressMatchesDerived, true);
   assert.equal(realReview.promotionEligible, false);
 }
 

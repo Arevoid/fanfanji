@@ -10,6 +10,12 @@ import dotenv from "dotenv";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
 import { callTextProvider, normalizeTextApiError } from "./src/server/textProtocolAdapters";
 import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
+import {
+  MEMORY_ADMISSION_CAMPAIGN_FINGERPRINT,
+  MEMORY_ADMISSION_SYNTHETIC_FIXTURE_ID,
+  MEMORY_ADMISSION_SYNTHETIC_PROMOTION_SCOPE,
+} from "./src/features/chat/services/directChatMemoryLongEvidencePersistenceProtocol";
+import { persistGovernedMemoryAdmissionEvidence } from "./scripts/memoryAdmissionEvidencePersistence";
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslandTts";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./src/utils/fetchWithTimeout";
@@ -39,6 +45,52 @@ async function startServer() {
   app.get("/healthz", (_req, res) => {
     res.json({ status: "ok", service: "fanfanji", version: process.env.npm_package_version || "0.0.0" });
   });
+
+  // Dev-only evidence cutover. The route accepts only the collector's
+  // already-sanitized export and writes only to the allow-listed synthetic
+  // campaign. It is intentionally absent from production behavior.
+  if (process.env.NODE_ENV !== "production") {
+    app.post("/api/dev/memory-admission/evidence", (req, res) => {
+      const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
+      const artifact = typeof body.artifact === "string" ? body.artifact : "";
+      if (body.campaignFingerprint !== MEMORY_ADMISSION_CAMPAIGN_FINGERPRINT
+        || body.fixtureId !== MEMORY_ADMISSION_SYNTHETIC_FIXTURE_ID
+        || body.promotionScopeFingerprint !== MEMORY_ADMISSION_SYNTHETIC_PROMOTION_SCOPE
+        || artifact.length === 0
+        || artifact.length > 2_000_000) {
+        return res.status(400).json({ success: false, status: "rejected", reason: "invalid_synthetic_evidence_request" });
+      }
+      const persisted = persistGovernedMemoryAdmissionEvidence({
+        projectRoot: process.cwd(),
+        artifactJson: artifact,
+        fixtureId: MEMORY_ADMISSION_SYNTHETIC_FIXTURE_ID,
+        promotionScopeFingerprint: MEMORY_ADMISSION_SYNTHETIC_PROMOTION_SCOPE,
+      });
+      return res.status(persisted.status === "persisted" || persisted.status === "duplicate" ? 200 : 422).json({
+        success: persisted.status === "persisted" || persisted.status === "duplicate",
+        status: persisted.status,
+        ...(persisted.reason ? { reason: persisted.reason } : {}),
+        campaignFingerprint: persisted.campaignFingerprint,
+        windowFingerprint: persisted.windowFingerprint,
+        artifactPath: persisted.artifactPath,
+        closurePath: persisted.closurePath,
+        reviewerBefore: persisted.reviewerBefore ? {
+          formalSessionCount: persisted.reviewerBefore.formalSessionCount,
+          extractionBatchCount: persisted.reviewerBefore.extractionBatchCount,
+          validControlCount: persisted.reviewerBefore.validControlCount,
+          validSuppressionCount: persisted.reviewerBefore.validSuppressionCount,
+          distinctEvidenceDayCount: persisted.reviewerBefore.distinctEvidenceDayCount,
+        } : null,
+        reviewerAfter: persisted.reviewerAfter ? {
+          formalSessionCount: persisted.reviewerAfter.formalSessionCount,
+          extractionBatchCount: persisted.reviewerAfter.extractionBatchCount,
+          validControlCount: persisted.reviewerAfter.validControlCount,
+          validSuppressionCount: persisted.reviewerAfter.validSuppressionCount,
+          distinctEvidenceDayCount: persisted.reviewerAfter.distinctEvidenceDayCount,
+        } : null,
+      });
+    });
+  }
 
   const neteaseSecureCookies = process.env.NODE_ENV === "production" || process.env.COOKIE_SECURE === "true";
   const getNeteaseAdapter = (req: express.Request) => {
