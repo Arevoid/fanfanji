@@ -1,4 +1,4 @@
-export type TemporalDistance = "just_now" | "recent" | "today" | "yesterday" | "long_ago" | "future" | "unknown";
+export type TemporalDistance = "just_now" | "recent" | "today" | "yesterday" | "tomorrow" | "long_ago" | "future" | "unknown";
 
 export interface TemporalContext {
   now: number;
@@ -8,6 +8,11 @@ export interface TemporalContext {
   elapsedSinceLastMeaningfulEventMs?: number;
   lastInteractionDistance: TemporalDistance;
   lastMeaningfulEventDistance: TemporalDistance;
+  isToday: boolean;
+  isYesterday: boolean;
+  isTomorrow: boolean;
+  isFuture: boolean;
+  isLongAgo: boolean;
   interactedToday: boolean;
   meaningfulEventToday: boolean;
   nextScheduleAt?: number;
@@ -31,13 +36,17 @@ export const getElapsedDurationMs = (from: number | undefined, to: number): numb
 /** Relative labels are derived from timestamps and local calendar boundaries. */
 export const classifyTemporalDistance = (timestamp: number | undefined, now: number): TemporalDistance => {
   if (timestamp === undefined || !Number.isFinite(timestamp) || !Number.isFinite(now)) return "unknown";
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (getLocalDayKey(timestamp) === getLocalDayKey(tomorrow.getTime())) return "tomorrow";
   if (timestamp > now) return "future";
   const elapsed = now - timestamp;
   if (elapsed < 2 * MINUTE) return "just_now";
   if (getLocalDayKey(timestamp) === getLocalDayKey(now)) return elapsed < 6 * HOUR ? "recent" : "today";
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
-  return getLocalDayKey(timestamp) === getLocalDayKey(yesterday.getTime()) ? "yesterday" : "long_ago";
+  if (getLocalDayKey(timestamp) === getLocalDayKey(yesterday.getTime())) return "yesterday";
+  return "long_ago";
 };
 
 export const buildTemporalContext = (input: {
@@ -60,6 +69,11 @@ export const buildTemporalContext = (input: {
       ? { elapsedSinceLastMeaningfulEventMs: getElapsedDurationMs(input.lastMeaningfulEventAt, now) } : {}),
     lastInteractionDistance: interactionDistance,
     lastMeaningfulEventDistance: eventDistance,
+    isToday: interactionDistance === "just_now" || interactionDistance === "recent" || interactionDistance === "today",
+    isYesterday: interactionDistance === "yesterday",
+    isTomorrow: interactionDistance === "tomorrow",
+    isFuture: interactionDistance === "future" || interactionDistance === "tomorrow",
+    isLongAgo: interactionDistance === "long_ago",
     interactedToday: interactionDistance === "just_now" || interactionDistance === "recent" || interactionDistance === "today",
     meaningfulEventToday: eventDistance === "just_now" || eventDistance === "recent" || eventDistance === "today",
     ...(typeof input.nextScheduleAt === "number" && Number.isFinite(input.nextScheduleAt)

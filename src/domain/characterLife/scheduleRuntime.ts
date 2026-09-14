@@ -152,7 +152,8 @@ export const transitionCharacterSchedule = (
 /** Marks only one-off/flexible entries overdue; recurring routines remain reusable. */
 export const deriveScheduleStatus = (entry: CharacterScheduleEntry, now: number): CharacterScheduleStatus => {
   if (entry.status !== "scheduled" || entry.kind === "recurring_routine" || !isFiniteTimestamp(now)) return entry.status;
-  if (entry.endAt !== undefined && entry.endAt < now) return "missed";
+  if ((entry.endAt !== undefined && entry.endAt < now)
+    || (entry.endAt === undefined && entry.startAt !== undefined && entry.startAt < now)) return "missed";
   return entry.status;
 };
 

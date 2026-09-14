@@ -59,6 +59,7 @@ assert.equal(patched.relationId, scope.relationId);
 
 assert.equal(getLocalDayKey(day), "2026-09-14");
 assert.equal(classifyTemporalDistance(day - 24 * 60 * 60 * 1000, day), "yesterday");
+assert.equal(classifyTemporalDistance(day + 24 * 60 * 60 * 1000, day), "tomorrow");
 const temporal = buildTemporalContext({ now: day, lastInteractionAt: day - 2 * 60 * 60 * 1000, nextScheduleAt: day + 60 * 60 * 1000 });
 assert.equal(temporal.interactedToday, true);
 assert.equal(temporal.nextScheduleInMs, 60 * 60 * 1000);
@@ -192,5 +193,6 @@ assert.equal(loadCharacterScheduleStore().value.entries.length, 1);
 const settingsSource = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 assert.match(settingsSource, /phone_character_life_runtime_v1/);
 assert.match(settingsSource, /phone_character_schedule_v1/);
+assert.match(settingsSource, /phone_continuity_runtime_v1/);
 
 console.log("PASS Character Life/Temporal/Schedule/Event/OpenLoop/Proactive runtime, persistence, privacy and backup compatibility");
