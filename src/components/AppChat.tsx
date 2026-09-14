@@ -174,6 +174,7 @@ import { formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "..
 import { createConversationSummaryRecord } from "../features/characterKnowledge/services/conversationSummaryService";
 import { createDeterministicArtifactClaim } from "../features/characterKnowledge/services/deterministicKnowledgeCapture";
 import { buildRelationshipCognitiveProjection } from "../features/characterLife/services/relationshipCognitiveProjectionService";
+import { persistDirectChatTopicRuntime } from "../features/chat/services/directChatTopicRuntime";
 import { buildCharacterRoutine } from "../domain/characterLife/characterRoutine/characterRoutineBuilder";
 import { createMomentTopicRecord } from "../domain/moments/momentGeneration/momentTopicHistory";
 import { createProactiveTopicRecord } from "../domain/characterLife/proactive/proactiveTopicHistory";
@@ -3254,6 +3255,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     activeIdentityName,
     activeIdentityAvatar,
     onUserMessageCreated: (message, context) => {
+      persistDirectChatTopicRuntime({
+        message,
+        previousMessages: currentChatMessages,
+        context,
+        enableTimeAwareness: activeCharacter ? resolveChatTurnSettings(activeCharacter).enableTimeAwareness : true,
+      });
       if (message.sender === "user" && !/^data:image\//i.test(message.content.trim())) {
         handleExplicitCharacterAvatarChangeRequest(message.content, context);
       }

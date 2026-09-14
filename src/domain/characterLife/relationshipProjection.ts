@@ -7,6 +7,7 @@ import {
   type RelationshipOpenLoop,
   type RelationshipState,
 } from "./relationshipStateTypes";
+import { applyRelationshipGrowthEvent, createRelationshipDimensions } from "./relationshipGrowth";
 
 const isSameRelationshipScope = (state: RelationshipState, event: CharacterEvent): boolean =>
   state.relationId === event.relationId
@@ -26,6 +27,7 @@ const createInitialState = (event: CharacterEvent): RelationshipState => ({
   // an inferred relationship upgrade.
   stage: event.kind === "relationship_created" ? "friend" : "unknown",
   tone: "neutral",
+  dimensions: createRelationshipDimensions(),
   openLoops: [],
   boundaries: [],
   habitSummaries: [],
@@ -46,6 +48,7 @@ const getPromiseLoopId = (event: CharacterEvent): string => getPromiseReference(
 
 const updateMeaningfulEvent = (state: RelationshipState, event: CharacterEvent): RelationshipState => ({
   ...state,
+  dimensions: applyRelationshipGrowthEvent(state.dimensions, event),
   lastMeaningfulEventId: event.id,
   lastMeaningfulEventAt: event.occurredAt,
   updatedAt: Math.max(state.updatedAt, event.recordedAt),

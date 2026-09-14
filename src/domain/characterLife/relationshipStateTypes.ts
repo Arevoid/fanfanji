@@ -1,4 +1,5 @@
 import type { CharacterRelationshipState } from "../relationship/characterRelationship";
+import type { RelationshipDimensions } from "./relationshipGrowth";
 
 export const RELATIONSHIP_STATE_PROJECTION_VERSION = 1;
 
@@ -44,6 +45,8 @@ export interface RelationshipState {
   userIdentityId: string;
   stage: CharacterRelationshipState;
   tone: RelationshipTone;
+  /** Bounded internal growth dimensions; macro stage remains separate. */
+  dimensions?: RelationshipDimensions;
   openLoops: readonly RelationshipOpenLoop[];
   boundaries: readonly string[];
   /** Optional for compatibility with pre-growth projections. */
