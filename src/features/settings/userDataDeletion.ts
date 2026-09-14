@@ -94,6 +94,8 @@ const USER_DATA_MANIFEST: Record<UserDataAppId, DataManifest> = {
       storageKeys.legacyCharacters,
       storageKeys.characterRelationships,
       storageKeys.characterEvents,
+      storageKeys.characterLifeRuntime,
+      storageKeys.characterSchedule,
       storageKeys.characterKnowledgeClaims,
       storageKeys.characterKnowledgeMigrationState,
       storageKeys.behaviorCorrections,

@@ -4,6 +4,9 @@ import type { HandoffCapsule } from "./handoffCapsule";
 import type { OpenLoopRecord } from "./openLoopRuntime";
 import type { TopicRuntimeState } from "./topicRuntime";
 import type { RelationshipState } from "../characterLife/relationshipStateTypes";
+import type { CharacterLifeState } from "../characterLife/lifeStateRuntime";
+import type { CharacterScheduleEntry } from "../characterLife/scheduleRuntime";
+import type { TemporalContext } from "../characterLife/temporalRuntime";
 import {
   sameContinuityScope,
   type ContinuityApp,
@@ -29,6 +32,9 @@ export interface CrossAppContextInput {
   relationship?: RelationshipState;
   openLoops?: readonly OpenLoopRecord[];
   handoff?: HandoffCapsule;
+  lifeState?: CharacterLifeState;
+  temporal?: TemporalContext;
+  schedules?: readonly CharacterScheduleEntry[];
 }
 
 export interface CrossAppContextSnapshot {
@@ -41,6 +47,9 @@ export interface CrossAppContextSnapshot {
   relationship?: RelationshipState;
   openLoops: readonly OpenLoopRecord[];
   handoff?: HandoffCapsule;
+  lifeState?: CharacterLifeState;
+  temporal?: TemporalContext;
+  schedules: readonly CharacterScheduleEntry[];
   visibility: "character_private";
 }
 
@@ -61,6 +70,16 @@ export function buildCrossAppContext(input: CrossAppContextInput): CrossAppConte
   const handoff = input.handoff && sameContinuityScope(input.handoff.scope, input.scope)
     ? input.handoff
     : undefined;
+  const lifeState = input.lifeState
+    && input.lifeState.characterId === input.scope.characterId
+    && input.lifeState.relationId === input.scope.relationId
+    && input.lifeState.userIdentityId === input.scope.userIdentityId
+    ? input.lifeState
+    : undefined;
+  const schedules = (input.schedules || []).filter((entry) =>
+    entry.characterId === input.scope.characterId
+    && entry.relationId === input.scope.relationId
+    && entry.userIdentityId === input.scope.userIdentityId);
   const beliefs = (input.beliefs || []).filter((belief) => sameContinuityScope(belief.scope, input.scope));
   const openLoops = (input.openLoops || []).filter((loop) => sameContinuityScope(loop.scope, input.scope));
   return {
@@ -73,6 +92,9 @@ export function buildCrossAppContext(input: CrossAppContextInput): CrossAppConte
     ...(relationship ? { relationship } : {}),
     openLoops,
     ...(handoff ? { handoff } : {}),
+    ...(lifeState ? { lifeState } : {}),
+    ...(input.temporal ? { temporal: input.temporal } : {}),
+    schedules,
     visibility: "character_private",
   };
 }

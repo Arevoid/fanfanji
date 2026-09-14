@@ -16,6 +16,9 @@ export interface HandoffCapsule {
   recentInteractionRefs: readonly string[];
   unresolvedTopicRefs: readonly string[];
   recentMeaningfulEventRefs: readonly string[];
+  lifeEventRefs?: readonly string[];
+  scheduleRefs?: readonly string[];
+  openLoopRefs?: readonly string[];
   relationshipContinuityRef?: string;
   createdAt: number;
 }
@@ -29,6 +32,9 @@ export interface CreateHandoffCapsuleInput {
   recentInteractionRefs?: readonly string[];
   unresolvedTopicRefs?: readonly string[];
   recentMeaningfulEventRefs?: readonly string[];
+  lifeEventRefs?: readonly string[];
+  scheduleRefs?: readonly string[];
+  openLoopRefs?: readonly string[];
   relationshipContinuityRef?: string;
   createdAt?: number;
 }
@@ -71,6 +77,9 @@ export function createHandoffCapsule(input: CreateHandoffCapsuleInput): HandoffC
     recentInteractionRefs: boundedRefs(input.recentInteractionRefs),
     unresolvedTopicRefs: boundedRefs(input.unresolvedTopicRefs),
     recentMeaningfulEventRefs: boundedRefs(input.recentMeaningfulEventRefs),
+    ...(boundedRefs(input.lifeEventRefs).length > 0 ? { lifeEventRefs: boundedRefs(input.lifeEventRefs) } : {}),
+    ...(boundedRefs(input.scheduleRefs).length > 0 ? { scheduleRefs: boundedRefs(input.scheduleRefs) } : {}),
+    ...(boundedRefs(input.openLoopRefs).length > 0 ? { openLoopRefs: boundedRefs(input.openLoopRefs) } : {}),
     ...(input.relationshipContinuityRef?.trim()
       ? { relationshipContinuityRef: input.relationshipContinuityRef.trim() }
       : {}),
@@ -91,5 +100,8 @@ export const isHandoffCapsule = (value: unknown): value is HandoffCapsule => {
     && Array.isArray(candidate.recentInteractionRefs)
     && Array.isArray(candidate.unresolvedTopicRefs)
     && Array.isArray(candidate.recentMeaningfulEventRefs)
+    && (candidate.lifeEventRefs === undefined || Array.isArray(candidate.lifeEventRefs))
+    && (candidate.scheduleRefs === undefined || Array.isArray(candidate.scheduleRefs))
+    && (candidate.openLoopRefs === undefined || Array.isArray(candidate.openLoopRefs))
     && isContinuityScope(candidate.scope);
 };

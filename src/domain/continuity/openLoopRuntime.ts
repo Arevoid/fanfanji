@@ -6,7 +6,7 @@ import {
 } from "./continuityTypes";
 
 export type OpenLoopType = "promise" | "pending_question" | "unfinished_action" | "future_intention" | "unresolved_conflict";
-export type OpenLoopStatus = "open" | "completed" | "cancelled" | "expired";
+export type OpenLoopStatus = "open" | "pending" | "fulfilled" | "completed" | "cancelled" | "expired" | "superseded";
 
 export interface OpenLoopRecord {
   version: typeof CONTINUITY_RUNTIME_SCHEMA_VERSION;
@@ -74,6 +74,24 @@ export function closeOpenLoop(
 }
 
 export function listOpenLoops(records: readonly OpenLoopRecord[], scope: ContinuityScope): OpenLoopRecord[] {
-  return records.filter((record) => sameContinuityScope(record.scope, scope) && record.status === "open")
+  return records.filter((record) => sameContinuityScope(record.scope, scope)
+    && (record.status === "open" || record.status === "pending"))
     .sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+export const isOpenLoopPending = (record: Pick<OpenLoopRecord, "status">): boolean =>
+  record.status === "open" || record.status === "pending";
+
+/** Explicit lifecycle transition; reloads cannot reopen a fulfilled loop. */
+export function transitionOpenLoop(
+  records: readonly OpenLoopRecord[],
+  scope: ContinuityScope,
+  id: string,
+  status: Exclude<OpenLoopStatus, "open" | "pending">,
+  at: number,
+): OpenLoopRecord[] {
+  return records.map((record) => record.id === id && sameContinuityScope(record.scope, scope)
+    && isOpenLoopPending(record)
+    ? { ...record, status, updatedAt: at }
+    : record);
 }

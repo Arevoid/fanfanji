@@ -30,23 +30,46 @@ export function normalizeCharacterEvent(value: unknown, now = Date.now()): Chara
   const userIdentityId = value.userIdentityId;
   const id = value.id;
   const kind = value.kind;
+  const type = value.type;
   const summary = value.summary;
   const source = value.source;
   const occurredAt = value.occurredAt;
+  const timestamp = value.timestamp;
+  const intervalValue = value.interval;
   const status = value.status === undefined ? "active" : value.status;
   const recordedAt = readOptionalFiniteNumber(value.recordedAt, isFiniteNumber(occurredAt) ? occurredAt : now);
   const confidence = readOptionalFiniteNumber(value.confidence, 1);
   const schemaVersion = value.schemaVersion === undefined ? CHARACTER_EVENT_SCHEMA_VERSION : value.schemaVersion;
 
+  const normalizedKind = isNonEmptyCharacterLifeId(kind) ? kind : type;
+  const normalizedOccurredAt = isFiniteNumber(occurredAt)
+    ? occurredAt
+    : isFiniteNumber(timestamp)
+      ? timestamp
+      : isRecord(intervalValue) && isFiniteNumber(intervalValue.startAt)
+        ? intervalValue.startAt
+        : undefined;
+  const interval = isRecord(intervalValue) && isFiniteNumber(intervalValue.startAt)
+    ? {
+      startAt: intervalValue.startAt,
+      ...(isFiniteNumber(intervalValue.endAt) ? { endAt: intervalValue.endAt } : {}),
+    }
+    : undefined;
+  const normalizeStringList = (input: unknown, max: number): string[] => Array.from(new Set(
+    Array.isArray(input)
+      ? input.filter(isNonEmptyCharacterLifeId).map((item) => item.trim())
+      : [],
+  )).slice(0, max);
+
   if (!isNonEmptyCharacterLifeId(relationId)
     || !isNonEmptyCharacterLifeId(characterId)
     || !isNonEmptyCharacterLifeId(userIdentityId)
     || !isNonEmptyCharacterLifeId(id)
-    || !isNonEmptyCharacterLifeId(kind)
+    || !isNonEmptyCharacterLifeId(normalizedKind)
     || !isNonEmptyCharacterLifeId(summary)
     || !isNonEmptyCharacterLifeId(source)
     || !isNonEmptyCharacterLifeId(status)
-    || !isFiniteNumber(occurredAt)
+    || !isFiniteNumber(normalizedOccurredAt)
     || recordedAt === undefined
     || confidence === undefined
     || !isFiniteNumber(schemaVersion)
@@ -60,10 +83,17 @@ export function normalizeCharacterEvent(value: unknown, now = Date.now()): Chara
     relationId: relationId.trim(),
     characterId: characterId.trim(),
     userIdentityId: userIdentityId.trim(),
-    kind: kind.trim(),
+    kind: normalizedKind.trim(),
+    ...(isNonEmptyCharacterLifeId(type) ? { type: type.trim() } : {}),
     summary: summary.trim(),
     source: source.trim(),
-    occurredAt,
+    occurredAt: normalizedOccurredAt,
+    ...(isFiniteNumber(timestamp) ? { timestamp } : {}),
+    ...(interval ? { interval } : {}),
+    ...(Array.isArray(value.participants) ? { participants: normalizeStringList(value.participants, 16) } : {}),
+    ...(typeof value.visibility === "string" && ["private", "shared", "public", "character_private", "user_private"].includes(value.visibility)
+      ? { visibility: value.visibility as CharacterEvent["visibility"] } : {}),
+    ...(Array.isArray(value.refs) ? { refs: normalizeStringList(value.refs, 24) } : {}),
     recordedAt,
     confidence,
     status: status.trim(),

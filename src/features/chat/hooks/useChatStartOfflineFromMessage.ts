@@ -12,7 +12,9 @@ import { buildOfflineHandoffFacts, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../../.
 import { getLatestWorldBookEntries } from "../../../utils/worldBook";
 import { isWorldBookEntryForAnyCharacter } from "../../../domain/worldbook/worldBookVisibility";
 import { createHandoffCapsule } from "../../../domain/continuity/handoffCapsule";
-import { upsertHandoffCapsule } from "../../../core/storage/repositories/continuityRuntimeRepository";
+import { loadContinuityRuntimeStore, upsertHandoffCapsule } from "../../../core/storage/repositories/continuityRuntimeRepository";
+import { loadCharacterEvents } from "../../../core/storage/repositories/characterEventRepository";
+import { listCharacterScheduleByScope } from "../../../core/storage/repositories/characterScheduleRepository";
 
 interface UseChatStartOfflineFromMessageOptions {
   activeChatCharId: string | null;
@@ -203,6 +205,23 @@ export function useChatStartOfflineFromMessage({
         recentInteractionRefs: sourceMessages.map((item) => item.id),
         unresolvedTopicRefs: [],
         recentMeaningfulEventRefs: [],
+        lifeEventRefs: loadCharacterEvents().value
+          .filter((event) => event.relationId === activeRelationship.id
+            && event.characterId === activeRelationship.characterId
+            && event.userIdentityId === activeRelationship.userIdentityId)
+          .slice(-8)
+          .map((event) => event.id),
+        scheduleRefs: listCharacterScheduleByScope({
+          relationId: activeRelationship.id,
+          characterId: activeRelationship.characterId,
+          userIdentityId: activeRelationship.userIdentityId,
+        }).slice(-8).map((entry) => entry.id),
+        openLoopRefs: loadContinuityRuntimeStore().value.openLoops
+          .filter((loop) => loop.scope.relationId === activeRelationship.id
+            && loop.scope.characterId === activeRelationship.characterId
+            && loop.scope.userIdentityId === activeRelationship.userIdentityId)
+          .slice(-8)
+          .map((loop) => loop.id),
         relationshipContinuityRef: `relationship:${activeRelationship.id}`,
         createdAt: snapshotTimestamp,
       });

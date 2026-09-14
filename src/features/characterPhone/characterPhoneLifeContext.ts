@@ -9,6 +9,13 @@ import { listRelationshipsForIdentityWorkspace, type CharacterRelationship } fro
 import type { CharacterPhoneRecord } from "../../domain/characterPhone/types";
 import type { CharacterPhoneRelationshipNetworkContact } from "./characterPhoneRelationshipNetwork";
 import { isWorldBookEntryVisible } from "../../domain/worldbook/worldBookVisibility";
+import type { CharacterLifeProjection } from "../../domain/characterLife/lifeProjection";
+import type { CharacterEvent } from "../../domain/characterLife/characterEventTypes";
+import { buildCharacterLifeProjection } from "../../domain/characterLife/lifeProjection";
+import { loadCharacterLifeRuntimeStore } from "../../core/storage/repositories/characterLifeRepository";
+import { loadCharacterEvents } from "../../core/storage/repositories/characterEventRepository";
+import { listCharacterScheduleByScope } from "../../core/storage/repositories/characterScheduleRepository";
+import { loadContinuityRuntimeStore } from "../../core/storage/repositories/continuityRuntimeRepository";
 
 export type CharacterPhoneContextSourceKind = "character" | "worldbook" | "chat" | "moment" | "phone" | "relationship-network";
 
@@ -32,6 +39,8 @@ export interface CharacterPhoneLifeContext {
   recentMoments: Moment[];
   relationshipNetworkContacts: CharacterPhoneRelationshipNetworkContact[];
   sourceRefs: CharacterPhoneContextSourceRef[];
+  /** One canonical life projection per owned relation; never cross-character. */
+  lifeProjections: CharacterLifeProjection[];
 }
 
 export function selectCharacterPhoneWorldBookEntries(input: {
@@ -120,6 +129,28 @@ export function buildCharacterPhoneLifeContext(input: {
     ...relationshipNetworkContacts.map((contact) => ({ kind: "relationship-network" as const, id: contact.npc.id })),
     ...(input.phone.updatedAt ? [{ kind: "phone" as const, id: input.phone.id }] : []),
   ];
+  const lifeStore = loadCharacterLifeRuntimeStore().value;
+  const events = loadCharacterEvents().value;
+  const continuity = loadContinuityRuntimeStore().value;
+  const lifeProjections = relationships.map((relationship) => buildCharacterLifeProjection({
+    app: "character_phone",
+    scope: {
+      relationId: relationship.id,
+      characterId: relationship.characterId,
+      userIdentityId: relationship.userIdentityId,
+    },
+    state: lifeStore.states.find((state) => state.relationId === relationship.id
+      && state.characterId === relationship.characterId
+      && state.userIdentityId === relationship.userIdentityId),
+    events: events as CharacterEvent[],
+    schedules: listCharacterScheduleByScope({
+      relationId: relationship.id,
+      characterId: relationship.characterId,
+      userIdentityId: relationship.userIdentityId,
+    }),
+    openLoops: continuity.openLoops,
+    now: Date.now(),
+  }));
   return {
     ownerIdentityId: input.phone.ownerIdentityId,
     characterId: input.character.id,
@@ -135,5 +166,6 @@ export function buildCharacterPhoneLifeContext(input: {
     recentMoments: moments.slice(-12),
     relationshipNetworkContacts,
     sourceRefs,
+    lifeProjections,
   };
 }

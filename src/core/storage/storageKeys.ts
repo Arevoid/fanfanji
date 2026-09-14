@@ -63,6 +63,9 @@ export const storageKeys = {
   proactiveTopicHistory: "phone_proactive_topic_history",
   /** Additive continuity runtime state; bounded metadata, never transcripts. */
   continuityRuntime: "phone_continuity_runtime_v1",
+  /** Character Life state and proactive intent metadata; bounded and relation scoped. */
+  characterLifeRuntime: "phone_character_life_runtime_v1",
+  characterSchedule: "phone_character_schedule_v1",
   offlineStories: "phone_offline_stories",
   memoryVaultSettings: "phone_memory_vault_settings",
   scheduleStore: "phone_schedule_v1",
