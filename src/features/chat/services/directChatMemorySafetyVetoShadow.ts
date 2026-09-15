@@ -6,6 +6,10 @@ import {
   type DirectChatSafetyVetoFeatureScope,
   type DirectChatSafetyVetoValidation,
 } from "./directChatMemorySafetyVetoValidator";
+import {
+  isMemoryAdmissionV2PromotionGateSatisfied,
+  MEMORY_ADMISSION_V2_PROMOTION_POLICY_VERSION,
+} from "./directChatMemoryAdmissionPromotionPolicy";
 
 export interface DirectChatMemorySafetyVetoShadowRecord {
   evaluated: boolean;
@@ -36,6 +40,8 @@ export interface DirectChatMemorySafetyVetoShadowConfiguration {
   enabled: boolean;
   /** Test/debug injection may enable collection outside a Vite dev build. */
   explicitDebug?: boolean;
+  /** Only the reviewed promotion policy may enable production diagnostics. */
+  productionPolicy?: typeof MEMORY_ADMISSION_V2_PROMOTION_POLICY_VERSION;
   maxObservations?: number;
 }
 
@@ -228,7 +234,9 @@ export function evaluateDirectChatSafetyVetoShadowForExtraction(
 export function configureDirectChatMemorySafetyVetoShadow(
   configuration: DirectChatMemorySafetyVetoShadowConfiguration,
 ): void {
-  configured = configuration.enabled && (configuration.explicitDebug === true || isDevBuild());
+  const productionPolicyApproved = configuration.productionPolicy === MEMORY_ADMISSION_V2_PROMOTION_POLICY_VERSION
+    && isMemoryAdmissionV2PromotionGateSatisfied();
+  configured = configuration.enabled && (configuration.explicitDebug === true || isDevBuild() || productionPolicyApproved);
   maxObservations = clampMaxObservations(configuration.maxObservations);
   if (!configured) records = [];
 }

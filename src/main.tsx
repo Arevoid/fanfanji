@@ -5,8 +5,10 @@ import './index.css';
 import { ThemeProvider } from './features/theme/ThemeProvider.tsx';
 import { isDevLoopbackOrigin } from './core/runtime/devOrigin.ts';
 import { installDevRuntimeProbe } from './core/runtime/devDiagnostics.ts';
+import { initializeMemoryAdmissionV2Promotion } from './features/chat/services/directChatMemoryAdmissionPromotion.ts';
 
 installDevRuntimeProbe();
+initializeMemoryAdmissionV2Promotion();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

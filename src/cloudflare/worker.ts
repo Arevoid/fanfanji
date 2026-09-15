@@ -229,10 +229,14 @@ export default {
     if (url.pathname === "/api/extract-memories") {
       try {
         const history = Array.isArray(body.history) ? body.history as any[] : [];
+        // Keep the client V2 shadow request explicit on the deployed Worker.
+        // Offline extraction is intentionally never promoted into this path.
+        const enableV2Shadow = body.enableV2Shadow === true && body.scenario !== "offline";
         const prompt = buildKnowledgeExtractionPrompt({
           characterName: String(body.characterName || "角色"), characterProfile: typeof body.characterProfile === "string" ? body.characterProfile : undefined,
           history, sourceReferenceMode: body.sourceReferenceMode === "local" ? "local" : "canonical",
           templateType: body.templateType === "delicate" ? "delicate" : "refined", scenario: body.scenario === "offline" ? "offline" : undefined,
+          includeV2Shadow: enableV2Shadow,
         });
         const text = await callTextProvider({
           ...textInput(body, prompt, "你是长期记忆提取器，严格按要求输出结构化候选。", 0.5),
@@ -242,8 +246,8 @@ export default {
           rawText: text,
           allowedMessageIds: new Set(history.map((item) => String(item.id))),
           originalPrompt: prompt,
-          preserveUnvalidatedSourceHints: body.sourceReferenceMode === "local",
-          repair: (repairPrompt) => callTextProvider({ ...textInput(body, repairPrompt, body.sourceReferenceMode === "local"
+          preserveUnvalidatedSourceHints: body.sourceReferenceMode === "local" || enableV2Shadow,
+          repair: (repairPrompt) => callTextProvider({ ...textInput(body, repairPrompt, body.sourceReferenceMode === "local" || enableV2Shadow
             ? "你是结构化记忆修复器。只输出使用本次 M# source refs 且可验证的 JSONL，不要解释。"
             : "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。", 0.2), allowEmptyText: true }),
         });

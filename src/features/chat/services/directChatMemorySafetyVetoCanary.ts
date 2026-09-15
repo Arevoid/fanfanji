@@ -8,8 +8,12 @@ import type {
   DirectChatMemorySafetyVetoShadowEvaluation,
   DirectChatMemorySafetyVetoShadowRecord,
 } from "./directChatMemorySafetyVetoShadow";
+import {
+  isMemoryAdmissionV2PromotionGateSatisfied,
+  MEMORY_ADMISSION_V2_PROMOTION_POLICY_VERSION,
+} from "./directChatMemoryAdmissionPromotionPolicy";
 
-/** Hard kill switch name reserved for the future runtime configuration seam. */
+/** Hard kill switch name for the promoted Direct Chat safety brake. */
 export const DIRECT_CHAT_MEMORY_ADMISSION_SAFETY_VETO_CANARY =
   "DIRECT_CHAT_MEMORY_ADMISSION_SAFETY_VETO_CANARY" as const;
 
@@ -38,6 +42,8 @@ export interface DirectChatMemorySafetyVetoCanaryConfiguration {
   enabled: boolean;
   /** Test/debug injection may opt in outside a Vite dev build. */
   explicitDebug?: boolean;
+  /** Only the reviewed promotion policy may enable the production brake. */
+  productionPolicy?: typeof MEMORY_ADMISSION_V2_PROMOTION_POLICY_VERSION;
   /** Runtime policy remains separate from the validator's approved reasons. */
   enabledReasons?: readonly string[];
   maxObservations?: number;
@@ -326,7 +332,9 @@ export function applyDirectChatMemorySafetyVetoCanary(input: {
 export function configureDirectChatMemorySafetyVetoCanary(
   configuration: DirectChatMemorySafetyVetoCanaryConfiguration,
 ): void {
-  configured = configuration.enabled && (configuration.explicitDebug === true || isDevBuild());
+  const productionPolicyApproved = configuration.productionPolicy === MEMORY_ADMISSION_V2_PROMOTION_POLICY_VERSION
+    && isMemoryAdmissionV2PromotionGateSatisfied();
+  configured = configuration.enabled && (configuration.explicitDebug === true || isDevBuild() || productionPolicyApproved);
   enabledReasons = configured ? normalizeEnabledReasons(configuration.enabledReasons) : new Set();
   maxObservations = clampMaxObservations(configuration.maxObservations);
   if (!configured) records = [];

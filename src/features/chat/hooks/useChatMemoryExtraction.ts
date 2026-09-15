@@ -34,6 +34,10 @@ import {
   isDirectChatMemorySafetyVetoCanaryEnabled,
   type DirectChatMemorySafetyVetoCanaryResult,
 } from "../services/directChatMemorySafetyVetoCanary";
+import {
+  isMemoryAdmissionV2Promoted,
+  MEMORY_ADMISSION_V2_PROMOTION_POLICY_VERSION,
+} from "../services/directChatMemoryAdmissionPromotion";
 import type { DirectChatMemoryAdmissionShadowResult } from "../services/directChatMemoryAdmissionShadow";
 import type { DirectChatMemorySafetyVetoShadowEvaluation } from "../services/directChatMemorySafetyVetoShadow";
 import {
@@ -239,10 +243,15 @@ export function useChatMemoryExtraction({
         && observationPathEligible
         && isDirectChatMemorySafetyVetoCanaryEnabled();
       if (canaryEnabled) {
-        // A developer/local Canary opt-in requires the existing fail-open
-        // Safety shadow to produce the same-operation validator result. This
-        // configuration is dev-gated and has no effect in production builds.
-        configureDirectChatMemorySafetyVetoShadow({ enabled: true });
+        // The promoted policy keeps the same-operation fail-open Safety shadow
+        // beside the candidate-local brake. Dev/local callers retain the old
+        // explicit-debug path and are not silently promoted.
+        configureDirectChatMemorySafetyVetoShadow({
+          enabled: true,
+          ...(isMemoryAdmissionV2Promoted()
+            ? { productionPolicy: MEMORY_ADMISSION_V2_PROMOTION_POLICY_VERSION }
+            : {}),
+        });
       }
       const admissionShadowEnabled = observationPathEligible && isDirectChatMemoryAdmissionShadowEvidenceEnabled();
       const safetyShadowEnabled = observationPathEligible
