@@ -145,7 +145,7 @@ function makeManifest(
       sessions: { current: 0, minimum: 5 },
       suppressions: { current: 0, minimum: 10 },
       scopes: { current: 0, minimum: 3 },
-      days: { current: 0, minimum: 7 },
+      days: { current: 0, minimum: 5 },
       batches: { current: 0, minimum: 20 },
       allMinimumsSatisfied: false,
       promotionEligible: false,
@@ -436,7 +436,7 @@ const thresholdRecords: DirectChatMemoryLongEvidenceRecord[] = Array.from({ leng
   scope: (index % 3) + 1,
   action: 100 + index,
   batch: 100 + index,
-  day: "2026-09-" + String(10 + (index % 7)).padStart(2, "0"),
+  day: "2026-09-" + String(10 + (index % 5)).padStart(2, "0"),
   classification: "VALID_ELIGIBLE_SUPPRESSION",
 }));
 const thresholdManifest = makeManifest(campaign, [windowA], mappingsFor(campaign, [windowA], [1, 2, 3]));
@@ -449,9 +449,24 @@ assert.equal(thresholdReview.formalSessionCount, 5);
 assert.equal(thresholdReview.validSuppressionCount, 20);
 assert.equal(thresholdReview.distinctExactScopeCount, 3);
 assert.equal(thresholdReview.extractionBatchCount, 20);
-assert.equal(thresholdReview.distinctEvidenceDayCount, 7);
+assert.equal(thresholdReview.distinctEvidenceDayCount, 5);
 assert.equal(thresholdReview.allMinimumsSatisfied, true);
 assert.equal(thresholdReview.promotionEligible, true);
+
+const fourDayRecords = thresholdRecords.map((record, index) => ({
+  ...record,
+  evidenceRecordFingerprint: "evidence-" + hex(200 + index, 16),
+  logicalActionFingerprint: "action-" + hex(200 + index, 8),
+  batchActionFingerprint: "batch-" + hex(200 + index, 8),
+  evidenceDay: "2026-09-" + String(10 + (index % 4)).padStart(2, "0"),
+}));
+const fourDayReview = reviewMemoryAdmissionCampaignEvidence({
+  manifest: thresholdManifest,
+  windows: [windowInput(campaign, windowA, fourDayRecords)],
+});
+assert.equal(fourDayReview.distinctEvidenceDayCount, 4);
+assert.equal(fourDayReview.allMinimumsSatisfied, false, "four evidence days do not satisfy accelerated policy");
+assert.equal(fourDayReview.promotionEligible, false);
 
 const tamperedManifest = makeManifest(campaign, [windowA], mappingsFor(campaign, [windowA], [1, 2, 3]), {
   ...zeroCounts(),
@@ -491,7 +506,7 @@ if (existsSync(realCampaignPath)) {
   assert.ok(realReview.distinctEvidenceDayCount >= 3);
   assert.equal(realReview.manifestSnapshotMatchesDerived, true);
   assert.equal(realReview.manifestThresholdProgressMatchesDerived, true);
-  assert.equal(realReview.promotionEligible, false);
+  assert.equal(realReview.promotionEligible, true);
 }
 
 const generatedScope = createPromotionScopeFingerprint(campaign, ["automatic_direct_chat", "character-scope", "relation-scope"]);

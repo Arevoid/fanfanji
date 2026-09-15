@@ -11,7 +11,13 @@ import {
 
 export const WINDOW_CLOSURE_SCHEMA_VERSION = "memory-admission-v2-window-closure-1" as const;
 export const CAMPAIGN_SCHEMA_VERSION = "memory-admission-v2-campaign-1" as const;
-export const PROMOTION_POLICY_VERSION = "memory-admission-v2-promotion-1" as const;
+/**
+ * Accelerated closeout policy: five real UTC evidence days remain required;
+ * the independent twenty-batch gate and every safety/integrity gate remain
+ * unchanged.  The previous seven-day value was an observation-duration gate,
+ * not an additional safety control (see the closeout rationale document).
+ */
+export const PROMOTION_POLICY_VERSION = "memory-admission-v2-promotion-2" as const;
 
 export type WindowStatus = "closed" | "closed_unrecoverable";
 export type WindowClosureReason =
@@ -155,7 +161,7 @@ const CLOSURE_REASONS = new Set<WindowClosureReason>([
   "accounting_stop",
 ]);
 const CAMPAIGN_STATUSES = new Set<CampaignStatus>(["planned", "active", "paused", "blocked", "completed"]);
-const THRESHOLDS = { sessions: 5, suppressions: 10, scopes: 3, days: 7, batches: 20 } as const;
+const THRESHOLDS = { sessions: 5, suppressions: 10, scopes: 3, days: 5, batches: 20 } as const;
 const FORBIDDEN_MANIFEST_KEYS = new Set([
   "rawtoken",
   "windowtoken",
