@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import type { UserSettings } from "../../../types";
 import {
   CLASSIC_BUBBLE_OPACITY,
@@ -84,7 +84,11 @@ export function useSettingsAppearanceDraftState(settings: UserSettings, effectiv
   const [avatarBorderColor, setAvatarBorderColor] = useState(settings.avatarBorderColor || "#e4e4e7");
   const [beautySubTab, setBeautySubTab] = useState<"desktop" | "chat" | "preset">("chat");
 
-  useEffect(() => {
+  // Synchronize the mode-specific draft before the browser paints. The
+  // preset changes in the parent settings object immediately, while these
+  // controls are local draft state; a normal effect would expose one frame
+  // combining the new mode with the old border/color values.
+  useLayoutEffect(() => {
     setOtherBubbleBg(isLiquidGlassChatStyle ? settings.liquidGlassOtherBubbleBg || LIQUID_GLASS_DEFAULT_BUBBLE_COLOR : settings.otherBubbleBg || CLASSIC_OTHER_BUBBLE_BACKGROUND);
     setOtherBubbleColor(isLiquidGlassChatStyle ? settings.liquidGlassOtherBubbleColor || LIQUID_GLASS_DEFAULT_TEXT_COLOR : settings.otherBubbleColor || CLASSIC_OTHER_BUBBLE_TEXT);
     setOtherBubbleOpacity(isLiquidGlassChatStyle ? settings.liquidGlassOtherBubbleOpacity ?? LIQUID_GLASS_DEFAULT_BUBBLE_OPACITY : settings.otherBubbleOpacity ?? CLASSIC_BUBBLE_OPACITY);

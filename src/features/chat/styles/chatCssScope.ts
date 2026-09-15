@@ -1,6 +1,9 @@
 const NESTED_AT_RULES = /^(?:@media|@supports|@container|@layer|@document|@scope)\b/i;
 const NON_SELECTOR_AT_RULES = /^(?:@(?:-\w+-)?keyframes|@font-face|@page|@property)\b/i;
-const SCOPE_SELECTOR = "#conv-screen.user-custom-chat-css:not([data-chat-settings-open=\"true\"]) #api-chat-screen > .chat-content-scope";
+// The settings sheet is rendered in a portal outside #conv-screen. Keeping
+// this scope active while the sheet animates in prevents the underlying chat
+// from briefly falling back to the built-in theme.
+const SCOPE_SELECTOR = "#conv-screen.user-custom-chat-css #api-chat-screen > .chat-content-scope";
 const ROOT_CLASS_SELECTOR = /^(?:\.chat-page|\.chat-theme|\.style-liquid-glass|\.user-custom-chat-css)(?=[.#:\[\s]|$)/i;
 
 export function normalizeChatCssSyntax(css: string): string {

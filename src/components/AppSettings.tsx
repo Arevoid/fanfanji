@@ -1540,7 +1540,7 @@ export default function AppSettings({
                           </div>
                           <div className="max-w-[75%] relative">
                             <div
-                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200"
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm text-left"
                               style={getPreviewBubbleVisualStyle("other")}
                             >
                               这里是对方气泡预览，颜色和圆角都是同步修改的。
@@ -1575,7 +1575,7 @@ export default function AppSettings({
                           <div className="flex flex-col items-start max-w-[75%]">
                             {!hideNicknames && (<span className="text-[9px] font-bold text-slate-400 mb-0.5">聊天对象 (AI)</span>)}
                             <div
-                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm text-left relative"
                               style={getPreviewBubbleVisualStyle("other")}
                             >
                               这里是对方气泡预览，颜色和圆角都是同步修改的。
@@ -1619,7 +1619,7 @@ export default function AppSettings({
                           )}
                           <div className="max-w-[75%] relative">
                             <div
-                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200"
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm text-left"
                               style={getPreviewBubbleVisualStyle("other")}
                             >
                               启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
@@ -1661,7 +1661,7 @@ export default function AppSettings({
                               <span className="text-[9px] font-bold text-slate-400 mb-0.5">聊天对象 (AI)</span>
                             )}
                             <div
-                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm text-left relative"
                               style={getPreviewBubbleVisualStyle("other")}
                             >
                               启用“合并连续发言头像”后，连续发言的头像会被折叠哦~
@@ -1703,7 +1703,7 @@ export default function AppSettings({
                           </div>
                           <div className="max-w-[75%] relative">
                             <div
-                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200"
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm text-left"
                               style={getPreviewBubbleVisualStyle("self")}
                             >
                               我的专属气泡！效果完全同步 ✨
@@ -1738,7 +1738,7 @@ export default function AppSettings({
                           <div className="flex flex-col items-end max-w-[75%]">
                             {!hideNicknames && (<span className="text-[9px] font-bold text-slate-400 mb-0.5">{settings.name || "我"}</span>)}
                             <div
-                              className="px-3 py-1.5 text-xs font-medium shadow-sm transition-all text-left duration-200 relative"
+                              className="px-3 py-1.5 text-xs font-medium shadow-sm text-left relative"
                               style={getPreviewBubbleVisualStyle("self")}
                             >
                               我的专属气泡！效果完全同步 ✨

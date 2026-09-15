@@ -7,6 +7,8 @@ const hook = fs.readFileSync(path.join(root, "src/features/settings/hooks/useSet
 const appSettings = fs.readFileSync(path.join(root, "src/components/AppSettings.tsx"), "utf8");
 
 assert.match(hook, /effectiveBubbleStylePreset/);
+assert.match(hook, /useLayoutEffect/);
+assert.doesNotMatch(hook, /useEffect\(/);
 assert.match(hook, /liquidGlassBubbleTailEnabled/);
 assert.match(hook, /otherBubbleBorderColor/);
 assert.match(hook, /beautySubTab/);

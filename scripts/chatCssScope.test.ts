@@ -1,7 +1,8 @@
 import { strict as assert } from "node:assert";
 import { normalizeChatCssSyntax, prioritizeUserChatCss, scopeUserChatCss } from "../src/features/chat/styles/chatCssScope";
 
-const scope = '#conv-screen.user-custom-chat-css:not([data-chat-settings-open="true"]) #api-chat-screen > .chat-content-scope';
+const scope = '#conv-screen.user-custom-chat-css #api-chat-screen > .chat-content-scope';
+assert.doesNotMatch(scopeUserChatCss(".chat-bubble-self { color: red; }"), /data-chat-settings-open/);
 assert.equal(normalizeChatCssSyntax("font‐size: 12px"), "font-size: 12px");
 const scoped = scopeUserChatCss(".chat-bubble-self, body.dark { color: red; }");
 assert.equal(scoped.includes(`${scope} .chat-bubble-self`), true);
