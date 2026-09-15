@@ -151,6 +151,14 @@ export function useChatRegenerationAction(context: Record<string, any>) {
       } = historyContext;
       const msgsForHistory = normalizedMessagesForHistory;
       const historyPartition = { hasCrossDayHistory };
+      const truthQueryText = [
+        currentMessageContextText,
+        ...slicedMsgs.slice(-2).map((message) => serializeMessageContentForPrompt(message, {
+          mode: "history",
+          userName: promptUserName,
+          characterName: activeCharacter.name,
+        })),
+      ].filter(Boolean).join("\n");
 
       const mainPromptText = buildDirectChatMainPrompt({
         characterName: activeCharacter.name,
@@ -182,7 +190,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
             userIdentityId: activeRelationship.userIdentityId,
             conversationId: activeRelationship.conversationId,
           },
-          queryText: currentMessageContextText,
+          queryText: truthQueryText,
           limit: topK,
           maxCharacters: 4800,
           alreadyPromptedMessageIds: [...slicedMsgs, lastUserMsg].map((message) => message.id),

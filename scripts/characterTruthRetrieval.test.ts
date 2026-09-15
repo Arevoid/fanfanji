@@ -162,5 +162,14 @@ assert.equal(
   true,
   "Chinese natural-language queries must recall the matching fact even when the Truth set exceeds the recall limit",
 );
+const unrelatedOnlyRecall = retrieveTruthForPrivatePrompt({
+  scope,
+  queryText: "完全不存在的主题",
+  limit: 50,
+  claims: checkInClaims,
+  summaries: [],
+  corrections: [],
+});
+assert.equal(Object.values(unrelatedOnlyRecall.projection).flat().length, 0, "large unrelated Truth sets must not be injected for a no-match query");
 
 console.log("PASS Truth Layer retrieval ranking, temporal labels, prompt visibility, and identity isolation");

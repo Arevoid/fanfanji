@@ -169,26 +169,42 @@ const rankClaims = (claims: readonly KnowledgeClaim[], queryText: string, limit:
   const oldest = timestamps.length > 0 ? Math.min(...timestamps) : 0;
   const newest = timestamps.length > 0 ? Math.max(...timestamps) : 0;
   const timestampRange = Math.max(0, newest - oldest);
-  return [...claims]
+  const normalizedQuery = queryText.trim();
+  const scored = [...claims]
     .filter((claim, index, all) => claim.status === "active" && !claim.recallDisabled && all.findIndex((candidate) => candidate.id === claim.id) === index)
+    .map((claim) => ({ claim, textScore: scoreText(claim.statement, normalizedQuery) }))
     .sort((left, right) => {
-      const leftRecency = timestampRange > 0 ? (left.recordedAt - oldest) / timestampRange : 0;
-      const rightRecency = timestampRange > 0 ? (right.recordedAt - oldest) / timestampRange : 0;
-      const leftScore = scoreText(left.statement, queryText) * 10
-        + truthWeight[left.truthStatus] * 2
-        + sourceQuality(left)
-        + claimImportance(left) * 0.35
-        + left.confidence
+      const leftClaim = left.claim;
+      const rightClaim = right.claim;
+      const leftRecency = timestampRange > 0 ? (leftClaim.recordedAt - oldest) / timestampRange : 0;
+      const rightRecency = timestampRange > 0 ? (rightClaim.recordedAt - oldest) / timestampRange : 0;
+      const leftScore = left.textScore * 10
+        + truthWeight[leftClaim.truthStatus] * 2
+        + sourceQuality(leftClaim)
+        + claimImportance(leftClaim) * 0.35
+        + leftClaim.confidence
         + leftRecency * 2;
-      const rightScore = scoreText(right.statement, queryText) * 10
-        + truthWeight[right.truthStatus] * 2
-        + sourceQuality(right)
-        + claimImportance(right) * 0.35
-        + right.confidence
+      const rightScore = right.textScore * 10
+        + truthWeight[rightClaim.truthStatus] * 2
+        + sourceQuality(rightClaim)
+        + claimImportance(rightClaim) * 0.35
+        + rightClaim.confidence
         + rightRecency * 2;
-      return rightScore - leftScore || right.recordedAt - left.recordedAt || left.id.localeCompare(right.id);
+      return rightScore - leftScore || rightClaim.recordedAt - leftClaim.recordedAt || leftClaim.id.localeCompare(rightClaim.id);
     })
+    // A small Truth set benefits from keeping high-governance records visible.
+    // Once the set is larger than the caller can reasonably inject, however,
+    // unrelated confirmed facts must not crowd out a matching old agreement.
+    .filter((candidate, _index, all) => {
+      if (!normalizedQuery || all.length <= Math.max(20, limit)) return true;
+      const hasTextMatch = all.some((item) => item.textScore > 0);
+      if (!hasTextMatch) return candidate.claim.truthStatus === "disputed" || candidate.claim.truthStatus === "legacy_unverified";
+      if (candidate.textScore > 0) return true;
+      return candidate.claim.truthStatus === "disputed" || candidate.claim.truthStatus === "legacy_unverified";
+    })
+    .map((candidate) => candidate.claim)
     .slice(0, limit);
+  return scored;
 };
 
 export function retrieveTruthForPrivatePrompt(input: TruthRetrievalInput): TruthRetrievalResult {

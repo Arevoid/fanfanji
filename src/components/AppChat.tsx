@@ -1393,7 +1393,10 @@ export default function AppChat({
     const recallLimit = resolveChatLongTermMemoryLimit(draftRetrievalHistoryLimit);
     const previewPromptedMessages = currentChatMessages.slice(-resolveChatContextMemoryLimit(draftContextMemoryLimit));
     const latestUserMessage = [...currentChatMessages].reverse().find((message) => message.sender === "user");
-    const queryText = latestUserMessage?.content || "";
+    const queryText = [
+      latestUserMessage?.content || "",
+      ...currentChatMessages.slice(-2).map((message) => message.content),
+    ].filter(Boolean).join("\n");
     const truthRetrieval = activeRelationship
       ? contributeDirectReplyTruthContext({
         scope: {
@@ -2220,6 +2223,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         callTranscript,
       });
       const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
+      const truthQueryText = [
+        currentMessageContextText,
+        ...slicedMsgs.slice(-2).map((message) => serializeMessageContentForPrompt(message, {
+          mode: "history",
+          userName: promptUserName,
+          characterName: activeCharacter.name,
+        })),
+      ].filter(Boolean).join("\n");
 
       // Recall memories from Memory Vault
       const topK = resolveChatLongTermMemoryLimit(activeCharacter.retrievalHistoryLimit);
@@ -2231,7 +2242,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             userIdentityId: activeRelationship.userIdentityId,
             conversationId: activeRelationship.conversationId,
           },
-          queryText: currentMessageContextText,
+          queryText: truthQueryText,
           limit: topK,
           maxCharacters: 4800,
           alreadyPromptedMessageIds: [...slicedMsgs, ...(userMsg ? [userMsg] : [])].map((message) => message.id),
