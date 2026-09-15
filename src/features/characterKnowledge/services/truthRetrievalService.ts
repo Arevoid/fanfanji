@@ -5,6 +5,7 @@ import type {
   KnowledgeClaim,
   KnowledgePromptProjection,
 } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
+import { getConversationSummaryLayer } from "../../../domain/characterKnowledge/conversationSummaryProjection";
 import { isExactTruthScope } from "../../../domain/characterKnowledge/knowledgeConflictPolicy";
 import { isKnowledgeTemporallyActive, temporalStatusLabel } from "../../../domain/characterKnowledge/knowledgeTemporalPolicy";
 import { selectKnowledgeForPrivatePrompt } from "../../../domain/characterKnowledge/knowledgeVisibilityPolicy";
@@ -332,8 +333,14 @@ export function formatTruthRetrievalForPrompt(result: TruthRetrievalResult, opti
   const correctionBlock = result.corrections.length > 0
     ? `\n[Behavior corrections / 人设修正]\n${result.corrections.map((correction) => `- ${correction.instruction}`).join("\n")}`
     : "";
+  const episodeSummaries = result.summaries.filter((summary) => getConversationSummaryLayer(summary) === "episode");
+  const projectionSummaries = result.summaries.filter((summary) => getConversationSummaryLayer(summary) !== "episode");
   const summaryBlock = result.summaries.length > 0
-    ? `\n[Conversation summary / 对话摘要（非权威补充）]\n这些摘要只是可重建的压缩缓存；如果与上面的具体事实、计划、假设或纠正冲突，以具体分组内容为准。\n${result.summaries.map((summary) => `- ${summary.summary.trim()}`).join("\n")}`
+    ? `${episodeSummaries.length > 0
+      ? `\n[Episode memory / 场景经历]\n这些是按对话窗口保存的经历摘要，只能作为场景线索；如果与上面的具体事实、计划、假设或纠正冲突，以具体分组内容为准。\n${episodeSummaries.map((summary) => `- ${summary.summary.trim()}`).join("\n")}`
+      : ""}${projectionSummaries.length > 0
+      ? `\n[Conversation summary / 对话摘要（非权威补充）]\n这些摘要只是可重建的压缩缓存；如果与上面的具体事实、计划、假设或纠正冲突，以具体分组内容为准。\n${projectionSummaries.map((summary) => `- ${summary.summary.trim()}`).join("\n")}`
+      : ""}`
     : "";
   const fullPrompt = `${blocks}${correctionBlock}${summaryBlock}`;
   const maxCharacters = options.maxCharacters ?? result.promptCharacterLimit;

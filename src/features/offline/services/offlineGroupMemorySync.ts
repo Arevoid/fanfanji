@@ -78,6 +78,7 @@ export async function createOfflineGroupParticipantMemories(input: {
       sourceMessageIds: input.sourceMessages.map((message) => message.id),
       generatedAt: input.now,
       generator: "offline-story-participant.v2",
+      layer: "episode",
     });
     if (summary) summaries.push(summary);
     else {

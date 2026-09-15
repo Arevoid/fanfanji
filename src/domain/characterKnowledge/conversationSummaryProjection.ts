@@ -2,6 +2,7 @@ import {
   CONVERSATION_SUMMARY_PROJECTION_VERSION,
   CONVERSATION_SUMMARY_SCHEMA_VERSION,
   type CharacterTruthScope,
+  type ConversationSummaryLayer,
   type ConversationSummaryRecord,
   type KnowledgeClaim,
 } from "./characterKnowledgeTypes";
@@ -59,6 +60,19 @@ export function isConversationSummarySourceValid(summary: ConversationSummaryRec
   });
 }
 
+/**
+ * Classify summaries without requiring a storage migration. New records carry
+ * an explicit layer; old records are classified from their generator/source.
+ */
+export function getConversationSummaryLayer(summary: Pick<ConversationSummaryRecord, "layer" | "generator" | "sourceRecordId">): ConversationSummaryLayer {
+  if (summary.layer) return summary.layer;
+  if (summary.sourceRecordId || summary.generator.startsWith("legacy-")) return "legacy";
+  if (summary.generator.startsWith("memory-projection.")) return "projection";
+  // Keep unannotated historical fixtures/storage on the old summary path;
+  // production episode writers pass the layer explicitly below.
+  return "projection";
+}
+
 export function createConversationSummaryRecord(input: {
   scope: CharacterTruthScope;
   claims: readonly KnowledgeClaim[];
@@ -67,6 +81,7 @@ export function createConversationSummaryRecord(input: {
   canonicalRevision?: string;
   id?: string;
   generator?: string;
+  layer?: ConversationSummaryLayer;
   rangeStartAt?: number;
   rangeEndAt?: number;
 }): ConversationSummaryRecord | undefined {
@@ -79,17 +94,19 @@ export function createConversationSummaryRecord(input: {
   const rangeStartAt = input.rangeStartAt ?? (claimTimes.length > 0 ? Math.min(...claimTimes) : undefined);
   const rangeEndAt = input.rangeEndAt ?? (claimTimes.length > 0 ? Math.max(...claimTimes) : undefined);
   const id = input.id || `conversation-summary:${input.scope.relationId}:${sourceMessageIds[0]}:${sourceMessageIds[sourceMessageIds.length - 1]}`;
+  const generator = input.generator || "character-truth-extraction.v1";
   return {
     id,
     ...input.scope,
     summary: claims.map((claim) => `- [${getConversationSummaryClaimLabel(claim)}] ${claim.statement}`).join("\n"),
+    layer: input.layer || getConversationSummaryLayer({ generator }),
     ...(input.canonicalRevision ? { canonicalRevision: input.canonicalRevision.trim() } : {}),
     sourceMessageIds,
     sourceClaimIds,
     ...(rangeStartAt !== undefined ? { rangeStartAt } : {}),
     ...(rangeEndAt !== undefined ? { rangeEndAt } : {}),
     generatedAt: input.generatedAt,
-    generator: input.generator || "character-truth-extraction.v1",
+    generator,
     projectionVersion: CONVERSATION_SUMMARY_PROJECTION_VERSION,
     status: "active",
     schemaVersion: CONVERSATION_SUMMARY_SCHEMA_VERSION,
@@ -107,6 +124,7 @@ export function rebuildConversationSummaryRecord(input: {
     sourceMessageIds: input.summary.sourceMessageIds,
     generatedAt: input.generatedAt ?? input.summary.generatedAt,
     generator: input.summary.generator,
+    layer: getConversationSummaryLayer(input.summary),
     canonicalRevision: input.summary.canonicalRevision,
     rangeStartAt: input.summary.rangeStartAt,
     rangeEndAt: input.summary.rangeEndAt,

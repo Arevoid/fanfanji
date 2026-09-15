@@ -1,8 +1,10 @@
 import {
   CONVERSATION_SUMMARY_SCHEMA_VERSION,
   type CharacterTruthScope,
+  type ConversationSummaryLayer,
   type ConversationSummaryRecord,
 } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
+import { getConversationSummaryLayer } from "../../../domain/characterKnowledge/conversationSummaryProjection";
 import { isExactTruthScope } from "../../../domain/characterKnowledge/knowledgeConflictPolicy";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
@@ -44,6 +46,12 @@ export function normalizeConversationSummary(value: unknown): ConversationSummar
     ...(isNonEmpty(value.conversationId) ? { conversationId: value.conversationId.trim() } : {}),
     ...(isNonEmpty(value.sourceRecordId) ? { sourceRecordId: value.sourceRecordId.trim() } : {}),
     summary: value.summary.trim(),
+    layer: ["episode", "projection", "legacy"].includes(value.layer as string)
+      ? value.layer as ConversationSummaryLayer
+      : getConversationSummaryLayer({
+        generator: value.generator.trim(),
+        ...(isNonEmpty(value.sourceRecordId) ? { sourceRecordId: value.sourceRecordId.trim() } : {}),
+      }),
     ...(isNonEmpty(value.canonicalRevision) ? { canonicalRevision: value.canonicalRevision.trim() } : {}),
     sourceMessageIds,
     sourceClaimIds,

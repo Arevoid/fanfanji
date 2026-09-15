@@ -17,6 +17,8 @@ export type KnowledgeKind = "fact" | "preference" | "plan" | "belief" | "hypothe
 export type KnowledgeSubject = "user" | "character" | "relationship" | "other";
 export type TruthStatus = "asserted" | "confirmed" | "inferred" | "disputed" | "retracted" | "legacy_unverified";
 export type TemporalStatus = "past" | "present" | "future" | "timeless" | "unknown";
+/** The retrieval layer a conversation summary belongs to. */
+export type ConversationSummaryLayer = "episode" | "projection" | "legacy";
 export type KnowledgeSourceKind =
   | "user_message"
   | "automatic_summary"
@@ -105,6 +107,12 @@ export interface ConversationSummaryRecord extends CharacterTruthScope {
   /** Original legacy record when this summary was created by migration. */
   sourceRecordId?: string;
   summary: string;
+  /**
+   * Episode records are bounded scene memories; projection records are
+   * canonical rebuilds; legacy records are imported compatibility data.
+   * Optional for backwards-compatible in-memory fixtures and old storage.
+   */
+  layer?: ConversationSummaryLayer;
   /** Additive canonical snapshot marker for durable background projections. */
   canonicalRevision?: string;
   sourceMessageIds: string[];

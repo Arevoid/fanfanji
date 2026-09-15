@@ -1816,6 +1816,7 @@ export default function App() {
         claims: result.acceptedClaims,
         sourceMessageIds: msgsToSummarize.map((message) => message.id),
         generatedAt: Date.now(),
+        layer: "episode",
         rangeStartAt: msgsToSummarize[0]?.timestamp,
         rangeEndAt: msgsToSummarize[msgsToSummarize.length - 1]?.timestamp,
       });

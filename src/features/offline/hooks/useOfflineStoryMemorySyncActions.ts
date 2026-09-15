@@ -192,6 +192,7 @@ export function useOfflineStoryMemorySyncActions({
         claims: acceptedOfflineClaims,
         sourceMessageIds: sourceMessages.map((message) => message.id),
         generatedAt: now,
+        layer: "episode",
         generator: "offline-story.v2",
       });
       if (!extractedSummary) {

@@ -336,6 +336,7 @@ export function useChatMemoryExtraction({
               sourceMessageIds,
               generatedAt,
               generator: "group-chat-summary.v1",
+              layer: "episode",
               rangeStartAt: messagesToCompress[0]?.timestamp,
               rangeEndAt: messagesToCompress[messagesToCompress.length - 1]?.timestamp,
             });
@@ -551,6 +552,7 @@ export function useChatMemoryExtraction({
               sourceMessageIds: canonicalSnapshot?.sourceMessageIds || messagesToCompress.map((message) => message.id),
               ...(canonicalSnapshot ? { canonicalRevision: canonicalSnapshot.canonicalRevision } : {}),
               generatedAt: Date.now(),
+              layer: "episode",
             });
             return extractedSummary;
           },
