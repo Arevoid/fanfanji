@@ -14,8 +14,18 @@ assert.match(
 );
 assert.match(
   lifecycleSource,
-  /finalizeStoryBeforeLeaving[\s\S]*await handleSyncMemoryToBrain\(story, \{ userConfirmed: true, syncIntent: "automatic_end" \}\)/,
-  "ending or returning from a continuation confirms automatic memory sync",
+  /const shouldConsolidateMemory = shouldSyncStoryMemory\(story\);/,
+  "ending or returning from a continuation decides whether automatic memory sync is needed",
+);
+assert.match(
+  finalization,
+  /void handleSyncMemoryToBrain\(completedStory, \{ userConfirmed: true, syncIntent: "automatic_end" \}\)/,
+  "heavy automatic memory sync is scheduled after the bounded handoff",
+);
+assert.doesNotMatch(
+  finalization,
+  /completedStory = await handleSyncMemoryToBrain/,
+  "returning to online chat does not await heavy automatic memory sync",
 );
 assert.match(finalization, /if \(!completedStory\.archivedAt\)/, "leaving marks the current offline story as ended even without automatic sync");
 assert.match(

@@ -1,7 +1,7 @@
 # Fanfanji V2 — Final Release Candidate
 
 日期：2026-09-15
-最终 source anchor：`919b11f12642fa1041ece9671495f6ebb21340df`
+最终 source anchor：`7109c37`（promotion source：`919b11f12642fa1041ece9671495f6ebb21340df`）
 分支：`refactor/v2-architecture`（未 push、未 merge、未 deploy）。
 
 ## 1. 状态收敛
@@ -51,7 +51,7 @@ Browser = N/A (phone locked at that acceptance)
 
 ## 3. Synthetic full-life regression
 
-执行 `scripts/v2FinalEngineeringConsolidation.test.ts` 与相关专项回归，覆盖以下正常链路：
+执行 `scripts/offlineExitImmediateHandoff.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` 与相关专项回归，覆盖以下正常链路：
 
 ```text
 create synthetic character/scope
@@ -113,7 +113,7 @@ MEMORY_SCOPE_LEAK = false
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm test` | PASS（本基线 623/623；RC 新增/复核回归未降低覆盖） |
+| `npm test` | PASS（本轮 624/624；包含 deferred offline-exit RC 回归） |
 | `npm run lint` | PASS |
 | `npm run build` | PASS |
 | `npm run install:check` | PASS |
@@ -131,14 +131,14 @@ MEMORY_SCOPE_LEAK = false
 
 ## 8. 工作区、数据和发布边界
 
-本 RC 只新增本文件与 `docs/110-v2-original-pain-points-final-acceptance.md`。此前 promotion commit 的源代码变更已经固定在 source anchor；工作区其余 13 项 dirty 内容保持原样，分类如下：
+本 RC 只修复一个已验证的 final blocker（先持久化 handoff、再异步启动既有 Memory consolidation），并新增对应 deterministic regression；此前 promotion commit 的源代码变更已经固定在 source anchor。工作区其余 13 项 dirty 内容保持原样，分类如下：
 
 - 1 个历史 campaign manifest 修改：既有 synthetic evidence 记录；不覆盖。
 - 3 个 API/settings runtime 配置修改及 `scripts/textApiRuntimeConfig.test.ts`：既有用户/API 设置修复；不扩大。
 - 8 个 `window-*` evidence 目录：既有 campaign evidence；不重写、不删除。
 - 本轮不读取、不复制、不打印任何 API key、Authorization、真实聊天、Diary、Memory 或真实 browser profile。
 
-本轮 source code 是否修改：`no`（仅新增 RC 文档；不改变业务源码）。本轮 real user data used：`NO`。credential exposed：`NO`。
+本轮 source code 是否修改：`yes`（仅 offline-exit blocker 修复；没有架构扩张或产品功能新增）。本轮 real user data used：`NO`。credential exposed：`NO`。
 
 Git 操作边界：不 push、不 merge、不 deploy；不提交 profile、backup、campaign artifact 或 secret。
 

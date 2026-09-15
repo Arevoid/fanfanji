@@ -6,7 +6,7 @@
 
 | 最初的问题 | V2 之前为什么会发生 | 现在怎么解决 | 验证证据 | 用户实际会感受到什么 | 最终状态 |
 | --- | --- | --- | --- | --- | --- |
-| Offline 结束后要等 Memory 同步才能回到 Online | 退出路径把重型提取、summary/consolidation 放在返回聊天之前 | 先持久化 Scene 与轻量 Handoff Capsule，Online 立即可用；重型 consolidation 在后续异步路径完成，并用 marker 去重 | `scripts/offlineStoryOnlineHandoff.e2e.test.ts`、`scripts/offlineHandoffRecoveryService.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 退出线下剧情后可以马上继续线上聊天，不会被整段历史同步卡住 | 已完成 |
+| Offline 结束后要等 Memory 同步才能回到 Online | 退出路径把重型提取、summary/consolidation 放在返回聊天之前 | 先持久化 Scene 与轻量 Handoff Capsule，Online 立即可用；重型 consolidation 在后续异步路径完成，并用 marker 去重 | `scripts/offlineExitImmediateHandoff.test.ts`、`scripts/offlineStoryOnlineHandoff.e2e.test.ts`、`scripts/offlineHandoffRecoveryService.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 退出线下剧情后可以马上继续线上聊天，不会被整段历史同步卡住 | 已完成 |
 | 同名角色互相串数据 | 旧路径容易把名称当作跨模块关联键 | 所有 V2 记录以 canonical Character ID、relation ID、user identity ID 精确限定 | `scripts/characterIdentity.test.ts`、`scripts/earlyBaselineBackupRoundTrip.test.ts` | 两个同名角色仍是两个独立的人 | 已完成 |
 | Character A 的 Memory 被 Character B 读到 | Memory、Summary、检索上下文缺少统一的关系作用域 | canonical memory、summary、episodic、truth 与 belief 检索均执行 exact-scope 过滤 | `scripts/memoryCrossAppScope.test.ts`、`scripts/memoryAndRelationshipIntegrity.test.ts`、`scripts/offlineStoryOnlineHandoff.e2e.test.ts` | 不会因为名字相同或搜索词相同看到另一角色的记忆 | 已完成 |
 | Memory、Scene、Relationship、Event、Truth 混成一件事 | 旧模型用一份上下文同时承载事实、场景和关系状态 | V2 将 Memory、Scene、Relationship、Event、Summary、Truth 分成独立通道；online 默认 remote，只有 offline/imagined scene 表示共享场景 | `scripts/characterStateBoundary.test.ts`、`scripts/characterCognitiveContext.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 历史事件不会凭空变成“现在就在一起”，记忆也不会改写关系真相 | 已完成 |
