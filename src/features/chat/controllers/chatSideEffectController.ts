@@ -15,6 +15,8 @@ export interface ChatReplySideEffectInput {
 
 export interface AutomaticMemoryExtractionOptions {
   automatic?: boolean;
+  /** A second pass for a high-value batch whose first pass returned no facts. */
+  retryHighValue?: boolean;
 }
 
 export interface ChatSideEffectControllerDependencies {
@@ -35,6 +37,7 @@ export type LastReadTimestamps = Record<string, number>;
 const AUTO_SUMMARY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const autoSummaryInFlight = new Set<string>();
 const autoSummaryCooldownUntil = new Map<string, number>();
+const autoSummaryZeroCandidateRetries = new Set<string>();
 
 /**
  * Reply-completion side effects. The controller deliberately receives the
@@ -96,6 +99,7 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
 
         if (eligibleMessages.length >= triggerCount) {
           const summaryScopeKey = input.activeRelationship?.id || input.activeCharacter.id;
+          let highValueBatch = false;
           // Normal Direct Chat is the only production consumer in this stage.
           // Group, Offline, and relationship-less paths keep their existing
           // extraction lifecycle unchanged.
@@ -108,6 +112,7 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
               // A filter defect must never become a memory false negative.
               cheapFilter = { decision: "extract", reason: "uncertain" };
             }
+            highValueBatch = cheapFilter.reason === "possible_memory_value";
             if (cheapFilter.decision === "skip") {
               const lastMessage = eligibleMessages[eligibleMessages.length - 1];
               autoSummaryCooldownUntil.delete(summaryScopeKey);
@@ -128,13 +133,27 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
             autoSummaryInFlight.add(summaryScopeKey);
             schedule(async () => {
               try {
-                const count = await dependencies.extractMemories(eligibleMessages, { automatic: true });
+                let count = await dependencies.extractMemories(eligibleMessages, { automatic: true });
+                const lastMessage = eligibleMessages[eligibleMessages.length - 1];
+                const retryKey = `${summaryScopeKey}:${lastMessage?.id || eligibleMessages.length}`;
+                if (count === 0
+                  && highValueBatch
+                  && !autoSummaryZeroCandidateRetries.has(retryKey)) {
+                  // A valuable-looking batch that produced no candidates may
+                  // be a model false negative. Retry once before advancing the
+                  // archive marker; a second empty result is accepted as an
+                  // honest no-fact decision and will not loop forever.
+                  autoSummaryZeroCandidateRetries.add(retryKey);
+                  count = await dependencies.extractMemories(eligibleMessages, {
+                    automatic: true,
+                    retryHighValue: true,
+                  });
+                }
                 // A successful extraction with no durable facts is still a
                 // completed archive pass. Advance the marker so the same
                 // range is not sent to the model again after every reply.
                 if (count >= 0) {
                   autoSummaryCooldownUntil.delete(summaryScopeKey);
-                  const lastMessage = eligibleMessages[eligibleMessages.length - 1];
                   if (lastMessage && input.activeRelationship) {
                     saveRelationships(input.relationships, (previous) => previous.map((relation) => relation.id === input.activeRelationship?.id
                       ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: now() }

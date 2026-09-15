@@ -42,7 +42,7 @@ const previousMessages = Array.from({ length: 18 }, (_, index) => ({
 const scheduled: Array<() => void | Promise<void>> = [];
 let savedOfflineStory: OfflineStory | undefined;
 let extractedMessages: Message[] = [];
-let extractionOptions: { automatic?: boolean } | undefined;
+let extractionOptions: { automatic?: boolean; retryHighValue?: boolean } | undefined;
 let savedRelationships: CharacterRelationship[] = [];
 const offlineStory = {
   id: "offline-1",
@@ -97,6 +97,35 @@ assert.equal(extractedMessages.length, 20);
 assert.deepEqual(extractedMessages.slice(-2).map((message) => message.id), ["user-1", "assistant-1"]);
 assert.equal(extractionOptions?.automatic, true, "automatic archive must preserve its invocation kind");
 assert.equal(savedRelationships[0]?.lastImmediateSummaryMsgId, "assistant-1");
+
+const retryScheduled: Array<() => void | Promise<void>> = [];
+let retryCalls = 0;
+const retryOptions: Array<{ automatic?: boolean; retryHighValue?: boolean } | undefined> = [];
+const retryRelationship = { id: "relation-retry", lastImmediateSummaryMsgId: undefined } as CharacterRelationship;
+const retryController = createChatSideEffectController({
+  offlineStories: [],
+  extractMemories: async (_messages, options) => {
+    retryCalls += 1;
+    retryOptions.push(options);
+    return 0;
+  },
+  onSaveRelationships: () => undefined,
+  onSaveCharacter: () => undefined,
+  schedule: (task) => { retryScheduled.push(task); },
+  now: () => 80,
+});
+retryController.afterReplySuccess({
+  userMsg: { ...userMessage, content: "我们约定明天见面" },
+  currentChatMessages: previousMessages,
+  createdMessages: [assistantMessage],
+  activeCharacter: { ...character, id: "character-retry" } as Character,
+  activeRelationship: retryRelationship,
+  relationships: [retryRelationship],
+  isOffline: false,
+});
+await retryScheduled[0]();
+assert.equal(retryCalls, 2, "high-value zero-candidate batches receive one retry");
+assert.equal(retryOptions[1]?.retryHighValue, true, "the second pass is marked as a high-value retry");
 
 const duplicateScheduled: Array<() => void | Promise<void>> = [];
 let duplicateCalls = 0;

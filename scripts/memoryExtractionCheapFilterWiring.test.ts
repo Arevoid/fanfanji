@@ -83,7 +83,7 @@ extractController.afterReplySuccess({
 });
 assert.equal(extractScheduled.length, 1, "a later meaningful batch still reaches the existing extraction path");
 await extractScheduled[0]!();
-assert.equal(extractCalls, 1);
+assert.equal(extractCalls, 2, "a high-value zero-candidate batch receives one retry before cursor advancement");
 
 const mixedHistory = Array.from({ length: 18 }, (_, index) => message(`mixed-${index}`, index % 2 ? "character" : "user", "哈哈"));
 let mixedCalls = 0;
