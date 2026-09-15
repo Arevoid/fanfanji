@@ -1,0 +1,46 @@
+# Fanfanji V2：最初问题到最终解决情况验收表
+
+日期：2026-09-15
+验收范围：`919b11f12642fa1041ece9671495f6ebb21340df` 及其之前已验收的 V2 增量。
+说明：本表按用户实际遇到的痛点记录，不把历史证据改写成新的实时数据；本轮新增验证均为 synthetic-only。
+
+| 最初的问题 | V2 之前为什么会发生 | 现在怎么解决 | 验证证据 | 用户实际会感受到什么 | 最终状态 |
+| --- | --- | --- | --- | --- | --- |
+| Offline 结束后要等 Memory 同步才能回到 Online | 退出路径把重型提取、summary/consolidation 放在返回聊天之前 | 先持久化 Scene 与轻量 Handoff Capsule，Online 立即可用；重型 consolidation 在后续异步路径完成，并用 marker 去重 | `scripts/offlineStoryOnlineHandoff.e2e.test.ts`、`scripts/offlineHandoffRecoveryService.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 退出线下剧情后可以马上继续线上聊天，不会被整段历史同步卡住 | 已完成 |
+| 同名角色互相串数据 | 旧路径容易把名称当作跨模块关联键 | 所有 V2 记录以 canonical Character ID、relation ID、user identity ID 精确限定 | `scripts/characterIdentity.test.ts`、`scripts/earlyBaselineBackupRoundTrip.test.ts` | 两个同名角色仍是两个独立的人 | 已完成 |
+| Character A 的 Memory 被 Character B 读到 | Memory、Summary、检索上下文缺少统一的关系作用域 | canonical memory、summary、episodic、truth 与 belief 检索均执行 exact-scope 过滤 | `scripts/memoryCrossAppScope.test.ts`、`scripts/memoryAndRelationshipIntegrity.test.ts`、`scripts/offlineStoryOnlineHandoff.e2e.test.ts` | 不会因为名字相同或搜索词相同看到另一角色的记忆 | 已完成 |
+| Memory、Scene、Relationship、Event、Truth 混成一件事 | 旧模型用一份上下文同时承载事实、场景和关系状态 | V2 将 Memory、Scene、Relationship、Event、Summary、Truth 分成独立通道；online 默认 remote，只有 offline/imagined scene 表示共享场景 | `scripts/characterStateBoundary.test.ts`、`scripts/characterCognitiveContext.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 历史事件不会凭空变成“现在就在一起”，记忆也不会改写关系真相 | 已完成 |
+| 已取消的计划仍被当成有效计划 | 候选提取没有稳定的取消语义、provenance 和相关性约束 | 生产 Safety-veto 只允许在完整 scope、lineage、correlation 和 validator 通过时抑制 cancelled-plan；不确定则保留 legacy 安全路径 | `scripts/directChatMemorySafetyVetoCanaryAuthority.test.ts`、`scripts/memoryAdmissionPromotion.test.ts`、`docs/109-memory-admission-v2-promotion-closure.md` | 说“取消了”的计划不会继续写成当前有效记忆 | 已完成 |
+| 临时偏好被当成永久偏好 | 临时意图与长期偏好没有稳定的生命周期边界 | temporary preference 仍按批准设计保持 shadow-only，不进入本轮 production veto | `scripts/directChatMemoryAdmissionBridge.test.ts`、`scripts/directChatMemorySafetyVetoCanary.test.ts` | 临时说法不会被假装成已经永久化；需要真实长期观察 | 已完成但需真实长期使用观察 |
+| Summary 越来越像真相 | 摘要曾被当作事实存储和身份上下文 | Summary 是 derived projection，只能从 canonical source 重建，不能覆盖 Identity、Relationship、Scene 或 Truth | `scripts/conversationSummaryProjectionEquivalence.test.ts`、`scripts/directChatSummaryCanonicalConvergence.test.ts` | 摘要变短或重建不会改变角色真正的事实 | 已完成 |
+| Memory 检索越来越长、越来越贵 | 旧路径容易把完整历史直接塞进每次请求 | 先 exact scope，再按相关性和预算选取；Memory/Summary/context 有固定顺序，且由 request ledger 记录成本形状 | `scripts/chatLongTermRecallBudget.test.ts`、`scripts/memoryRecallPolicy.test.ts`、`scripts/aiRequestAccounting.test.ts` | 请求上下文更稳定，不会无界增长 | 已完成 |
+| Online 和 Offline 像两个不同的人 | Offline 曾复制线上上下文，或让新场景覆盖原关系 | 一个 canonical life，online/offline 只是不同 current scene；handoff 传 bounded references/delta，不复制 transcript | `scripts/characterContinuityLite.test.ts`、`scripts/offlineHandoffContext.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 角色记得关系和经历，但不会错误地把两个场景混在一起 | 已完成 |
+| 换话题后仍被旧话题牵着走 | Topic 曾隐含在 Memory/整段历史里 | 独立 Topic Runtime 维护 active topic、history 与 transition；转场是确定性判断，不要求每条消息额外 LLM | `scripts/directChatTopicBoundary.test.ts`、`scripts/topicHistoryRepository.test.ts` | 明确换话题后能开启新主题，旧主题仍可作为历史参考 | 已完成 |
+| 情绪不能跨回合自然延续 | 情绪只是当次回复文字，没有独立有界状态 | Emotion Runtime 维护 bounded intensity、residue、decay 和 cause refs，不改写 Identity/Truth | `scripts/chatEmotionTracker.test.ts`、`scripts/characterCognitiveContext.test.ts` | 情绪有余韵但会自然衰减，不会永久污染角色事实 | 已完成 |
+| 角色对用户的印象和事实混在一起 | Belief/Impression 没有独立存储语义 | Belief Runtime 有独立 record、scope、confidence 和 supporting events，明确不是 Truth writer | `scripts/characterCognitiveContext.test.ts`、`scripts/memoryAndRelationshipIntegrity.test.ts` | 角色可以有“印象”，但不会把印象冒充客观事实 | 已完成 |
+| Relationship 只会被 Memory 粗暴覆盖 | 关系变化没有独立投影和维度 | Relationship State 独立投影 familiarity/trust/attachment/comfort/conflict/intimacy/respect/security 等增长维度 | `scripts/relationshipGrowthProjection.test.ts`、`scripts/relationshipCognitiveProjectionService.test.ts` | 关系会渐进变化，不会因一条摘要突然跳变 | 已完成 |
+| 角色的生活时间线不连续 | 当前活动、未来安排和历史事件没有时间边界 | Life State、Temporal Context、Schedule、Event 分开；过去/未来记录不会直接成为当前同场 | `scripts/characterLifeRuntimePack3.test.ts`、`scripts/characterRoutine.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 角色知道“现在、之后、已经发生”之间的区别 | 已完成 |
+| 日程过期、取消、延期状态混乱 | 日程只有文本，缺少显式生命周期 | Schedule Runtime 使用 scheduled/completed/cancelled/missed/postponed 状态并按时间推导 | `scripts/characterLifeRuntimePack3.test.ts`、`scripts/appointmentDomain.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 过期安排不会一直显示成未来待办 | 已完成 |
+| Event 会直接改变当前场景 | 事件写入和当前 Scene 没有边界 | Event→continuity 只更新对应 channel；历史或未来 Event 不会写成 current co-location | `scripts/characterEventPolicy.test.ts`、`scripts/characterCognitiveContext.test.ts`、`scripts/characterStateBoundary.test.ts` | 发生过的事会被记住，但不会把当前聊天地点改掉 | 已完成 |
+| Promise/Open Loop 会重复复活 | 承诺没有稳定的 loop ID、完成和关闭语义 | Promise 建立 scoped OpenLoop，kept/cancelled/missed 可关闭；source refs 防止重复 resurrection | `scripts/characterCognitiveContext.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 已完成的约定不会无限次重新出现 | 已完成 |
+| 角色无控制地主动发消息 | 主动行为只看时间或随机性，缺少生活状态约束 | Proactive eligibility 是确定性、限频、按 scope 的判定；只有满足事件/生活条件才产生一个 intent | `scripts/proactiveSchedule.test.ts`、`scripts/proactiveOfflineEligibility.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 不会因为后台轮询连续打扰或产生 Provider spam | 已完成 |
+| Chat、Diary、Moments、Phone 各自有一套人生 | 各 App 直接维护自己的角色状态 | Cross-App Life 通过只读 gateway 投影同一 canonical life，同时保留 App-specific scene 和隐私边界 | `scripts/v2FinalEngineeringConsolidation.test.ts`、`scripts/momentContextOwnership.test.ts`、`scripts/characterPhoneLifeContext.test.ts` | 不同 App 能保持同一角色连续性，又不会互相泄露全部内容 | 已完成 |
+| Diary/private、Browser/Reading 被角色全知 | 跨 App 共享时没有 visibility 和 ownership 过滤 | Diary/private reflection、Character Phone、Browser/Reading 只在授权 scope 内可见；gateway 拒绝 other-character/private 数据 | `scripts/diaryPromptAdapter.test.ts`、`scripts/memoryCrossAppScope.test.ts`、`scripts/characterKnowledgeBoundary.test.ts` | 角色不会因为“同一个手机”就自动知道用户所有私密内容 | 已完成 |
+| Character Phone 串到错误角色或错误作者 | Phone 记录缺少 owner/character/relation 的强约束 | Phone repository、contacts、thread、posts、diary、schedule 均按 owner identity + character ID 读写 | `scripts/characterPhoneIndexedDbPersistence.test.ts`、`scripts/characterPhoneIsolationRepair.test.ts`、`scripts/characterPhoneLifeContext.test.ts` | 每个角色看到自己的手机状态，不会拿到别人的聊天或朋友圈 | 已完成 |
+| 备份恢复后 ID、同名角色和新 V2 状态损坏 | 多存储恢复顺序和 legacy mapping 不稳定 | system backup v3 采用 allowlist、scope inventory、IDB/local snapshot、compensating rollback；旧格式仍可读 | `scripts/earlyBaselineBackupRoundTrip.test.ts`、`scripts/systemBackup.test.ts`、`scripts/systemBackupRelationshipCoverage.test.ts` | 恢复和重新加载后角色、关系、消息和 V2 增量仍可读 | 已完成 |
+| Provider 重试和请求次数不可追踪 | 一个用户动作可能隐藏多次物理请求 | logical action 与 physical attempts 分开记账，retry、fallback、terminal status 可审计，ledger 不存 prompt/key/body | `scripts/aiRequestAccounting.test.ts`、`scripts/memoryExtractionLogicalAccountingRuntime.test.ts`、`scripts/structuredOutputTelemetry.test.ts` | 失败不会悄悄重复请求，排查时能区分逻辑动作和物理尝试 | 已完成 |
+| Provider 超时、结构错误会破坏数据 | 错误结果可能直接落到 canonical writer | timeout、malformed structured output、schema/provenance 缺失均 fail-safe/fail-closed；canonical writer 只接收已验证结果 | `scripts/apiChatErrorHandling.test.ts`、`scripts/directChatMemoryEvidenceTrace.test.ts`、`scripts/memoryExtractionModelFallback.test.ts` | Provider 出错时最多少写一次，不会把坏结果写进长期数据 | 已完成 |
+| 页面/服务直接各自操作存储 | page、feature、storage 责任边界不清 | V2 新路径遵循 Repository → Storage Adapter，domain 不依赖具体存储或 Provider；旧兼容例外有审计记录 | `scripts/dependencyDirectionBaseline.test.ts`、`scripts/storageBoundaryContract.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 数据写入更可恢复，模块不会偷偷绕过统一边界 | 已完成 |
+| 巨型组件难以安全拆分 | 大文件同时承载既有稳定行为和新需求 | 已完成 Final Engineering Consolidation 审计；不在 RC 冻结期重拆，避免改变成熟行为 | `docs/04-ai-request-envelope.md`、`docs/10-contribution-checklist.md`、`scripts/productionDevToolAbsence.test.ts` | 当前版本保持稳定，风险拆分留给单独变更 | V2之后增强 |
+| Legacy/dead code 让人担心重复写入 | 旧 schema、writer 和 rollback seam 仍被兼容流程使用 | 区分 production-used、compatibility、historical schema；legacy writer 保留作为回滚/兼容保障，不为“清理”而删除 | `scripts/legacyCodeCleanup.test.ts`、`scripts/characterTruthLegacyCompatibility.test.ts`、`docs/109-memory-admission-v2-promotion-closure.md` | 升级不要求破坏旧数据，回滚仍有路可走 | 已完成 |
+| 依赖边界和循环可能继续恶化 | 早期模块依赖没有硬门禁 | 维持已接受基线：105 条 concrete edges、3 个已登记 cycle，未增加 | `scripts/dependencyDirectionBaseline.test.ts` | 后续迭代有可检查的架构底线 | 已完成 |
+| 多份文档互相矛盾、无法知道哪个是当前状态 | 历史 campaign、baseline、promotion 文档的时点不同 | 以本表、`docs/109-memory-admission-v2-promotion-closure.md` 和 `docs/111-v2-final-release-candidate.md` 作为本 RC 的权威收敛记录；历史文档保留原时点语义 | 文档交叉审计与 Git history | 用户和 reviewer 能区分历史状态、当前 promoted 状态和后续观察 | 已完成 |
+| Promotion 后担心无法撤回 | 切换如果伴随 schema/数据迁移，失败后难恢复 | `promoteMemoryAdmissionV2()` 与 `rollbackMemoryAdmissionV2()` 只切换内存中的运行开关；canonical data 不重写、不回放、不删除 | `scripts/memoryAdmissionPromotion.test.ts` | 发现问题可退回 legacy-compatible path，已有数据仍可读 | 已完成 |
+
+## 结论
+
+- Offline 退出重型同步阻塞：`OFFLINE_EXIT_BLOCKED_BY_HEAVY_MEMORY = false`。
+- 同名角色跨角色泄漏：`SAME_NAME_CROSS_CHARACTER_LEAK = false`。
+- Memory 作用域泄漏：`MEMORY_SCOPE_LEAK = false`。
+- temporary preference 按既定设计仍为 shadow-only，列为真实长期使用观察，不虚报为 production veto。
+- 其余 V2 代码级痛点均有 deterministic/runtime 证据；本轮没有发现新的代码级 RC blocker。
