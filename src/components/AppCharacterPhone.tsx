@@ -464,16 +464,17 @@ function openCharacterPhone(
   const shouldQueueInitialGeneration = !contextualPhone.initialContentGeneratedAt
     && !contextualPhone.initialContentPending
     && !hasStoredPhoneContent;
-  const storedUserContact = contextualPhone.contacts.find((contact) => contact.source === "user" || contact.kind === "user");
-  const hasStoredUserThread = Boolean(storedUserContact
-    && contextualPhone.threadMessages.some((message) => message.contactId === storedUserContact.id));
+  const storedUserContacts = contextualPhone.contacts.filter((contact) => contact.source === "user" || contact.kind === "user");
+  const hasStoredUserThread = storedUserContacts.some((contact) =>
+    contextualPhone.threadMessages.some((message) => message.contactId === contact.id),
+  );
   // Repair phones created by the old first-generation contract once. Keep
   // their existing records, but let the new generator add the missing direct
   // chat and album baseline. Clearing the marker after a successful repair
   // prevents this from running again on later opens.
   const shouldRepairInitialGeneration = Boolean(contextualPhone.initialContentGeneratedAt)
     && !contextualPhone.initialContentPending
-    && (!storedUserContact || !hasStoredUserThread || contextualPhone.galleryItems.length === 0);
+    && (storedUserContacts.length === 0 || !hasStoredUserThread || contextualPhone.galleryItems.length === 0);
   const preparedPhone = shouldRepairInitialGeneration
     ? { ...contextualPhone, initialContentGeneratedAt: undefined, initialContentPending: true }
     : shouldQueueInitialGeneration
@@ -812,10 +813,19 @@ export default function AppCharacterPhone({
   onOpenChat,
   onClose,
 }: AppCharacterPhoneProps) {
-  const [selectedCharacterId, setSelectedCharacterId] = useState(
-    characters[0]?.id || "",
+  const selectableCharacters = useMemo(
+    () => characters.filter((character) => !character.isContactInstance && !character.profileSourceId),
+    [characters],
   );
-  const selectedCharacter = characters.find(
+  const characterNameCounts = useMemo(() => selectableCharacters.reduce((counts, character) => {
+    const key = character.name.trim().toLocaleLowerCase();
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return counts;
+  }, new Map<string, number>()), [selectableCharacters]);
+  const [selectedCharacterId, setSelectedCharacterId] = useState(
+    selectableCharacters[0]?.id || "",
+  );
+  const selectedCharacter = selectableCharacters.find(
     (character) => character.id === selectedCharacterId,
   );
   const phoneContext = useMemo(() => ({
@@ -848,11 +858,11 @@ export default function AppCharacterPhone({
   );
   const previousIdentityIdRef = useRef(userIdentityId);
   useEffect(() => {
-    if (!selectedCharacterId && characters[0]) {
-      setSelectedCharacterId(characters[0].id);
-      setPhone(openCharacterPhone(userIdentityId, characters[0], phoneContext));
+    if ((!selectedCharacterId || !selectedCharacter) && selectableCharacters[0]) {
+      setSelectedCharacterId(selectableCharacters[0].id);
+      setPhone(openCharacterPhone(userIdentityId, selectableCharacters[0], phoneContext));
     }
-  }, [characters, selectedCharacterId, userIdentityId]);
+  }, [selectableCharacters, selectedCharacter, selectedCharacterId, userIdentityId]);
   useEffect(() => {
     const handleGalleryUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ ownerIdentityId?: string; characterId?: string }>).detail;
@@ -1031,7 +1041,7 @@ export default function AppCharacterPhone({
     initialGenerationPhoneIdRef.current = null;
     setIsAdvancing(false);
     previousIdentityIdRef.current = userIdentityId;
-    const nextCharacter = characters[0];
+    const nextCharacter = selectableCharacters[0];
     setSelectedCharacterId(nextCharacter?.id || "");
     setPhone(nextCharacter ? openCharacterPhone(userIdentityId, nextCharacter, phoneContext) : null);
     setUnlocked(false);
@@ -1063,7 +1073,7 @@ export default function AppCharacterPhone({
     setPhoneNotice("");
     setPhoneDataNotice("");
     setDraftsByContact({});
-  }, [characters, userIdentityId]);
+  }, [selectableCharacters, userIdentityId]);
   const currentPhone = useMemo(
     () =>
       selectedCharacter
@@ -1082,8 +1092,9 @@ export default function AppCharacterPhone({
   };
   const forwardDelayedPhoneDiscoveries = (before: CharacterPhoneRecord, after: CharacterPhoneRecord) => {
     if (!selectedCharacter || !onSendMessage) return;
+    const contactIdentityId = selectedContact?.userIdentityId || userIdentityId;
     const relation = relationships.find(
-      (item) => item.userIdentityId === userIdentityId && item.characterId === selectedCharacter.id,
+      (item) => item.userIdentityId === contactIdentityId && item.characterId === selectedCharacter.id,
     );
     if (!relation) return;
     const previousIds = new Set(before.messages.map((message) => message.id));
@@ -1554,9 +1565,18 @@ export default function AppCharacterPhone({
     )
       return;
     const now = Date.now();
+    const contactIdentityId = selectedContact.userIdentityId || userIdentityId;
     const relation = relationships.find(
-      (item) => item.userIdentityId === userIdentityId && item.characterId === selectedCharacter.id,
+      (item) => item.userIdentityId === contactIdentityId && item.characterId === selectedCharacter.id,
     );
+    // A user/alias lane is only writable through its real main-chat
+    // relationship. Never fall back to the NPC reply generator for an
+    // identity contact, otherwise the role phone could invent a message that
+    // the user never sent.
+    if (selectedContact.kind === "user" && !relation) {
+      setPhoneNotice("该身份与角色暂无独立聊天关系，未发送消息");
+      return;
+    }
     const sourceMessageId = selectedContact.kind === "user" && relation && onSendMessage
       ? `phone-user-thread-${now}`
       : undefined;
@@ -1591,7 +1611,7 @@ export default function AppCharacterPhone({
         content: draft.trim().slice(0, 1000),
         timestamp: now,
         sentFromCharacterPhone: true,
-      }), userIdentityId);
+      }), contactIdentityId);
     } else {
       setPhoneNotice(`${selectedContact.remark || selectedContact.name}正在查看消息…`);
     }
@@ -1600,7 +1620,7 @@ export default function AppCharacterPhone({
       persistPhone(discoveredNext);
       setPhone(discoveredNext);
     }
-    if (!sourceMessageId) {
+    if (!sourceMessageId && selectedContact.kind !== "user") {
       const outgoingMessageId = loggedNext.threadMessages.at(-1)?.id;
       if (outgoingMessageId) {
         enqueueCharacterPhoneContactReply({
@@ -1660,7 +1680,7 @@ export default function AppCharacterPhone({
   };
 
   const selectCharacter = (characterId: string) => {
-    const character = characters.find((item) => item.id === characterId);
+    const character = selectableCharacters.find((item) => item.id === characterId);
     if (!character) return;
     generationRequestRef.current += 1;
     initialGenerationPhoneIdRef.current = null;
@@ -2423,8 +2443,10 @@ export default function AppCharacterPhone({
   const endThreadMessagePress = () => clearThreadMessagePressTimer();
   const getPhoneMutationScopeForMessage = (message: CharacterPhoneThreadMessage): MessageMutationScope | undefined => {
     if (!message.sourceMessageId || !selectedCharacter) return undefined;
+    const contact = currentPhone?.contacts.find((candidate) => candidate.id === message.contactId);
+    const contactIdentityId = contact?.userIdentityId || userIdentityId;
     const relation = relationships.find((candidate) =>
-      candidate.userIdentityId === userIdentityId
+      candidate.userIdentityId === contactIdentityId
       && candidate.characterId === selectedCharacter.id,
     );
     return relation
@@ -4261,9 +4283,14 @@ export default function AppCharacterPhone({
                 onChange={(event) => selectCharacter(event.target.value)}
                 className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
               >
-                {characters.map((character) => (
-                  <option key={character.id} value={character.id}>{character.name}</option>
-                ))}
+                {selectableCharacters.map((character) => {
+                  const key = character.name.trim().toLocaleLowerCase();
+                  const duplicateName = (characterNameCounts.get(key) || 0) > 1;
+                  const label = duplicateName && character.remark?.trim()
+                    ? `${character.name}（${character.remark.trim()}）`
+                    : character.name;
+                  return <option key={character.id} value={character.id}>{label}</option>;
+                })}
               </select>
             </label>
 

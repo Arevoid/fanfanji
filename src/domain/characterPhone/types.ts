@@ -25,6 +25,8 @@ export interface CharacterPhoneMessage {
 export interface CharacterPhoneContact {
   id: string;
   name: string;
+  /** User identity represented by this contact when kind is "user". */
+  userIdentityId?: string;
   relation: string;
   kind?: "user" | "character" | "npc" | "group";
   isLongTerm: boolean;

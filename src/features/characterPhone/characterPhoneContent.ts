@@ -6,7 +6,7 @@ import type {
   WorldBookEntry,
   MusicTrack,
 } from "../../types";
-import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
+import { getRootIdentityId, type CharacterRelationship } from "../../domain/relationship/characterRelationship";
 import { buildCharacterPhoneLifeContext } from "./characterPhoneLifeContext";
 import { listCharacterPhoneRelationshipNetworkContacts, type CharacterPhoneRelationshipNetworkContact } from "./characterPhoneRelationshipNetwork";
 import { createCharacterPhoneInitialAvatar, normalizeCharacterPhoneContactName } from "./characterPhoneContactVisuals";
@@ -92,6 +92,22 @@ function toCharacterMessage(message: Message, phoneId: string, contactId: string
   };
 }
 
+function listPhoneUserIdentities(input: CharacterPhoneContentInput): UserIdentity[] {
+  const identities = input.identities ?? [];
+  const ownerIdentity = identities.find((identity) => identity.id === input.phone.ownerIdentityId)
+    || input.activeIdentity;
+  if (identities.length === 0) return ownerIdentity ? [ownerIdentity] : [];
+  const rootIdentityId = getRootIdentityId(input.phone.ownerIdentityId, identities);
+  const scoped = identities.filter((identity) =>
+    getRootIdentityId(identity.id, identities) === rootIdentityId,
+  );
+  return scoped.length > 0
+    ? scoped
+    : ownerIdentity
+      ? [ownerIdentity]
+      : [];
+}
+
 function isCurrentUserMessage(
   message: Message,
   characterId: string,
@@ -105,9 +121,16 @@ function isCurrentUserMessage(
 }
 
 function makeUserContact(phone: CharacterPhoneRecord, identity?: UserIdentity): CharacterPhoneContact {
+  const userIdentityId = identity?.id || phone.ownerIdentityId;
+  const isPrimaryContact = userIdentityId === phone.ownerIdentityId;
   return {
-    id: scopedId(phone.id, "contact", "user"),
+    // Keep the original primary-contact ID for backward compatibility. Each
+    // alias gets its own stable contact lane in the same role phone.
+    id: isPrimaryContact
+      ? scopedId(phone.id, "contact", "user")
+      : scopedId(phone.id, "contact", `user-${userIdentityId}`),
     name: identity?.name?.trim() || "用户",
+    userIdentityId,
     relation: "与角色聊天",
     kind: "user",
     isLongTerm: true,
@@ -177,7 +200,10 @@ function buildContextContacts(
 }
 
 function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[] {
-  const userContact = makeUserContact(input.phone, input.activeIdentity);
+  const scopedUserContacts = listPhoneUserIdentities(input).map((identity) => makeUserContact(input.phone, identity));
+  const userContacts = scopedUserContacts.length > 0
+    ? scopedUserContacts
+    : [makeUserContact(input.phone)];
   const networkContacts = listCharacterPhoneRelationshipNetworkContacts({
     character: input.character,
     ownerIdentityId: input.phone.ownerIdentityId,
@@ -210,7 +236,10 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
     ...networkContacts.map((contact) => contact.npc.name),
   ].filter(Boolean);
   const normalizedExisting = existing
-    .filter((contact) => contact.id !== userContact.id)
+    // User contacts are rebuilt from the identity workspace below. Keeping
+    // them in this legacy-normalization pass would duplicate the primary lane
+    // and leave alias lanes with no stable identity owner.
+    .filter((contact) => contact.source !== "user" && contact.kind !== "user")
     .filter((contact) => !isGenericContactName(contact.name))
     .flatMap((contact) => {
       const normalizedName = normalizeCharacterPhoneContactName(
@@ -261,6 +290,7 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
   const linkedIds = new Set(
     input.characters
       .filter((candidate) => candidate.id !== input.character.id && !candidate.isGroupChat)
+      .filter((candidate) => !candidate.isContactInstance && !candidate.profileSourceId)
       .filter((candidate) => {
         const context = buildContext(input.character, input.worldBookEntries);
         return context.includes(candidate.name.toLocaleLowerCase())
@@ -270,6 +300,7 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
   );
   const linkedContacts = input.characters
     .filter((candidate) => linkedIds.has(candidate.id))
+    .filter((candidate) => !candidate.isContactInstance && !candidate.profileSourceId)
     .filter((candidate) => !normalizedExisting.some((contact) => contact.name === candidate.name))
     .map((candidate) => ({
       id: scopedId(input.phone.id, "contact", `linked-${candidate.id}`),
@@ -287,10 +318,14 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
     .filter((network) => !normalizedExisting.some((contact) => contactKey(contact.name) === contactKey(network.npc.name)))
     .map(toNetworkContact);
   const generated = buildContextContacts(input.phone, input.character, input.worldBookEntries);
-  const nextContacts = [userContact, ...normalizedExisting, ...linkedContacts, ...networkLinkedContacts, ...generated];
+  const nextContacts = [...userContacts, ...normalizedExisting, ...linkedContacts, ...networkLinkedContacts, ...generated];
   const seenNames = new Set<string>();
   return nextContacts.filter((contact) => {
-    const key = contactKey(contact.name);
+    // User lanes are identity-scoped. Two aliases may intentionally share a
+    // display name, so name-only de-duplication would merge their threads.
+    const key = contact.source === "user" || contact.kind === "user"
+      ? `user:${contact.userIdentityId || contact.id}`
+      : contactKey(contact.name);
     if (!key || seenNames.has(key)) return false;
     seenNames.add(key);
     return true;
@@ -321,7 +356,7 @@ function buildRelationshipNetworkPhoneContacts(
 function syncUserChat(
   phone: CharacterPhoneRecord,
   character: Character,
-  userContact: CharacterPhoneContact,
+  userContacts: CharacterPhoneContact[],
   messages: Message[],
   relations: CharacterRelationship[],
 ): { threadMessages: CharacterPhoneThreadMessage[]; lastMessageId?: string } {
@@ -333,10 +368,23 @@ function syncUserChat(
     .filter((message) => !message.id.startsWith("phone-proactive-"))
     .sort((left, right) => left.timestamp - right.timestamp);
   const sourceMessageIds = new Set(sourceMessages.map((message) => message.id));
-  const existing = (phone.threadMessages ?? []).filter((message) => message.contactId !== userContact.id
+  const userContactIds = new Set(userContacts.map((contact) => contact.id));
+  const relationById = new Map(relations.map((relation) => [relation.id, relation]));
+  const relationByConversationId = new Map(relations.map((relation) => [relation.conversationId, relation]));
+  const userContactByIdentityId = new Map(userContacts.map((contact) => [contact.userIdentityId || phone.ownerIdentityId, contact]));
+  const contactForMessage = (message: Message): CharacterPhoneContact => {
+    const relation = message.relationId
+      ? relationById.get(message.relationId)
+      : message.conversationId
+        ? relationByConversationId.get(message.conversationId)
+        : undefined;
+    return userContactByIdentityId.get(relation?.userIdentityId || message.authorIdentityId || phone.ownerIdentityId)
+      || userContacts[0];
+  };
+  const existing = (phone.threadMessages ?? []).filter((message) => !userContactIds.has(message.contactId)
     || Boolean(message.sourceMessageId && sourceMessageIds.has(message.sourceMessageId)));
-  const synced = sourceMessages.map((message) => toCharacterMessage(message, phone.id, userContact.id));
-  const existingSynced = (phone.threadMessages ?? []).filter((message) => message.contactId === userContact.id && message.sourceMessageId);
+  const synced = sourceMessages.map((message) => toCharacterMessage(message, phone.id, contactForMessage(message).id));
+  const existingSynced = (phone.threadMessages ?? []).filter((message) => userContactIds.has(message.contactId) && message.sourceMessageId);
   const bySourceId = new Map(existingSynced.map((message) => [message.sourceMessageId, message]));
   const merged = synced.map((message) => {
     const existingMessage = bySourceId.get(message.sourceMessageId || "");
@@ -820,8 +868,13 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
     worldBookEntries: lifeContext.worldBookEntries,
   };
   const contacts = syncContacts(scopedInput);
-  const userContact = contacts[0];
-  const chat = syncUserChat(sourcePhone, input.character, userContact, lifeContext.messages, lifeContext.relationships);
+  const chat = syncUserChat(
+    sourcePhone,
+    input.character,
+    contacts.filter((contact) => contact.source === "user" || contact.kind === "user"),
+    lifeContext.messages,
+    lifeContext.relationships,
+  );
   // During first-life initialization the generator owns the conversation
   // history. Do not seed every contact with the same generic one-line opener;
   // that makes every chat look identical and leaves no character reply.

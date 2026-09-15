@@ -25,11 +25,29 @@ const identity: UserIdentity = {
   signature: "",
   bio: "",
 };
+const aliasIdentity: UserIdentity = {
+  id: "identity-a-alias",
+  name: "马甲乙",
+  avatar: "",
+  signature: "",
+  bio: "",
+  kind: "alias",
+  parentIdentityId: identity.id,
+};
 const relation = {
   id: "relation-a",
   userIdentityId: identity.id,
   characterId: characterA.id,
   conversationId: "conversation-a",
+  relationship: "friend" as const,
+  createdAt: 1,
+  updatedAt: 1,
+};
+const aliasRelation = {
+  id: "relation-a-alias",
+  userIdentityId: aliasIdentity.id,
+  characterId: characterA.id,
+  conversationId: "conversation-a-alias",
   relationship: "friend" as const,
   createdAt: 1,
   updatedAt: 1,
@@ -45,6 +63,7 @@ const worldBook: WorldBookEntry[] = [{
 }];
 const messages: Message[] = [
   { id: "message-a", characterId: characterA.id, relationId: relation.id, sender: "user", content: "今晚还散步吗？", timestamp: 10 },
+  { id: "message-a-alias", characterId: characterA.id, relationId: aliasRelation.id, conversationId: aliasRelation.conversationId, sender: "user", content: "这是马甲的独立对话。", timestamp: 10.5, authorIdentityId: aliasIdentity.id },
   { id: "message-b", characterId: characterB.id, sender: "user", content: "另一条关系的消息", timestamp: 11 },
   { id: "message-unscoped", characterId: characterA.id, sender: "user", content: "没有归属的旧消息", timestamp: 12 },
   { id: "message-other-relation", characterId: characterA.id, relationId: "relation-other", sender: "user", content: "其他身份的关系消息", timestamp: 13 },
@@ -127,6 +146,30 @@ assert.equal(phoneA.scheduleItems.length, 0, "does not seed a synthetic schedule
 assert.equal(phoneA.musicTracks?.length, 0, "does not seed a synthetic music library without a user source");
 assert.equal(phoneA.listeningHistory?.length, 0, "does not seed synthetic listening history without a user source");
 assert.equal(phoneA.musicPlaylists?.length, 0, "does not seed a synthetic playlist without a user source");
+
+const aliasScopedPhone = ensureCharacterPhoneContent({
+  phone: emptyPhone("phone-a-alias", characterA.id),
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  identities: [identity, aliasIdentity],
+  relationships: [relation, aliasRelation],
+  messages,
+  moments,
+  worldBookEntries: worldBook,
+  now: 100,
+});
+const aliasUserContacts = aliasScopedPhone.contacts.filter((contact) => contact.source === "user");
+assert.equal(aliasUserContacts.length, 2, "role phone keeps one direct-chat lane per identity in the same workspace");
+assert.notEqual(aliasUserContacts[0]?.id, aliasUserContacts[1]?.id, "identity lanes have distinct stable contact IDs");
+assert.ok(aliasScopedPhone.threadMessages.some((message) =>
+  message.content === "今晚还散步吗？"
+  && message.contactId === aliasUserContacts.find((contact) => contact.userIdentityId === identity.id)?.id,
+));
+assert.ok(aliasScopedPhone.threadMessages.some((message) =>
+  message.content === "这是马甲的独立对话。"
+  && message.contactId === aliasUserContacts.find((contact) => contact.userIdentityId === aliasIdentity.id)?.id,
+), "alias chat messages are not merged into the primary identity lane");
 
 const clearedPhone = ensureCharacterPhoneContent({
   phone: {

@@ -1,7 +1,7 @@
 import { apiChat } from "../../utils/apiHelper";
 import { createId } from "../../core/id/createId";
 import type { Character, Message, Moment, MusicTrack, UserIdentity, UserSettings, WorldBookEntry } from "../../types";
-import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
+import { getRootIdentityId, type CharacterRelationship } from "../../domain/relationship/characterRelationship";
 import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../../domain/relationshipNetwork/relationshipNetworkTypes";
 import type {
   CharacterPhoneContact,
@@ -530,9 +530,14 @@ function createGeneratedUserContact(
   identity?: UserIdentity,
 ): CharacterPhoneContact {
   const name = identity?.name?.trim() || "用户";
+  const userIdentityId = identity?.id || phone.ownerIdentityId;
+  const isPrimaryContact = userIdentityId === phone.ownerIdentityId;
   return {
-    id: `character-phone:${phone.id}:contact:user`,
+    id: isPrimaryContact
+      ? `character-phone:${phone.id}:contact:user`
+      : `character-phone:${phone.id}:contact:user-${userIdentityId}`,
     name,
+    userIdentityId,
     relation: "与角色聊天",
     kind: "user",
     isLongTerm: true,
@@ -541,6 +546,21 @@ function createGeneratedUserContact(
     source: "user",
     sourceRefs: identity?.id ? [{ kind: "character", id: identity.id }] : [],
   };
+}
+
+function createGeneratedUserContacts(
+  phone: CharacterPhoneRecord,
+  identities: UserIdentity[] | undefined,
+  activeIdentity?: UserIdentity,
+): CharacterPhoneContact[] {
+  const ownerIdentity = identities?.find((identity) => identity.id === phone.ownerIdentityId) || activeIdentity;
+  if (!identities || identities.length === 0) {
+    return ownerIdentity ? [createGeneratedUserContact(phone, ownerIdentity)] : [];
+  }
+  const rootIdentityId = getRootIdentityId(phone.ownerIdentityId, identities);
+  const scoped = identities.filter((identity) => getRootIdentityId(identity.id, identities) === rootIdentityId);
+  return (scoped.length > 0 ? scoped : ownerIdentity ? [ownerIdentity] : [])
+    .map((identity) => createGeneratedUserContact(phone, identity));
 }
 
 function buildInitialContactFallback(
@@ -737,8 +757,11 @@ export async function advanceCharacterPhoneWithResult(
     // Recreate only this synthetic owner contact here; evidence-backed NPC
     // contacts (for example relationship-network links) come from the scoped
     // context or the validated generation response.
-    contacts: isInitialGeneration && !(contextualPhone.contacts ?? []).some((contact) => contact.source === "user" || contact.kind === "user")
-      ? [createGeneratedUserContact(contextualPhone, input.activeIdentity), ...(contextualPhone.contacts ?? [])]
+    contacts: isInitialGeneration
+      ? [
+          ...createGeneratedUserContacts(contextualPhone, input.identities, input.activeIdentity),
+          ...(contextualPhone.contacts ?? []).filter((contact) => contact.source !== "user" && contact.kind !== "user"),
+        ]
       : contextualPhone.contacts ?? [],
     threadMessages: contextualPhone.threadMessages ?? [],
     posts: contextualPhone.posts ?? [],
@@ -771,11 +794,12 @@ export async function advanceCharacterPhoneWithResult(
     moments,
     worldBookEntries,
     relationshipNetworkContacts,
+    identities: input.identities,
   });
   const textImageEvidence = collectTextImageEvidence(lifeContext);
   const roleName = roleDisplayName(input.character);
   const generationRequest = isInitialGeneration
-    ? "这是该角色手机首次初始化。忽略前文可能出现的2—4条总量示例，以本条数量要求为准。请围绕同一个有证据的生活事件，批量生成完整但自然的手机生活：与用户的直接聊天 userThreadMessages 必须有 4—6 条且包含角色和用户双方；每一个有证据的非用户 NPC（包括关系网已连线 NPC）都必须在 contacts 中出现，并用 contactThreads 生成属于自己的聊天，不能把不同联系人混在同一线程；没有证据的人不要添加；浏览器 4—8 条搜索记录；未来 3—6 天内分布 1—3 条日程；日记、备忘录、待办合计 2—4 条；朋友圈至少 1 条，visibility 必须是 user（仅用户可见）或 private（仅自己可见）；音乐必须有曲目、收听历史、常听时段和当前正在收听曲目；相册至少保存一条与该事件有关的文字图描述。优先使用 userThreadMessages、contactThreads、browserEntries、scheduleItems、diaryEntries、noteEntries、todoEntries、posts、musicTracks、musicListening、musicNowPlaying 数组字段表达数量；同一事件可以投影到多个应用，但每条仍须有证据。"
+    ? "这是该角色手机首次初始化。忽略前文可能出现的2—4条总量示例，以本条数量要求为准。请围绕同一个有证据的生活事件，批量生成完整但自然的手机生活：userThreadMessages 禁止填写，角色与用户的直接聊天由系统从已持久化的主聊天镜像；每一个有证据的非用户 NPC（包括关系网已连线 NPC）都必须在 contacts 中出现，并用 contactThreads 生成属于自己的聊天，不能把不同联系人混在同一线程；没有证据的人不要添加；浏览器 4—8 条搜索记录；未来 3—6 天内分布 1—3 条日程；日记、备忘录、待办合计 2—4 条；朋友圈至少 1 条，visibility 必须是 user（仅用户可见）或 private（仅自己可见）；音乐必须有曲目、收听历史、常听时段和当前正在收听曲目；相册至少保存一条与该事件有关的文字图描述。优先使用 contactThreads、browserEntries、scheduleItems、diaryEntries、noteEntries、todoEntries、posts、musicTracks、musicListening、musicNowPlaying 数组字段表达数量；同一事件可以投影到多个应用，但每条仍须有证据。"
     : "这是一次追加生活痕迹。请从最有依据的 2—4 个应用中随机选择少量记录，避免每次都选择相同应用或相同数量；不要为了填满首次初始化的数量而重复旧内容。";
   let response;
   try {
@@ -785,13 +809,13 @@ export async function advanceCharacterPhoneWithResult(
       // context, but send the current batch schema last so the model cannot
       // mistake the old singular example for the active quantity contract.
       ...{
-        message: `${generationRequest}\n只返回 JSON，不要 Markdown。数量字段请优先使用数组：userThreadMessages:[{sender:"contact或character",content:"用户与角色的消息"}]、contactThreads:[{contactName:"联系人",messages:[{sender:"contact或character",content:"消息内容"}]}]、threadMessages:[{sender:"contact或character",content:"兼容旧版单联系人消息"}]、browserEntries:[{query:"搜索词",title:"记录标题",results:[{platform:"平台",title:"结果标题",snippet:"摘要"}],searchResults:[{platform:"平台",title:"结果标题",snippet:"摘要"}],reflection:"搜索后的私下反应"}]、scheduleItems:[{title:"日程标题",detail:"具体事项",daysFromNow:3}]、diaryEntries:[{title:"日记标题",body:"私密想法"}]、noteEntries:[{title:"备忘录标题",content:"具体内容"}]、todoEntries:[{text:"待办事项"}]、posts:[{content:"朋友圈内容",visibility:"user、private 或 public"}]、musicTracks:[{title:"曲目",artist:"艺术家",duration:"3:30",current:true}]、musicListening:[{trackTitle:"曲目",playedHoursAgo:2,durationSeconds:180,playCount:2}]、musicNowPlaying:{trackTitle:"当前曲目"}。同时保留 lifeEventSummary、evidenceSourceIds、contacts、threadContactName、callContactName、callDirection、galleryTitle、galleryCaption、hiddenGalleryTitle、hiddenGalleryCaption 等字段。首次初始化按上面的数量要求完整填写；追加生成只随机填写 2—4 个应用。没有证据的字段返回空数组或空字符串。`,
+      message: `${generationRequest}\n只返回 JSON，不要 Markdown。数量字段请优先使用数组：userThreadMessages:[]（禁止生成用户与角色的聊天，系统会从主聊天镜像）、contactThreads:[{contactName:"联系人",messages:[{sender:"contact或character",content:"消息内容"}]}]、threadMessages:[{sender:"contact或character",content:"兼容旧版单联系人消息，仅用于明确 NPC 线程"}]、browserEntries:[{query:"搜索词",title:"记录标题",results:[{platform:"平台",title:"结果标题",snippet:"摘要"}],searchResults:[{platform:"平台",title:"结果标题",snippet:"摘要"}],reflection:"搜索后的私下反应"}]、scheduleItems:[{title:"日程标题",detail:"具体事项",daysFromNow:3}]、diaryEntries:[{title:"日记标题",body:"私密想法"}]、noteEntries:[{title:"备忘录标题",content:"具体内容"}]、todoEntries:[{text:"待办事项"}]、posts:[{content:"朋友圈内容",visibility:"user、private 或 public"}]、musicTracks:[{title:"曲目",artist:"艺术家",duration:"3:30",current:true}]、musicListening:[{trackTitle:"曲目",playedHoursAgo:2,durationSeconds:180,playCount:2}]、musicNowPlaying:{trackTitle:"当前曲目"}。同时保留 lifeEventSummary、evidenceSourceIds、contacts、threadContactName、callContactName、callDirection、galleryTitle、galleryCaption、hiddenGalleryTitle、hiddenGalleryCaption 等字段。首次初始化按上面的数量要求完整填写；追加生成只随机填写 2—4 个应用。没有证据的字段返回空数组或空字符串。`,
       },
       history: [],
       systemInstruction: `你扮演真实存在的角色“${roleName}”，正在整理他自己的手机。\n${context}\n\n${generationRequest}\n严格规则：
 1. 所有内容必须来自角色人设、世界书、最近上下文或已有手机记录的合理延伸；不能凭空制造与角色无关的人和事件。
 2. 联系人只能是角色现实中可能认识的人：用户、已有角色关系、世界书/人设明确提到的家人朋友同事，或有明确依据的新 NPC。群聊必须有明确的群名称或成员依据。不要读取或生成用户不认识该角色的好友。name 只能填写真实的人名或群聊名，不能填写“我可”“我都开始怀疑你是不”这类句子片段；无法确定正式名称时请留空并不要添加该联系人。
-3. userThreadMessages 只表示用户与角色的直接对话；contactThreads/threadMessages 只表示 NPC 或群聊。每个有证据的非用户联系人（尤其是关系网已连线 NPC）都必须对应 contacts 和自己的 contactThreads；每个 contactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成该线程。不要把 NPC 聊天塞进用户与角色的聊天镜像。
+3. userThreadMessages 必须始终返回空数组；用户与角色的直接聊天由系统从已持久化的主聊天严格镜像，不能生成、改写或补齐用户说过的话。contactThreads/threadMessages 只表示 NPC 或群聊。每个有证据的非用户联系人（尤其是关系网已连线 NPC）都必须对应 contacts 和自己的 contactThreads；每个 contactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成该线程。不要把 NPC 聊天塞进用户与角色的聊天镜像。
 4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isInitialGeneration ? "首次初始化时必须覆盖所有支持内容生成的应用，并满足聊天4—6条、浏览器4—8条、未来3—6天的1—3条日程、日记/备忘录/待办合计2—4条、至少一条仅用户可见或仅自己可见的朋友圈和音乐收听/常听时段/正在收听数据；不要使用模板标题。" : "后续生活推进从最有依据的2—4个应用随机选择少量记录，不要每个应用都强行生成一条，也不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。"}
 5. 角色真实姓名、备注名和人设文件名是不同概念。绝不能把文件名、输入字段名、世界书标题当作角色姓名或正文内容。
 6. 日记必须是角色不会公开展示的私密想法；备忘录和日程必须是具体事项；浏览器输出搜索记录标题和 2—3 条不同平台的 AI 结果卡片，不能输出网址或引导查看原始页面；相册字段只描述角色真实可能保存的图片或文字图，不要凭空输出图片文件名。主手机的文字图只以描述形式参考，角色手机会在本地渲染文字图，不要声称有真实照片。
@@ -846,8 +870,7 @@ export async function advanceCharacterPhoneWithResult(
   const requestedThreadContact = cleanGeneratedText(raw.threadContactName, sourceFileName, 40);
   // An initial response with several contacts must not silently attach every
   // message to the first NPC. Only an explicitly named NPC thread may use
-  // the legacy singular fields; otherwise they are treated as the direct
-  // user conversation below.
+  // the legacy singular fields; otherwise those fields are discarded.
   const threadContact = findThreadContact(mergedContacts.contacts, requestedThreadContact, mergedContacts.added);
   const incoming = cleanGeneratedText(raw.threadIncoming || raw.threadMessage, sourceFileName);
   const outgoing = cleanGeneratedText(raw.threadOutgoing || raw.message, sourceFileName);
@@ -867,44 +890,27 @@ export async function advanceCharacterPhoneWithResult(
       lifeEventSummary,
     );
   }
-  const userContact = mergedContacts.contacts.find((contact) => contact.source === "user" || contact.kind === "user");
-  let userThreadDrafts = parseGeneratedThreadMessages(raw.userThreadMessages, sourceFileName);
-  // Older providers do not know userThreadMessages. Mirror the scoped main
-  // chat when it exists, and only then use the legacy singular response as a
-  // direct-chat fallback when no NPC was explicitly selected.
-  if (isInitialGeneration && userThreadDrafts.length === 0) {
-    userThreadDrafts = lifeContext.messages
+  // Direct role-phone chat is a strict mirror of real main-chat messages.
+  // Provider userThreadMessages and legacy threadMessages are intentionally
+  // ignored so no generated text can be persisted as if the user sent it.
+  const userThreadDrafts = isInitialGeneration
+    ? lifeContext.messages
       .slice(-6)
-      .map((message) => ({
-        sender: message.sender === "character" ? "character" as const : "contact" as const,
-        content: cleanGeneratedText(message.content, sourceFileName),
-      }))
-      .filter((message) => Boolean(message.content));
-    if (userThreadDrafts.length === 0 && threadDrafts.length > 0 && !requestedThreadContact) {
-      userThreadDrafts = threadDrafts;
-      threadDrafts = [];
-    }
-    if (userThreadDrafts.length === 0 && userContact) {
-      userThreadDrafts = completeInitialThreadDrafts(
-        [],
-        lifeEventSummary ? `关于${lifeEventSummary.slice(0, 34)}，你现在方便聊聊吗？` : "你现在方便聊聊吗？",
-        lifeEventSummary ? `我刚处理完${lifeEventSummary.slice(0, 34)}，晚点跟你说。` : "我刚忙完，看到消息了。",
-        userContact,
-        input.character,
-        lifeEventSummary,
-      );
-    }
-  }
-  if (isInitialGeneration && userContact && userThreadDrafts.length > 0) {
-    userThreadDrafts = completeInitialThreadDrafts(
-      userThreadDrafts,
-      "",
-      "",
-      userContact,
-      input.character,
-      lifeEventSummary,
-    );
-  }
+      .map((message) => {
+        const relation = message.relationId
+          ? lifeContext.relationships.find((candidate) => candidate.id === message.relationId)
+          : message.conversationId
+            ? lifeContext.relationships.find((candidate) => candidate.conversationId === message.conversationId)
+            : undefined;
+        return {
+          sender: message.sender === "character" ? "character" as const : "contact" as const,
+          content: cleanGeneratedText(message.content, sourceFileName),
+          sourceMessageId: message.id,
+          userIdentityId: relation?.userIdentityId || message.authorIdentityId || base.ownerIdentityId,
+        };
+      })
+      .filter((message) => Boolean(message.content))
+    : [];
   const contactThreadDrafts = parseGeneratedContactThreads(raw.contactThreads, sourceFileName);
   const explicitContactThreadNames = new Set([
     ...contactThreadDrafts.map((thread) => contactKey(thread.contactName)),
@@ -977,14 +983,19 @@ export async function advanceCharacterPhoneWithResult(
     return true;
   };
 
-  if (userContact && userThreadDrafts.length > 0) {
+  const userContacts = next.contacts.filter((contact) => contact.source === "user" || contact.kind === "user");
+  const userContactByIdentityId = new Map(userContacts.map((contact) => [contact.userIdentityId || next.ownerIdentityId, contact]));
+  if (userContacts.length > 0 && userThreadDrafts.length > 0) {
     userThreadDrafts.slice(0, 6).forEach((draft, index) => {
+      const userIdentityId = draft.userIdentityId || next.ownerIdentityId;
+      const userContact = userContactByIdentityId.get(userIdentityId) || userContacts[0];
       const message: CharacterPhoneThreadMessage = {
         id: createId(`phone-life-user-thread-${draft.sender}`),
         contactId: userContact.id,
         sender: draft.sender,
         content: draft.content,
         timestamp: now - (userThreadDrafts.length - index) * 60 * 1000,
+        ...(draft.sourceMessageId ? { sourceMessageId: draft.sourceMessageId } : {}),
       };
       pushArtifact("chat", next.threadMessages, message, (value) => `${value.contactId}|${value.sender}|${normalizeArtifactText(value.content)}`);
     });

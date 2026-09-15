@@ -125,6 +125,9 @@ try {
       { name: "林晓", relation: "现实朋友" },
       { name: "王强", relation: "模型凭空编造的人" },
     ],
+    userThreadMessages: [
+      { sender: "contact", content: "这条内容并不是用户说过的。" },
+    ],
     threadContactName: "林晓",
     threadIncoming: "晚点到，给你带杯热饮。",
     threadOutgoing: "好，我在海边入口等你。",
@@ -220,6 +223,7 @@ try {
   const initialThread = initialGeneration.phone.threadMessages.filter((message) => message.contactId === "contact-linxiao");
   assert.ok(initialThread.length >= 4, "legacy singular provider replies are expanded into a real initial conversation");
   assert.ok(initialThread.some((message) => message.sender === "contact") && initialThread.some((message) => message.sender === "character"), "initial conversation includes both sides");
+  assert.ok(!initialGeneration.phone.threadMessages.some((message) => message.content === "这条内容并不是用户说过的。"), "provider cannot invent direct user-chat history");
   assert.ok(new Set(initialGeneration.phone.lifeEvents?.[0]?.artifactRefs.map((ref) => ref.app)).size <= 10);
   assert.match(String(requestBodies[1]?.systemInstruction || ""), /首次初始化时必须覆盖/);
 
