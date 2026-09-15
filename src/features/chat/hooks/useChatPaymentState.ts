@@ -8,7 +8,9 @@ import {
   RED_PACKET_STATUSES_KEY,
   getPaymentStatusKey,
   loadIdentityWalletBalances,
+  readRedPacketClaims,
   readRedPacketStatus,
+  resolveRedPacketExpiry,
   writeRedPacketStatus,
   type IdentityWalletBalances,
   type RedPacketClaim,
@@ -17,7 +19,7 @@ import {
   type RedPacketStatus,
   type RedPacketStatusMap,
 } from "../services/paymentScope";
-import { isRedPacketMarkup, normalizePaymentMarkup } from "../services/messageParser";
+import { isRedPacketMarkup } from "../services/messageParser";
 
 interface UseChatPaymentStateOptions {
   activeIdentityId: string;
@@ -80,12 +82,16 @@ export function useChatPaymentState({
   };
 
   const getRedPacketActualStatus = (message: Message): RedPacketStatus | "unclaimed" => {
-    const savedStatus = readRedPacketStatus(redPacketStatuses, message, activeIdentityId === "identity-1");
-    if (savedStatus === "refunded" || savedStatus === "expired") return savedStatus;
+    // Message IDs were the legacy persistence key. They remain a safe
+    // fallback because message IDs are globally generated and unique.
+    const savedStatus = readRedPacketStatus(redPacketStatuses, message, true);
     const packet = parseRedPacketPayload(message);
-    const claims = redPacketClaims[getPaymentStatusKey(message)] || [];
-    if (savedStatus === "exhausted" || claims.length >= Math.max(1, packet.count)) return "exhausted" as const;
+    const claims = readRedPacketClaims(redPacketClaims, message);
+    const maxClaims = packet.mode === "exclusive" ? 1 : Math.max(1, Math.floor(packet.count));
+    if (savedStatus === "exhausted" || claims.length >= maxClaims) return "exhausted" as const;
+    // Claims are authoritative over stale expired/refunded status rows.
     if (savedStatus === "claimed" || claims.length > 0) return "claimed" as const;
+    if (savedStatus === "refunded" || savedStatus === "expired") return savedStatus;
     if (Date.now() - message.timestamp > 24 * 3600 * 1000) return "expired" as const;
     return savedStatus || "unclaimed" as const;
   };
@@ -93,7 +99,7 @@ export function useChatPaymentState({
   const claimRedPacket = (message: Message, claimantId: string): number => {
     const packet = parseRedPacketPayload(message);
     const key = getPaymentStatusKey(message);
-    const previousClaims = redPacketClaimsRef.current[key] || [];
+    const previousClaims = readRedPacketClaims(redPacketClaimsRef.current, message);
     if (previousClaims.some((claim) => claim.claimantId === claimantId)) return 0;
     if (packet.recipientId && packet.recipientId !== claimantId) return 0;
     const maxClaims = packet.mode === "exclusive" ? 1 : Math.max(1, Math.floor(packet.count));
@@ -121,26 +127,27 @@ export function useChatPaymentState({
     let changed = false;
     const updatedStatuses = { ...redPacketStatuses };
     let refundAmountTotal = 0;
-    const expiredMessages: Message[] = [];
+    const expiredMessages: Array<{ message: Message; status: RedPacketStatus; refundAmount: number }> = [];
     const activeRelationIds = new Set(activeRelationships.map((relationship) => relationship.id));
     messages.filter((message) => message.relationId
       ? activeRelationIds.has(message.relationId)
       : Boolean(characters.find((character) => character.id === message.characterId && character.isGroupChat && belongsToActiveIdentity(character.ownerIdentityId))))
       .forEach((message) => {
         if (!isRedPacketMarkup(message.content)) return;
-        const currentStatus = readRedPacketStatus(redPacketStatuses, message, activeIdentityId === "identity-1") || "unclaimed";
-        if (Date.now() - message.timestamp <= 24 * 3600 * 1000 || currentStatus !== "unclaimed") return;
-        updatedStatuses[getPaymentStatusKey(message)] = "expired";
+        const currentStatus = readRedPacketStatus(redPacketStatuses, message, true) || "unclaimed";
+        const settlement = resolveRedPacketExpiry({
+          message,
+          packet: parseRedPacketPayload(message),
+          claims: readRedPacketClaims(redPacketClaims, message),
+          currentStatus,
+          now: Date.now(),
+        });
+        if (!settlement.notify && settlement.status === currentStatus) return;
+        const key = getPaymentStatusKey(message);
+        updatedStatuses[key] = settlement.status;
         changed = true;
-        expiredMessages.push(message);
-        if (message.sender === "user") {
-          const [, amountText] = normalizePaymentMarkup(message.content).split("|");
-          const amount = Number.parseFloat(amountText || "0");
-          if (Number.isFinite(amount) && amount > 0) {
-            refundAmountTotal += amount;
-            updatedStatuses[getPaymentStatusKey(message)] = "refunded";
-          }
-        }
+        if (settlement.notify) expiredMessages.push({ message, status: settlement.status as RedPacketStatus, refundAmount: settlement.refundAmount });
+        if (settlement.refundAmount > 0) refundAmountTotal += settlement.refundAmount;
       });
     if (!changed) return;
     setRedPacketStatuses(updatedStatuses);
@@ -149,7 +156,7 @@ export function useChatPaymentState({
       setWalletBalance((previous) => previous + refundAmountTotal);
       showToast(`检测到有红包逾期未领，已自动退回 ¥${refundAmountTotal.toFixed(2)} 至您的零钱！🧧`);
     }
-    expiredMessages.forEach((message) => {
+    expiredMessages.forEach(({ message, status, refundAmount }) => {
       onSendMessage?.({
         id: `redpacket-expired-${message.id}`,
         characterId: message.characterId,
@@ -157,12 +164,14 @@ export function useChatPaymentState({
         ...(message.conversationId ? { conversationId: message.conversationId } : {}),
         sender: "character",
         ...(message.senderId ? { senderId: message.senderId } : {}),
-        content: "红包超过24小时未领取，已原路退回。",
+        content: refundAmount > 0
+          ? (status === "refunded" ? "红包超过24小时未领取，已原路退回。" : `红包已过期，未领取余额 ¥${refundAmount.toFixed(2)} 已原路退回。`)
+          : "红包超过24小时未领取，已关闭。",
         timestamp: Date.now(),
         isNarration: true,
       });
     });
-  }, [messages, redPacketStatuses, activeRelationships, activeIdentityId, characters, belongsToActiveIdentity, showToast, onSendMessage]);
+  }, [messages, redPacketStatuses, redPacketClaims, activeRelationships, activeIdentityId, characters, belongsToActiveIdentity, showToast, onSendMessage]);
 
   return {
     walletBalances,
