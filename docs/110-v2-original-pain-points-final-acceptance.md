@@ -1,7 +1,7 @@
 # Fanfanji V2：最初问题到最终解决情况验收表
 
 日期：2026-09-15
-验收范围：`919b11f12642fa1041ece9671495f6ebb21340df` 及其之前已验收的 V2 增量。
+验收范围：`4291c20`（本轮原始需求缺口收尾 source commit）及其之前已验收的 V2 增量。
 说明：本表按用户实际遇到的痛点记录，不把历史证据改写成新的实时数据；本轮新增验证均为 synthetic-only。
 
 | 最初的问题 | V2 之前为什么会发生 | 现在怎么解决 | 验证证据 | 用户实际会感受到什么 | 最终状态 |
@@ -15,6 +15,7 @@
 | Summary 越来越像真相 | 摘要曾被当作事实存储和身份上下文 | Summary 是 derived projection，只能从 canonical source 重建，不能覆盖 Identity、Relationship、Scene 或 Truth | `scripts/conversationSummaryProjectionEquivalence.test.ts`、`scripts/directChatSummaryCanonicalConvergence.test.ts` | 摘要变短或重建不会改变角色真正的事实 | 已完成 |
 | Memory 检索越来越长、越来越贵 | 旧路径容易把完整历史直接塞进每次请求 | 先 exact scope，再按相关性和预算选取；Memory/Summary/context 有固定顺序，且由 request ledger 记录成本形状 | `scripts/chatLongTermRecallBudget.test.ts`、`scripts/memoryRecallPolicy.test.ts`、`scripts/aiRequestAccounting.test.ts` | 请求上下文更稳定，不会无界增长 | 已完成 |
 | Online 和 Offline 像两个不同的人 | Offline 曾复制线上上下文，或让新场景覆盖原关系 | 一个 canonical life，online/offline 只是不同 current scene；handoff 传 bounded references/delta，不复制 transcript | `scripts/characterContinuityLite.test.ts`、`scripts/offlineHandoffContext.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 角色记得关系和经历，但不会错误地把两个场景混在一起 | 已完成 |
+| 从 Online 再进入已有 Offline 剧情时无法明确选择继续或新开 | 入口只负责创建/打开故事，没有把可恢复故事列为用户可选择的产品状态 | 进入线下前按 canonical character、relation、identity 精确列出可继续故事；由用户选择“继续之前的剧情”“开启新的剧情”或取消；故事 ID 保持稳定，新故事使用独立 ID | `src/domain/offlineStory/offlineStoryResumePolicy.ts`、`scripts/offlineStoryResumePolicy.test.ts`、`src/features/chat/hooks/useChatStartOfflineFromMessage.ts`、`src/components/AppChat.tsx` | 多次 Online ↔ Offline 往返不会自动替用户决定，也不会把不同关系的剧情混在一起；退出仍先保存轻量 handoff、Online 立即可用 | 已完成 |
 | 换话题后仍被旧话题牵着走 | Topic 曾隐含在 Memory/整段历史里 | 独立 Topic Runtime 维护 active topic、history 与 transition；转场是确定性判断，不要求每条消息额外 LLM | `scripts/directChatTopicBoundary.test.ts`、`scripts/topicHistoryRepository.test.ts` | 明确换话题后能开启新主题，旧主题仍可作为历史参考 | 已完成 |
 | 情绪不能跨回合自然延续 | 情绪只是当次回复文字，没有独立有界状态 | Emotion Runtime 维护 bounded intensity、residue、decay 和 cause refs，不改写 Identity/Truth | `scripts/chatEmotionTracker.test.ts`、`scripts/characterCognitiveContext.test.ts` | 情绪有余韵但会自然衰减，不会永久污染角色事实 | 已完成 |
 | 角色对用户的印象和事实混在一起 | Belief/Impression 没有独立存储语义 | Belief Runtime 有独立 record、scope、confidence 和 supporting events，明确不是 Truth writer | `scripts/characterCognitiveContext.test.ts`、`scripts/memoryAndRelationshipIntegrity.test.ts` | 角色可以有“印象”，但不会把印象冒充客观事实 | 已完成 |
@@ -25,6 +26,7 @@
 | Promise/Open Loop 会重复复活 | 承诺没有稳定的 loop ID、完成和关闭语义 | Promise 建立 scoped OpenLoop，kept/cancelled/missed 可关闭；source refs 防止重复 resurrection | `scripts/characterCognitiveContext.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 已完成的约定不会无限次重新出现 | 已完成 |
 | 角色无控制地主动发消息 | 主动行为只看时间或随机性，缺少生活状态约束 | Proactive eligibility 是确定性、限频、按 scope 的判定；只有满足事件/生活条件才产生一个 intent | `scripts/proactiveSchedule.test.ts`、`scripts/proactiveOfflineEligibility.test.ts`、`scripts/v2FinalEngineeringConsolidation.test.ts` | 不会因为后台轮询连续打扰或产生 Provider spam | 已完成 |
 | Chat、Diary、Moments、Phone 各自有一套人生 | 各 App 直接维护自己的角色状态 | Cross-App Life 通过只读 gateway 投影同一 canonical life，同时保留 App-specific scene 和隐私边界 | `scripts/v2FinalEngineeringConsolidation.test.ts`、`scripts/momentContextOwnership.test.ts`、`scripts/characterPhoneLifeContext.test.ts` | 不同 App 能保持同一角色连续性，又不会互相泄露全部内容 | 已完成 |
+| Browser/Reading 不是独立的角色手机窗口，或跨角色泄漏搜索内容 | 角色手机历史若只按名称/全局集合读取，就会把另一角色的浏览记录当成当前角色所见 | Browser history 持久化和读取始终使用 owner identity + canonical character scope；错误/HTML/Cloudflare 响应只生成友好状态，不渲染源码；角色反思只使用当前角色上下文 | `scripts/characterPhoneBrowserScope.test.ts`、`scripts/characterPhoneBrowserDetails.test.ts`、`src/core/storage/repositories/characterPhoneRepository.ts`、`src/features/characterPhone/characterPhoneBrowserDetails.ts` | 同一主人设下的不同角色各自只看到自己的搜索记录；被拦截网页不会显示 Cloudflare/HTML 错误页源码，也不会自动获得别的角色或私密内容 | 已完成 |
 | Diary/private、Browser/Reading 被角色全知 | 跨 App 共享时没有 visibility 和 ownership 过滤 | Diary/private reflection、Character Phone、Browser/Reading 只在授权 scope 内可见；gateway 拒绝 other-character/private 数据 | `scripts/diaryPromptAdapter.test.ts`、`scripts/memoryCrossAppScope.test.ts`、`scripts/characterKnowledgeBoundary.test.ts` | 角色不会因为“同一个手机”就自动知道用户所有私密内容 | 已完成 |
 | Character Phone 串到错误角色或错误作者 | Phone 记录缺少 owner/character/relation 的强约束 | Phone repository、contacts、thread、posts、diary、schedule 均按 owner identity + character ID 读写 | `scripts/characterPhoneIndexedDbPersistence.test.ts`、`scripts/characterPhoneIsolationRepair.test.ts`、`scripts/characterPhoneLifeContext.test.ts` | 每个角色看到自己的手机状态，不会拿到别人的聊天或朋友圈 | 已完成 |
 | 备份恢复后 ID、同名角色和新 V2 状态损坏 | 多存储恢复顺序和 legacy mapping 不稳定 | system backup v3 采用 allowlist、scope inventory、IDB/local snapshot、compensating rollback；旧格式仍可读 | `scripts/earlyBaselineBackupRoundTrip.test.ts`、`scripts/systemBackup.test.ts`、`scripts/systemBackupRelationshipCoverage.test.ts` | 恢复和重新加载后角色、关系、消息和 V2 增量仍可读 | 已完成 |
@@ -42,5 +44,7 @@
 - Offline 退出重型同步阻塞：`OFFLINE_EXIT_BLOCKED_BY_HEAVY_MEMORY = false`。
 - 同名角色跨角色泄漏：`SAME_NAME_CROSS_CHARACTER_LEAK = false`。
 - Memory 作用域泄漏：`MEMORY_SCOPE_LEAK = false`。
+- Offline 重新进入已有剧情时的用户选择：`OFFLINE_RESUME_NEW_CHOICE = explicit-and-scoped`。
+- Browser 跨角色泄漏：`BROWSER_CROSS_CHARACTER_LEAK = false`；Browser/Reading 仍是角色手机内独立窗口，不具备自动全知能力。
 - temporary preference 按既定设计仍为 shadow-only，列为真实长期使用观察，不虚报为 production veto。
-- 其余 V2 代码级痛点均有 deterministic/runtime 证据；本轮没有发现新的代码级 RC blocker。
+- 其余 V2 代码级痛点均有 deterministic/runtime 证据；本轮补齐了两个原始产品缺口，没有改变 canonical life、storage、Provider 或 backup 架构前提。

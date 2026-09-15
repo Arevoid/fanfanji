@@ -1,7 +1,7 @@
 # Fanfanji V2 — Final Release Candidate
 
 日期：2026-09-15
-最终 source anchor：`7109c37a77ba038337d972d65a23826bd1d7f15e`（promotion source：`919b11f12642fa1041ece9671495f6ebb21340df`）
+最终 source anchor：`4291c20`（本轮 Original Requirement Closure；promotion source：`919b11f12642fa1041ece9671495f6ebb21340df`）
 分支：`refactor/v2-architecture`（未 push、未 merge、未 deploy）。
 
 ## 1. 状态收敛
@@ -89,6 +89,13 @@ MEMORY_SCOPE_LEAK = false
 
 取消计划已进入 production Safety-veto gate；temporary preference 仍诚实标记为 shadow-only/长期观察，不把未 productionized 语义包装成“已完成”。
 
+本次 Original Requirement Gap Closure 继续保持 feature-freeze 边界，只补齐两个入口/隔离验收缺口：
+
+- Offline 从 Online 进入已有可恢复故事时，先按 exact character/relation/identity scope 展示“继续之前的剧情 / 开启新的剧情 / 先不进入”，不再自动替用户决定；已有非阻塞 handoff 语义保持不变。
+- Browser/Reading 作为角色手机内独立窗口按 owner identity + character ID 隔离；新增 synthetic cross-character regression，并复核 Cloudflare/HTML 错误页只生成友好状态。
+
+对应证据：`scripts/offlineStoryResumePolicy.test.ts`、`scripts/characterPhoneBrowserScope.test.ts`、`scripts/characterPhoneBrowserDetails.test.ts`。本次没有新增持久化字段，因此 V3 backup schema/legacy restore 兼容前提未改变。
+
 ## 5. Cloudflare Worker RC
 
 `src/cloudflare/worker.ts` 的 `includeV2Shadow` forwarding 修复已通过：
@@ -113,7 +120,7 @@ MEMORY_SCOPE_LEAK = false
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm test` | PASS（本轮 624/624；包含 deferred offline-exit RC 回归） |
+| `npm test` | PASS（本轮 626/626；包含 Offline resume/new 与 Browser scope 回归） |
 | `npm run lint` | PASS |
 | `npm run build` | PASS |
 | `npm run install:check` | PASS |
@@ -131,7 +138,7 @@ MEMORY_SCOPE_LEAK = false
 
 ## 8. 工作区、数据和发布边界
 
-本 RC 只修复一个已验证的 final blocker（先持久化 handoff、再异步启动既有 Memory consolidation），并新增对应 deterministic regression；此前 promotion commit 的源代码变更已经固定在 source anchor。工作区其余 13 项 dirty 内容保持原样，分类如下：
+本 RC 先前已修复 Offline 退出的 final blocker（先持久化 handoff、再异步启动既有 Memory consolidation）；本次 Original Requirement Closure 在 feature-freeze 边界内补齐 Offline 入口选择与 Browser 隔离回归，对应源代码与 deterministic regression 已固定于 source commit `4291c20`。工作区原有 13 项 dirty 内容保持原样，分类如下：
 
 - 1 个历史 campaign manifest 修改：既有 synthetic evidence 记录；不覆盖。
 - 3 个 API/settings runtime 配置修改及 `scripts/textApiRuntimeConfig.test.ts`：既有用户/API 设置修复；不扩大。
