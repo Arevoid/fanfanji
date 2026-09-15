@@ -173,6 +173,7 @@ import { contributeDirectReplyTruthContext } from "../features/characterKnowledg
 import { formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../features/characterKnowledge/services/truthRetrievalService";
 import { createConversationSummaryRecord } from "../features/characterKnowledge/services/conversationSummaryService";
 import { createDeterministicArtifactClaim } from "../features/characterKnowledge/services/deterministicKnowledgeCapture";
+import { createAcceptedRelationshipPlanClaim } from "../features/characterKnowledge/services/relationshipCommitmentCapture";
 import { buildRelationshipCognitiveProjection } from "../features/characterLife/services/relationshipCognitiveProjectionService";
 import { persistDirectChatTopicRuntime } from "../features/chat/services/directChatTopicRuntime";
 import { persistCharacterLifeInteraction } from "../features/characterLife/services/characterLifeRuntimeService";
@@ -2768,6 +2769,21 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             if (!saved) console.warn("Proactive offline invitation could not be persisted.");
           }
           if (turnRelationship && !replyContext.isGroup) {
+            if (userMsg && createdMessages.length > 0) {
+              const planClaim = createAcceptedRelationshipPlanClaim({
+                userMessage: userMsg,
+                characterMessages: createdMessages,
+                characterName: turnCharacter.name,
+                scope: {
+                  relationId: turnRelationship.id,
+                  characterId: turnRelationship.characterId,
+                  userIdentityId: turnRelationship.userIdentityId,
+                  conversationId: turnRelationship.conversationId,
+                },
+                now: createdMessages[createdMessages.length - 1].timestamp,
+              });
+              if (planClaim && !appendKnowledgeClaim(planClaim).success) console.warn("Failed to capture accepted relationship plan.");
+            }
             maybeAutoStartOfflineFromPresence({
               relationship: turnRelationship,
               messages: [...sourceMsgs, ...createdMessages],
