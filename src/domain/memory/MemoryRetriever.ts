@@ -4,6 +4,7 @@ import {
   selectMemoryItemsWithinBudget,
   type MemoryRecallBudget,
 } from "./memoryRecallPolicy";
+import { buildSemanticVector, cosineSimilarity, tokenizeMemoryText } from "./semanticVector";
 
 export interface MemoryRetrievalOptions extends Partial<MemoryRecallBudget> {
   relationId?: string;
@@ -23,45 +24,6 @@ export interface RankedMemoryItem {
 }
 
 const normalize = (text: string): string => text.toLocaleLowerCase().normalize("NFKC").trim();
-
-/** Keep Chinese phrases useful without treating every single Chinese character as a hit. */
-const tokenize = (text: string): string[] => {
-  const normalized = normalize(text);
-  const latinTerms = normalized.match(/[a-z0-9]+/gu) || [];
-  const cjkRuns = normalized.match(/[\u3400-\u9fff]+/gu) || [];
-  const cjkTerms = cjkRuns.flatMap((run) => {
-    if (run.length <= 2) return [run];
-    const terms = [run];
-    for (let index = 0; index < run.length - 1; index += 1) terms.push(run.slice(index, index + 2));
-    return terms;
-  });
-  return Array.from(new Set([...latinTerms, ...cjkTerms].filter((term) => term.length > 0)));
-};
-
-const buildTokenVector = (tokens: readonly string[]): Map<string, number> => {
-  const vector = new Map<string, number>();
-  tokens.forEach((token) => vector.set(token, (vector.get(token) || 0) + 1));
-  return vector;
-};
-
-/**
- * A provider-independent semantic fallback. It is deliberately deterministic:
- * normalized word/phrase vectors let related wording share partial meaning
- * without making recall depend on a second network request or an API key.
- */
-const cosineSimilarity = (left: Map<string, number>, right: Map<string, number>): number => {
-  if (left.size === 0 || right.size === 0) return 0;
-  let dot = 0;
-  let leftMagnitude = 0;
-  let rightMagnitude = 0;
-  left.forEach((value, token) => {
-    dot += value * (right.get(token) || 0);
-    leftMagnitude += value * value;
-  });
-  right.forEach((value) => { rightMagnitude += value * value; });
-  if (leftMagnitude === 0 || rightMagnitude === 0) return 0;
-  return dot / Math.sqrt(leftMagnitude * rightMagnitude);
-};
 
 const recencyScore = (timestamp: number, now: number): number => {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return 0;
@@ -97,14 +59,12 @@ export function rankRelevantMemories(
   if (scoped.length === 0) return [];
 
   const query = normalize(userQuery);
-  const terms = tokenize(query);
-  const queryVector = buildTokenVector(terms);
+  const terms = tokenizeMemoryText(query);
   const now = options.now ?? Date.now();
   return scoped.map((memory, originalIndex) => {
     const content = normalize(memory.content);
-    const contentTerms = tokenize(content);
     const matchedTerms = terms.filter((term) => content.includes(term));
-    const semanticScore = cosineSimilarity(queryVector, buildTokenVector(contentTerms));
+    const semanticScore = cosineSimilarity(buildSemanticVector(query), buildSemanticVector(content));
     const phraseMatch = query.length > 1 && content.includes(query) ? 8 : 0;
     const keywordScore = matchedTerms.reduce((sum, term) => sum + (term.length >= 2 ? Math.min(term.length, 8) * 0.7 : 0), 0);
     const importanceScore = (memory.importance ?? 5) * 0.08;

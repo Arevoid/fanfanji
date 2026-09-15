@@ -10,6 +10,7 @@ import { isExactTruthScope } from "../../../domain/characterKnowledge/knowledgeC
 import { isKnowledgeTemporallyActive, temporalStatusLabel } from "../../../domain/characterKnowledge/knowledgeTemporalPolicy";
 import { selectKnowledgeForPrivatePrompt } from "../../../domain/characterKnowledge/knowledgeVisibilityPolicy";
 import { DEFAULT_TRUTH_PROMPT_CHARACTER_LIMIT, truncatePromptText } from "../../../domain/memory/memoryRecallPolicy";
+import { buildSemanticVector, cosineSimilarity } from "../../../domain/memory/semanticVector";
 import { isConversationSummarySourceValid } from "./conversationSummaryService";
 
 export interface TruthRetrievalInput {
@@ -98,6 +99,11 @@ const scoreText = (text: string, queryText: string): number => {
   return phraseScore + terms.reduce((score, term) => score + (lower.includes(term) ? Math.min(term.length, 8) : 0), 0);
 };
 
+const semanticScoreText = (text: string, queryText: string): number => {
+  const query = queryText.trim().toLocaleLowerCase().normalize("NFKC");
+  return query ? cosineSimilarity(buildSemanticVector(text), buildSemanticVector(query)) : 0;
+};
+
 const sourceQuality = (claim: KnowledgeClaim): number => {
   const base: Record<KnowledgeClaim["source"]["kind"], number> = {
     manual: 4,
@@ -173,19 +179,21 @@ const rankClaims = (claims: readonly KnowledgeClaim[], queryText: string, limit:
   const normalizedQuery = queryText.trim();
   const scored = [...claims]
     .filter((claim, index, all) => claim.status === "active" && !claim.recallDisabled && all.findIndex((candidate) => candidate.id === claim.id) === index)
-    .map((claim) => ({ claim, textScore: scoreText(claim.statement, normalizedQuery) }))
+    .map((claim) => ({ claim, textScore: scoreText(claim.statement, normalizedQuery), semanticScore: semanticScoreText(claim.statement, normalizedQuery) }))
     .sort((left, right) => {
       const leftClaim = left.claim;
       const rightClaim = right.claim;
       const leftRecency = timestampRange > 0 ? (leftClaim.recordedAt - oldest) / timestampRange : 0;
       const rightRecency = timestampRange > 0 ? (rightClaim.recordedAt - oldest) / timestampRange : 0;
       const leftScore = left.textScore * 10
+        + left.semanticScore * 3
         + truthWeight[leftClaim.truthStatus] * 2
         + sourceQuality(leftClaim)
         + claimImportance(leftClaim) * 0.35
         + leftClaim.confidence
         + leftRecency * 2;
       const rightScore = right.textScore * 10
+        + right.semanticScore * 3
         + truthWeight[rightClaim.truthStatus] * 2
         + sourceQuality(rightClaim)
         + claimImportance(rightClaim) * 0.35

@@ -171,6 +171,7 @@ import { loadBehaviorCorrections } from "../core/storage/repositories/behaviorCo
 import { behaviorCorrectionRepository } from "../core/storage/repositories/behaviorCorrectionRepository";
 import { contributeDirectReplyTruthContext } from "../features/characterKnowledge/services/directReplyTruthContextContributor";
 import { formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../features/characterKnowledge/services/truthRetrievalService";
+import { persistTruthVectorIndex } from "../features/characterKnowledge/services/truthVectorIndexService";
 import { createConversationSummaryRecord } from "../features/characterKnowledge/services/conversationSummaryService";
 import { createDeterministicArtifactClaim } from "../features/characterKnowledge/services/deterministicKnowledgeCapture";
 import { createAcceptedRelationshipPlanClaim } from "../features/characterKnowledge/services/relationshipCommitmentCapture";
@@ -747,6 +748,20 @@ export default function AppChat({
     characters,
     isGroupChat: Boolean(activeCharacter?.isGroupChat),
   });
+  useEffect(() => {
+    if (!activeDirectScope) return;
+    const scopeClaims = loadKnowledgeClaims().value.filter((claim) =>
+      claim.relationId === activeDirectScope.relationId
+      && claim.characterId === activeDirectScope.characterId
+      && claim.userIdentityId === activeDirectScope.userIdentityId
+      && claim.conversationId === activeDirectScope.conversationId);
+    const scopeSummaries = loadConversationSummaries().value.filter((summary) =>
+      summary.relationId === activeDirectScope.relationId
+      && summary.characterId === activeDirectScope.characterId
+      && summary.userIdentityId === activeDirectScope.userIdentityId
+      && summary.conversationId === activeDirectScope.conversationId);
+    void persistTruthVectorIndex(scopeClaims, scopeSummaries);
+  }, [activeDirectScope?.relationId, activeDirectScope?.characterId, activeDirectScope?.userIdentityId, activeDirectScope?.conversationId, messages.length]);
   const isActiveChatScopeValid = Boolean(activeCharacter && (activeCharacter.isGroupChat
     ? !activeChatRelationId
     : activeDirectScope));
