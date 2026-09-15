@@ -1,7 +1,7 @@
 # Fanfanji V2 — Final Release Candidate
 
 日期：2026-09-15
-最终 source anchor：`4291c20`（本轮 Original Requirement Closure；promotion source：`919b11f12642fa1041ece9671495f6ebb21340df`）
+最终 source anchor：`4291c20846441922b8c6a497a5cdf6414f154765`（本轮 Original Requirement Closure；promotion source：`919b11f12642fa1041ece9671495f6ebb21340df`）
 分支：`refactor/v2-architecture`（未 push、未 merge、未 deploy）。
 
 ## 1. 状态收敛
@@ -138,7 +138,7 @@ MEMORY_SCOPE_LEAK = false
 
 ## 8. 工作区、数据和发布边界
 
-本 RC 先前已修复 Offline 退出的 final blocker（先持久化 handoff、再异步启动既有 Memory consolidation）；本次 Original Requirement Closure 在 feature-freeze 边界内补齐 Offline 入口选择与 Browser 隔离回归，对应源代码与 deterministic regression 已固定于 source commit `4291c20`。工作区原有 13 项 dirty 内容保持原样，分类如下：
+本 RC 先前已修复 Offline 退出的 final blocker（先持久化 handoff、再异步启动既有 Memory consolidation）；本次 Original Requirement Closure 在 feature-freeze 边界内补齐 Offline 入口选择与 Browser 隔离回归，对应源代码与 deterministic regression 已固定于 source commit `4291c20846441922b8c6a497a5cdf6414f154765`。工作区原有 13 项 dirty 内容保持原样，分类如下：
 
 - 1 个历史 campaign manifest 修改：既有 synthetic evidence 记录；不覆盖。
 - 3 个 API/settings runtime 配置修改及 `scripts/textApiRuntimeConfig.test.ts`：既有用户/API 设置修复；不扩大。
