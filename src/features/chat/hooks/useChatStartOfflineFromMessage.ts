@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Character, MemoryItem, Message, OfflineStory, WorldBookEntry } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { Appointment } from "../../../domain/schedule/scheduleTypes";
@@ -15,6 +16,14 @@ import { createHandoffCapsule } from "../../../domain/continuity/handoffCapsule"
 import { loadContinuityRuntimeStore, upsertHandoffCapsule } from "../../../core/storage/repositories/continuityRuntimeRepository";
 import { loadCharacterEvents } from "../../../core/storage/repositories/characterEventRepository";
 import { listCharacterScheduleByScope } from "../../../core/storage/repositories/characterScheduleRepository";
+import { listResumableOfflineStories } from "../../../domain/offlineStory/offlineStoryResumePolicy";
+
+export interface OfflineStoryChoiceRequest {
+  sourceMessage: Message;
+  appointment?: Appointment;
+  handoffMessages?: readonly Message[];
+  stories: OfflineStory[];
+}
 
 interface UseChatStartOfflineFromMessageOptions {
   activeChatCharId: string | null;
@@ -31,6 +40,7 @@ interface UseChatStartOfflineFromMessageOptions {
   onSaveOfflineStory?: (story: OfflineStory) => boolean | void | Promise<boolean>;
   onOpenOfflineStory?: (storyId: string) => void;
   onNavigateToApp?: (app: string) => void;
+  onRequestOfflineStoryChoice?: (request: OfflineStoryChoiceRequest) => void;
   showToast: (message: string) => void;
 }
 
@@ -49,9 +59,12 @@ export function useChatStartOfflineFromMessage({
   onSaveOfflineStory,
   onOpenOfflineStory,
   onNavigateToApp,
+  onRequestOfflineStoryChoice,
   showToast,
 }: UseChatStartOfflineFromMessageOptions) {
-  const handleStartOfflineFromMsg = async (
+  const [pendingOfflineStoryChoice, setPendingOfflineStoryChoice] = useState<OfflineStoryChoiceRequest | null>(null);
+
+  const createOfflineStoryFromMessage = async (
     msg: Message,
     appointment?: Appointment,
     handoffMessages?: readonly Message[],
@@ -236,6 +249,55 @@ export function useChatStartOfflineFromMessage({
     }
   };
 
+  const handleStartOfflineFromMsg = async (
+    msg: Message,
+    appointment?: Appointment,
+    handoffMessages?: readonly Message[],
+    options?: { skipResumeChoice?: boolean },
+  ) => {
+    if (!options?.skipResumeChoice && !appointment && activeChatCharId && activeCharacter) {
+      const stories = listResumableOfflineStories({
+        stories: offlineStories,
+        characters,
+        relationships,
+        scope: {
+          characterId: activeChatCharId,
+          relationId: activeRelationship?.id,
+          userIdentityId: activeIdentityId,
+        },
+      });
+      if (stories.length > 0) {
+        const request = { sourceMessage: msg, handoffMessages, stories };
+        setPendingOfflineStoryChoice(request);
+        onRequestOfflineStoryChoice?.(request);
+        return;
+      }
+    }
+    return createOfflineStoryFromMessage(msg, appointment, handoffMessages);
+  };
 
-  return { handleStartOfflineFromMsg };
+  const chooseOfflineStory = (storyId: string) => {
+    const request = pendingOfflineStoryChoice;
+    if (!request) return;
+    setPendingOfflineStoryChoice(null);
+    onOpenOfflineStory?.(storyId);
+    onNavigateToApp?.("offline");
+  };
+
+  const startNewOfflineStory = () => {
+    const request = pendingOfflineStoryChoice;
+    if (!request) return;
+    setPendingOfflineStoryChoice(null);
+    void createOfflineStoryFromMessage(request.sourceMessage, request.appointment, request.handoffMessages);
+  };
+
+  const cancelOfflineStoryChoice = () => setPendingOfflineStoryChoice(null);
+
+  return {
+    handleStartOfflineFromMsg,
+    pendingOfflineStoryChoice,
+    chooseOfflineStory,
+    startNewOfflineStory,
+    cancelOfflineStoryChoice,
+  };
 }

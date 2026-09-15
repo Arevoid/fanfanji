@@ -1097,7 +1097,6 @@ export default function AppChat({
       readyAppointment,
       input.messages,
     );
-    showToast("已确认你们正在同一地点，正在进入线下故事");
     // Navigation/storage updates are synchronous, but release the guard on
     // the next task so a stale queued reply cannot create a second story.
     window.setTimeout(() => offlineAutoStartInFlightRef.current.delete(input.relationship.id), 0);
@@ -1111,7 +1110,13 @@ export default function AppChat({
 
   const { handleTranslateMessage } = useChatMessageTranslation({ settings, onUpdateMessage, showToast });
 
-  const { handleStartOfflineFromMsg } = useChatStartOfflineFromMessage({
+  const {
+    handleStartOfflineFromMsg,
+    pendingOfflineStoryChoice,
+    chooseOfflineStory,
+    startNewOfflineStory,
+    cancelOfflineStoryChoice,
+  } = useChatStartOfflineFromMessage({
     activeChatCharId,
     activeCharacter,
     activeRelationship,
@@ -11284,6 +11289,52 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         </div>
         );
       })()}
+
+      {pendingOfflineStoryChoice && (
+        <div
+          className="absolute inset-0 z-[60] flex items-center justify-center bg-black/35 p-5 backdrop-blur-[1px]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="offline-story-choice-title"
+        >
+          <div className="w-full max-w-sm space-y-3 rounded-3xl bg-white p-5 text-slate-800 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="offline-story-choice-title" className="text-sm font-black">进入线下故事</h2>
+                <p className="mt-1 text-[11px] leading-5 text-slate-500">检测到这个角色有可以继续的剧情，请选择进入方式。</p>
+              </div>
+              <button type="button" onClick={cancelOfflineStoryChoice} className="rounded-full p-1 text-slate-400 hover:bg-slate-100" aria-label="取消">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {pendingOfflineStoryChoice.stories.map((story) => (
+                <button
+                  key={story.id}
+                  type="button"
+                  onClick={() => chooseOfflineStory(story.id)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-left transition-colors hover:border-slate-300 hover:bg-white"
+                >
+                  <span className="block truncate text-xs font-bold text-slate-800">继续之前的剧情 · {story.title}</span>
+                  <span className="mt-1 block text-[10px] text-slate-500">已有 {story.messages.filter((message) => !message.isImportedContext).length} 段线下记录，保留原剧情场景</span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={startNewOfflineStory}
+              className="w-full rounded-2xl bg-[var(--button-primary-bg)] px-3 py-3 text-xs font-bold text-[var(--button-primary-text)] transition-opacity hover:opacity-90"
+            >
+              开启新的剧情
+            </button>
+            <button type="button" onClick={cancelOfflineStoryChoice} className="w-full py-1 text-[11px] font-medium text-slate-400 hover:text-slate-600">
+              先不进入
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* OOC Comment Modal */}
       {showOocCommentModal && (
