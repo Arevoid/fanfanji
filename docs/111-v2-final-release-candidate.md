@@ -1,7 +1,7 @@
 # Fanfanji V2 — Final Release Candidate
 
 日期：2026-09-15
-最终 source anchor：`7109c37`（promotion source：`919b11f12642fa1041ece9671495f6ebb21340df`）
+最终 source anchor：`7109c37a77ba038337d972d65a23826bd1d7f15e`（promotion source：`919b11f12642fa1041ece9671495f6ebb21340df`）
 分支：`refactor/v2-architecture`（未 push、未 merge、未 deploy）。
 
 ## 1. 状态收敛

@@ -27,6 +27,7 @@ const activeStoryRef = { current: story as OfflineStory | null };
 const saved: OfflineStory[] = [];
 let releaseConsolidation: (() => void) | undefined;
 let consolidationStarted = false;
+let consolidationFinished = false;
 const consolidation = new Promise<void>((resolve) => { releaseConsolidation = resolve; });
 
 const { finalizeStoryBeforeLeaving } = useOfflineStoryExitFinalization({
@@ -36,6 +37,7 @@ const { finalizeStoryBeforeLeaving } = useOfflineStoryExitFinalization({
   handleSyncMemoryToBrain: async () => {
     consolidationStarted = true;
     await consolidation;
+    consolidationFinished = true;
     return story;
   },
   onSaveOfflineStory: (next) => { saved.push(next); return true; },
@@ -52,7 +54,10 @@ const onlineReturnPromise = Promise.resolve().then(() => { onlineReturn = true; 
 await onlineReturnPromise;
 assert.equal(onlineReturn, true, "Online return can complete without awaiting heavy consolidation");
 assert.equal(consolidationStarted, true, "heavy consolidation is scheduled after handoff persistence");
+assert.equal(consolidationFinished, false, "heavy consolidation remains pending while Online returns");
 
 releaseConsolidation?.();
 await consolidation;
+await Promise.resolve();
+assert.equal(consolidationFinished, true, "scheduled consolidation can complete after Online returns");
 console.log("PASS offline exit persists bounded handoff before asynchronous memory consolidation");
