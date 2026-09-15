@@ -283,6 +283,25 @@ try {
   assert.equal(unknownReason?.validatorReason, "unknown");
   assert.equal(unknownReason?.classification, "INVALID_SAMPLE");
 
+  // Matcher reasons are safe, bounded observability codes. They remain
+  // visible in the artifact, while an ambiguous review still cannot count as
+  // a suppression.
+  const ambiguousReason = recordDirectChatMemoryLongEvidence(input({
+    candidate: {
+      ...suppressionCandidate,
+      canaryReason: "none",
+      validatorResult: "deny_veto",
+      validatorReason: "bridge_not_safety_veto",
+      bridgeState: "review",
+      bridgeReason: "ambiguous_correlation",
+      correlationClass: "shared_non_unique",
+      candidateSuppressed: false,
+      vetoedCandidateCanonicalAbsent: false,
+    },
+  }));
+  assert.equal(ambiguousReason?.bridgeReason, "ambiguous_correlation");
+  assert.equal(ambiguousReason?.classification, "INVALID_SAMPLE");
+
   // A successful automatic extraction with an explicitly empty candidate
   // array is a batch-level observation, not a candidate/control/suppression.
   clearDirectChatMemoryLongEvidenceCollector();

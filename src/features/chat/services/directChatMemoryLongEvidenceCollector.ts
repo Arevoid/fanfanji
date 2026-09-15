@@ -279,7 +279,37 @@ const SAFE_BRIDGE_STATES = new Set([
   "safety_veto",
 ]);
 const SAFE_BRIDGE_REASONS = new Set([
+  // Keep every bridge decision reason observable without persisting arbitrary
+  // exception text.  The previous allowlist only covered collector-level
+  // summaries, so normal matcher reasons (for example
+  // `ambiguous_correlation`) were incorrectly rewritten to `unknown`.
+  "legacy_only",
+  "unmatched_legacy",
+  "v2_only_not_write_enabled",
+  "exact_objective_candidate",
+  "cautious_belief_passthrough",
+  "uncertain_belief_review",
+  "stable_preference_review",
+  "temporary_preference_not_durable",
   "cancelled_plan_not_active",
+  "unknown_preference_durability",
+  "active_plan_review",
+  "uncertain_plan_review",
+  "completed_plan_not_active",
+  "event_route",
+  "episodic_review_or_route",
+  "scene_only_not_truth",
+  "relationship_signal_review",
+  "unknown_semantics",
+  "ambiguous_correlation",
+  "scope_mismatch",
+  "provenance_mismatch",
+  "authority_conflict",
+  "conflicting_duplicate",
+  "duplicate_same_intent",
+  "old_reject_new_accept",
+  "v2_candidate_not_accepted",
+  "missing_runtime_binding",
   "legacy_rejected",
   "legacy_not_write_eligible",
   "v2_candidate_missing",
