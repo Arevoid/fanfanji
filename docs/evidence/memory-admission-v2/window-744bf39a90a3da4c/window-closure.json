@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "memory-admission-v2-window-closure-1",
+  "campaignFingerprint": "campaign-memory-admission-v2-2026-09-10",
+  "windowFingerprint": "window-744bf39a90a3da4c",
+  "windowStatus": "closed",
+  "closureReason": "intentional_window_rotation",
+  "closedAtUtc": "2026-09-15T08:00:14.120Z",
+  "authoritativeArtifactCount": 1,
+  "lastAuthoritativeEvidenceDay": "2026-09-15",
+  "interruptedRuntimeExcluded": true,
+  "rawTokenPersisted": false,
+  "safetyIncidentCount": 0,
+  "privacyViolationCount": 0,
+  "accountingConflictCount": 0,
+  "authoritativeEvidence": false
+}

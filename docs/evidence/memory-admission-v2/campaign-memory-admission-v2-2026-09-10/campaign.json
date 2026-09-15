@@ -2,7 +2,7 @@
   "schemaVersion": "memory-admission-v2-campaign-1",
   "campaignFingerprint": "campaign-memory-admission-v2-2026-09-10",
   "campaignStatus": "paused",
-  "promotionPolicyVersion": "memory-admission-v2-promotion-1",
+  "promotionPolicyVersion": "memory-admission-v2-promotion-2",
   "approvedWindows": [
     {
       "windowFingerprint": "window-8817672802574c9a",
@@ -81,6 +81,62 @@
         "docs/evidence/memory-admission-v2/window-0001c5fd5813d1f7/2026-09-14__session-91ac18c9411180f3.json"
       ],
       "closurePath": "docs/evidence/memory-admission-v2/window-0001c5fd5813d1f7/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-7d34ebc1c8923dbf",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-7d34ebc1c8923dbf/2026-09-15__session-b5ff3293689faec9.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-7d34ebc1c8923dbf/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-e95340d45e818b4e",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-e95340d45e818b4e/2026-09-15__session-fbb7ef67aa12a821.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-e95340d45e818b4e/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-06145947f4d21ce9",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-06145947f4d21ce9/2026-09-15__session-d93f9d4f8f027719.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-06145947f4d21ce9/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-02061ed9b4c87d7f",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-02061ed9b4c87d7f/2026-09-15__session-5f8f7ba1b826d7af.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-02061ed9b4c87d7f/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-da311d74d2c262e2",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-da311d74d2c262e2/2026-09-15__session-5734725815b1e20e.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-da311d74d2c262e2/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-744bf39a90a3da4c",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-744bf39a90a3da4c/2026-09-15__session-0bf8286da5e4abbb.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-744bf39a90a3da4c/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-f183cc40225a7836",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-f183cc40225a7836/2026-09-15__session-35980f2ada027680.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-f183cc40225a7836/window-closure.json"
+    },
+    {
+      "windowFingerprint": "window-9fa8d3cb92a1a0dd",
+      "artifactPaths": [
+        "docs/evidence/memory-admission-v2/window-9fa8d3cb92a1a0dd/2026-09-15__session-87e4556303dda7e9.json"
+      ],
+      "closurePath": "docs/evidence/memory-admission-v2/window-9fa8d3cb92a1a0dd/window-closure.json"
     }
   ],
   "closedWindows": [
@@ -95,7 +151,15 @@
     "window-30166722268919d0",
     "window-56f30e41b28c4a03",
     "window-645b13eb732001c5",
-    "window-0001c5fd5813d1f7"
+    "window-0001c5fd5813d1f7",
+    "window-7d34ebc1c8923dbf",
+    "window-e95340d45e818b4e",
+    "window-06145947f4d21ce9",
+    "window-02061ed9b4c87d7f",
+    "window-da311d74d2c262e2",
+    "window-744bf39a90a3da4c",
+    "window-f183cc40225a7836",
+    "window-9fa8d3cb92a1a0dd"
   ],
   "createdAtUtc": "2026-09-10T15:46:57.912Z",
   "promotionScopeMappings": [
@@ -138,19 +202,59 @@
       "windowFingerprint": "window-0001c5fd5813d1f7",
       "localScopeFingerprint": "scope-91d8da0f",
       "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-7d34ebc1c8923dbf",
+      "localScopeFingerprint": "scope-a976d53b",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-e95340d45e818b4e",
+      "localScopeFingerprint": "scope-cef2b5a0",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-06145947f4d21ce9",
+      "localScopeFingerprint": "scope-154ae349",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-02061ed9b4c87d7f",
+      "localScopeFingerprint": "scope-2a2c5287",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-da311d74d2c262e2",
+      "localScopeFingerprint": "scope-21fa5dc0",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-744bf39a90a3da4c",
+      "localScopeFingerprint": "scope-9a0edd6a",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-f183cc40225a7836",
+      "localScopeFingerprint": "scope-1336e87c",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
+    },
+    {
+      "windowFingerprint": "window-9fa8d3cb92a1a0dd",
+      "localScopeFingerprint": "scope-8a4a2e2c",
+      "promotionScopeFingerprint": "promotion-scope-stage4d3-portable"
     }
   ],
   "cumulativeAuthoritativeCounts": {
-    "authoritativeArtifactCount": 9,
-    "formalSessionCount": 8,
+    "authoritativeArtifactCount": 17,
+    "formalSessionCount": 16,
     "distinctExactScopeCount": 4,
-    "extractionBatchCount": 8,
-    "validControlCount": 11,
-    "validSuppressionCount": 0,
-    "logicalActionTotal": 8,
-    "physicalAttemptTotal": 14,
-    "distinctEvidenceDayCount": 4,
-    "fallbackBatchCount": 6,
+    "extractionBatchCount": 20,
+    "validControlCount": 14,
+    "validSuppressionCount": 10,
+    "logicalActionTotal": 20,
+    "physicalAttemptTotal": 27,
+    "distinctEvidenceDayCount": 5,
+    "fallbackBatchCount": 7,
     "safetyIncidentCount": 0,
     "privacyViolationCount": 0,
     "accountingConflictCount": 0
@@ -161,14 +265,14 @@
     "accounting": true
   },
   "firstEvidenceDay": "2026-09-10",
-  "lastEvidenceDay": "2026-09-14",
+  "lastEvidenceDay": "2026-09-15",
   "thresholdProgress": {
     "sessions": {
-      "current": 8,
+      "current": 16,
       "minimum": 5
     },
     "suppressions": {
-      "current": 0,
+      "current": 10,
       "minimum": 10
     },
     "scopes": {
@@ -176,14 +280,14 @@
       "minimum": 3
     },
     "days": {
-      "current": 4,
-      "minimum": 7
+      "current": 5,
+      "minimum": 5
     },
     "batches": {
-      "current": 8,
+      "current": 20,
       "minimum": 20
     },
-    "allMinimumsSatisfied": false,
-    "promotionEligible": false
+    "allMinimumsSatisfied": true,
+    "promotionEligible": true
   }
 }
