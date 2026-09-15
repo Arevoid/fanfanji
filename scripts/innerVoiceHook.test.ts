@@ -10,6 +10,7 @@ assert.match(hook, /syncInlineRecord/);
 assert.match(hook, /setRecord\(current\.record \|\| null\)/);
 assert.match(hook, /requestsRef/);
 assert.match(hook, /generateInnerVoice/);
+assert.match(hook, /getConversationId/);
 assert.match(app, /const innerVoiceController = useInnerVoice/);
 assert.match(app, /record=\{innerVoiceController\.record\}/);
 assert.match(app, /createInlineInnerVoiceRecord/);

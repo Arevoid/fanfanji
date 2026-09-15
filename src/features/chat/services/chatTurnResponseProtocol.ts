@@ -112,6 +112,37 @@ const readVoice = (value: unknown): InlineInnerVoicePayload | undefined => {
   };
 };
 
+/**
+ * Parses the standalone inner-voice response using the same tolerant JSON
+ * handling as the normal chat envelope. Providers commonly wrap JSON in a
+ * string, a markdown fence, or a `data`/`result` object even when the prompt
+ * asks for a bare object.
+ */
+export function parseInnerVoiceResponse(text: string): InlineInnerVoicePayload | undefined {
+  const candidate = cleanJsonCandidate(text);
+  const value = parseJsonRecord(candidate);
+  if (!value) return undefined;
+
+  const readNestedVoice = (input: unknown, depth = 0): InlineInnerVoicePayload | undefined => {
+    if (depth > 3) return undefined;
+    const direct = readVoice(input);
+    if (direct) return direct;
+    if (typeof input === "string") {
+      const nested = parseJsonRecord(cleanJsonCandidate(input));
+      return nested ? readNestedVoice(nested, depth + 1) : undefined;
+    }
+    if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+    const object = input as Record<string, unknown>;
+    for (const key of ["innerVoice", "data", "response", "result", "output"]) {
+      const nested = readNestedVoice(object[key], depth + 1);
+      if (nested) return nested;
+    }
+    return undefined;
+  };
+
+  return readNestedVoice(value);
+}
+
 const readReplyText = (value: unknown, depth = 0): string | undefined => {
   if (depth > 4) return undefined;
   if (typeof value === "string" && value.trim()) return value.trim();

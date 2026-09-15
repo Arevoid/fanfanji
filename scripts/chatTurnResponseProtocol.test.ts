@@ -1,5 +1,19 @@
 import assert from "node:assert/strict";
-import { parseChatTurnResponse } from "../src/features/chat/services/chatTurnResponseProtocol";
+import { parseChatTurnResponse, parseInnerVoiceResponse } from "../src/features/chat/services/chatTurnResponseProtocol";
+
+assert.deepEqual(
+  parseInnerVoiceResponse('```json\n{"content":"我其实有点开心","emotionalState":"嘴上不说，心里已经悄悄软下来了"}\n```'),
+  { content: "我其实有点开心", emotionalState: "嘴上不说，心里已经悄悄软下来了" },
+);
+assert.deepEqual(
+  parseInnerVoiceResponse('{"data":"{\\"content\\":\\"被你说中了\\",\\"emotionalState\\":\\"有点慌，但还在装镇定\\"}"}'),
+  { content: "被你说中了", emotionalState: "有点慌，但还在装镇定" },
+);
+assert.deepEqual(
+  parseInnerVoiceResponse('{"result":{"innerVoice":{"content":"不想承认自己在期待","emotionalState":"明明期待，却还想故意嘴硬"}}}'),
+  { content: "不想承认自己在期待", emotionalState: "明明期待，却还想故意嘴硬" },
+);
+assert.equal(parseInnerVoiceResponse('{"content":"只有正文"}'), undefined);
 
 const parsedArrayReply = parseChatTurnResponse([
   "```json",

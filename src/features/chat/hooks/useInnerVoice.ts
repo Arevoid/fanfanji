@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { Character, InnerVoiceRecord, MemoryItem, Message, UserSettings, WorldBookEntry } from "../../../types";
-import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
+import { getConversationId, type CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
 import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, saveInnerVoiceRecords, type InnerVoiceScope } from "../../../core/storage/repositories/innerVoiceRepository";
 import { generateInnerVoice } from "../services/innerVoiceService";
@@ -38,7 +38,9 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     if (!targetCharacter) return { record: undefined, history: [] as InnerVoiceRecord[] };
     const relationId = activeRelationship?.id;
     const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
-    const conversationId = relationId ? activeRelationship?.conversationId : triggerMessage.conversationId || groupId;
+    const conversationId = relationId
+      ? activeRelationship?.conversationId || getConversationId(relationId)
+      : triggerMessage.conversationId || groupId;
     if (!conversationId || (!relationId && !groupId)) return { record: undefined, history: [] as InnerVoiceRecord[] };
     const scope: InnerVoiceScope = relationId
       ? { kind: "direct", relationId, messageId: triggerMessage.id }
@@ -65,7 +67,9 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const canonicalCharacterId = resolveCanonicalCharacterId(lastOpen.targetCharacterId, characters);
     const relationId = activeRelationship?.id;
     const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
-    const conversationId = relationId ? activeRelationship?.conversationId : lastOpen.triggerMessage.conversationId || groupId;
+    const conversationId = relationId
+      ? activeRelationship?.conversationId || getConversationId(relationId)
+      : lastOpen.triggerMessage.conversationId || groupId;
     if (!conversationId || (!relationId && !groupId)) return;
     const stored = loadInnerVoiceRecords([]).value;
     setHistory(relationId
@@ -106,7 +110,9 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     if (!targetCharacter) return;
     const relationId = activeRelationship?.id;
     const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
-    const conversationId = relationId ? activeRelationship?.conversationId : triggerMessage.conversationId || groupId;
+    const conversationId = relationId
+      ? activeRelationship?.conversationId || getConversationId(relationId)
+      : triggerMessage.conversationId || groupId;
     if (!conversationId || (!relationId && !groupId)) return;
     // Keep direct-chat context strict. A stale message from another contact
     // must never be used to generate this character's private reflection.

@@ -7,7 +7,7 @@ import type { CharacterRelationship } from "../../../domain/relationship/charact
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 import { serializeMessageContentForPrompt } from "../prompts/messagePromptSerializer";
-import type { InlineInnerVoicePayload } from "./chatTurnResponseProtocol";
+import { parseInnerVoiceResponse, type InlineInnerVoicePayload } from "./chatTurnResponseProtocol";
 
 export interface GenerateInnerVoiceInput {
   character: Character;
@@ -52,22 +52,9 @@ export function createInlineInnerVoiceRecord(input: {
   };
 }
 
-function parseInnerVoice(text: string): { content: string; emotionalState: string } | null {
-  const candidate = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start < 0 || end < start) return null;
-  try {
-    const value: unknown = JSON.parse(candidate.slice(start, end + 1));
-    if (!value || typeof value !== "object") return null;
-    const record = value as { content?: unknown; emotionalState?: unknown };
-    if (typeof record.content !== "string" || typeof record.emotionalState !== "string") return null;
-    if (!record.content.trim() || !record.emotionalState.trim()) return null;
-    return { content: record.content.trim(), emotionalState: record.emotionalState.trim() };
-  } catch {
-    return null;
-  }
-}
+const INNER_VOICE_FORMAT_RETRY_INSTRUCTION = `
+上一轮心声输出未通过格式校验。请重新生成，只返回一个合法 JSON 对象，不要 Markdown、代码块、解释或前后缀文字。
+必须包含两个非空字符串字段：content（第一人称心声正文）和 emotionalState（完整的当前情绪短句）。`;
 
 /** Generates one standalone record. Persistence is intentionally owned by the repository caller. */
 export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promise<InnerVoiceRecord | null> {
@@ -96,19 +83,31 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
     }), worldBook?.formattedAll ? `[本次心声可使用的关系世界书]\n${worldBook.formattedAll}\n只将其作为角色认知背景，不要逐条复述。` : ""].filter(Boolean).join("\n\n"),
     historyInjections: worldBook?.at_depth,
   });
-  const response = await apiChat({
+  const request = {
     ...composedPrompt,
     apiKey: input.settings.apiKey,
     model: input.settings.selectedModel || "gemini-3.5-flash",
     apiEndpoint: input.settings.apiEndpoint,
     apiTemperature: input.settings.apiTemperature,
     streamCompatible: input.settings.streamCompatible,
+    maxOutputTokens: 256,
     purpose: "inner_voice",
     characterId: input.character.id,
     relationId,
     conversationId,
-  });
-  const parsed = parseInnerVoice(response.text);
+  } as const;
+  const response = await apiChat(request);
+  let parsed = parseInnerVoiceResponse(response.text);
+  if (!parsed) {
+    const retryResponse = await apiChat({
+      ...request,
+      systemInstruction: [request.systemInstruction, INNER_VOICE_FORMAT_RETRY_INSTRUCTION]
+        .filter(Boolean)
+        .join("\n\n"),
+      retryReasons: ["response format validation"],
+    });
+    parsed = parseInnerVoiceResponse(retryResponse.text);
+  }
   if (!parsed) return null;
   return {
     id: createId("inner-voice"),
