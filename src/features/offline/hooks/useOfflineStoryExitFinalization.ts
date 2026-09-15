@@ -27,12 +27,7 @@ export function useOfflineStoryExitFinalization({
 }: UseOfflineStoryExitFinalizationOptions) {
   const finalizeStoryBeforeLeaving = async (story: OfflineStory): Promise<OfflineStory> => {
     let completedStory = story;
-    if (shouldSyncStoryMemory(story)) {
-      // The exit path is the single automatic sync owner. Await it before
-      // creating the handoff so a second exit cannot race the first write and
-      // append another copy of the same offline memory.
-      completedStory = await handleSyncMemoryToBrain(story, { userConfirmed: true, syncIntent: "automatic_end" });
-    }
+    const shouldConsolidateMemory = shouldSyncStoryMemory(story);
     const handoffCreatedAt = Date.now();
     if (!completedStory.archivedAt) {
       completedStory = {
@@ -59,6 +54,15 @@ export function useOfflineStoryExitFinalization({
     }
     if (activeStoryRef.current?.id === completedStory.id) saveActiveStorySnapshot(completedStory);
     else onSaveOfflineStory(completedStory);
+
+    // Persist the scene and bounded handoff before starting heavy extraction.
+    // The caller can now return to Online immediately; the existing sync
+    // service remains the single automatic consolidation owner and updates
+    // this durable story later without copying the transcript again.
+    if (shouldConsolidateMemory) {
+      void handleSyncMemoryToBrain(completedStory, { userConfirmed: true, syncIntent: "automatic_end" })
+        .catch(() => undefined);
+    }
     return completedStory;
   };
 
