@@ -11,6 +11,7 @@ import { createManualKnowledgeClaim } from "../features/characterKnowledge/servi
 import { getMemoryDisplayContent } from "../domain/memory/offlineMemorySync";
 import { commitMemoryWriteBundle } from "../domain/memory/memoryWriteCoordinator";
 import { rankRelevantMemories } from "../domain/memory/MemoryRetriever";
+import { getLastTruthRetrievalDiagnostics } from "../features/characterKnowledge/services/truthRetrievalService";
 import { buildMemoryCenterRecords, filterMemoryCenterRecords, MEMORY_CENTER_LAYER_LABELS, MEMORY_CENTER_SOURCE_LABELS, MEMORY_CENTER_TYPE_LABELS, type MemoryCenterRecord, type MemoryCenterRecordType } from "../domain/memory/memoryCenterModel";
 import { 
   ChevronLeft,
@@ -260,6 +261,12 @@ export default function AppMemory({
     const relationMatch = selectedRelationId === "all" || claim.relationId === selectedRelationId;
     return characterMatch && relationMatch;
   });
+  const selectedDiagnosticRelation = selectedRelationId !== "all"
+    ? relationships.find((relation) => relation.id === selectedRelationId)
+    : undefined;
+  const runtimeTruthDiagnostics = selectedDiagnosticRelation
+    ? getLastTruthRetrievalDiagnostics(toTruthScope(selectedDiagnosticRelation))
+    : undefined;
 
   const toggleMemoryRecall = (item: MemoryItem) => {
     const nextDisabled = !item.recallDisabled;
@@ -1277,6 +1284,21 @@ export default function AppMemory({
                   当前关系：<strong className="text-slate-700">{selectedRelationId === "all" ? "全部关系" : getRelationLabel(selectedRelationId)}</strong>。
                   暂停只影响未来召回，不会删除原文、摘要、来源消息或档案；恢复后即可重新参与检索。
                 </div>
+
+                {selectedDiagnosticRelation && (
+                  <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-[10px] leading-relaxed text-slate-500">
+                    <p className="font-bold text-slate-700">最近一次真实聊天注入</p>
+                    {runtimeTruthDiagnostics ? (
+                      <>
+                        <p className="mt-1">查询：<strong className="text-slate-700">{runtimeTruthDiagnostics.queryText || "（无显式查询）"}</strong></p>
+                        <p className="mt-1">候选 Truth {runtimeTruthDiagnostics.candidateClaimCount} 条，已注入 {runtimeTruthDiagnostics.injectedClaimIds.length} 条；摘要 {runtimeTruthDiagnostics.injectedSummaryIds.length} 条；修正 {runtimeTruthDiagnostics.injectedCorrectionIds.length} 条。</p>
+                        <p className="mt-1">向量兜底：{runtimeTruthDiagnostics.vectorFallbackUsed ? "已启用" : "未使用"}。这份记录只保存在当前页面运行期间，不写入聊天内容。</p>
+                      </>
+                    ) : (
+                      <p className="mt-1">当前关系还没有产生可读取的直接聊天注入诊断；发送一轮消息后再打开这里即可查看。</p>
+                    )}
+                  </div>
+                )}
 
                 {diagnosticItems.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-xs text-slate-400">

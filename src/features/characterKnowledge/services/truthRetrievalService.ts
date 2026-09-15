@@ -37,6 +37,36 @@ export interface TruthRetrievalResult {
   corrections: BehaviorCorrectionRecord[];
   shadowedLegacyMemoryIds: string[];
   promptCharacterLimit?: number;
+  diagnostics?: TruthRetrievalDiagnostics;
+}
+
+export interface TruthRetrievalDiagnostics {
+  scopeKey: string;
+  queryText: string;
+  candidateClaimCount: number;
+  alreadyPromptedClaimCount: number;
+  rankedClaimCount: number;
+  injectedClaimIds: string[];
+  consideredSummaryCount: number;
+  injectedSummaryIds: string[];
+  injectedCorrectionIds: string[];
+  vectorFallbackUsed: boolean;
+  recordedAt: number;
+}
+
+const truthRetrievalDiagnosticsByScope = new Map<string, TruthRetrievalDiagnostics>();
+
+const truthScopeKey = (scope: CharacterTruthScope): string => [
+  scope.relationId,
+  scope.characterId,
+  scope.userIdentityId,
+  scope.conversationId || "",
+].join("\u0000");
+
+/** Read the latest in-process production injection trace without persisting text. */
+export function getLastTruthRetrievalDiagnostics(scope: CharacterTruthScope): TruthRetrievalDiagnostics | undefined {
+  const value = truthRetrievalDiagnosticsByScope.get(truthScopeKey(scope));
+  return value ? { ...value, injectedClaimIds: [...value.injectedClaimIds], injectedSummaryIds: [...value.injectedSummaryIds], injectedCorrectionIds: [...value.injectedCorrectionIds] } : undefined;
 }
 
 const countProjectionClaims = (projection: KnowledgePromptProjection): number => Object.values(projection)
@@ -269,6 +299,20 @@ export function retrieveTruthForPrivatePrompt(input: TruthRetrievalInput): Truth
   const corrections = candidateCorrections.slice(0, correctionCount);
   const summaryCount = Math.min(candidateSummaries.length, Math.max(0, limit - claimCount - corrections.length));
   const summaries = candidateSummaries.slice(0, summaryCount);
+  const diagnostics: TruthRetrievalDiagnostics = {
+    scopeKey: truthScopeKey(input.scope),
+    queryText: input.queryText || "",
+    candidateClaimCount: scopedClaimCandidates.length,
+    alreadyPromptedClaimCount: alreadyPromptedClaimIds.size,
+    rankedClaimCount: ranked.length,
+    injectedClaimIds: projectionClaims(projection).map((claim) => claim.id),
+    consideredSummaryCount: candidateSummaries.length,
+    injectedSummaryIds: summaries.map((summary) => summary.id),
+    injectedCorrectionIds: corrections.map((correction) => correction.id),
+    vectorFallbackUsed: Boolean(input.queryText?.trim()),
+    recordedAt: now,
+  };
+  truthRetrievalDiagnosticsByScope.set(diagnostics.scopeKey, diagnostics);
   return {
     projection,
     summaries,
@@ -277,6 +321,7 @@ export function retrieveTruthForPrivatePrompt(input: TruthRetrievalInput): Truth
       .filter((claim) => claim.source.kind === "legacy_memory" && Boolean(claim.source.sourceRecordId))
       .map((claim) => claim.source.sourceRecordId as string),
     promptCharacterLimit: input.maxCharacters ?? DEFAULT_TRUTH_PROMPT_CHARACTER_LIMIT,
+    diagnostics,
   };
 }
 
