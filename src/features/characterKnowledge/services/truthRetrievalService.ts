@@ -66,11 +66,35 @@ export interface TruthProjectionDiagnostic {
   source: KnowledgeClaim["source"];
 }
 
+/**
+ * Keep Chinese retrieval useful when the user asks a natural sentence such as
+ * “打卡格式是什么”. Splitting only on punctuation treats that whole sentence
+ * as one token and misses the stored “打卡格式” fact.
+ */
+const tokenizeTruthQuery = (value: string): string[] => {
+  const normalized = value.toLocaleLowerCase().normalize("NFKC");
+  const latinTerms = normalized.match(/[a-z0-9]+/gu) || [];
+  const cjkRuns = normalized.match(/[\u3400-\u9fff]+/gu) || [];
+  const cjkTerms = cjkRuns.flatMap((run) => {
+    if (run.length <= 2) return [run];
+    const terms = [run];
+    for (let index = 0; index < run.length - 1; index += 1) {
+      terms.push(run.slice(index, index + 2));
+    }
+    return terms;
+  });
+  return Array.from(new Set([...latinTerms, ...cjkTerms]
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0)));
+};
+
 const scoreText = (text: string, queryText: string): number => {
-  if (!queryText.trim()) return 0;
-  const words = queryText.toLocaleLowerCase().split(/[\s,.:;!?"'，（）()，。！“”]+/u).filter((word) => word.length > 0);
-  const lower = text.toLocaleLowerCase();
-  return words.reduce((score, word) => score + (lower.includes(word) ? word.length : 0), 0);
+  const query = queryText.trim().toLocaleLowerCase().normalize("NFKC");
+  if (!query) return 0;
+  const lower = text.toLocaleLowerCase().normalize("NFKC");
+  const phraseScore = query.length > 1 && lower.includes(query) ? query.length : 0;
+  const terms = tokenizeTruthQuery(query);
+  return phraseScore + terms.reduce((score, term) => score + (lower.includes(term) ? Math.min(term.length, 8) : 0), 0);
 };
 
 const sourceQuality = (claim: KnowledgeClaim): number => {

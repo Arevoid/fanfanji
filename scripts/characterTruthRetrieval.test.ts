@@ -145,4 +145,22 @@ const textOnlyDuplicate = retrieveTruthForPrivatePrompt({
 });
 assert.equal(textOnlyDuplicate.projection.confirmedFacts.length, 0, "exact normalized text duplicates are suppressed even without source IDs");
 
+const checkInClaims = [
+  claim("claim-checkin", "用户和角色约定每天打卡格式为亲亲老婆", "confirmed"),
+  ...Array.from({ length: 50 }, (_, index) => claim(`claim-noise-${index + 1}`, `用户确认普通事实${index + 1}`, "confirmed")),
+];
+const naturalSentenceRecall = retrieveTruthForPrivatePrompt({
+  scope,
+  queryText: "打卡格式是什么",
+  limit: 50,
+  claims: checkInClaims,
+  summaries: [],
+  corrections: [],
+});
+assert.equal(
+  Object.values(naturalSentenceRecall.projection).flat().some((item) => item.id === "claim-checkin"),
+  true,
+  "Chinese natural-language queries must recall the matching fact even when the Truth set exceeds the recall limit",
+);
+
 console.log("PASS Truth Layer retrieval ranking, temporal labels, prompt visibility, and identity isolation");
