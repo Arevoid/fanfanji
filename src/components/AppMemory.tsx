@@ -52,7 +52,7 @@ interface AppMemoryProps {
   openDiagnosticsRequestId?: number;
 }
 
-const DEFAULT_AUTO_SUMMARY_ROUNDS = 50;
+const DEFAULT_AUTO_SUMMARY_ROUNDS = 10;
 const normalizeAutoSummaryRounds = (value: number | undefined): number =>
   Number.isFinite(value)
     ? Math.min(100, Math.max(10, Math.round(value as number)))

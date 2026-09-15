@@ -78,7 +78,7 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
         const configuredRounds = input.activeCharacter.summaryTriggerRound;
         const extractIntervalRounds = Number.isFinite(configuredRounds)
           ? Math.min(100, Math.max(10, Math.round(configuredRounds as number)))
-          : 50;
+          : 10;
         const triggerCount = extractIntervalRounds * 2;
         const currentMessages = input.userMsg
           ? [...input.currentChatMessages, input.userMsg, ...input.createdMessages]

@@ -45,7 +45,7 @@ export interface Character {
   /** Legacy persisted field; automatic summary is now always enabled. */
   enableAutoSummary?: boolean;
   enableAutoTranslate?: boolean;
-  summaryTriggerRound?: number; // 10~100, default 50 rounds
+  summaryTriggerRound?: number; // 10~100, default 10 rounds
   compressedMemory?: string;
   /** Optional character-level routine configuration; it is a prompt hint only. */
   routine?: CharacterRoutine;
