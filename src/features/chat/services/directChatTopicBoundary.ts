@@ -13,6 +13,7 @@ type TopicMessage = Pick<Message, "sender" | "content" | "timestamp" | "imageAss
 const EXPLICIT_SHIFT_PATTERN = /(?:换个话题|换个聊法|聊点别的|说点别的|不聊(?:这个|了)|先不说(?:这个|了)|重新开始|开始新话题|另一个话题|对了(?:[，,、]\s*(?:换个|聊点|说点|另外|另一件|我想聊|今天|现在)))/u;
 const EXPLICIT_CONTINUE_PATTERN = /(?:继续|上次|之前|刚才|还记得|后来|结果|接着|那个(?:问题|事情|话题|图片)|你说的|这件事)/u;
 const PRIOR_REFERENCE_PATTERN = /(?:刚才|上次|之前|那个(?:问题|事情|话题|图片)|你说的|还记得|后来|结果)/u;
+const DATED_PRIOR_REFERENCE_PATTERN = /(?:昨天|前天)[^。！？\n]{0,24}(?:说过|聊过|提过|约定|答应|讲过|定下|旧账|那件事|那个话题|打卡格式)/u;
 const CLOSURE_PATTERN = /(?:晚安|先这样|回头聊|下次再说|我先忙|拜拜|睡了|到家再聊|改天聊|先不聊了|先去忙)/u;
 const OPEN_THREAD_PATTERN = /(?:[?？]|要不要|什么时候|等你|回来|记得|答应|还没|没完|待会|之后|下次)/u;
 
@@ -83,7 +84,8 @@ export function decideDirectChatTopicBoundary(input: {
   const currentIsImage = isImageMessage(current);
   const explicitShift = EXPLICIT_SHIFT_PATTERN.test(currentText);
   const explicitContinue = EXPLICIT_CONTINUE_PATTERN.test(currentText);
-  const priorReference = PRIOR_REFERENCE_PATTERN.test(currentText);
+  const priorReference = PRIOR_REFERENCE_PATTERN.test(currentText)
+    || DATED_PRIOR_REFERENCE_PATTERN.test(currentText);
   const priorClosed = CLOSURE_PATTERN.test(normalizeTopicText(recent.slice(-2).map((message) => message.content).join(" ")));
   const priorOpen = OPEN_THREAD_PATTERN.test(normalizeTopicText(recent.slice(-2).map((message) => message.content).join(" ")));
   const overlap = calculateTopicOverlap(currentText, recentText);

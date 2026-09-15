@@ -34,6 +34,13 @@ const explicitContinuation = decideDirectChatTopicBoundary({
 assert.equal(explicitContinuation.mode, "continue");
 assert.equal(explicitContinuation.confidence, 0.99);
 
+const datedPriorReference = decideDirectChatTopicBoundary({
+  currentMessage: { content: "我还以为你又在翻昨天查岗的旧账", timestamp: day("2026-09-13T12:18:00+08:00") },
+  previousMessages: oldTopic,
+  enableTimeAwareness: true,
+});
+assert.equal(datedPriorReference.mode, "continue", "a dated reference to an old exchange keeps cross-day context available");
+
 const explicitShift = decideDirectChatTopicBoundary({
   currentMessage: { content: "换个话题，今天吃什么", timestamp: day("2026-08-19T18:05:00+08:00") },
   previousMessages: oldTopic,

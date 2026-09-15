@@ -44,10 +44,14 @@ export function partitionDirectChatHistoryByCurrentDay<T extends { timestamp: nu
   };
   const liveMessages = input.messages.filter((message) => isCurrentDay(message.timestamp) && message.timestamp >= longGapCutoff);
   const olderMessages = input.messages.filter((message) => !isCurrentDay(message.timestamp) || message.timestamp < longGapCutoff);
-  const historicalLimit = Math.max(1, input.historicalLimit ?? 6);
+  const historicalMessages = input.historicalLimit === undefined
+    ? olderMessages
+    : olderMessages.slice(-Math.max(1, input.historicalLimit));
   return {
     liveMessages,
-    historicalMessages: olderMessages.slice(-historicalLimit),
+    // The caller already applies a character budget. Do not silently discard
+    // a recent agreement merely because more than six bubbles followed it.
+    historicalMessages,
     hasCrossDayHistory: olderMessages.length > 0,
   };
 }
