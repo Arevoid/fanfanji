@@ -114,8 +114,22 @@
   gap: 8px;
 }
 
-/* The theme hooks add no default visual layer.  Flatten the semantic wrapper
- * and hide its decorative icon so existing card geometry remains unchanged. */
+/* The legacy layer keeps the original four direct grid children.  The
+ * semantic layer is opt-in: it is enabled only when saved chat CSS is active,
+ * while the default chat continues to render the original Pay card. */
+.redpacket-card__default-layer { display: contents; }
+.redpacket-card__wechat-layer { display: none; }
+
+#conv-screen.user-custom-chat-css:not([data-chat-settings-open="true"]) .redpacket-card__default-layer {
+  display: none !important;
+}
+#conv-screen.user-custom-chat-css:not([data-chat-settings-open="true"]) .redpacket-card__wechat-layer {
+  display: contents !important;
+}
+
+/* The theme hooks add no default visual layer.  Flatten only the semantic
+ * content wrapper when it is active; this is deliberately not applied to the
+ * legacy layer above. */
 .wechat-redpacket__icon,
 .wechat-transfer__icon { display: none; }
 .wechat-redpacket__content,

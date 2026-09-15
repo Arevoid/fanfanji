@@ -31,6 +31,8 @@ const checks: Array<[string, boolean]> = [
   ["packet legacy title remains available", packet("unclaimed").includes("redpacket-card__legacy-title")],
   ["packet semantic title is greeting node", packet("unclaimed").includes("special-payment-card__note wechat-redpacket__title") && packet("unclaimed").includes("恭喜发财，大吉大利！")],
   ["packet semantic footer text", packet("unclaimed").includes("wechat-redpacket__footer") && packet("unclaimed").includes("微信红包")],
+  ["packet keeps legacy default layer", packet("unclaimed").includes("redpacket-card__default-layer") && packet("unclaimed").includes('special-payment-card__brand redpacket-card__brand">Pay')],
+  ["packet gates semantic layer", packet("unclaimed").includes("redpacket-card__wechat-layer")],
   ["packet semantic hooks", [
     "wechat-redpacket__main",
     "wechat-redpacket__icon",
