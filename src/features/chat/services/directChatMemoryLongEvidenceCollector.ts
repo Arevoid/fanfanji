@@ -22,6 +22,7 @@ export type LongEvidenceRecordKind = "candidate" | "batch";
 export type LongEvidenceValidatorResult = "allow_veto" | "deny_veto" | "not_evaluated" | "unknown";
 export type LongEvidencePrivacyStatus = "metadata_only" | "violation";
 export type LongEvidenceAccountingShape = "single_row" | "fallback_split_rows" | "unknown";
+export type LongEvidenceSideLineageStatus = "present" | "missing" | "unknown";
 
 export interface DirectChatMemoryLongEvidenceScope {
   characterId: string;
@@ -42,6 +43,20 @@ export interface DirectChatMemoryLongEvidenceCandidateInput {
   pairUnique?: boolean;
   exactScope?: boolean;
   provenanceTrusted?: boolean;
+  legacyProvenanceTrusted?: boolean;
+  v2ProvenanceTrusted?: boolean;
+  legacyScopeExact?: boolean;
+  v2ScopeExact?: boolean;
+  legacySourceRefsPresent?: boolean;
+  v2SourceRefsPresent?: boolean;
+  legacySourceRefsAllowed?: boolean;
+  v2SourceRefsAllowed?: boolean;
+  legacyLineageStatus?: LongEvidenceSideLineageStatus;
+  v2LineageStatus?: LongEvidenceSideLineageStatus;
+  legacyMatchCount?: number;
+  v2MatchCount?: number;
+  eligiblePairCount?: number;
+  correlationReason?: string;
   metadataSource?: string;
   semanticKind?: string;
   planLifecycle?: string;
@@ -134,6 +149,20 @@ export interface DirectChatMemoryLongEvidenceRecord {
   pairUnique: boolean;
   exactScope: boolean;
   provenanceTrusted: boolean;
+  legacyProvenanceTrusted?: boolean;
+  v2ProvenanceTrusted?: boolean;
+  legacyScopeExact?: boolean;
+  v2ScopeExact?: boolean;
+  legacySourceRefsPresent?: boolean;
+  v2SourceRefsPresent?: boolean;
+  legacySourceRefsAllowed?: boolean;
+  v2SourceRefsAllowed?: boolean;
+  legacyLineageStatus?: LongEvidenceSideLineageStatus;
+  v2LineageStatus?: LongEvidenceSideLineageStatus;
+  legacyMatchCount?: number;
+  v2MatchCount?: number;
+  eligiblePairCount?: number;
+  correlationReason?: string;
   metadataSource: "v2_model_native" | "legacy_derived" | "mixed" | "unknown";
   semanticKind: "plan" | "preference" | "fact" | "unknown";
   planLifecycle: "cancelled" | "active" | "not_applicable" | "unknown";
@@ -626,6 +655,26 @@ function sanitizeInput(
     pairUnique: normalizeBoolean(candidate.pairUnique),
     exactScope: normalizeBoolean(candidate.exactScope),
     provenanceTrusted: normalizeBoolean(candidate.provenanceTrusted),
+    ...(typeof candidate.legacyProvenanceTrusted === "boolean" ? { legacyProvenanceTrusted: candidate.legacyProvenanceTrusted } : {}),
+    ...(typeof candidate.v2ProvenanceTrusted === "boolean" ? { v2ProvenanceTrusted: candidate.v2ProvenanceTrusted } : {}),
+    ...(typeof candidate.legacyScopeExact === "boolean" ? { legacyScopeExact: candidate.legacyScopeExact } : {}),
+    ...(typeof candidate.v2ScopeExact === "boolean" ? { v2ScopeExact: candidate.v2ScopeExact } : {}),
+    ...(typeof candidate.legacySourceRefsPresent === "boolean" ? { legacySourceRefsPresent: candidate.legacySourceRefsPresent } : {}),
+    ...(typeof candidate.v2SourceRefsPresent === "boolean" ? { v2SourceRefsPresent: candidate.v2SourceRefsPresent } : {}),
+    ...(typeof candidate.legacySourceRefsAllowed === "boolean" ? { legacySourceRefsAllowed: candidate.legacySourceRefsAllowed } : {}),
+    ...(typeof candidate.v2SourceRefsAllowed === "boolean" ? { v2SourceRefsAllowed: candidate.v2SourceRefsAllowed } : {}),
+    ...(candidate.legacyLineageStatus === "present" || candidate.legacyLineageStatus === "missing"
+      ? { legacyLineageStatus: candidate.legacyLineageStatus }
+      : {}),
+    ...(candidate.v2LineageStatus === "present" || candidate.v2LineageStatus === "missing"
+      ? { v2LineageStatus: candidate.v2LineageStatus }
+      : {}),
+    ...(typeof candidate.legacyMatchCount === "number" ? { legacyMatchCount: clampCount(candidate.legacyMatchCount) } : {}),
+    ...(typeof candidate.v2MatchCount === "number" ? { v2MatchCount: clampCount(candidate.v2MatchCount) } : {}),
+    ...(typeof candidate.eligiblePairCount === "number" ? { eligiblePairCount: clampCount(candidate.eligiblePairCount) } : {}),
+    ...(candidate.correlationReason !== undefined
+      ? { correlationReason: normalizeCode(candidate.correlationReason, SAFE_BRIDGE_REASONS) }
+      : {}),
     metadataSource: candidate.metadataSource === "v2_model_native" || candidate.metadataSource === "legacy_derived" || candidate.metadataSource === "mixed"
       ? candidate.metadataSource
       : "unknown",

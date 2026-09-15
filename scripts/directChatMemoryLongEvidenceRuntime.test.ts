@@ -101,6 +101,17 @@ const bridgeObservation = (overrides: Record<string, unknown> = {}) => ({
   legacyWriteEligibility: "canonical_write",
   legacyProvenanceTrusted: true,
   v2ProvenanceTrusted: true,
+  legacyScopeExact: true,
+  v2ScopeExact: true,
+  legacySourceRefsPresent: true,
+  v2SourceRefsPresent: true,
+  legacySourceRefsAllowed: true,
+  v2SourceRefsAllowed: true,
+  legacyLineageStatus: "present",
+  v2LineageStatus: "present",
+  legacyMatchCount: 1,
+  v2MatchCount: 1,
+  eligiblePairCount: 1,
   bridgeState: "write_proposal",
   bridgeReason: "no_veto",
   legacySemanticKind: "plan",
@@ -210,6 +221,13 @@ try {
   assert.equal(control.accounting.providerLogicalRequestCount, 1);
   assert.equal(control.accounting.providerPhysicalAttemptCount, 1);
   assert.equal(control.recorded[0]?.classification, "VALID_CONTROL");
+  assert.equal(control.recorded[0]?.legacyProvenanceTrusted, true);
+  assert.equal(control.recorded[0]?.v2ProvenanceTrusted, true);
+  assert.equal(control.recorded[0]?.legacySourceRefsAllowed, true);
+  assert.equal(control.recorded[0]?.v2SourceRefsAllowed, true);
+  assert.equal(control.recorded[0]?.legacyLineageStatus, "present");
+  assert.equal(control.recorded[0]?.v2LineageStatus, "present");
+  assert.equal(control.recorded[0]?.eligiblePairCount, 1);
 
   // A cancelled-plan veto is valid only when the suppressed claim is absent
   // from every exact-scope canonical readback and no summary/projection mirror exists.
@@ -398,7 +416,7 @@ try {
   assert.deepEqual(exactReadback.activeSummaryClaimIds, ["claim-exact"]);
 
   const exported = JSON.stringify(getDirectChatMemoryLongEvidenceRecords());
-  assert.doesNotMatch(exported, /private statement|private summary|api[_ -]?key|authorization|"prompt"\s*:|"response"\s*:/i);
+  assert.doesNotMatch(exported, /private statement|private summary|"apiKey"\s*:|"authorization"\s*:|"prompt"\s*:|"response"\s*:|"messageBody"\s*:|"responseBody"\s*:|"rawMemoryText"\s*:/i);
   assert.ok(getDirectChatMemoryLongEvidenceRecords().every((record) => record.promptDelta === 0 && record.canaryProviderDelta === 0));
   console.log("PASS direct-chat long-evidence runtime seam: disabled guard, exact readback, control/veto/partial classification, and explicit accounting");
 } finally {

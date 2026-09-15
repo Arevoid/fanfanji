@@ -302,6 +302,35 @@ try {
   assert.equal(ambiguousReason?.bridgeReason, "ambiguous_correlation");
   assert.equal(ambiguousReason?.classification, "INVALID_SAMPLE");
 
+  const provenanceTelemetry = recordDirectChatMemoryLongEvidence(input({
+    candidate: {
+      ...suppressionCandidate,
+      legacyProvenanceTrusted: true,
+      v2ProvenanceTrusted: false,
+      legacyScopeExact: true,
+      v2ScopeExact: true,
+      legacySourceRefsPresent: true,
+      v2SourceRefsPresent: true,
+      legacySourceRefsAllowed: true,
+      v2SourceRefsAllowed: false,
+      legacyLineageStatus: "present",
+      v2LineageStatus: "present",
+      legacyMatchCount: 1,
+      v2MatchCount: 1,
+      eligiblePairCount: 0,
+      correlationReason: "provenance_mismatch",
+      candidateSuppressed: false,
+      vetoedCandidateCanonicalAbsent: false,
+    },
+  }));
+  assert.equal(provenanceTelemetry?.legacyProvenanceTrusted, true);
+  assert.equal(provenanceTelemetry?.v2ProvenanceTrusted, false);
+  assert.equal(provenanceTelemetry?.v2SourceRefsAllowed, false);
+  assert.equal(provenanceTelemetry?.eligiblePairCount, 0);
+  assert.equal(provenanceTelemetry?.correlationReason, "provenance_mismatch");
+  assert.equal(provenanceTelemetry?.classification, "INVALID_SAMPLE");
+  assert.doesNotMatch(exportDirectChatMemoryLongEvidenceJson(), /"apiKey"\s*:|"authorization"\s*:|"prompt"\s*:|"response"\s*:|"messageBody"\s*:|"responseBody"\s*:|"rawMemoryText"\s*:/i);
+
   // A successful automatic extraction with an explicitly empty candidate
   // array is a batch-level observation, not a candidate/control/suppression.
   clearDirectChatMemoryLongEvidenceCollector();

@@ -60,6 +60,8 @@ export type DirectChatMemoryBridgeShadowMetadataSource =
   | "runtime_owned"
   | "unknown";
 
+export type DirectChatMemorySideLineageStatus = "present" | "missing";
+
 export interface DirectChatMemoryBridgeShadowObservation {
   bridgeCorrelation: DirectChatMemoryCorrelationState;
   /** Runtime-only correlation classification; the opaque lineage token is never exposed. */
@@ -70,6 +72,20 @@ export interface DirectChatMemoryBridgeShadowObservation {
   legacyWriteEligibility: "canonical_write" | "not_write_eligible" | "needs_review" | "unknown";
   legacyProvenanceTrusted: boolean;
   v2ProvenanceTrusted: boolean;
+  /** Side-specific provenance anatomy; metadata-only and decision-neutral. */
+  legacyScopeExact?: boolean;
+  v2ScopeExact?: boolean;
+  legacySourceRefsPresent?: boolean;
+  v2SourceRefsPresent?: boolean;
+  legacySourceRefsAllowed?: boolean;
+  v2SourceRefsAllowed?: boolean;
+  legacyLineageStatus?: DirectChatMemorySideLineageStatus;
+  v2LineageStatus?: DirectChatMemorySideLineageStatus;
+  /** Existing matcher group cardinalities; no candidate content is persisted. */
+  legacyMatchCount?: number;
+  v2MatchCount?: number;
+  eligiblePairCount?: number;
+  correlationReason?: Extract<DirectChatMemoryBridgeReason, "ambiguous_correlation" | "scope_mismatch" | "provenance_mismatch" | "conflicting_duplicate">;
   bridgeState: DirectChatMemoryBridgeState;
   bridgeReason: DirectChatMemoryBridgeReason;
   legacySemanticKind: MemoryAdmissionComparisonSemanticKind;
@@ -563,9 +579,26 @@ function buildConflictAnatomy(
   };
 }
 
+function v2SourceRefs(candidate: DirectChatMemoryV2Candidate): string[] {
+  return normalizeRefs([
+    ...(candidate.candidate.provenance.sourceMessageIds || []),
+    ...(candidate.candidate.provenance.sourceEventIds || []),
+    ...(candidate.candidate.provenance.sourceRecordIds || []),
+    ...(candidate.candidate.evidence.sourceMessageIds || []),
+    ...(candidate.candidate.evidence.sourceEventIds || []),
+    ...(candidate.candidate.evidence.sourceRecordIds || []),
+  ]);
+}
+
+function sourceRefsAllowed(refs: readonly string[], runtime: DirectChatMemoryBridgeRuntimeContext): boolean {
+  const allowed = new Set(runtime.allowedSourceRefs);
+  return refs.length > 0 && refs.every((ref) => allowed.has(ref));
+}
+
 function shadowObservation(
   match: ReturnType<typeof matchDirectChatMemoryCandidates>["matches"][number],
   decision: ReturnType<typeof decideDirectChatMemoryBridge>,
+  runtime: DirectChatMemoryBridgeRuntimeContext,
 ): DirectChatMemoryBridgeShadowObservation {
   const legacy = match.legacy[0];
   const v2 = match.v2[0];
@@ -581,6 +614,18 @@ function shadowObservation(
     : undefined;
   const legacyLineage = legacy?.runtimeLineageId;
   const v2Lineage = v2?.candidate.runtimeLineageId;
+  const legacyRefs = legacy ? normalizeRefs(legacy.sourceRefs) : [];
+  const v2Refs = v2 ? v2SourceRefs(v2) : [];
+  const legacyScopeExact = Boolean(legacy && sameScope(legacy.scope, runtime.scope));
+  const v2ScopeExact = Boolean(v2 && sameScope(v2.candidate.scope, runtime.scope));
+  const eligiblePairCount = match.legacy.reduce((count, legacyCandidate) => count
+    + match.v2.filter((v2Candidate) => sameScope(legacyCandidate.scope, runtime.scope)
+      && legacyCandidate.provenanceTrusted
+      && sameScope(v2Candidate.candidate.scope, runtime.scope)
+      && trustedCandidate(v2Candidate)).length, 0);
+  const correlationReason = match.reason
+    || (match.correlation === "ambiguous" ? "ambiguous_correlation" : undefined)
+    || (match.correlation === "conflict" ? "conflicting_duplicate" : undefined);
   const lineageStatus: DirectChatMemoryBridgeShadowObservation["lineageStatus"] = !legacyLineage && !v2Lineage
     ? "absent"
     : !legacyLineage || !v2Lineage
@@ -596,6 +641,18 @@ function shadowObservation(
     legacyWriteEligibility: legacyComparison?.writeEligibility || "unknown",
     legacyProvenanceTrusted: Boolean(legacy?.provenanceTrusted),
     v2ProvenanceTrusted: Boolean(v2 && trustedCandidate(v2)),
+    legacyScopeExact,
+    v2ScopeExact,
+    legacySourceRefsPresent: legacyRefs.length > 0,
+    v2SourceRefsPresent: v2Refs.length > 0,
+    legacySourceRefsAllowed: sourceRefsAllowed(legacyRefs, runtime),
+    v2SourceRefsAllowed: sourceRefsAllowed(v2Refs, runtime),
+    legacyLineageStatus: legacyLineage ? "present" : "missing",
+    v2LineageStatus: v2Lineage ? "present" : "missing",
+    legacyMatchCount: match.legacy.length,
+    v2MatchCount: match.v2.length,
+    eligiblePairCount,
+    ...(correlationReason ? { correlationReason } : {}),
     bridgeState: decision.state,
     bridgeReason: decision.reason,
     legacySemanticKind: legacyComparison?.semanticKind || "unknown",
@@ -693,7 +750,7 @@ export function observeDirectChatMemoryAdmissionBridgeShadow(
     const metrics = emptyMetrics();
     const observations = matched.matches.map((match) => {
       const decision = decideDirectChatMemoryBridge(match, { runtime, knownIdempotencyKeys: input.knownIdempotencyKeys });
-      const observation = shadowObservation(match, decision);
+      const observation = shadowObservation(match, decision, runtime);
       incrementMetric(metrics, observation);
       return observation;
     });

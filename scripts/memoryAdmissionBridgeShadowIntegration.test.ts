@@ -139,6 +139,21 @@ assert.equal(objectiveResult.bridgeShadow.failedOpen, false);
 assert.equal(oneBridgeObservation(objectiveResult).bridgeCorrelation, "exact");
 assert.equal(oneBridgeObservation(objectiveResult).bridgeState, "write_proposal");
 assert.equal(objectiveResult.bridgeShadow.metrics.wouldWriteProposal, 1);
+const objectiveObservation = oneBridgeObservation(objectiveResult);
+assert.equal(objectiveObservation.legacyProvenanceTrusted, true);
+assert.equal(objectiveObservation.v2ProvenanceTrusted, true);
+assert.equal(objectiveObservation.legacyScopeExact, true);
+assert.equal(objectiveObservation.v2ScopeExact, true);
+assert.equal(objectiveObservation.legacySourceRefsPresent, true);
+assert.equal(objectiveObservation.v2SourceRefsPresent, true);
+assert.equal(objectiveObservation.legacySourceRefsAllowed, true);
+assert.equal(objectiveObservation.v2SourceRefsAllowed, true);
+assert.equal(objectiveObservation.legacyLineageStatus, "missing");
+assert.equal(objectiveObservation.v2LineageStatus, "missing");
+assert.equal(objectiveObservation.legacyMatchCount, 1);
+assert.equal(objectiveObservation.v2MatchCount, 1);
+assert.equal(objectiveObservation.eligiblePairCount, 1);
+assert.equal(objectiveObservation.correlationReason, undefined);
 
 // 2. Asserted fact is not projected as confirmed objective.
 const assertedFact = claim("fact", { id: "asserted-fact", truthStatus: "asserted" as TruthStatus });
@@ -214,6 +229,10 @@ const ambiguous = observe({
 });
 assert.equal(oneBridgeObservation(ambiguous).bridgeCorrelation, "ambiguous");
 assert.equal(oneBridgeObservation(ambiguous).wouldWriteProposal, false);
+assert.equal(oneBridgeObservation(ambiguous).correlationReason, "ambiguous_correlation");
+assert.equal(oneBridgeObservation(ambiguous).legacyMatchCount, 1);
+assert.equal(oneBridgeObservation(ambiguous).v2MatchCount, 2);
+assert.equal(oneBridgeObservation(ambiguous).eligiblePairCount, 2);
 const duplicate = observe({ claims: [objectiveClaim], v2Candidates: [v2(), v2({ statement: "same intent, different candidate" })] });
 assert.equal(oneBridgeObservation(duplicate).bridgeCorrelation, "duplicate");
 assert.equal(duplicate.bridgeShadow.metrics.wouldWriteProposal, 1);
@@ -239,6 +258,11 @@ const provenanceMismatch = observe({
 });
 assert.equal(provenanceMismatch.bridgeShadow.metrics.wouldWriteProposal, 0);
 assert.equal(provenanceMismatch.bridgeShadow.observations.some((item) => item.bridgeCorrelation === "exact"), false);
+assert.equal(provenanceMismatch.bridgeShadow.observations.length, 2);
+assert.equal(provenanceMismatch.bridgeShadow.observations.some((item) => item.legacyProvenanceTrusted === false), true);
+assert.equal(provenanceMismatch.bridgeShadow.observations.some((item) => item.v2ProvenanceTrusted === false), true);
+assert.equal(provenanceMismatch.bridgeShadow.observations.every((item) => item.legacySourceRefsAllowed === false), true);
+assert.equal(provenanceMismatch.bridgeShadow.observations.every((item) => item.v2SourceRefsAllowed === false), true);
 const malformed = observe({
   diagnostics: [],
   v2Candidates: [{ schemaVersion: 2, kind: "fact", statement: "", temporalStatus: "present", sourceMessageIds: [], evidenceQuote: "" } as MemoryExtractionCandidateV2],
