@@ -6,6 +6,7 @@ import type {
   MemoryExtractionRejectionDiagnostic,
 } from "./memoryExtractionSchema";
 import type { MemoryExtractionSourceEnvelope } from "./memoryExtractionSourceEnvelope";
+import type { StructuredOutputTelemetry } from "../../core/monitoring/structuredOutputTelemetryTypes";
 
 export type MemoryScenario =
   | "chat"
@@ -91,6 +92,8 @@ export interface MemoryExtractionApiResult {
   structuredCandidatesV2?: MemoryExtractionCandidateV2[];
   /** True when a response attempted V2 metadata, even if it was malformed. */
   v2MetadataPresent?: boolean;
+  /** Privacy-safe, dev-gated structured-output diagnostics. */
+  structuredOutputTelemetry?: StructuredOutputTelemetry;
   error?: string;
 }
 
@@ -106,6 +109,8 @@ export interface MemoryExtractionResult {
   sourceEnvelope?: MemoryExtractionSourceEnvelope;
   /** Per-candidate legacy classification; never includes statement/evidence bodies. */
   rejectedCandidates?: MemoryExtractionRejectionDiagnostic[];
+  /** Privacy-safe, dev-gated structured-output diagnostics. */
+  structuredOutputTelemetry?: StructuredOutputTelemetry;
   apiError?: string;
 }
 

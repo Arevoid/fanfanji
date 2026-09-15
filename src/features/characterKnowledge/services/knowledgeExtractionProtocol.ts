@@ -6,6 +6,17 @@ import {
   type MemoryExtractionCandidateV2NormalizationOptions,
   type MemoryExtractionCandidateV2,
 } from "../../../domain/memory/memoryExtractionSchema";
+import {
+  emptyStructuredOutputTelemetry,
+  textLengthBucket,
+  withStructuredOutputTelemetry,
+  type StructuredOutputFailureReasonCode,
+  type StructuredOutputFailureStage,
+  type StructuredOutputJsonRootKind,
+  type StructuredOutputSchemaRejectReasonCode,
+  type StructuredOutputTelemetry,
+  type StructuredOutputWrapperKind,
+} from "./structuredOutputTelemetry";
 
 export interface KnowledgeExtractionHistoryItem {
   id: string;
@@ -198,51 +209,176 @@ export function parseKnowledgeExtractionOutputWithV2(
   allowedMessageIds: ReadonlySet<string>,
   options: MemoryExtractionCandidateV2NormalizationOptions = {},
 ): ParsedKnowledgeExtractionOutput {
-  const rawValues = parseRawValues(rawText);
-  const parsedProjections = rawValues.map((value) => {
-    const runtimeLineage = createId("memory-extraction-item");
-    const legacy = attachRuntimeExtractionLineage(
-      normalizeExtractedKnowledgeCandidate(value, allowedMessageIds, options),
-      runtimeLineage,
-    );
-    const v2 = attachRuntimeExtractionLineage(
-      normalizeEmbeddedMemoryExtractionCandidateV2(value, allowedMessageIds, options)
-        || normalizeMemoryExtractionCandidateV2(value, allowedMessageIds, options),
-      runtimeLineage,
-    );
-    return { legacy, v2 };
-  });
-  const structuredCandidatesV2 = parsedProjections
-    .map((projection) => projection.v2)
-    .filter((value): value is MemoryExtractionCandidateV2 => value !== undefined);
-  return {
-    candidates: parsedProjections
-      .map((projection) => projection.legacy)
-      .filter((value): value is ExtractedKnowledgeCandidatePayload => value !== undefined),
-    structuredCandidatesV2,
-    v2MetadataPresent: rawValues.some((value) => Boolean(value && typeof value === "object" && !Array.isArray(value)
-      && ("v2" in value || "schemaVersion" in value))),
-    runtimeLineageTransport: buildRuntimeLineageTransport(parsedProjections),
-  };
+  return parseKnowledgeExtractionOutputWithV2WithTelemetry(rawText, allowedMessageIds, options).parsed;
+}
+
+interface RawValuesTelemetry {
+  rawValues: unknown[];
+  wrapperKind: StructuredOutputWrapperKind;
+  jsonParseStage: "json" | "jsonl" | "none" | "unknown";
+  jsonParseSucceeded: boolean;
+  jsonRootKind: StructuredOutputJsonRootKind;
+  jsonlAttempted: boolean;
+  jsonlAcceptedCount: number;
+  jsonlRejectedCount: number;
+  failureStage: StructuredOutputFailureStage;
+  failureReasonCode: StructuredOutputFailureReasonCode;
+}
+
+const rootKind = (value: unknown): StructuredOutputJsonRootKind => {
+  if (value === undefined) return "none";
+  if (Array.isArray(value)) return "array";
+  if (value !== null && typeof value === "object") return "object";
+  return "scalar";
+};
+
+const wrapperKind = (source: string): StructuredOutputWrapperKind => {
+  if (/^```\s*jsonl\b/iu.test(source)) return "jsonl_fence";
+  if (/^```(?:\s*json)?\b/iu.test(source)) return "json_fence";
+  if (!source) return "unknown";
+  if (/^[\[{]/u.test(source)) return "plain_json";
+  if (/[{[]/u.test(source) && /[}\]]/u.test(source)) return "prose_wrapper";
+  return "unknown";
+};
+
+const looksTruncatedJson = (source: string): boolean => /^[\[{]/u.test(source) && !/[}\]]$/u.test(source);
+
+function parseRawValuesWithTelemetry(rawText: string): RawValuesTelemetry {
+  const source = rawText.trim();
+  const detectedWrapper = wrapperKind(source);
+  const text = source.replace(/^```(?:json|jsonl)?\s*/iu, "").replace(/\s*```$/u, "");
+  if (!text) {
+    return {
+      rawValues: [], wrapperKind: detectedWrapper, jsonParseStage: "none", jsonParseSucceeded: false,
+      jsonRootKind: "none", jsonlAttempted: false, jsonlAcceptedCount: 0, jsonlRejectedCount: 0,
+      failureStage: "none", failureReasonCode: "valid_empty",
+    };
+  }
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return {
+      rawValues: Array.isArray(parsed) ? parsed : [parsed], wrapperKind: detectedWrapper,
+      jsonParseStage: "json", jsonParseSucceeded: true, jsonRootKind: rootKind(parsed),
+      jsonlAttempted: false, jsonlAcceptedCount: 0, jsonlRejectedCount: 0,
+      failureStage: "none", failureReasonCode: "none",
+    };
+  } catch {
+    const rawValues: unknown[] = [];
+    let rejected = 0;
+    for (const line of text.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean)) {
+      try { rawValues.push(JSON.parse(line) as unknown); } catch { rejected += 1; }
+    }
+    const noValidLines = rawValues.length === 0;
+    const failureStage: StructuredOutputFailureStage = noValidLines
+      ? (detectedWrapper === "prose_wrapper" ? "wrapper" : looksTruncatedJson(text) ? "json_parse" : "json_parse")
+      : "none";
+    const failureReasonCode: StructuredOutputFailureReasonCode = noValidLines
+      ? (detectedWrapper === "prose_wrapper" ? "prose_wrapper" : looksTruncatedJson(text) ? "truncated_json" : "json_parse_failed")
+      : "none";
+    return {
+      rawValues, wrapperKind: detectedWrapper, jsonParseStage: "jsonl", jsonParseSucceeded: false,
+      jsonRootKind: "none", jsonlAttempted: true, jsonlAcceptedCount: rawValues.length,
+      jsonlRejectedCount: rejected, failureStage, failureReasonCode,
+    };
+  }
 }
 
 function parseRawValues(rawText: string): unknown[] {
-  const text = rawText.trim().replace(/^```(?:json|jsonl)?\s*/iu, "").replace(/\s*```$/u, "");
-  if (!text) return [];
-  const rawValues: unknown[] = [];
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    rawValues.push(...(Array.isArray(parsed) ? parsed : [parsed]));
-  } catch {
-    for (const line of text.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean)) {
-      try {
-        rawValues.push(JSON.parse(line) as unknown);
-      } catch {
-        // Legacy bullets and invalid JSON never become long-term knowledge.
-      }
-    }
+  return parseRawValuesWithTelemetry(rawText).rawValues;
+}
+
+const schemaRejectReason = (
+  value: unknown,
+  allowedMessageIds: ReadonlySet<string>,
+  options: MemoryExtractionCandidateV2NormalizationOptions,
+): StructuredOutputSchemaRejectReasonCode => {
+  if (!isRecord(value)) return "not_object";
+  if (!nonEmpty(value.statement)) return "missing_statement";
+  if (!KINDS.has(value.kind as KnowledgeKind)) return "invalid_kind";
+  if (!SUBJECTS.has(value.subject as KnowledgeSubject)) return "invalid_subject";
+  if (!TEMPORAL.has(value.temporalStatus as TemporalStatus)) return "invalid_temporal_status";
+  if (!Array.isArray(value.sourceMessageIds) || value.sourceMessageIds.length === 0) return "missing_source_refs";
+  if (value.sourceMessageIds.some((id) => !nonEmpty(id)
+    || (!options.preserveUnvalidatedSourceHints && !allowedMessageIds.has(id.trim())))) return "invalid_source_refs";
+  if (!nonEmpty(value.evidenceQuote)) return "missing_evidence_quote";
+  return "unknown";
+};
+
+export function parseKnowledgeExtractionOutputWithV2WithTelemetry(
+  rawText: string,
+  allowedMessageIds: ReadonlySet<string>,
+  options: MemoryExtractionCandidateV2NormalizationOptions = {},
+): { parsed: ParsedKnowledgeExtractionOutput; structuredOutputTelemetry: StructuredOutputTelemetry } {
+  const raw = parseRawValuesWithTelemetry(rawText);
+  const parsedProjections = raw.rawValues.map((value) => {
+    const runtimeLineage = createId("memory-extraction-item");
+    const legacy = attachRuntimeExtractionLineage(
+      normalizeExtractedKnowledgeCandidate(value, allowedMessageIds, options), runtimeLineage,
+    );
+    const v2 = attachRuntimeExtractionLineage(
+      normalizeEmbeddedMemoryExtractionCandidateV2(value, allowedMessageIds, options)
+        || normalizeMemoryExtractionCandidateV2(value, allowedMessageIds, options), runtimeLineage,
+    );
+    return { value, legacy, v2 };
+  });
+  const candidates = parsedProjections
+    .map((projection) => projection.legacy)
+    .filter((value): value is ExtractedKnowledgeCandidatePayload => value !== undefined);
+  const structuredCandidatesV2 = parsedProjections
+    .map((projection) => projection.v2)
+    .filter((value): value is MemoryExtractionCandidateV2 => value !== undefined);
+  const acceptedEntryCount = parsedProjections.filter((projection) => projection.legacy || projection.v2).length;
+  const v2RawCount = parsedProjections.filter((projection) => isRecord(projection.value)
+    && ("v2" in projection.value || "schemaVersion" in projection.value
+      || ("kind" in projection.value && "subject" in projection.value))).length;
+  const firstRejectReason = parsedProjections
+    .map((projection) => schemaRejectReason(projection.value, allowedMessageIds, options))
+    .find((reason) => reason !== "unknown") || "none";
+  let failureStage = raw.failureStage;
+  let failureReasonCode = raw.failureReasonCode;
+  if (raw.rawValues.length > 0 && acceptedEntryCount === 0) {
+    failureStage = "schema";
+    failureReasonCode = "schema_rejected";
+  } else if (raw.rawValues.length > 0 && acceptedEntryCount > 0) {
+    failureStage = "none";
+    failureReasonCode = "none";
   }
-  return rawValues;
+  if (raw.rawValues.length === 0 && raw.jsonParseSucceeded) {
+    failureStage = "none";
+    failureReasonCode = "valid_empty";
+  }
+  const structuredOutputTelemetry = emptyStructuredOutputTelemetry({
+    textPresent: Boolean(rawText.trim()),
+    textLengthBucket: textLengthBucket(rawText.trim().length),
+    wrapperKind: raw.wrapperKind,
+    jsonParseStage: raw.jsonParseStage,
+    jsonParseSucceeded: raw.jsonParseSucceeded,
+    jsonRootKind: raw.jsonRootKind,
+    jsonlAttempted: raw.jsonlAttempted,
+    jsonlAcceptedCount: raw.jsonlAcceptedCount,
+    jsonlRejectedCount: raw.jsonlRejectedCount,
+    structuredEntryCount: raw.rawValues.length,
+    legacyCandidateRawCount: raw.rawValues.length,
+    legacyCandidateAcceptedCount: candidates.length,
+    legacyCandidateRejectedCount: Math.max(0, raw.rawValues.length - candidates.length),
+    v2CandidateRawCount: v2RawCount,
+    v2CandidateAcceptedCount: structuredCandidatesV2.length,
+    v2CandidateRejectedCount: Math.max(0, v2RawCount - structuredCandidatesV2.length),
+    schemaRejectReasonCode: firstRejectReason === "none" ? "none" : firstRejectReason,
+    finalCandidateCount: acceptedEntryCount,
+    failureStage,
+    failureReasonCode,
+  });
+  return {
+    parsed: {
+      candidates,
+      structuredCandidatesV2,
+      v2MetadataPresent: raw.rawValues.some((value) => Boolean(value && typeof value === "object" && !Array.isArray(value)
+        && ("v2" in value || "schemaVersion" in value))),
+      runtimeLineageTransport: buildRuntimeLineageTransport(parsedProjections),
+    },
+    structuredOutputTelemetry,
+  };
 }
 
 export function buildKnowledgeExtractionRepairPrompt(input: {
@@ -273,19 +409,65 @@ export async function parseOrRepairKnowledgeExtractionOutput(input: {
   repair: (repairPrompt: string) => Promise<string>;
   preserveUnvalidatedSourceHints?: boolean;
 }): Promise<ParsedKnowledgeExtractionOutput & { text: string; repaired: boolean }> {
+  const result = await parseOrRepairKnowledgeExtractionOutputWithDiagnostics(input);
+  const { structuredOutputTelemetry: _structuredOutputTelemetry, ...compatibilityResult } = result;
+  return compatibilityResult;
+}
+
+export async function parseOrRepairKnowledgeExtractionOutputWithDiagnostics(input: {
+  rawText: string;
+  allowedMessageIds: ReadonlySet<string>;
+  originalPrompt: string;
+  repair: (repairPrompt: string) => Promise<string>;
+  preserveUnvalidatedSourceHints?: boolean;
+}): Promise<ParsedKnowledgeExtractionOutput & {
+  text: string;
+  repaired: boolean;
+  structuredOutputTelemetry: StructuredOutputTelemetry;
+}> {
   const options = input.preserveUnvalidatedSourceHints
     ? { preserveUnvalidatedSourceHints: true, allowMissingSourceHints: true }
     : {};
-  const parsed = parseKnowledgeExtractionOutputWithV2(input.rawText, input.allowedMessageIds, options);
+  const parsedWithTelemetry = parseKnowledgeExtractionOutputWithV2WithTelemetry(
+    input.rawText, input.allowedMessageIds, options,
+  );
+  const parsed = parsedWithTelemetry.parsed;
   if (parsed.candidates.length > 0 || parsed.structuredCandidatesV2.length > 0
     || parsed.v2MetadataPresent || !input.rawText.trim()) {
-    return { text: input.rawText, ...parsed, repaired: false };
+    return {
+      text: input.rawText,
+      ...parsed,
+      repaired: false,
+      structuredOutputTelemetry: parsedWithTelemetry.structuredOutputTelemetry,
+    };
   }
   const repairedText = await input.repair(buildKnowledgeExtractionRepairPrompt({
     originalPrompt: input.originalPrompt,
     invalidOutput: input.rawText,
   }));
-  return { text: repairedText, ...parseKnowledgeExtractionOutputWithV2(repairedText, input.allowedMessageIds, options), repaired: true };
+  const repairedResult = parseKnowledgeExtractionOutputWithV2WithTelemetry(
+    repairedText, input.allowedMessageIds, options,
+  );
+  const repairedTelemetry = withStructuredOutputTelemetry(repairedResult.structuredOutputTelemetry, {
+    fallbackAttempted: true,
+    fallbackReasonCode: "repair_request",
+    // Preserve the first broken seam so a successful repair does not erase
+    // evidence that the original response crossed the parser boundary badly.
+    ...(parsedWithTelemetry.structuredOutputTelemetry.failureReasonCode !== "none"
+      && parsedWithTelemetry.structuredOutputTelemetry.failureReasonCode !== "valid_empty"
+      ? {
+        failureStage: parsedWithTelemetry.structuredOutputTelemetry.failureStage,
+        failureReasonCode: parsedWithTelemetry.structuredOutputTelemetry.failureReasonCode,
+        schemaRejectReasonCode: parsedWithTelemetry.structuredOutputTelemetry.schemaRejectReasonCode,
+      }
+      : {}),
+  });
+  return {
+    text: repairedText,
+    ...repairedResult.parsed,
+    repaired: true,
+    structuredOutputTelemetry: repairedTelemetry,
+  };
 }
 
 export function buildKnowledgeExtractionPrompt(input: {

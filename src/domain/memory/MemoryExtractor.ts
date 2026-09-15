@@ -121,9 +121,11 @@ export async function extractMemories(
     parentActionId: context.parentActionId,
     extractionActionId: context.extractionActionId,
   });
+  let structuredOutputTelemetry: import("../../core/monitoring/structuredOutputTelemetryTypes").StructuredOutputTelemetry | undefined;
   const withSourceEnvelope = (result: Omit<MemoryExtractionResult, "sourceEnvelope">): MemoryExtractionResult => ({
     ...result,
     sourceEnvelope,
+    ...(structuredOutputTelemetry ? { structuredOutputTelemetry } : {}),
   });
   const usesLocalSourceRefs = context.scenario === "chat";
   const localSourceRefTable = usesLocalSourceRefs
@@ -157,6 +159,7 @@ export async function extractMemories(
     ...(context.enableMemoryExtractionV2Shadow ? { enableV2Shadow: true } : {}),
     ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
   });
+  structuredOutputTelemetry = data.structuredOutputTelemetry;
   const resolveModelSourceRefs = <T extends { sourceMessageIds?: readonly string[] }>(candidate: T): T => {
     if (!localSourceRefTable || !Array.isArray(candidate.sourceMessageIds)) return candidate;
     const resolution = resolveMemoryExtractionSourceRefs(candidate.sourceMessageIds, localSourceRefTable);

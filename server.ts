@@ -8,8 +8,9 @@ import tailwindcss from "@tailwindcss/vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
-import { callTextProvider, normalizeTextApiError } from "./src/server/textProtocolAdapters";
-import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
+import { callTextProvider, callTextProviderWithDiagnostics, normalizeTextApiError } from "./src/server/textProtocolAdapters";
+import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutputWithDiagnostics, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
+import { combineStructuredOutputTelemetry, withStructuredOutputTelemetry, type StructuredOutputTelemetry } from "./src/features/characterKnowledge/services/structuredOutputTelemetry";
 import {
   MEMORY_ADMISSION_CAMPAIGN_FINGERPRINT,
   MEMORY_ADMISSION_SYNTHETIC_FIXTURE_ID,
@@ -512,8 +513,9 @@ ${historyText}
         includeV2Shadow: enableV2Shadow === true && scenario !== "offline",
       });
 
+      let latestProviderTelemetry: StructuredOutputTelemetry | undefined;
       const generateExtractionText = async (promptText: string, temperature: number): Promise<string> => {
-        return callTextProvider({
+        const result = await callTextProviderWithDiagnostics({
           message: promptText,
           apiKey: apiKeyValue,
           model: String(model || (apiEndpoint && apiEndpoint.trim() ? "deepseek-v4-flash" : "gemini-3.5-flash")),
@@ -523,16 +525,29 @@ ${historyText}
           systemInstruction: "你是结构化长期知识提取器。只输出可验证的 JSONL，不要解释。",
           allowEmptyText: true,
         });
+        latestProviderTelemetry = result.structuredOutputTelemetry;
+        return result.text;
       };
 
       const aiText = await generateExtractionText(prompt, 0.5);
-      const repaired = await parseOrRepairKnowledgeExtractionOutput({
+      const repaired = await parseOrRepairKnowledgeExtractionOutputWithDiagnostics({
         rawText: aiText,
         allowedMessageIds: new Set(safeHistory.map((item) => item.id)),
         originalPrompt: prompt,
         preserveUnvalidatedSourceHints: (sourceReferenceMode === "local" || enableV2Shadow === true) && scenario !== "offline",
         repair: (repairPrompt) => generateExtractionText(repairPrompt, 0.2),
       });
+      const structuredOutputTelemetry = latestProviderTelemetry
+        ? combineStructuredOutputTelemetry(latestProviderTelemetry, repaired.structuredOutputTelemetry)
+        : repaired.structuredOutputTelemetry;
+      const boundaryTelemetry = !structuredOutputTelemetry.textPresent && structuredOutputTelemetry.failureReasonCode === "valid_empty"
+        ? withStructuredOutputTelemetry(structuredOutputTelemetry, {
+          failureStage: structuredOutputTelemetry.responseEnvelopeKind === "unknown" ? "envelope" : "content",
+          failureReasonCode: structuredOutputTelemetry.responseEnvelopeKind === "unknown"
+            ? "unsupported_envelope"
+            : structuredOutputTelemetry.messageContentKind === "missing" ? "missing_content" : "empty_content",
+        })
+        : structuredOutputTelemetry;
       res.json({
         text: repaired.text,
         items: repaired.candidates,
@@ -541,6 +556,7 @@ ${historyText}
         v2MetadataPresent: repaired.v2MetadataPresent,
         runtimeLineageTransport: repaired.runtimeLineageTransport,
         repaired: repaired.repaired,
+        ...(process.env.NODE_ENV !== "production" ? { structuredOutputTelemetry: boundaryTelemetry } : {}),
       });
     } catch (error: any) {
       console.error("Extract Memories Error:", error);

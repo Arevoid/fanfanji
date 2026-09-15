@@ -4,7 +4,7 @@ import {
   buildKnowledgeExtractionPrompt,
   hydrateRuntimeExtractionLineage,
   normalizeKnowledgeExtractionLineageTransport,
-  parseOrRepairKnowledgeExtractionOutput,
+  parseOrRepairKnowledgeExtractionOutputWithDiagnostics,
   parseMemoryExtractionCandidateV2Output,
   type ExtractedKnowledgeCandidatePayload,
   type KnowledgeExtractionHistoryItem,
@@ -20,6 +20,7 @@ import {
   type AiRequestLedgerSession,
 } from "../core/monitoring/aiRequestLedger";
 import { emptyTextApiErrorDetails, parseTextApiErrorPayload, type TextApiErrorCode } from "./textApiError";
+import { isStructuredOutputTelemetry, withStructuredOutputTelemetry, type StructuredOutputTelemetry } from "../features/characterKnowledge/services/structuredOutputTelemetry";
 
 type AiRequestMetadata = {
   purpose?: AiPurpose;
@@ -684,6 +685,7 @@ async function apiExtractMemoriesImpl(params: {
   v2MetadataPresent?: boolean;
   /** Backend-only transient sidecar; hydrated into the parser WeakMap then discarded. */
   runtimeLineageTransport?: import("../features/characterKnowledge/services/knowledgeExtractionProtocol").KnowledgeExtractionLineageTransport;
+  structuredOutputTelemetry?: StructuredOutputTelemetry;
   error?: string;
 }> {
   const { ledger, purpose, logicalActionId, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
@@ -711,6 +713,9 @@ async function apiExtractMemoriesImpl(params: {
       : undefined;
     const backendCandidates = Array.isArray(data?.candidates) ? data.candidates : [];
     const runtimeLineageTransport = normalizeKnowledgeExtractionLineageTransport(data?.runtimeLineageTransport);
+    const structuredOutputTelemetry = isStructuredOutputTelemetry(data?.structuredOutputTelemetry)
+      ? data.structuredOutputTelemetry
+      : undefined;
     if (runtimeLineageTransport) {
       hydrateRuntimeExtractionLineage({
         legacy: backendCandidates.filter((candidate: unknown): candidate is object => Boolean(candidate && typeof candidate === "object")),
@@ -724,6 +729,7 @@ async function apiExtractMemoriesImpl(params: {
         ...(Array.isArray(data.candidates) ? { candidates: data.candidates } : {}),
         ...(structuredCandidatesV2?.length ? { structuredCandidatesV2 } : {}),
         ...(data.v2MetadataPresent === true ? { v2MetadataPresent: true } : {}),
+        ...(structuredOutputTelemetry ? { structuredOutputTelemetry } : {}),
         ...(typeof data.error === "string" && data.error.trim() ? { error: data.error.trim() } : {}),
       };
     }
@@ -769,7 +775,7 @@ async function apiExtractMemoriesImpl(params: {
       });
 
       const aiText = result.text || "";
-      const repaired = await parseOrRepairKnowledgeExtractionOutput({
+      const repaired = await parseOrRepairKnowledgeExtractionOutputWithDiagnostics({
         rawText: aiText,
         allowedMessageIds: new Set(params.history.map((item) => item.id)),
         originalPrompt: prompt,
@@ -798,6 +804,7 @@ async function apiExtractMemoriesImpl(params: {
         ...(repaired.runtimeLineageTransport.legacy.length || repaired.runtimeLineageTransport.v2.length
           ? { runtimeLineageTransport: repaired.runtimeLineageTransport }
           : {}),
+        structuredOutputTelemetry: repaired.structuredOutputTelemetry,
       };
     } catch (fallbackErr) {
       console.error("Direct extract memories fallback failed:", fallbackErr);
@@ -816,7 +823,11 @@ export async function apiExtractMemories(params: Parameters<typeof apiExtractMem
   const inputCharacters = params.history.reduce((total, entry) => total + String(entry.text || "").length, 0);
   const logicalActionId = params.logicalActionId || createAiActionId();
   const requestParams = { ...params, logicalActionId };
-  return trackApiUsage("memory-extraction", inputCharacters, buildLedgerInput("memory_extract", inputCharacters, requestParams), (ledger) => apiExtractMemoriesImpl({ ...requestParams, ledger }));
+  return trackApiUsage("memory-extraction", inputCharacters, buildLedgerInput("memory_extract", inputCharacters, requestParams), async (ledger) => {
+    // Normalize structural failures inside the ledger boundary so a provider
+    // response containing prose is durably accounted as a failed action.
+    return normalizeMemoryExtractionResponse(await apiExtractMemoriesImpl({ ...requestParams, ledger }));
+  });
 }
 
 // summarize personality wrapper
@@ -998,7 +1009,7 @@ export async function apiTranslate(params: Parameters<typeof apiTranslateImpl>[0
 type MemoryExtractionParams = Parameters<typeof apiExtractMemories>[0];
 type MemoryExtractionResponse = Awaited<ReturnType<typeof apiExtractMemories>>;
 
-function normalizeMemoryExtractionResponse(response: MemoryExtractionResponse): MemoryExtractionResponse {
+export function normalizeMemoryExtractionResponse(response: MemoryExtractionResponse): MemoryExtractionResponse {
   const hasStructuredItems = (response.items?.length || 0) > 0
     || (response.candidates?.length || 0) > 0
     || (response.structuredCandidatesV2?.length || 0) > 0
@@ -1026,5 +1037,11 @@ export async function apiExtractMemoriesWithModelFallback(
   const normalizedFallback = fallbackModel?.trim();
   if (!primary.error || !normalizedFallback || normalizedFallback === params.model.trim()) return primary;
   console.warn(`Memory extraction model '${params.model}' failed; retrying with the active chat model '${normalizedFallback}'.`);
-  return normalizeMemoryExtractionResponse(await request({ ...requestParams, model: normalizedFallback }));
+  const fallbackResult = normalizeMemoryExtractionResponse(await request({ ...requestParams, model: normalizedFallback }));
+  return fallbackResult.structuredOutputTelemetry
+    ? { ...fallbackResult, structuredOutputTelemetry: withStructuredOutputTelemetry(fallbackResult.structuredOutputTelemetry, {
+      fallbackAttempted: true,
+      fallbackReasonCode: "model_fallback",
+    }) }
+    : fallbackResult;
 }

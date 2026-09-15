@@ -7,6 +7,13 @@ import {
 } from "../domain/prompt/promptTransport";
 import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError, readResponseTextWithTimeout } from "../utils/fetchWithTimeout";
 import { emptyTextApiErrorDetails, parseTextApiErrorPayload, redactTextApiError, type TextApiErrorCode } from "../utils/textApiError";
+import {
+  emptyStructuredOutputTelemetry,
+  textLengthBucket,
+  type StructuredOutputContentKind,
+  type StructuredOutputFinishReasonKind,
+  type StructuredOutputTelemetry,
+} from "../features/characterKnowledge/services/structuredOutputTelemetry";
 
 export class TextApiError extends Error {
   constructor(public status: number, message: string, public code: TextApiErrorCode = "unknown", public reason?: string) {
@@ -62,10 +69,37 @@ const openAiEndpoint = (value: string): string => {
 
 const openAiBase = (value: string): string => value.trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
 
-const parseOpenAiText = (raw: string): string => {
+const finishReasonKind = (value: unknown): StructuredOutputFinishReasonKind => {
+  if (typeof value !== "string" || !value.trim()) return "missing";
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "stop") return "stop";
+  if (normalized === "length" || normalized === "max_tokens") return "length";
+  if (normalized === "content_filter" || normalized === "content-filter") return "content_filter";
+  if (normalized === "tool_calls" || normalized === "tool_call") return "tool_call";
+  return "other";
+};
+
+const contentKind = (value: unknown): { kind: StructuredOutputContentKind; count: number } => {
+  if (typeof value === "string") return { kind: "string", count: 0 };
+  if (!Array.isArray(value)) return value === undefined ? { kind: "missing", count: 0 } : { kind: "unknown", count: 0 };
+  const parts = value.slice(0, 64);
+  if (parts.length === 0) return { kind: "text_parts", count: 0 };
+  const textParts = parts.map((part) => typeof part === "string" || (part && typeof part === "object" && typeof (part as any).text === "string"));
+  return {
+    kind: textParts.every(Boolean) ? "text_parts" : textParts.some(Boolean) ? "mixed_parts" : "unknown",
+    count: parts.length,
+  };
+};
+
+export function parseOpenAiTextWithTelemetry(raw: string): { text: string; structuredOutputTelemetry: StructuredOutputTelemetry } {
   const trimmed = raw.trim();
+  let result = "";
+  let observedContent: StructuredOutputContentKind = "missing";
+  let contentPartCount = 0;
+  let choiceCount = 0;
+  let finishReason: StructuredOutputFinishReasonKind = "missing";
+  let observedEnvelope: "openai_choices" | "unknown" = "unknown";
   if (trimmed.startsWith("data:") || trimmed.includes("\ndata:")) {
-    let result = "";
     for (const sourceLine of trimmed.split("\n")) {
       const line = sourceLine.trim();
       if (!line.startsWith("data:")) continue;
@@ -73,29 +107,90 @@ const parseOpenAiText = (raw: string): string => {
       if (!payload || payload === "[DONE]") continue;
       try {
         const chunk = JSON.parse(payload);
-        result += chunk.choices?.[0]?.delta?.content
-          || chunk.choices?.[0]?.message?.content
-          || chunk.choices?.[0]?.text
-          || "";
+        if (Array.isArray(chunk.choices)) {
+          observedEnvelope = "openai_choices";
+          choiceCount = Math.min(64, choiceCount + chunk.choices.length);
+        }
+        const choice = chunk.choices?.[0];
+        finishReason = finishReasonKind(choice?.finish_reason || choice?.finishReason);
+        const content = choice?.delta?.content || choice?.message?.content || choice?.text || "";
+        const summary = contentKind(content);
+        if (summary.kind !== "missing") observedContent = summary.kind;
+        contentPartCount = Math.min(64, contentPartCount + summary.count);
+        result += content || "";
       } catch {
         // Ignore malformed keep-alive chunks while preserving valid content.
       }
     }
-    return result;
+    return {
+      text: result,
+      structuredOutputTelemetry: emptyStructuredOutputTelemetry({
+        protocolFamily: "openai_compatible", transportOk: true, responseEnvelopeKind: observedEnvelope,
+        choiceCount, messageContentKind: observedContent, contentPartCount, textPresent: Boolean(result.trim()),
+        textLengthBucket: textLengthBucket(result.length), finishReasonKind: finishReason,
+      }),
+    };
   }
   try {
     const parsed = JSON.parse(trimmed);
-    const content = parsed.choices?.[0]?.message?.content ?? parsed.choices?.[0]?.text;
+    const hasChoices = Array.isArray(parsed.choices);
+    if (hasChoices) observedEnvelope = "openai_choices";
+    choiceCount = hasChoices ? Math.min(64, parsed.choices.length) : 0;
+    const choice = parsed.choices?.[0];
+    finishReason = finishReasonKind(choice?.finish_reason || choice?.finishReason);
+    const content = choice?.message?.content ?? choice?.text;
+    const summary = contentKind(content);
+    observedContent = summary.kind;
+    contentPartCount = summary.count;
     if (Array.isArray(content)) {
-      return content.map((part) => typeof part === "string" ? part : part?.text || "").join("");
+      result = content.map((part) => typeof part === "string" ? part : part?.text || "").join("");
+    } else {
+      result = typeof content === "string" ? content : "";
     }
-    return typeof content === "string" ? content : "";
   } catch {
-    return trimmed;
+    result = trimmed;
   }
-};
+  return {
+    text: result,
+    structuredOutputTelemetry: emptyStructuredOutputTelemetry({
+      protocolFamily: "openai_compatible", transportOk: true,
+      responseEnvelopeKind: observedEnvelope,
+      choiceCount, messageContentKind: observedContent, contentPartCount, textPresent: Boolean(result.trim()),
+      textLengthBucket: textLengthBucket(result.length), finishReasonKind: finishReason,
+    }),
+  };
+}
 
-export async function callTextProvider(input: TextProviderInput): Promise<string> {
+export function parseGeminiTextWithTelemetry(raw: string): { text: string; structuredOutputTelemetry: StructuredOutputTelemetry } {
+  let parsed: any;
+  try { parsed = JSON.parse(raw); } catch {
+    return {
+      text: "",
+      structuredOutputTelemetry: emptyStructuredOutputTelemetry({
+        protocolFamily: "gemini_native", transportOk: true, responseEnvelopeKind: "unknown",
+        failureStage: "envelope", failureReasonCode: "unsupported_envelope",
+      }),
+    };
+  }
+  const hasCandidates = Array.isArray(parsed.candidates);
+  const candidates = hasCandidates ? parsed.candidates : [];
+  const parts = candidates[0]?.content?.parts;
+  const summary = contentKind(parts);
+  const text = Array.isArray(parts) ? parts.map((part: any) => part?.text || "").join("") : "";
+  const finishReason = finishReasonKind(candidates[0]?.finishReason || parsed?.promptFeedback?.blockReason);
+  return {
+    text,
+    structuredOutputTelemetry: emptyStructuredOutputTelemetry({
+      protocolFamily: "gemini_native", transportOk: true,
+      responseEnvelopeKind: hasCandidates ? "gemini_candidates" : "unknown",
+      choiceCount: Math.min(64, candidates.length), messageContentKind: summary.kind,
+      contentPartCount: summary.count, textPresent: Boolean(text.trim()), textLengthBucket: textLengthBucket(text.length),
+      finishReasonKind: finishReason,
+    }),
+  };
+}
+
+export async function callTextProviderWithDiagnostics(input: TextProviderInput): Promise<{ text: string; structuredOutputTelemetry: StructuredOutputTelemetry }> {
   const apiKey = input.apiKey?.trim();
   const model = input.model?.trim();
   const requestTimeoutMs = resolveTextGenerationTimeout(input.timeoutMs);
@@ -129,13 +224,14 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
       const details = parseTextApiErrorPayload(raw, response.status);
       throw new TextApiError(response.status, details.message, details.code, details.reason);
     }
-    const text = parseOpenAiText(raw);
-    if (!text.trim() && input.allowEmptyText === true) return text;
+    const parsedOutput = parseOpenAiTextWithTelemetry(raw);
+    const text = parsedOutput.text;
+    if (!text.trim() && input.allowEmptyText === true) return parsedOutput;
     if (!text.trim()) {
       const details = emptyTextApiErrorDetails();
       throw new TextApiError(502, details.message, details.code, details.reason);
     }
-    return text;
+    return parsedOutput;
   }
 
   const prompt = prepareGeminiPromptTransport(input.history, input.systemInstruction);
@@ -173,16 +269,23 @@ export async function callTextProvider(input: TextProviderInput): Promise<string
     const details = parseTextApiErrorPayload(raw, response.status);
     throw new TextApiError(response.status, details.message, details.code, details.reason);
   }
-  let parsed: any;
-  try { parsed = JSON.parse(raw); } catch { throw new TextApiError(502, "Gemini 返回了无法解析的响应。", "provider_invalid_response"); }
-  const text = parsed.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || "").join("") || "";
-  if (!text.trim() && input.allowEmptyText === true) return text;
+  let parsedPayload: any;
+  try { parsedPayload = JSON.parse(raw); } catch {
+    throw new TextApiError(502, "Gemini 返回了无法解析的响应。", "provider_invalid_response");
+  }
+  const parsedOutput = parseGeminiTextWithTelemetry(raw);
+  const text = parsedOutput.text;
+  if (!text.trim() && input.allowEmptyText === true) return parsedOutput;
   if (!text.trim()) {
-    const reason = parsed.candidates?.[0]?.finishReason || parsed.promptFeedback?.blockReason;
+    const reason = parsedPayload.candidates?.[0]?.finishReason || parsedPayload.promptFeedback?.blockReason;
     const details = emptyTextApiErrorDetails(502, reason || "");
     throw new TextApiError(502, details.message, details.code, details.reason);
   }
-  return text;
+  return parsedOutput;
+}
+
+export async function callTextProvider(input: TextProviderInput): Promise<string> {
+  return (await callTextProviderWithDiagnostics(input)).text;
 }
 
 export async function fetchTextModels(input: { apiKey: string; apiEndpoint?: string }): Promise<string[]> {
