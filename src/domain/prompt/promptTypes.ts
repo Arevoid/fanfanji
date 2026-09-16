@@ -24,6 +24,8 @@ export interface PromptHistoryEntry {
   // apiChat historically accepts the caller's role string without narrowing it.
   role: string;
   text: string;
+  /** Request-local priority used to retain explicit antecedents on token-limit retries. */
+  contextPriority?: "pinned";
 }
 
 export interface PromptHistoryInjection {

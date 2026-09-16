@@ -198,14 +198,15 @@ export async function callTextProviderWithDiagnostics(input: TextProviderInput):
   if (!model) throw new TextApiError(400, "请先选择或填写模型名称。", "configuration");
 
   if (input.apiEndpoint?.trim()) {
-    const prompt = prepareOpenAiPromptTransport(input.history, input.systemInstruction);
+    const prompt = prepareOpenAiPromptTransport(input.history, input.systemInstruction, input.message);
     const messages: any[] = [];
     if (prompt.systemInstruction) messages.push({ role: "system", content: prompt.systemInstruction });
     messages.push(...prompt.history.map(toOpenAiHistoryEntry));
     if (prompt.finalSystemInstruction) messages.push({ role: "system", content: prompt.finalSystemInstruction });
+    const currentMessage = prompt.currentMessage ?? input.message;
     messages.push({ role: "user", content: input.imageDataUrl
-      ? [{ type: "text", text: input.message || "请结合这张画面回答。" }, { type: "image_url", image_url: { url: input.imageDataUrl } }]
-      : input.message });
+      ? [{ type: "text", text: currentMessage || "请结合这张画面回答。" }, { type: "image_url", image_url: { url: input.imageDataUrl } }]
+      : currentMessage });
     const response = await fetchWithTimeout(openAiEndpoint(input.apiEndpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },

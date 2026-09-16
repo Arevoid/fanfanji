@@ -112,4 +112,44 @@ const agreementContext = buildDirectChatHistoryContext({
 assert.equal(agreementContext.topicBoundary.mode, "continue");
 assert.match(agreementContext.crossDayHistoricalReference, /你要发 亲亲老婆，么么哒/);
 assert.match(agreementContext.crossDayHistoricalReference, /亲亲老婆，么么哒/);
+const questionnaireContext = buildDirectChatHistoryContext({
+  messages: [
+    { id: "questionnaire", sender: "user", content: "小狗测试问卷：\n1. 你会主动摇尾巴吗？\n2. 如果我生病，你会怎么照顾我？\n3. 你最想和我做什么？", timestamp: day("2026-09-14T12:00:00+08:00") },
+    { id: "questionnaire-followup", sender: "user", content: "补充：请每题都回答。", timestamp: day("2026-09-14T12:00:10+08:00") },
+    { id: "questionnaire-reply", sender: "character", content: "嗯？", timestamp: day("2026-09-14T12:00:20+08:00") },
+    { id: "questionnaire-current", sender: "user", content: "那来填一下这个吧", timestamp: day("2026-09-16T12:00:00+08:00") },
+  ] as any,
+  userMessageId: "questionnaire-current",
+  userMessageAt: day("2026-09-16T12:00:00+08:00"),
+  enableTimeAwareness: true,
+  contextLimit: 1,
+  historyCharacterLimit: 1,
+  characterName: "角色",
+  userName: "用户",
+  requestTime: new Date(day("2026-09-16T12:00:00+08:00")),
+});
+assert.equal(questionnaireContext.topicBoundary.mode, "continue");
+assert.ok(questionnaireContext.history.some((entry) => entry.contextPriority === "pinned"), "explicit antecedents are pinned in request history");
+assert.ok(questionnaireContext.history.some((entry) => entry.text.includes("小狗测试问卷") && entry.text.includes("补充：请每题都回答")), "older questionnaire and adjacent user follow-up survive tight time/message budgets as one turn");
+const splitUserTurn = buildDirectChatHistoryContext({
+  messages: [
+    { id: "split-1", sender: "user", content: "我刚才答应了她。", timestamp: 1 },
+    { id: "split-2", sender: "user", content: "但是我其实不想去。", timestamp: 2 },
+    { id: "split-current", sender: "user", content: "你觉得我应该怎么办？", timestamp: 3 },
+  ] as any,
+  userMessageId: "split-current",
+  userMessageAt: 3,
+  enableTimeAwareness: false,
+  contextLimit: 1,
+  historyCharacterLimit: 1,
+  characterName: "角色",
+  userName: "用户",
+});
+assert.equal(splitUserTurn.history.length, 1, "consecutive user bubbles are represented as one complete user turn");
+assert.match(splitUserTurn.history[0].text, /我刚才答应了她。\n但是我其实不想去。/);
+assert.equal(splitUserTurn.history[0].contextPriority, "pinned", "the unfinished multi-bubble user turn survives context recovery");
 console.log("PASS direct chat history context deduplicates, applies topic boundaries, and keeps the bounded window");
+
+function day(value: string): number {
+  return new Date(value).getTime();
+}

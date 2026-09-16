@@ -66,24 +66,36 @@ const compactSystemInstruction = (systemInstruction: string): string => {
  */
 export function buildContextRecoveryRequests(request: AiChatRequest): AiChatRequest[] {
   const history = Array.isArray(request.history) ? request.history : [];
+  const compactedSystemInstruction = request.systemInstruction
+    ? compactSystemInstruction(request.systemInstruction)
+    : request.systemInstruction;
+  const variants: AiChatRequest[] = [];
+  const seen = new Set<string>();
+  const addVariant = (systemInstruction: string | undefined, retainedHistory: typeof history) => {
+    if (retainedHistory.length === history.length && systemInstruction === request.systemInstruction) return;
+    const key = JSON.stringify({ systemInstruction, history: retainedHistory });
+    if (seen.has(key)) return;
+    seen.add(key);
+    variants.push({ ...request, history: retainedHistory, systemInstruction });
+  };
+
+  // First reduce the usually bulky system prompt while retaining the complete
+  // dialogue. Only then progressively trim unpinned history.
+  if (compactedSystemInstruction !== request.systemInstruction) {
+    addVariant(compactedSystemInstruction, history);
+  }
+
+  const pinnedIndexes = new Set(history.flatMap((entry, index) => entry?.contextPriority === "pinned" ? [index] : []));
   const historyLengths = Array.from(new Set([
-    Math.max(1, Math.ceil(history.length * 0.75)),
-    Math.max(1, Math.ceil(history.length * 0.5)),
-    Math.max(1, Math.ceil(history.length * 0.25)),
+    Math.ceil(history.length * 0.75),
+    Math.ceil(history.length * 0.5),
+    Math.ceil(history.length * 0.25),
     0,
   ])).filter((length) => length < history.length);
-  const variants: AiChatRequest[] = historyLengths.map((length) => ({
-    ...request,
-    history: length === 0 ? [] : history.slice(-length),
-  }));
-  const compactedSystemInstruction = compactSystemInstruction(request.systemInstruction || "");
-  if (compactedSystemInstruction !== request.systemInstruction) {
-    variants.push({
-      ...request,
-      history: history.slice(-Math.max(1, Math.ceil(history.length * 0.25))),
-      systemInstruction: compactedSystemInstruction,
-    });
-    variants.push({ ...request, history: [], systemInstruction: compactedSystemInstruction });
+  for (const length of historyLengths) {
+    const suffixStart = Math.max(0, history.length - length);
+    const retainedHistory = history.filter((entry, index) => index >= suffixStart || pinnedIndexes.has(index));
+    addVariant(compactedSystemInstruction, retainedHistory);
   }
   return variants;
 }
@@ -155,7 +167,10 @@ const requestDirectChatResponseWithContextRecovery = async (input: {
   for (let index = 0; index < requests.length; index += 1) {
     try {
       if (index > 0) {
-        console.warn(`[chat-context-recovery] retrying with request-local context reduction (${index}/${requests.length - 1})`);
+        const retryRequest = requests[index];
+        const history = Array.isArray(retryRequest.history) ? retryRequest.history : [];
+        const pinnedCount = history.filter((entry) => entry?.contextPriority === "pinned").length;
+        console.warn(`[chat-context-recovery] retrying request-local variant ${index}/${requests.length - 1}: history=${history.length}, pinned=${pinnedCount}, historyChars=${history.reduce((total, entry) => total + String(entry?.text || entry?.content || "").length, 0)}, compactedSystem=${retryRequest.systemInstruction !== input.request.systemInstruction}`);
       }
       return await requestDirectChatResponse({
         ...input,

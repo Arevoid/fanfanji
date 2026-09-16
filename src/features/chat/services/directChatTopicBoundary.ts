@@ -12,6 +12,7 @@ type TopicMessage = Pick<Message, "sender" | "content" | "timestamp" | "imageAss
 
 const EXPLICIT_SHIFT_PATTERN = /(?:换个话题|换个聊法|聊点别的|说点别的|不聊(?:这个|了)|先不说(?:这个|了)|重新开始|开始新话题|另一个话题|对了(?:[，,、]\s*(?:换个|聊点|说点|另外|另一件|我想聊|今天|现在)))/u;
 const EXPLICIT_CONTINUE_PATTERN = /(?:继续|上次|之前|刚才|还记得|后来|结果|接着|那个(?:问题|事情|话题|图片)|你说的|这件事)/u;
+const REFERENTIAL_FOLLOW_UP_PATTERN = /(?:填(?:写|一下|一)?(?:这个|这份|这张|上面|刚才)|(?:回答|作答|逐题)(?:一下)?(?:这个|这份|这些|上面|刚才)?|(?:这个|这份|这张|上面|刚才)(?:问题|问卷|那题|这些题)|照着?(?:上面|这个|这份)|按(?:上面|这份|这些题)|把(?:上面|这份|这些题)(?:做完|答完|填完))/u;
 const PRIOR_REFERENCE_PATTERN = /(?:刚才|上次|之前|那个(?:问题|事情|话题|图片)|你说的|还记得|后来|结果)/u;
 const DATED_PRIOR_REFERENCE_PATTERN = /(?:昨天|前天)[^。！？\n]{0,24}(?:说过|聊过|提过|约定|答应|讲过|定下|旧账|那件事|那个话题|打卡格式)/u;
 const CLOSURE_PATTERN = /(?:晚安|先这样|回头聊|下次再说|我先忙|拜拜|睡了|到家再聊|改天聊|先不聊了|先去忙)/u;
@@ -83,7 +84,8 @@ export function decideDirectChatTopicBoundary(input: {
   const crossDay = !sameCalendarDay(current.timestamp, latest.timestamp);
   const currentIsImage = isImageMessage(current);
   const explicitShift = EXPLICIT_SHIFT_PATTERN.test(currentText);
-  const explicitContinue = EXPLICIT_CONTINUE_PATTERN.test(currentText);
+  const explicitFollowUpReference = REFERENTIAL_FOLLOW_UP_PATTERN.test(currentText);
+  const explicitContinue = EXPLICIT_CONTINUE_PATTERN.test(currentText) || explicitFollowUpReference;
   const priorReference = PRIOR_REFERENCE_PATTERN.test(currentText)
     || DATED_PRIOR_REFERENCE_PATTERN.test(currentText);
   const priorClosed = CLOSURE_PATTERN.test(normalizeTopicText(recent.slice(-2).map((message) => message.content).join(" ")));
@@ -96,7 +98,9 @@ export function decideDirectChatTopicBoundary(input: {
     return { mode: "shift", confidence: 0.99, reasons: ["explicit_topic_shift"] };
   }
   if (explicitContinue || priorReference) {
-    reasons.push(explicitContinue ? "explicit_continuation" : "prior_topic_reference");
+    reasons.push(explicitFollowUpReference
+      ? "explicit_follow_up_reference"
+      : explicitContinue ? "explicit_continuation" : "prior_topic_reference");
     return { mode: "continue", confidence: explicitContinue ? 0.99 : 0.86, reasons };
   }
 

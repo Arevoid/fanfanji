@@ -153,7 +153,7 @@ async function directClientChatImpl(params: {
     }
 
     const messagesPayload: any[] = [];
-    const openAiPrompt = prepareOpenAiPromptTransport(history, systemInstruction);
+    const openAiPrompt = prepareOpenAiPromptTransport(history, systemInstruction, message);
     if (openAiPrompt.systemInstruction) {
       messagesPayload.push({ role: "system", content: openAiPrompt.systemInstruction });
     }
@@ -165,9 +165,10 @@ async function directClientChatImpl(params: {
     if (openAiPrompt.finalSystemInstruction) {
       messagesPayload.push({ role: "system", content: openAiPrompt.finalSystemInstruction });
     }
+    const currentMessage = openAiPrompt.currentMessage ?? message;
     messagesPayload.push({ role: "user", content: imageDataUrl
-      ? [{ type: "text", text: message }, { type: "image_url", image_url: { url: imageDataUrl } }]
-      : message });
+      ? [{ type: "text", text: currentMessage }, { type: "image_url", image_url: { url: imageDataUrl } }]
+      : currentMessage });
 
     const responseFetch = await fetchWithTimeout(endpointUrl, {
       method: "POST",
@@ -256,7 +257,8 @@ async function directClientChatImpl(params: {
       }
     }
 
-    // Add current user message
+    // Add current user message, joining a trailing historical user bubble
+    // into the same provider turn below.
     const cleanMsg = (message || "").trim();
     if (cleanMsg || imageDataUrl) {
       const currentParts: any[] = [];
@@ -398,9 +400,17 @@ export type ApiChatParams = {
 // chat wrapper
 async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSession }): Promise<{ text: string }> {
   const { signal, timeoutMs, ledger, purpose, parentActionId, characterId, relationId, conversationId, retryReasons, fallbackReasons, estimatedOutputTokens, ...requestBody } = params;
+  const providerHistory = Array.isArray(requestBody.history)
+    ? requestBody.history.map((entry) => {
+      if (!entry || typeof entry !== "object") return entry;
+      const { contextPriority: _contextPriority, ...providerEntry } = entry;
+      return providerEntry;
+    })
+    : requestBody.history;
+  const safeRequestBody = { ...requestBody, history: providerHistory };
   const backendRequestBody = typeof timeoutMs === "number"
-    ? { ...requestBody, timeoutMs }
-    : requestBody;
+    ? { ...safeRequestBody, timeoutMs }
+    : safeRequestBody;
   let res: Response | null = null;
   try {
     ledger?.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/chat", transport: "backend_proxy" });

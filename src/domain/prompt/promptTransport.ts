@@ -2,6 +2,32 @@ export interface TransportHistoryEntry {
   role?: string;
   text?: string;
   content?: string;
+  /** Request-local marker used by context-length recovery; never sent to a provider. */
+  contextPriority?: "pinned";
+}
+
+/**
+ * Consecutive bubbles from one speaker are a single conversational turn.
+ * Keeping them separate is accepted by some APIs but interpreted inconsistently
+ * by OpenAI-compatible providers, so normalize the role sequence first.
+ */
+export function coalesceAdjacentPromptTurns<T extends TransportHistoryEntry>(history: readonly T[]): T[] {
+  const result: T[] = [];
+  for (const entry of history) {
+    const text = entry.text || entry.content || "";
+    const previous = result[result.length - 1];
+    if (entry.role && entry.role !== "system" && previous?.role === entry.role && previous.role !== "system") {
+      const previousText = previous.text || previous.content || "";
+      result[result.length - 1] = {
+        ...previous,
+        text: [previousText, text].filter(Boolean).join("\n"),
+        ...(entry.contextPriority === "pinned" ? { contextPriority: "pinned" as const } : {}),
+      } as T;
+    } else {
+      result.push({ ...entry } as T);
+    }
+  }
+  return result;
 }
 
 const FINAL_LANGUAGE_MARKER = "[FINAL OUTPUT LANGUAGE — HIGHEST PRIORITY]";
@@ -35,7 +61,7 @@ export function prepareGeminiPromptTransport(
   }
   if (finalLanguageInstruction) systemParts.push(finalLanguageInstruction);
   return {
-    history: dialogueHistory,
+    history: coalesceAdjacentPromptTurns(dialogueHistory),
     systemInstruction: systemParts.filter(Boolean).join("\n\n---\n\n") || undefined,
   };
 }
@@ -43,12 +69,23 @@ export function prepareGeminiPromptTransport(
 export function prepareOpenAiPromptTransport(
   history: readonly TransportHistoryEntry[] | undefined,
   systemInstruction?: string,
+  currentMessage?: string,
 ) {
   const { baseSystemInstruction, finalLanguageInstruction } = splitFinalLanguageInstruction(systemInstruction);
+  const normalizedHistory = coalesceAdjacentPromptTurns(history || []);
+  let normalizedCurrentMessage = currentMessage;
+  const latestHistoryEntry = normalizedHistory[normalizedHistory.length - 1];
+  if (typeof currentMessage === "string" && latestHistoryEntry?.role === "user") {
+    normalizedHistory.pop();
+    normalizedCurrentMessage = [latestHistoryEntry.text || latestHistoryEntry.content || "", currentMessage]
+      .filter(Boolean)
+      .join("\n");
+  }
   return {
-    history: [...(history || [])],
+    history: normalizedHistory,
     systemInstruction: baseSystemInstruction || undefined,
     finalSystemInstruction: finalLanguageInstruction || undefined,
+    ...(currentMessage !== undefined ? { currentMessage: normalizedCurrentMessage } : {}),
   };
 }
 

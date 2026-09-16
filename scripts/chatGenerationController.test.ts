@@ -158,6 +158,15 @@ assert.ok(contextRecoveryRequests.length > 0);
 assert.ok(contextRecoveryRequests.every((candidate) => candidate.history.length < contextRequest.history.length));
 assert.equal(contextRequest.history.length, 8, "context recovery must not mutate the original request history");
 
+const pinnedHistory = contextHistory.map((entry, index) => index === 1 ? { ...entry, contextPriority: "pinned" as const } : entry);
+const oversizedSystem = `核心规则\n\n---\n\n${"冗余设定 ".repeat(4_000)}`;
+const oversizedRequest = { ...request, history: pinnedHistory, systemInstruction: oversizedSystem };
+const prioritizedRecoveryRequests = buildContextRecoveryRequests(oversizedRequest);
+assert.equal(prioritizedRecoveryRequests[0].history.length, pinnedHistory.length, "system prompt is compacted before any dialogue history is removed");
+assert.ok(prioritizedRecoveryRequests[0].systemInstruction!.length < oversizedSystem.length);
+assert.ok(prioritizedRecoveryRequests.every((candidate) => candidate.history.some((entry) => entry.contextPriority === "pinned")), "explicitly referenced antecedents survive every context recovery tier");
+assert.equal(oversizedRequest.history.length, 8, "recovery variants do not mutate request-local history");
+
 const contextAttemptHistoryLengths: number[] = [];
 const contextRecoveryAi = (async (input) => {
   contextAttemptHistoryLengths.push(input.history.length);

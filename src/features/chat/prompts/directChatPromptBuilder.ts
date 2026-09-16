@@ -1,6 +1,6 @@
 import type { CharacterPromptProjection } from "../../../domain/prompt/characterPromptProjector";
 import { LIVING_HUMAN_PROMPT } from "../../../utils/livingPrompt";
-import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "./chatPromptPolicy";
+import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, DIRECT_CHAT_TURN_COMPLETENESS_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "./chatPromptPolicy";
 import { CHINESE_SEMANTIC_CONTINUITY_PROMPT, CURRENT_SCENE_CONTINUITY_PROMPT } from "./directChatTurnPrompt";
 import { finalizeCharacterChatSystemInstruction } from "./chatPromptBuilders";
 
@@ -84,6 +84,7 @@ export function buildDirectChatSystemInstruction(input: DirectChatPromptBuilderI
     input.userKnowledgeBoundary,
     DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES,
     DIRECT_CHAT_SINGLE_SPEAKER_RULE,
+    DIRECT_CHAT_TURN_COMPLETENESS_RULE,
     input.innerVoiceInstruction,
     CURRENT_SCENE_CONTINUITY_PROMPT,
     CHINESE_SEMANTIC_CONTINUITY_PROMPT,

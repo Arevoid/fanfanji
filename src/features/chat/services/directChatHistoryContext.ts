@@ -4,6 +4,7 @@ import { buildCrossDayHistoricalReferencePrompt, partitionDirectChatHistoryByCur
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../prompts/messagePromptSerializer";
 import { formatWeChatTimestamp } from "./chatTime";
 import { DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT, MAX_CHAT_CONTEXT_MEMORY_LIMIT } from "./chatMemoryRetrievalSettings";
+import { coalesceAdjacentPromptTurns } from "../../../domain/prompt/promptTransport";
 import {
   decideDirectChatTopicBoundary,
   type DirectChatTopicBoundaryDecision,
@@ -11,6 +12,10 @@ import {
 
 const DEFAULT_HISTORY_CHARACTER_LIMIT = 16_000;
 const DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT = 6_000;
+const MAX_TRAILING_USER_TURN_MESSAGES = 8;
+const MAX_TRAILING_USER_TURN_CHARACTERS = 12_000;
+const MAX_REFERENCED_USER_MESSAGES = 5;
+const MAX_REFERENCED_USER_MESSAGE_CHARACTERS = 8_000;
 
 const isUserImageMessage = (message: Message): boolean => message.sender === "user"
   && (Boolean(message.imageAssetId)
@@ -41,6 +46,50 @@ function selectRecentMessagesWithinBudget(
   return selected;
 }
 
+function selectReferencedUserMessages(
+  messages: readonly Message[],
+  characterName: string,
+  userName: string,
+): Message[] {
+  const candidates = messages.filter((message) => message.sender === "user" && !isUserImageMessage(message));
+  const selected: Message[] = [];
+  let usedCharacters = 0;
+  for (let index = candidates.length - 1; index >= 0 && selected.length < MAX_REFERENCED_USER_MESSAGES; index -= 1) {
+    const message = candidates[index];
+    const serialized = serializeMessageContentForPrompt(message, {
+      mode: "history", userName, characterName, includeCallTranscript: false,
+    });
+    const cost = Math.max(1, serialized.length + 32);
+    // Keep the most recent antecedent even when it alone exceeds the soft cap.
+    if (selected.length > 0 && usedCharacters + cost > MAX_REFERENCED_USER_MESSAGE_CHARACTERS) break;
+    selected.unshift(message);
+    usedCharacters += cost;
+  }
+  return selected;
+}
+
+function selectTrailingUserTurnMessages(
+  messages: readonly Message[],
+  characterName: string,
+  userName: string,
+): Message[] {
+  const selected: Message[] = [];
+  let usedCharacters = 0;
+  for (let index = messages.length - 1; index >= 0 && selected.length < MAX_TRAILING_USER_TURN_MESSAGES; index -= 1) {
+    const message = messages[index];
+    if (message.sender !== "user") break;
+    const serialized = serializeMessageContentForPrompt(message, {
+      mode: "history", userName, characterName, includeCallTranscript: false,
+    });
+    const cost = Math.max(1, serialized.length + 32);
+    // Keep the newest bubble even when a single message exceeds the soft cap.
+    if (selected.length > 0 && usedCharacters + cost > MAX_TRAILING_USER_TURN_CHARACTERS) break;
+    selected.unshift(message);
+    usedCharacters += cost;
+  }
+  return selected;
+}
+
 export function buildDirectChatHistoryContext(input: {
   messages: readonly Message[];
   userMessageId?: string;
@@ -61,7 +110,7 @@ export function buildDirectChatHistoryContext(input: {
 }): {
   finalMessages: Message[];
   recentMessages: Message[];
-  history: Array<{ role: "user" | "model"; text: string }>;
+  history: Array<{ role: "user" | "model"; text: string; contextPriority?: "pinned" }>;
   messagesForHistory: Message[];
   crossDayHistoricalReference: string;
   timeLogString: string;
@@ -107,18 +156,28 @@ export function buildDirectChatHistoryContext(input: {
     previousMessages: messagesForHistory,
     enableTimeAwareness: input.enableTimeAwareness,
   });
+  const trailingUserTurnMessages = topicBoundary.mode === "shift"
+    ? []
+    : selectTrailingUserTurnMessages(messagesForHistory, input.characterName, input.userName);
+  const referencedUserMessages = topicBoundary.reasons.includes("explicit_follow_up_reference")
+    ? selectReferencedUserMessages(messagesForHistory, input.characterName, input.userName)
+    : [];
   const topicLiveMessages = topicBoundary.mode === "shift" ? [] : historyPartition.liveMessages;
   const liveWindow = topicLiveMessages.slice(-Math.min(MAX_CHAT_CONTEXT_MEMORY_LIMIT, Math.max(0, input.contextLimit ?? DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT)));
-  const recentMessages = selectRecentMessagesWithinBudget(
+  const budgetedRecentMessages = selectRecentMessagesWithinBudget(
     liveWindow,
     Math.max(1, input.historyCharacterLimit ?? DEFAULT_HISTORY_CHARACTER_LIMIT),
     input.characterName,
     input.userName,
   );
+  const pinnedMessageIds = new Set([...trailingUserTurnMessages, ...referencedUserMessages].map((message) => message.id));
+  const recentMessages = budgetedRecentMessages;
+  const historyMessageIds = new Set([...recentMessages, ...trailingUserTurnMessages, ...referencedUserMessages].map((message) => message.id));
+  const historyMessages = messagesForHistory.filter((message) => historyMessageIds.has(message.id));
   const historicalMessages = topicBoundary.mode === "shift"
     ? []
     : selectRecentMessagesWithinBudget(
-      historyPartition.historicalMessages,
+      historyPartition.historicalMessages.filter((message) => !pinnedMessageIds.has(message.id)),
       Math.max(1, input.historicalReferenceCharacterLimit ?? DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT),
       input.characterName,
       input.userName,
@@ -130,13 +189,14 @@ export function buildDirectChatHistoryContext(input: {
     }).replace(/\s+/gu, " ").trim().slice(0, 240);
     return `- ${new Date(message.timestamp).toLocaleString("zh-CN", { hour12: false })}｜${speaker}：${content}`;
   });
-  const history = recentMessages.flatMap((message) => serializeMessageToPromptTurns(message, {
+  const history = coalesceAdjacentPromptTurns(historyMessages.flatMap((message) => serializeMessageToPromptTurns(message, {
     userName: input.userName,
     characterName: input.characterName,
   }).map((turn) => ({
     role: turn.role,
     text: input.enableTimeAwareness ? formatHistoricalMessageForPrompt(turn.text, turn.timestamp, requestTime) : turn.text,
-  })));
+    ...(pinnedMessageIds.has(message.id) ? { contextPriority: "pinned" as const } : {}),
+  }))));
   const timeLogString = input.enableTimeAwareness
     ? input.timeLogStyle === "compact"
       ? recentMessages.map((message) => {

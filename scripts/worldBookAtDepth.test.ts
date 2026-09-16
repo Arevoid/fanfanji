@@ -44,6 +44,24 @@ assert.equal(geminiTransport.systemInstruction?.endsWith("Japanese only"), true)
 assert.ok((geminiTransport.systemInstruction || "").indexOf("DEPTH") < (geminiTransport.systemInstruction || "").indexOf("Japanese only"));
 const openAiTransport = prepareOpenAiPromptTransport([{ role: "system", text: "DEPTH" }], anchoredSystem);
 assert.equal(openAiTransport.finalSystemInstruction?.endsWith("Japanese only"), true);
+const normalizedOpenAiTurn = prepareOpenAiPromptTransport([
+  { role: "user", text: "first user bubble" },
+  { role: "user", text: "second user bubble", contextPriority: "pinned" },
+  { role: "assistant", text: "character reply" },
+  { role: "user", text: "latest user bubble", contextPriority: "pinned" },
+], undefined, "current user bubble");
+assert.deepEqual(normalizedOpenAiTurn.history.map((entry) => entry.role), ["user", "assistant"]);
+assert.equal(normalizedOpenAiTurn.history[0].text, "first user bubble\nsecond user bubble");
+assert.equal(normalizedOpenAiTurn.history[0].contextPriority, "pinned");
+assert.equal(normalizedOpenAiTurn.currentMessage, "latest user bubble\ncurrent user bubble");
+const normalizedGeminiTurn = prepareGeminiPromptTransport([
+  { role: "user", text: "first user bubble" },
+  { role: "user", text: "second user bubble" },
+], undefined);
+assert.equal(normalizedGeminiTurn.history.length, 1, "Gemini transport also coalesces adjacent bubbles into one user turn");
+assert.equal(normalizedGeminiTurn.history[0].text, "first user bubble\nsecond user bubble");
+assert.deepEqual(toOpenAiHistoryEntry({ role: "user", text: "pinned antecedent", contextPriority: "pinned" }), { role: "user", content: "pinned antecedent" }, "request-local priority metadata is not sent to the provider");
+assert.deepEqual(toGeminiHistoryEntry({ role: "user", text: "pinned antecedent", contextPriority: "pinned" }), { role: "user", text: "pinned antecedent" }, "Gemini transport also excludes request-local priority metadata");
 assert.deepEqual(toOpenAiHistoryEntry({ role: "system", text: "规则" }), { role: "system", content: "规则" });
 assert.equal(toGeminiHistoryEntry({ role: "system", text: "规则" }), null);
 const geminiPrompt = prepareGeminiPromptTransport(composed.history, composed.systemInstruction);

@@ -34,6 +34,14 @@ const explicitContinuation = decideDirectChatTopicBoundary({
 assert.equal(explicitContinuation.mode, "continue");
 assert.equal(explicitContinuation.confidence, 0.99);
 
+const referentialFollowUp = decideDirectChatTopicBoundary({
+  currentMessage: { content: "那来填一下这个吧", timestamp: day("2026-09-13T12:18:00+08:00") },
+  previousMessages: oldTopic,
+  enableTimeAwareness: true,
+});
+assert.equal(referentialFollowUp.mode, "continue", "an explicit request to fill a referenced item keeps its antecedent available");
+assert.ok(referentialFollowUp.reasons.includes("explicit_follow_up_reference"));
+
 const datedPriorReference = decideDirectChatTopicBoundary({
   currentMessage: { content: "我还以为你又在翻昨天查岗的旧账", timestamp: day("2026-09-13T12:18:00+08:00") },
   previousMessages: oldTopic,

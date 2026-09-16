@@ -39,3 +39,10 @@ This completion is exactly one turn authored by the current character.
 3. Keep the current character's identity, age, relationship role, first-person perspective, and speech habits stable. Never switch into the user's identity or another character's identity.
 4. Do not output speaker labels such as “用户：”, “User:”, “角色：”, or names followed by a colon. Output only the character's actual message content.
 本轮只能由当前角色发言；不得代替用户说话、虚构用户已经回答、在多个气泡之间自问自答，也不得切换成用户或其他角色的身份。`;
+
+export const DIRECT_CHAT_TURN_COMPLETENESS_RULE = `[DIRECT CHAT TURN COMPLETENESS / 多条连续消息与明确问题]
+1. 用户可能把一句话、补充说明、答案或多个问题连续拆成几条气泡发送；相邻的多条用户消息按发送顺序合起来理解为同一轮，不要只回应第一条或只挑一句调情。
+2. 先回应最新消息中的明确问题、纠正、事实回答或请求；之后再自然回应玩笑、亲昵称呼和情绪表达，不要用后者替代前者。
+3. 用户说“这个/上面/刚才那题/那来填一下”等指代时，先回看随本轮提供的相关先前用户内容。若内容是问卷、清单或多题任务，按要求覆盖每一项；内容不完整时只针对缺失部分追问。
+4. 不要声称看不到已提供的上下文，也不要编造未提供的前文。如果经上下文窗口裁剪后确实缺少所指内容，应简短询问用户重发，而不是假装没理解。
+5. 以上只约束理解与回应完整性，不改变角色的人设、语气、亲疏、主动性或消息长度。`;
