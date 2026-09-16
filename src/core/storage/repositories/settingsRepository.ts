@@ -7,6 +7,8 @@ import { readingAssetDb } from "../readingAssetDb";
 import {
   applySettingsAssetOverlay,
   loadSettingsAssetOverlay,
+  restoreSettingsAssetOverlay,
+  saveSettingsAssetOverlay,
   SETTINGS_CUSTOM_ICONS_ASSET_ID,
   SETTINGS_WALLPAPER_ASSET_ID,
 } from "../settingsAssetRepository";
@@ -166,10 +168,75 @@ export async function hydrateSettingsOverlays(
     loadSettingsAssetOverlay(),
   ]);
   const currentSettings = getCurrentSettings();
-  const withReferences = durableOverlay
+  let withReferences = durableOverlay
     ? applySettingsDurableOverlay(currentSettings, durableOverlay)
     : currentSettings;
-  const hydratedSettings = applySettingsAssetOverlay(withReferences, assetOverlay);
+  let hydratedAssetOverlay = assetOverlay;
+
+  // Older releases kept uploaded wallpaper and app-icon data URLs inside the
+  // monolithic localStorage settings record. Move those legacy assets through
+  // the existing asset store before the first paint, then compact the settings
+  // record so unrelated edits (including API presets) can still be persisted
+  // when the browser's localStorage quota is tight. Credentials remain only in
+  // the existing settings record and are never copied into IndexedDB.
+  const isImageDataUrl = (value: unknown): value is string =>
+    typeof value === "string" && /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
+  const hasLegacyWallpaperBytes = isImageDataUrl(currentSettings.wallpaper);
+  const hasLegacyIconBytes = Object.values(currentSettings.customIcons || {}).some(isImageDataUrl);
+  const legacyWallpaper = (withReferences.wallpaperAssetId !== SETTINGS_WALLPAPER_ASSET_ID
+    || !hydratedAssetOverlay?.wallpaper)
+    && (isImageDataUrl(withReferences.wallpaper) || isImageDataUrl(currentSettings.wallpaper))
+    ? (isImageDataUrl(withReferences.wallpaper) ? withReferences.wallpaper : currentSettings.wallpaper)
+    : undefined;
+  const sourceCustomIcons = Object.values(withReferences.customIcons || {}).some(isImageDataUrl)
+    ? withReferences.customIcons
+    : currentSettings.customIcons;
+  const legacyCustomIcons = (withReferences.customIconsAssetId !== SETTINGS_CUSTOM_ICONS_ASSET_ID
+    || !hydratedAssetOverlay?.customIcons)
+    && Object.values(sourceCustomIcons || {}).some(isImageDataUrl)
+    ? sourceCustomIcons
+    : undefined;
+
+  if (legacyWallpaper || legacyCustomIcons || hasLegacyWallpaperBytes || hasLegacyIconBytes) {
+    const previousAssets = hydratedAssetOverlay;
+    const migratedAssets = {
+      ...(previousAssets || { version: 1 as const }),
+      ...(legacyWallpaper ? { wallpaper: legacyWallpaper } : {}),
+      ...(legacyCustomIcons ? { customIcons: legacyCustomIcons } : {}),
+    };
+    const needsAssetWrite = Boolean(legacyWallpaper || legacyCustomIcons);
+    try {
+      if (needsAssetWrite) await saveSettingsAssetOverlay(migratedAssets);
+      const migratedSettings: UserSettings = {
+        ...withReferences,
+        ...(legacyWallpaper ? { wallpaperAssetId: SETTINGS_WALLPAPER_ASSET_ID } : {}),
+        ...(legacyCustomIcons ? { customIconsAssetId: SETTINGS_CUSTOM_ICONS_ASSET_ID } : {}),
+      };
+      // This migration specifically needs to compact the existing localStorage
+      // record. Do not use saveSettingsAsync here: its quota fallback can report
+      // success after writing only stable references to IndexedDB, leaving the
+      // old base64 payload in phone_settings and the quota problem unresolved.
+      const saved = writeJson(storageKeys.settings, toPersistedSettings(migratedSettings));
+      if (saved.success) {
+        if (settingsOverlayHydrated && typeof indexedDB !== "undefined") {
+          enqueueSettingsOverlayWrite(() => readingAssetDb.deleteMetadataValue(SETTINGS_DURABLE_OVERLAY_KEY));
+        }
+        withReferences = migratedSettings;
+        hydratedAssetOverlay = migratedAssets;
+      } else {
+        if (needsAssetWrite) await restoreSettingsAssetOverlay(previousAssets);
+        console.warn("[settings] Legacy image assets remain in localStorage because their compact references could not be saved.");
+      }
+    } catch (error) {
+      if (needsAssetWrite) {
+        try { await restoreSettingsAssetOverlay(previousAssets); }
+        catch (restoreError) { console.warn("[settings] Could not roll back an incomplete legacy asset migration.", restoreError); }
+      }
+      console.warn("[settings] Could not migrate legacy image assets out of localStorage.", error);
+    }
+  }
+
+  const hydratedSettings = applySettingsAssetOverlay(withReferences, hydratedAssetOverlay);
   if (hydratedSettings !== currentSettings) applyHydratedSettings(hydratedSettings);
 }
 

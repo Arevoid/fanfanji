@@ -65,6 +65,43 @@ const hydrated = assets.applySettingsAssetOverlay(persisted, loadedOverlay);
 assert.equal(hydrated.wallpaper, wallpaper);
 assert.deepEqual(hydrated.customIcons, settings.customIcons);
 
+// Legacy installations had no asset references, so image data URLs lived in
+// phone_settings and could block otherwise-small API configuration writes.
+const legacyApiPreset = {
+  id: "preset-private",
+  name: "私有配置",
+  apiEndpoint: "https://provider.example/v1",
+  apiKey: "keep-this-key-in-settings-only",
+  selectedModel: "test-model",
+  apiTemperature: 0.7,
+  streamCompatible: false,
+};
+const legacySettings = {
+  ...settings,
+  apiPresets: [legacyApiPreset],
+  activeApiPresetId: legacyApiPreset.id,
+  wallpaper,
+  wallpaperAssetId: undefined,
+  customIcons: settings.customIcons,
+  customIconsAssetId: undefined,
+} as UserSettings;
+values.set("phone_settings", JSON.stringify(legacySettings));
+let migratedSettings = legacySettings;
+await repository.hydrateSettingsOverlays(
+  () => migratedSettings,
+  (next) => { migratedSettings = next; },
+);
+const compactLegacySettings = JSON.parse(values.get("phone_settings") || "null") as UserSettings;
+assert.equal(compactLegacySettings.wallpaper, "", "legacy wallpaper bytes should be removed from the compact settings record");
+assert.deepEqual(compactLegacySettings.customIcons, {}, "legacy icon bytes should be removed from the compact settings record");
+assert.equal(compactLegacySettings.wallpaperAssetId, assets.SETTINGS_WALLPAPER_ASSET_ID);
+assert.equal(compactLegacySettings.customIconsAssetId, assets.SETTINGS_CUSTOM_ICONS_ASSET_ID);
+assert.deepEqual(compactLegacySettings.apiPresets, [legacyApiPreset], "compaction must preserve API presets and keys in the existing settings record");
+assert.equal(migratedSettings.wallpaper, wallpaper, "runtime settings should keep hydrated wallpaper data");
+assert.deepEqual(migratedSettings.customIcons, settings.customIcons, "runtime settings should keep hydrated icon data");
+const migratedAssetOverlay = await assets.loadSettingsAssetOverlay();
+assert.equal("apiPresets" in (migratedAssetOverlay || {}), false, "API keys must never be copied into the asset overlay");
+
 // Reproduce an older installation where legacy image data already filled the
 // settings bucket. The IndexedDB asset write has succeeded, but even the small
 // reference-only localStorage write is rejected; the settings reference must
@@ -96,6 +133,9 @@ assert.equal(startupSettings.wallpaper, wallpaper);
 assert.equal(startupSettings.wallpaperAssetId, assets.SETTINGS_WALLPAPER_ASSET_ID);
 assert.deepEqual(startupSettings.customIcons, settings.customIcons);
 assert.equal(startupSettings.customIconsAssetId, assets.SETTINGS_CUSTOM_ICONS_ASSET_ID);
+const stillUncompacted = JSON.parse(values.get("phone_settings")!) as UserSettings;
+assert.ok(stillUncompacted.wallpaper.startsWith("data:image/"), "failed compaction must preserve the old source until the smaller settings record can be saved");
+assert.equal((await assets.loadSettingsAssetOverlay())?.wallpaper, wallpaper, "failed compaction must not overwrite an existing referenced asset with stale embedded bytes");
 
 const recovered = repository.applySettingsDurableOverlay(JSON.parse(values.get("phone_settings")!) as UserSettings, durable!);
 const recoveredWithAssets = assets.applySettingsAssetOverlay(recovered, loadedOverlay);

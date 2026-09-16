@@ -116,7 +116,7 @@ export function useSettingsTextApiActions({ settings, onSaveSettings, apiState, 
       streamCompatible,
     }));
     if (!saved) {
-      alert("API 配置保存失败：浏览器未能保存设置。请检查浏览器存储空间后重试；当前页面中的草稿仍保留。");
+      alert("API 配置保存失败：浏览器未能保存设置。当前页面中的草稿仍保留；请到“设置 > 系统备份 > 本地存储诊断”检查空间，必要时清理已迁移副本后重试。");
       return;
     }
     alert("API 配置保存成功！");
