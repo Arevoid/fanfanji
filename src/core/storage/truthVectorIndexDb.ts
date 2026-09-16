@@ -83,3 +83,15 @@ export async function removeTruthVectorIndexRecords(ids: readonly string[]): Pro
     transaction.onabort = () => reject(transaction.error || new Error("truth vector index delete aborted"));
   });
 }
+
+/** Clears vector projections during the explicit whole-application data reset. */
+export async function clearTruthVectorIndexRecords(): Promise<void> {
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(TRUTH_VECTOR_INDEX_STORE_NAME, "readwrite");
+    transaction.objectStore(TRUTH_VECTOR_INDEX_STORE_NAME).clear();
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("truth vector index clear failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("truth vector index clear aborted"));
+  });
+}

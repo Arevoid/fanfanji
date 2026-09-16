@@ -8,6 +8,10 @@ import { cinemaAssetDb } from "../../core/storage/cinemaAssetDb";
 import { messageEntryDb } from "../../core/storage/messageEntryDb";
 import { isMessageEntryStoreEnabled } from "../../core/storage/contentStorageFlags";
 import { characterPhoneDb } from "../../core/storage/characterPhoneDb";
+import { innerVoiceDb } from "../../core/storage/innerVoiceDb";
+import { flushInnerVoiceRepository } from "../../core/storage/repositories/innerVoiceRepository";
+import { memoryProjectionJobRepository } from "../../core/storage/repositories/memoryProjectionJobRepository";
+import { clearTruthVectorIndexRecords } from "../../core/storage/truthVectorIndexDb";
 
 type ClearableStorage = Pick<Storage, "clear">;
 type ClearableCacheStorage = Pick<CacheStorage, "keys" | "delete">;
@@ -34,6 +38,13 @@ function getDefaultDependencies(): ClearApplicationDataDependencies {
       () => readingAssetDb.clearAll(),
       () => cinemaAssetDb.clearAll(),
       () => characterPhoneDb.clearAll(),
+      async () => {
+        const flushed = await flushInnerVoiceRepository();
+        if (!flushed.success) throw new Error(`无法安全清理心声数据：${flushed.error || "write"}`);
+        await innerVoiceDb.clearAll();
+      },
+      () => clearTruthVectorIndexRecords(),
+      () => memoryProjectionJobRepository.clearAll(),
     ],
   };
 }

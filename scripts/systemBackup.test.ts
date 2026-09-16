@@ -73,6 +73,11 @@ assert.equal(backup.localStorage.phone_reading_analysis_store_v1, undefined, "on
 
 const fullBackup = await buildSystemBackup(storage, ["phone_reading_analysis_store_v1"]);
 assert.equal(fullBackup.localStorage.phone_reading_analysis_store_v1, JSON.stringify({ version: 1, tasks: [] }));
+await assert.rejects(
+  buildSystemBackup(storage, [], [["聊天记录", async () => ({ success: false, error: "write" })]]),
+  /备份已取消.*聊天记录/,
+  "backup export must stop when a repository reports that its pending snapshot was not flushed",
+);
 
 assert.deepEqual(
   filterSystemBackupLocalStorageForRestore([

@@ -30,23 +30,44 @@ class StickerDB {
     });
   }
 
-  async saveGroup(group: StickerGroup): Promise<void> {
+  private async run<T>(storeName: string, mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
     const db = await this.init();
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeGroups, "readwrite");
-      const store = transaction.objectStore(this.storeGroups);
-      // Strip dynamic Object URLs before saving to DB to avoid saving expired blob URLs
-      const cleanedGroup: StickerGroup = {
-        ...group,
-        stickers: group.stickers.map((s) => ({
-          ...s,
-          url: s.url.startsWith("blob:") ? "" : s.url, // we will reconstruct blob URLs on load
-        })),
+      const transaction = db.transaction(storeName, mode);
+      let settled = false;
+      let result: T;
+      const fail = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(error || transaction.error || new Error("Sticker transaction failed"));
       };
-      const request = store.put(cleanedGroup);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      transaction.onerror = () => fail(transaction.error);
+      transaction.onabort = () => fail(transaction.error);
+      try {
+        const request = operation(transaction.objectStore(storeName));
+        request.onsuccess = () => { result = request.result; };
+        request.onerror = () => fail(request.error);
+      } catch (error) {
+        fail(error instanceof DOMException ? error : new Error(String(error)));
+      }
     });
+  }
+
+  async saveGroup(group: StickerGroup): Promise<void> {
+    // Strip dynamic Object URLs before saving to DB to avoid saving expired blob URLs
+    const cleanedGroup: StickerGroup = {
+      ...group,
+      stickers: group.stickers.map((s) => ({
+        ...s,
+        url: s.url.startsWith("blob:") ? "" : s.url, // we will reconstruct blob URLs on load
+      })),
+    };
+    await this.run(this.storeGroups, "readwrite", (store) => store.put(cleanedGroup));
   }
 
   async getGroups(): Promise<StickerGroup[]> {
@@ -86,25 +107,11 @@ class StickerDB {
   }
 
   async deleteGroup(id: string): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeGroups, "readwrite");
-      const store = transaction.objectStore(this.storeGroups);
-      const request = store.delete(id);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    await this.run(this.storeGroups, "readwrite", (store) => store.delete(id));
   }
 
   async saveStickerImage(id: string, data: Blob): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeImages, "readwrite");
-      const store = transaction.objectStore(this.storeImages);
-      const request = store.put(data, id);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    await this.run(this.storeImages, "readwrite", (store) => store.put(data, id));
   }
 
   async getStickerImage(id: string): Promise<Blob | null> {
@@ -119,14 +126,7 @@ class StickerDB {
   }
 
   async deleteStickerImage(id: string): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeImages, "readwrite");
-      const store = transaction.objectStore(this.storeImages);
-      const request = store.delete(id);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    await this.run(this.storeImages, "readwrite", (store) => store.delete(id));
   }
 
   async listStickerImages(ids?: readonly string[]): Promise<Array<{ id: string; blob: Blob }>> {

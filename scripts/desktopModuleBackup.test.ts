@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { decodeJsonStorageText } from "../src/core/storage/storageAdapter";
 import { applyDesktopModuleBackup, buildDesktopModuleBackup, parseDesktopModuleBackup } from "../src/features/home/desktopModuleBackup";
 
 class MemoryStorage {
@@ -36,7 +37,7 @@ const destination = new MemoryStorage();
 destination.setItem("phone_settings", JSON.stringify({ apiKey: "keep", wallpaper: "old" }));
 destination.setItem("calendar_album_image_old", "stale");
 applyDesktopModuleBackup(parsedBackup, destination);
-assert.deepEqual(JSON.parse(destination.getItem("phone_settings") || "{}"), { apiKey: "keep", wallpaper: "wallpaper", customIcons: { chat: "icon" }, dockColor: "#fff", dockOpacity: 70 });
+assert.deepEqual(JSON.parse(decodeJsonStorageText("phone_settings", destination.getItem("phone_settings") || "{}")), { apiKey: "keep", wallpaper: "wallpaper", customIcons: { chat: "icon" }, dockColor: "#fff", dockOpacity: 70 });
 assert.equal(destination.getItem("calendar_album_image_old"), null);
 assert.equal(destination.getItem("anniversary_title_widget-2"), "纪念日");
 assert.equal(destination.getItem("welcome_widget_name_welcome_widget_1"), "桌面欢迎");

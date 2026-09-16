@@ -13,6 +13,7 @@ import { flushCharacterPhoneRepository } from "../../core/storage/repositories/c
 import { SETTINGS_ASSET_OVERLAY_KEY } from "../../core/storage/settingsAssetRepository";
 import { SETTINGS_DURABLE_OVERLAY_KEY } from "../../core/storage/repositories/settingsRepository";
 import { flushInnerVoiceRepository, loadInnerVoiceRecords, loadInnerVoiceRecordsAsync, saveInnerVoiceRecords } from "../../core/storage/repositories/innerVoiceRepository";
+import type { StorageWriteResult } from "../../core/storage/storageTypes";
 
 export const SYSTEM_BACKUP_FORMAT = "fanfanji-system-backup" as const;
 export const SYSTEM_BACKUP_VERSION = 3 as const;
@@ -144,6 +145,26 @@ function includeCharacterPhoneLocalStorageKeys(storage: Storage, requestedKeys: 
 const CHARACTER_PHONE_INDEXED_DB_KEY = "character-phone-v1";
 const INNER_VOICE_INDEXED_DB_KEY = "inner-voice-v1";
 
+export type SystemBackupFlushers = readonly (readonly [name: string, flush: () => Promise<StorageWriteResult>])[];
+
+const DEFAULT_SYSTEM_BACKUP_FLUSHERS: SystemBackupFlushers = [
+  ["角色档案", flushCharacters],
+  ["聊天记录", flushMessages],
+  ["朋友圈", flushMoments],
+  ["阅读设置", flushReadingStore],
+  ["共读数据", flushCoReadingStore],
+  ["共写数据", flushReadingCoStoryStore],
+  ["角色手机", flushCharacterPhoneRepository],
+  ["角色心声", flushInnerVoiceRepository],
+];
+
+export async function flushSystemBackupRepositories(flushers: SystemBackupFlushers = DEFAULT_SYSTEM_BACKUP_FLUSHERS): Promise<void> {
+  const results = await Promise.all(flushers.map(async ([name, flush]) => ({ name, result: await flush() })));
+  const failures = results.filter(({ result }) => !result.success)
+    .map(({ name, result }) => `${name}（${result.error || "write"}）`);
+  if (failures.length > 0) throw new Error(`系统备份已取消：以下数据尚未可靠写入，避免导出旧副本：${failures.join("、")}`);
+}
+
 async function loadSystemBackupIndexedDbValue(key: string): Promise<unknown | null> {
   if (key === CHARACTER_PHONE_INDEXED_DB_KEY) return characterPhoneDb.loadAll();
   if (key === INNER_VOICE_INDEXED_DB_KEY) {
@@ -189,19 +210,11 @@ async function deleteSystemBackupIndexedDbValue(key: string): Promise<void> {
 export async function buildSystemBackup(
   storage: Storage,
   localStorageKeys: readonly string[],
+  flushers: SystemBackupFlushers = DEFAULT_SYSTEM_BACKUP_FLUSHERS,
 ): Promise<SystemBackupEnvelope> {
   const backupLocalStorageKeys = includeCharacterPhoneLocalStorageKeys(storage, localStorageKeys);
   const localStorageBeforeFlush = readLocalStorage(storage, backupLocalStorageKeys);
-  await Promise.all([
-    flushCharacters(),
-    flushMessages(),
-    flushMoments(),
-    flushReadingStore(),
-    flushCoReadingStore(),
-    flushReadingCoStoryStore(),
-    flushCharacterPhoneRepository(),
-    flushInnerVoiceRepository(),
-  ]);
+  await flushSystemBackupRepositories(flushers);
   const indexedDbEntries = await Promise.all(SYSTEM_BACKUP_INDEXED_DB_KEYS.map(async (key) => [
     key,
     await loadSystemBackupIndexedDbValue(key),

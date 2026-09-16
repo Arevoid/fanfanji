@@ -51,6 +51,26 @@ releaseFlush?.();
 await flushPromise;
 assert.equal(flushCompleted, true, "flush resolves after the writer becomes idle");
 
+let releaseFailingWrite: (() => void) | null = null;
+const recoveredSnapshots: number[] = [];
+const recoveringWriter = createLatestSnapshotWriter(
+  (value: number) => value,
+  async (value) => {
+    recoveredSnapshots.push(value);
+    if (value === 30) {
+      await new Promise<void>((resolve) => { releaseFailingWrite = resolve; });
+      throw new Error("old snapshot failed");
+    }
+  },
+);
+const recoveringWrite = recoveringWriter.enqueue(30);
+void recoveringWrite.catch(() => undefined);
+void recoveringWriter.enqueue(31).catch(() => undefined);
+releaseFailingWrite?.();
+await recoveringWrite;
+assert.deepEqual(recoveredSnapshots, [30, 31], "a failed in-flight snapshot must not discard a newer queued snapshot");
+await recoveringWriter.flush();
+
 const failedFlushWriter = createLatestSnapshotWriter(
   (value: number) => value,
   async () => { throw new Error("flush persistence failure"); },

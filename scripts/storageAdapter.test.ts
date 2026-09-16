@@ -69,6 +69,13 @@ assert.equal(storage.getItem("plain"), "previous", "serialization failure must n
 assert.deepEqual(writeJson("plain", undefined), { success: false, error: "serialize" });
 assert.equal(storage.getItem("plain"), "previous");
 
+const apiSettings = { apiKey: "keep-local-only", apiPresets: [{ id: "preset-a", apiKey: "credential" }], globalCss: "repeatable-css;".repeat(500) };
+assert.deepEqual(writeJson("phone_settings", apiSettings), { success: true });
+assert.match(storage.getItem("phone_settings") || "", /^lz-settings-v1:/, "large settings JSON should be compacted before it reaches quota");
+assert.deepEqual(readJson("phone_settings", {}), { value: apiSettings, found: true, valid: true }, "compressed settings preserve every value when loaded");
+storage.setItem("phone_settings", JSON.stringify(apiSettings));
+assert.deepEqual(readJson("phone_settings", {}), { value: apiSettings, found: true, valid: true }, "legacy plain settings remain readable");
+
 storage.setItem("broken-json", "{");
 assert.deepEqual(readJson("broken-json", { safe: true }), {
   value: { safe: true },

@@ -6,7 +6,7 @@ import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTav
 import { getSpeechForText } from "../utils/minimaxTts";
 import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile, createCharacterFromRawDocument } from "../features/archives/characterExport";
 import { buildCharacterTtsOptions, type TtsProvider } from "../features/voice/ttsConfig";
-import { readString } from "../core/storage/storageAdapter";
+import { decodeJsonStorageText, readString } from "../core/storage/storageAdapter";
 import { createCharacterFromInput } from "../domain/character/characterCreation";
 
 interface AppArchivesProps {
@@ -145,7 +145,7 @@ export default function AppArchives({
       let settings: any = {};
       try {
         const saved = readString("phone_settings").value;
-        if (saved) settings = JSON.parse(saved);
+        if (saved) settings = JSON.parse(decodeJsonStorageText("phone_settings", saved));
       } catch (e) {
         console.error(e);
       }
@@ -467,7 +467,7 @@ export default function AppArchives({
       
       if (rawSettings) {
         try {
-          const parsed = JSON.parse(rawSettings);
+          const parsed = JSON.parse(decodeJsonStorageText("phone_settings", rawSettings));
           apiKey = parsed.apiKey || "";
           model = parsed.selectedModel || "";
           apiEndpoint = parsed.apiEndpoint || "";

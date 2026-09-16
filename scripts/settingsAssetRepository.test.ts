@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { indexedDB } from "fake-indexeddb";
 import type { UserSettings } from "../src/types";
+import { decodeJsonStorageText } from "../src/core/storage/storageAdapter";
 
 const values = new Map<string, string>();
 let forceSettingsQuota = false;
@@ -27,6 +28,7 @@ Object.defineProperty(globalThis, "window", { configurable: true, value: { local
 
 const assets = await import("../src/core/storage/settingsAssetRepository");
 const repository = await import("../src/core/storage/repositories/settingsRepository");
+const parseStoredSettings = (raw: string | undefined) => JSON.parse(decodeJsonStorageText("phone_settings", raw || "null")) as UserSettings;
 const wallpaper = `data:image/jpeg;base64,${"w".repeat(5000)}`;
 const icon = `data:image/png;base64,${"i".repeat(2000)}`;
 const settings = {
@@ -52,7 +54,7 @@ await assets.saveSettingsAssetOverlay({
   customIcons: settings.customIcons,
 });
 assert.equal(repository.saveSettings(settings).success, true);
-const persisted = JSON.parse(values.get("phone_settings") || "null") as UserSettings;
+const persisted = parseStoredSettings(values.get("phone_settings"));
 assert.equal(persisted.wallpaper, "");
 assert.deepEqual(persisted.customIcons, {});
 assert.equal(persisted.wallpaperAssetId, assets.SETTINGS_WALLPAPER_ASSET_ID);
@@ -91,7 +93,7 @@ await repository.hydrateSettingsOverlays(
   () => migratedSettings,
   (next) => { migratedSettings = next; },
 );
-const compactLegacySettings = JSON.parse(values.get("phone_settings") || "null") as UserSettings;
+const compactLegacySettings = parseStoredSettings(values.get("phone_settings"));
 assert.equal(compactLegacySettings.wallpaper, "", "legacy wallpaper bytes should be removed from the compact settings record");
 assert.deepEqual(compactLegacySettings.customIcons, {}, "legacy icon bytes should be removed from the compact settings record");
 assert.equal(compactLegacySettings.wallpaperAssetId, assets.SETTINGS_WALLPAPER_ASSET_ID);
@@ -124,7 +126,7 @@ assert.ok(await repository.loadSettingsDurableOverlay(), "an unsynced durable ov
 // Startup must recover the durable IDs before reading asset bytes. If the
 // asset overlay is read first, applySettingsAssetOverlay sees no stable ID and
 // leaves both settings blank even though both IndexedDB records exist.
-let startupSettings = JSON.parse(values.get("phone_settings")!) as UserSettings;
+let startupSettings = parseStoredSettings(values.get("phone_settings"));
 await repository.hydrateSettingsOverlays(
   () => startupSettings,
   (next) => { startupSettings = next; },
@@ -133,11 +135,11 @@ assert.equal(startupSettings.wallpaper, wallpaper);
 assert.equal(startupSettings.wallpaperAssetId, assets.SETTINGS_WALLPAPER_ASSET_ID);
 assert.deepEqual(startupSettings.customIcons, settings.customIcons);
 assert.equal(startupSettings.customIconsAssetId, assets.SETTINGS_CUSTOM_ICONS_ASSET_ID);
-const stillUncompacted = JSON.parse(values.get("phone_settings")!) as UserSettings;
+const stillUncompacted = parseStoredSettings(values.get("phone_settings"));
 assert.ok(stillUncompacted.wallpaper.startsWith("data:image/"), "failed compaction must preserve the old source until the smaller settings record can be saved");
 assert.equal((await assets.loadSettingsAssetOverlay())?.wallpaper, wallpaper, "failed compaction must not overwrite an existing referenced asset with stale embedded bytes");
 
-const recovered = repository.applySettingsDurableOverlay(JSON.parse(values.get("phone_settings")!) as UserSettings, durable!);
+const recovered = repository.applySettingsDurableOverlay(parseStoredSettings(values.get("phone_settings")), durable!);
 const recoveredWithAssets = assets.applySettingsAssetOverlay(recovered, loadedOverlay);
 assert.equal(recoveredWithAssets.wallpaper, wallpaper);
 assert.deepEqual(recoveredWithAssets.customIcons, settings.customIcons);

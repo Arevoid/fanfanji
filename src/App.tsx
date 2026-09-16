@@ -5,7 +5,7 @@ import { createId } from "./core/id/createId";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { hydrateSettingsOverlays, loadSettings, resolveSettingsUpdate, saveSettings, saveSettingsAsync } from "./core/storage/repositories/settingsRepository";
-import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
+import { readString, remove as removeStoredValue, STORAGE_WRITE_FAILURE_EVENT, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
 import { flushMessages, initializeMessages, loadMessages, saveMessages } from "./core/storage/repositories/messageRepository";
@@ -602,6 +602,21 @@ export default function App() {
   useRuntimeErrorMonitoring();
   const { resolvedTheme } = useTheme();
   useVisualViewport();
+  const [storageWriteWarning, setStorageWriteWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onStorageWriteFailure = (event: Event) => {
+      const detail = (event as CustomEvent<{ error?: string }>).detail;
+      const reason = detail?.error === "quota"
+        ? "浏览器本地空间不足"
+        : detail?.error === "unavailable"
+          ? "浏览器本地存储不可用"
+          : "浏览器未能确认写入完成";
+      setStorageWriteWarning(`${reason}，部分更改可能尚未保存。请先导出系统备份，再检查本地存储诊断。`);
+    };
+    window.addEventListener(STORAGE_WRITE_FAILURE_EVENT, onStorageWriteFailure);
+    return () => window.removeEventListener(STORAGE_WRITE_FAILURE_EVENT, onStorageWriteFailure);
+  }, []);
 
   useEffect(() => {
     void initializeInnerVoiceRepository([]).then((result) => {
@@ -3896,6 +3911,12 @@ export default function App() {
           <button type="button" onClick={() => runMemoryEvidenceControl("summary")}>Evidence summary</button>
           <button type="button" onClick={() => runMemoryEvidenceControl("finish")}>Evidence finish</button>
           <button type="button" onClick={() => runMemoryEvidenceControl("export")}>Evidence export</button>
+        </div>
+      )}
+      {storageWriteWarning && (
+        <div role="alert" className="fixed left-3 right-3 top-3 z-[1100] mx-auto flex max-w-lg items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-950 shadow-lg">
+          <span className="flex-1">{storageWriteWarning}</span>
+          <button type="button" className="shrink-0 underline" onClick={() => setStorageWriteWarning(null)}>知道了</button>
         </div>
       )}
       

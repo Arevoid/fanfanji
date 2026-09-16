@@ -27,10 +27,18 @@ export function createLatestSnapshotWriter<T>(
       while (pending !== null) {
         const snapshot = pending;
         pending = null;
-        await persist(snapshot);
+        try {
+          await persist(snapshot);
+          lastError = null;
+        } catch (error) {
+          lastError = error;
+          // A newer complete snapshot supersedes the failed one. Persist it
+          // before surfacing the error so a transient failure cannot discard
+          // the latest state queued while the previous write was in flight.
+          if (pending === null) throw error;
+        }
       }
     })().catch((error) => {
-      pending = null;
       lastError = error;
       throw error;
     }).finally(() => {

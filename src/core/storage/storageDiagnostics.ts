@@ -1,4 +1,4 @@
-import { readString, remove } from "./storageAdapter";
+import { decodeJsonStorageText, readString, remove } from "./storageAdapter";
 import { loadStorageMigrationState, type StorageMigrationState } from "./storageMigrationState";
 import { loadStorageMigrationLock, type StorageMigrationLock } from "./storageMigrationLock";
 import { storageKeys } from "./storageKeys";
@@ -8,9 +8,14 @@ import { offlineStoryDb } from "./offlineStoryDb";
 import { readingAssetDb } from "./readingAssetDb";
 import { imageAssetDb } from "../../utils/imageAssetDb";
 import { stickerDb } from "../../utils/stickerDb";
+import { characterPhoneDb } from "./characterPhoneDb";
+import * as LZStringModule from "lz-string";
 import { CURRENT_STORAGE_SCHEMA_VERSION, STORAGE_MIGRATION_SCRIPT_VERSION } from "./storageVersion";
 import { loadCharacterKnowledgeMigrationState } from "./repositories/characterKnowledgeMigrationRepository";
 import type { CharacterKnowledgeMigrationState } from "../../domain/characterKnowledge/characterKnowledgeMigrationTypes";
+
+const LZString = ((LZStringModule as typeof LZStringModule & { default?: typeof LZStringModule }).default ?? LZStringModule) as typeof import("lz-string");
+const CHARACTER_PHONE_COMPRESSED_PREFIX = "lz16:";
 
 export interface LocalStorageUsageEntry {
   key: string;
@@ -119,7 +124,7 @@ export async function cleanupOrphanedStorageResources(
   const result: OrphanedResourceCleanupEntry[] = [];
   if (cleanImages && existingNames.has("FanfanImageAssets")) {
     const storedIds = new Set(await readStoreKeys("FanfanImageAssets", "images"));
-    const referencedScan = await collectReferencedAssetIds(storage);
+    const referencedScan = await collectReferencedAssetIds(storage, existingNames);
     if (!referencedScan.complete) {
       throw new Error("无法完整读取图片引用，已停止清理以保护现有资源。");
     }
@@ -259,7 +264,7 @@ function inspectStorageHealth(storage: Storage): StorageHealthReport {
   const relationshipRecords = collections.get(storageKeys.characterRelationships) || [];
   if (settingsRaw) {
     try {
-      const settings = JSON.parse(settingsRaw) as Record<string, unknown>;
+      const settings = JSON.parse(decodeJsonStorageText(storageKeys.settings, settingsRaw)) as Record<string, unknown>;
       const identities = Array.isArray(settings.identities)
         ? settings.identities.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
         : [];
@@ -295,11 +300,26 @@ function inspectStorageHealth(storage: Storage): StorageHealthReport {
   return { checkedCollections, findings, indexedDb: [], resources: [] };
 }
 
-async function collectReferencedAssetIds(storage: Storage): Promise<ReferencedAssetScan> {
+function collectNestedImageAssetIds(value: unknown, referenced: Set<string>): void {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectNestedImageAssetIds(entry, referenced));
+    return;
+  }
+  for (const [key, nested] of Object.entries(value)) {
+    if (/^(?:image|avatar).*AssetId$/i.test(key) && typeof nested === "string" && nested.length > 0) {
+      referenced.add(nested);
+    }
+    collectNestedImageAssetIds(nested, referenced);
+  }
+}
+
+async function collectReferencedAssetIds(storage: Storage, existingNames: Set<string> = new Set()): Promise<ReferencedAssetScan> {
   const referenced = new Set<string>();
   let complete = true;
   const fieldsByKey: Array<[string, string]> = [
     [storageKeys.characters, "imageReferenceAssetId"],
+    [storageKeys.legacyCharacters, "imageReferenceAssetId"],
     [storageKeys.messages, "imageAssetId"],
     [storageKeys.imageGenerationRecords, "imageAssetId"],
     [storageKeys.forumProfiles, "avatarAssetId"],
@@ -317,6 +337,37 @@ async function collectReferencedAssetIds(storage: Storage): Promise<ReferencedAs
       });
     } catch {
       // An incomplete reference scan must never authorize destructive cleanup.
+      complete = false;
+    }
+  }
+  // Role-phone gallery images live in the same image-asset database as chat
+  // pictures. These records were missing from the old orphan scan, which
+  // could therefore delete a still-visible gallery photo.
+  const characterPhoneKeys: string[] = [storageKeys.characterPhones];
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (key?.startsWith("phone_character_phone_v2_")) characterPhoneKeys.push(key);
+    }
+  } catch {
+    complete = false;
+  }
+  for (const key of characterPhoneKeys) {
+    let raw: string | null;
+    try {
+      raw = storage.getItem(key);
+    } catch {
+      complete = false;
+      continue;
+    }
+    if (!raw) continue;
+    try {
+      const serialized = raw.startsWith(CHARACTER_PHONE_COMPRESSED_PREFIX)
+        ? LZString.decompressFromUTF16(raw.slice(CHARACTER_PHONE_COMPRESSED_PREFIX.length))
+        : raw;
+      if (!serialized) throw new Error("empty character phone record");
+      collectNestedImageAssetIds(JSON.parse(serialized), referenced);
+    } catch {
       complete = false;
     }
   }
@@ -340,6 +391,21 @@ async function collectReferencedAssetIds(storage: Storage): Promise<ReferencedAs
       complete = false;
     }
   }
+  if (typeof indexedDB !== "undefined" && existingNames.has("FanfanjiCharacterPhoneDB")) {
+    try {
+      (await characterPhoneDb.loadAll()).forEach((phone) => collectNestedImageAssetIds(phone, referenced));
+    } catch {
+      complete = false;
+    }
+  }
+  if (typeof indexedDB !== "undefined" && existingNames.has("FanfanjiReadingMetadataDB")) {
+    try {
+      const characters = await readingAssetDb.loadMetadataValue<unknown>("character-archive-v4");
+      if (characters !== null) collectNestedImageAssetIds(characters, referenced);
+    } catch {
+      complete = false;
+    }
+  }
   return { ids: referenced, complete };
 }
 
@@ -357,7 +423,7 @@ function buildIdentityDiagnosticSummary(storage: Storage): IdentityDiagnosticSum
   const settingsRaw = storage.getItem(storageKeys.settings);
   if (!settingsRaw) return undefined;
   try {
-    const settings = JSON.parse(settingsRaw) as Record<string, unknown>;
+    const settings = JSON.parse(decodeJsonStorageText(storageKeys.settings, settingsRaw)) as Record<string, unknown>;
     const identities = Array.isArray(settings.identities)
       ? settings.identities.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
       : [];
@@ -463,7 +529,7 @@ async function inspectIndexedDbResources(storage: Storage, existingNames: Set<st
   const resources: IndexedDbResourceHealthEntry[] = [];
   if (existingNames.has("FanfanImageAssets")) {
     const storedIds = new Set(await readStoreKeys("FanfanImageAssets", "images"));
-    const referencedScan = await collectReferencedAssetIds(storage);
+    const referencedScan = await collectReferencedAssetIds(storage, existingNames);
     const referencedIds = referencedScan.ids;
     resources.push({
       database: "FanfanImageAssets",
@@ -504,6 +570,9 @@ async function inspectIndexedDbHealth(existingDatabaseNames?: Set<string>): Prom
     "FanfanjiReadingCoverDB",
     "FanfanjiReadingMetadataDB",
     "FanfanjiCharacterPhoneDB",
+    "FanfanjiInnerVoiceDB",
+    "FanfanjiTruthVectorIndexDB",
+    "FanfanjiMemoryProjectionDB",
   ]);
   const existingNames = existingDatabaseNames
     ? [...existingDatabaseNames].filter((name) => knownNames.has(name))

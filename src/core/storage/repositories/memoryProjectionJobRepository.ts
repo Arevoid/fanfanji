@@ -42,6 +42,13 @@ export class MemoryProjectionJobIndexedDbRepository {
     this.database = null;
   }
 
+  async clearAll(): Promise<void> {
+    const transaction = (await this.db()).transaction(MEMORY_PROJECTION_JOB_STORE_NAME, "readwrite");
+    const complete = idbTransaction(transaction);
+    transaction.objectStore(MEMORY_PROJECTION_JOB_STORE_NAME).clear();
+    await complete;
+  }
+
   async get(jobId: string): Promise<MemoryProjectionJob | undefined> {
     if (!jobId.trim()) return undefined;
     const transaction = (await this.db()).transaction(MEMORY_PROJECTION_JOB_STORE_NAME, "readonly");

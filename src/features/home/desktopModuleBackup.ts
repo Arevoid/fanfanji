@@ -1,5 +1,6 @@
 import type { HomeScreenItem, UserSettings } from "../../types";
 import { normalizeHomeScreenLayout } from "./homeGrid";
+import { decodeJsonStorageText, encodeJsonStorageText } from "../../core/storage/storageAdapter";
 
 export const DESKTOP_SETTING_KEYS = [
   "wallpaper", "wallpaperSource", "customIcons", "dockApps", "dockColor", "dockOpacity", "dockBorderRadius",
@@ -76,9 +77,9 @@ export const applyDesktopModuleBackup = (backup: DesktopModuleBackup, storage: S
   let currentSettings: Record<string, unknown> = {};
   const rawSettings = storage.getItem("phone_settings");
   if (rawSettings) {
-    try { currentSettings = JSON.parse(rawSettings) as Record<string, unknown>; } catch { /* overwrite only known desktop fields below */ }
+    try { currentSettings = JSON.parse(decodeJsonStorageText("phone_settings", rawSettings)) as Record<string, unknown>; } catch { /* overwrite only known desktop fields below */ }
   }
-  storage.setItem("phone_settings", JSON.stringify({ ...currentSettings, ...backup.settings }));
+  storage.setItem("phone_settings", encodeJsonStorageText("phone_settings", JSON.stringify({ ...currentSettings, ...backup.settings })));
   for (let index = storage.length - 1; index >= 0; index -= 1) {
     const key = storage.key(index);
     if (key && isDesktopStorageKey(key) && !Object.hasOwn(backup.storage, key)) storage.removeItem(key);

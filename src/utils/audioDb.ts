@@ -28,64 +28,56 @@ class AudioDB {
     });
   }
 
-  async saveTrackFile(id: string, file: Blob): Promise<void> {
+  private async run<T>(storeName: string, mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
     const db = await this.init();
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, "readwrite");
-      const store = transaction.objectStore(this.storeName);
-      const request = store.put(file, id);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      const transaction = db.transaction(storeName, mode);
+      let settled = false;
+      let result: T;
+      const fail = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(error || transaction.error || new Error("Music asset transaction failed"));
+      };
+      transaction.oncomplete = () => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      transaction.onerror = () => fail(transaction.error);
+      transaction.onabort = () => fail(transaction.error);
+      try {
+        const request = operation(transaction.objectStore(storeName));
+        request.onsuccess = () => { result = request.result; };
+        request.onerror = () => fail(request.error);
+      } catch (error) {
+        fail(error instanceof DOMException ? error : new Error(String(error)));
+      }
     });
+  }
+
+  async saveTrackFile(id: string, file: Blob): Promise<void> {
+    await this.run(this.storeName, "readwrite", (store) => store.put(file, id));
   }
 
   async getTrackFile(id: string): Promise<Blob | null> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, "readonly");
-      const store = transaction.objectStore(this.storeName);
-      const request = store.get(id);
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error);
-    });
+    return (await this.run(this.storeName, "readonly", (store) => store.get(id))) || null;
   }
 
   async deleteTrackFile(id: string): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, "readwrite");
-      const store = transaction.objectStore(this.storeName);
-      const request = store.delete(id);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    await this.run(this.storeName, "readwrite", (store) => store.delete(id));
   }
 
   async saveTrackCover(id: string, file: Blob): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const request = db.transaction(this.coverStoreName, "readwrite").objectStore(this.coverStoreName).put(file, id);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    await this.run(this.coverStoreName, "readwrite", (store) => store.put(file, id));
   }
 
   async getTrackCover(id: string): Promise<Blob | null> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const request = db.transaction(this.coverStoreName, "readonly").objectStore(this.coverStoreName).get(id);
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error);
-    });
+    return (await this.run(this.coverStoreName, "readonly", (store) => store.get(id))) || null;
   }
 
   async deleteTrackCover(id: string): Promise<void> {
-    const db = await this.init();
-    return new Promise((resolve, reject) => {
-      const request = db.transaction(this.coverStoreName, "readwrite").objectStore(this.coverStoreName).delete(id);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+    await this.run(this.coverStoreName, "readwrite", (store) => store.delete(id));
   }
 
   async clearAll(): Promise<void> {

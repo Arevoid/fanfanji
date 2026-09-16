@@ -26,9 +26,28 @@ class ImageAssetDB {
   private async run<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
     const db = await this.init();
     return new Promise((resolve, reject) => {
-      const request = operation(db.transaction(this.storeName, mode).objectStore(this.storeName));
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      const transaction = db.transaction(this.storeName, mode);
+      let settled = false;
+      let result: T;
+      const fail = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(error || transaction.error || new Error("Image asset transaction failed"));
+      };
+      transaction.oncomplete = () => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      transaction.onerror = () => fail(transaction.error);
+      transaction.onabort = () => fail(transaction.error);
+      try {
+        const request = operation(transaction.objectStore(this.storeName));
+        request.onsuccess = () => { result = request.result; };
+        request.onerror = () => fail(request.error);
+      } catch (error) {
+        fail(error instanceof DOMException ? error : new Error(String(error)));
+      }
     });
   }
 

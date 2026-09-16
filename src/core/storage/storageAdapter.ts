@@ -1,4 +1,31 @@
 import type { StorageResult, StorageWriteResult } from "./storageTypes";
+import * as LZStringModule from "lz-string";
+
+const LZString = ((LZStringModule as typeof LZStringModule & { default?: typeof LZStringModule }).default ?? LZStringModule) as typeof import("lz-string");
+const COMPRESSED_SETTINGS_PREFIX = "lz-settings-v1:";
+export const STORAGE_WRITE_FAILURE_EVENT = "fanfanji-storage-write-failed";
+
+function notifyJsonWriteFailure(key: string, error: StorageWriteResult["error"]): void {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function" || typeof CustomEvent === "undefined") return;
+  window.dispatchEvent(new CustomEvent(STORAGE_WRITE_FAILURE_EVENT, { detail: { key, error } }));
+}
+
+/** Decodes the versioned compact representation of the settings JSON. */
+export function decodeJsonStorageText(key: string, text: string): string {
+  if (key !== "phone_settings" || !text.startsWith(COMPRESSED_SETTINGS_PREFIX)) return text;
+  const decoded = LZString.decompressFromUTF16(text.slice(COMPRESSED_SETTINGS_PREFIX.length));
+  if (!decoded) throw new Error("Stored settings could not be decompressed");
+  return decoded;
+}
+
+/** Encodes settings compactly while retaining legacy plain-JSON compatibility. */
+export function encodeJsonStorageText(key: string, serialized: string): string {
+  if (key !== "phone_settings") return serialized;
+  const compressed = LZString.compressToUTF16(serialized);
+  return compressed && compressed.length + COMPRESSED_SETTINGS_PREFIX.length < serialized.length
+    ? `${COMPRESSED_SETTINGS_PREFIX}${compressed}`
+    : serialized;
+}
 
 function isQuotaExceededError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
@@ -40,7 +67,7 @@ export function readJson<T>(key: string, fallback: T): StorageResult<T> {
   }
 
   try {
-    return { value: JSON.parse(result.value) as T, found: true, valid: true };
+    return { value: JSON.parse(decodeJsonStorageText(key, result.value)) as T, found: true, valid: true };
   } catch (error) {
     console.warn(`[storage] Invalid JSON in "${key}". The original value was left untouched.`, error);
     return { value: fallback, found: true, valid: false, error: "parse" };
@@ -113,9 +140,12 @@ export function writeJson<T>(key: string, value: T): StorageWriteResult {
       return { success: false, error: "serialize" };
     }
     JSON.parse(serialized);
-    return writeString(key, serialized);
+    const result = writeString(key, encodeJsonStorageText(key, serialized));
+    if (!result.success) notifyJsonWriteFailure(key, result.error);
+    return result;
   } catch (error) {
     console.warn(`[storage] Failed to serialize "${key}".`, error);
+    notifyJsonWriteFailure(key, "serialize");
     return { success: false, error: "serialize" };
   }
 }
