@@ -349,6 +349,83 @@ try {
   assert.match(String(requestBodies.at(-1)?.message || ""), /联系人聊天记录专项修复/);
   assert.match(String(requestBodies.at(-1)?.message || ""), /不得生成.*日记.*日程/);
 
+  const multiNpcRepairPhone = {
+    ...phone,
+    initialContentGeneratedAt: 900,
+    contacts: [...phone.contacts,
+      {
+        id: "repair-npc-mom-a",
+        name: "老妈",
+        relation: "家人",
+        kind: "npc" as const,
+        isLongTerm: true,
+        isNpc: true,
+        source: "generated" as const,
+        sourceRefs: [{ kind: "worldbook" as const, id: "world-generation" }],
+      },
+      {
+        id: "repair-npc-mom-b",
+        name: "老妈",
+        relation: "家人",
+        kind: "npc" as const,
+        isLongTerm: true,
+        isNpc: true,
+        source: "generated" as const,
+        sourceRefs: [{ kind: "worldbook" as const, id: "world-generation" }],
+      },
+      {
+        id: "repair-npc-friend",
+        name: "林晓二",
+        relation: "朋友",
+        kind: "npc" as const,
+        isLongTerm: true,
+        isNpc: true,
+        source: "generated" as const,
+        sourceRefs: [{ kind: "worldbook" as const, id: "world-generation" }],
+      },
+    ],
+    threadMessages: [{
+      id: "repair-npc-one-sided",
+      contactId: "repair-npc-mom-a",
+      sender: "contact" as const,
+      content: "周末还回来吗？",
+      timestamp: 950,
+    }],
+  };
+  responsePayload = {
+    lifeEventSummary: "",
+    evidenceSourceIds: [],
+    contactThreads: [{
+      contactName: "老妈",
+      messages: [
+        { sender: "contact", content: "周末回来吃饭吗？" },
+        { sender: "character", content: "好，我周六回去。" },
+      ],
+    }],
+  };
+  const multiNpcRepair = await advanceCharacterPhoneWithResult({
+    phone: multiNpcRepairPhone,
+    character,
+    activeIdentity: identity,
+    relationships: [relation],
+    messages,
+    moments: [],
+    worldBookEntries: worldBook,
+    settings,
+    contactThreadRepair: true,
+    now: 1_185,
+  });
+  assert.equal(multiNpcRepair.status, "generated", "persisted target evidence allows repair even if the provider omits citations");
+  for (const contactId of ["repair-npc-mom-a", "repair-npc-mom-b", "repair-npc-friend"]) {
+    const thread = multiNpcRepair.phone.threadMessages.filter((message) => message.contactId === contactId);
+    assert.ok(thread.some((message) => message.sender === "contact"), `${contactId} keeps/receives a contact message`);
+    assert.ok(thread.some((message) => message.sender === "character"), `${contactId} receives the missing role reply`);
+    assert.ok(thread.filter((message) => message.id !== "repair-npc-one-sided")
+      .every((message) => message.sourceRefs?.some((source) => source.kind === "worldbook" && source.id === "world-generation")), `${contactId} newly repaired messages cite their verified source`);
+  }
+  assert.equal(multiNpcRepair.phone.threadMessages.filter((message) => message.contactId === "repair-npc-mom-a" && message.sender === "contact").length, 1, "repair only adds the missing side of an existing one-sided conversation");
+  assert.match(String(requestBodies.at(-1)?.message || ""), /repair-npc-mom-a/);
+
   const missingApiConfig = await advanceCharacterPhoneWithResult({
     phone,
     character,

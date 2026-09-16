@@ -887,13 +887,21 @@ export function normalizeCharacterPhoneMessages(messages: CharacterPhoneMessage[
   });
 }
 
+export function hasCompleteCharacterPhoneContactThread(
+  phone: CharacterPhoneRecord,
+  contactId: string,
+): boolean {
+  const messages = (phone.threadMessages ?? []).filter((message) => message.contactId === contactId);
+  return messages.some((message) => message.sender === "contact")
+    && messages.some((message) => message.sender === "character");
+}
+
 export function hasMissingCharacterPhoneContactThreads(phone: CharacterPhoneRecord): boolean {
-  const threadedContactIds = new Set((phone.threadMessages ?? []).map((message) => message.contactId));
   return (phone.contacts ?? []).some((contact) => !contact.removedAt
     && contact.source !== "user"
     && contact.kind !== "user"
     && Boolean(contact.sourceRefs?.length || contact.linkedCharacterId || contact.relationshipNetworkNpcId)
-    && !threadedContactIds.has(contact.id));
+    && !hasCompleteCharacterPhoneContactThread(phone, contact.id));
 }
 
 export function normalizeCharacterPhoneProactiveMessages(messages: Message[]): Message[] {

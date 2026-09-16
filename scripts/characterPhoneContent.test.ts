@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { ensureCharacterPhoneContent, hasMissingCharacterPhoneContactThreads, normalizeCharacterPhoneMessages } from "../src/features/characterPhone/characterPhoneContent";
+import { ensureCharacterPhoneContent, hasCompleteCharacterPhoneContactThread, hasMissingCharacterPhoneContactThreads, normalizeCharacterPhoneMessages } from "../src/features/characterPhone/characterPhoneContent";
 import type { Character, Message, Moment, UserIdentity, WorldBookEntry } from "../src/types";
 import type { CharacterPhoneRecord } from "../src/domain/characterPhone/types";
 import { createCharacterPhoneInitialAvatar, normalizeCharacterPhoneContactName } from "../src/features/characterPhone/characterPhoneContactVisuals";
@@ -355,6 +355,11 @@ assert.ok(repairedRolePhoneIdentities.contacts.some((contact) => contact.linkedC
 assert.ok(!repairedRolePhoneIdentities.contacts.some((contact) => !contact.removedAt && contact.linkedCharacterId === aliasOwnedCharacter.id), "characters owned by another identity do not leak into the primary role phone");
 assert.ok(repairedRolePhoneIdentities.contacts.some((contact) => contact.id === "alias-owned-contact-row" && Boolean(contact.removedAt)), "legacy alias-owned contact rows are hidden while their data remains stored");
 assert.equal(hasMissingCharacterPhoneContactThreads(repairedRolePhoneIdentities), true, "an evidence-backed contact without a thread is detected for repair");
+assert.equal(hasCompleteCharacterPhoneContactThread(repairedRolePhoneIdentities, friendContacts[0].id), true, "merged duplicate contact histories are complete when both sides are represented");
+assert.equal(hasCompleteCharacterPhoneContactThread({
+  ...repairedRolePhoneIdentities,
+  threadMessages: [{ id: "partial-contact-thread", contactId: "partial-contact", sender: "contact", content: "只有联系人发言", timestamp: 1 }],
+}, "partial-contact"), false, "a one-sided NPC thread is incomplete until both sides are represented");
 const threadRepairState = emptyPhone("phone-thread-repair-state", characterA.id);
 threadRepairState.contacts = [{
   id: "evidence-contact",
@@ -374,7 +379,15 @@ threadRepairState.threadMessages = [{
   content: "我到了。",
   timestamp: 34,
 }];
-assert.equal(hasMissingCharacterPhoneContactThreads(threadRepairState), false, "a repaired NPC conversation does not trigger repeated generation");
+assert.equal(hasMissingCharacterPhoneContactThreads(threadRepairState), true, "a one-sided NPC conversation still schedules completion");
+threadRepairState.threadMessages.push({
+  id: "evidence-character-reply",
+  contactId: "evidence-contact",
+  sender: "character",
+  content: "我到了。",
+  timestamp: 35,
+});
+assert.equal(hasMissingCharacterPhoneContactThreads(threadRepairState), false, "a repaired two-sided NPC conversation does not trigger repeated generation");
 
 const clearedPhone = ensureCharacterPhoneContent({
   phone: {

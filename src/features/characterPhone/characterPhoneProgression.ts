@@ -16,13 +16,14 @@ import type {
   CharacterPhoneMusicTrack,
   CharacterPhonePost,
   CharacterPhoneRecord,
+  CharacterPhoneSourceRef,
   CharacterPhoneScheduleItem,
   CharacterPhoneThreadMessage,
   CharacterPhoneTodo,
 } from "../../domain/characterPhone/types";
 import { parseTextImageDescription } from "../chat/services/messageParser";
 import { cleanAndExtractMoment } from "../moments/services/momentContent";
-import { ensureCharacterPhoneContent } from "./characterPhoneContent";
+import { ensureCharacterPhoneContent, hasCompleteCharacterPhoneContactThread } from "./characterPhoneContent";
 import { buildCharacterPhoneBrowserDetail } from "./characterPhoneBrowserDetails";
 import { buildCharacterPhoneLifeContext, type CharacterPhoneLifeContext } from "./characterPhoneLifeContext";
 import { listCharacterPhoneRelationshipNetworkContacts } from "./characterPhoneRelationshipNetwork";
@@ -524,7 +525,8 @@ function parseGeneratedContactThreads(
       record.messages ?? record.threadMessages,
       sourceFileName,
     );
-    return contactName && messages.length > 0 ? [{ contactName, messages }] : [];
+    const contactId = typeof record.contactId === "string" ? record.contactId.trim().slice(0, 160) : "";
+    return contactName && messages.length > 0 ? [{ contactName, ...(contactId ? { contactId } : {}), messages }] : [];
   }).slice(0, 12);
 }
 
@@ -576,6 +578,47 @@ function buildInitialContactFallback(
     },
     { sender: "character", content: outgoing },
   ];
+}
+
+function getValidatedContactEvidenceRefs(
+  contact: CharacterPhoneContact,
+  input: CharacterPhoneProgressionInput,
+  lifeContext: CharacterPhoneLifeContext,
+  allowedSources: Map<string, CharacterPhoneSourceRef>,
+): CharacterPhoneSourceRef[] {
+  const knownCharacters = input.characters ?? [input.character];
+  const candidateRefs = [...(contact.sourceRefs ?? [])];
+  if (contact.linkedCharacterId) candidateRefs.push({ kind: "character", id: contact.linkedCharacterId });
+  if (contact.relationshipNetworkNpcId) candidateRefs.push({ kind: "relationship-network", id: contact.relationshipNetworkNpcId });
+  const validated = new Map<string, CharacterPhoneSourceRef>();
+  candidateRefs.forEach((source) => {
+    const key = `${source.kind}:${source.id}`;
+    if (allowedSources.has(key)) {
+      validated.set(key, allowedSources.get(key)!);
+      return;
+    }
+    let isKnownInScope = false;
+    if (source.kind === "character") {
+      const candidate = knownCharacters.find((character) => character.id === source.id);
+      isKnownInScope = source.id === input.character.id
+        || Boolean(candidate && !candidate.isContactInstance
+          && (candidate.ownerIdentityId || "identity-1") === input.phone.ownerIdentityId);
+    } else if (source.kind === "worldbook") {
+      isKnownInScope = lifeContext.worldBookEntries.some((entry) => entry.id === source.id);
+    } else if (source.kind === "chat") {
+      isKnownInScope = lifeContext.messages.some((message) => message.id === source.id);
+    } else if (source.kind === "moment") {
+      isKnownInScope = lifeContext.moments.some((moment) => moment.id === source.id);
+    } else if (source.kind === "phone") {
+      isKnownInScope = source.id === input.phone.id;
+    } else if (source.kind === "relationship-network") {
+      isKnownInScope = lifeContext.relationshipNetworkContacts.some((network) => network.npc.id === source.id)
+        || (input.relationshipNetworkNpcs ?? []).some((npc) => npc.id === source.id
+          && npc.ownerIdentityId === input.phone.ownerIdentityId);
+    }
+    if (isKnownInScope) validated.set(key, source);
+  });
+  return [...validated.values()];
 }
 
 function stableVariantIndex(value: string, length: number): number {
@@ -772,16 +815,29 @@ export async function advanceCharacterPhoneWithResult(
     character: input.character,
     phone: base,
     activeIdentity: input.activeIdentity,
+    identities: input.identities,
     relationships,
     messages,
     moments,
     worldBookEntries,
     relationshipNetworkContacts,
   });
+  const allowedSources = new Map(lifeContext.sourceRefs.map((source) => [`${source.kind}:${source.id}`, source]));
+  const repairTargets = isContactThreadRepair
+    ? base.contacts.filter((contact) => !contact.removedAt
+      && contact.source !== "user"
+      && contact.kind !== "user"
+      && !hasCompleteCharacterPhoneContactThread(base, contact.id)
+      && getValidatedContactEvidenceRefs(contact, input, lifeContext, allowedSources).length > 0)
+    : [];
+  const repairSourceRefsByContactId = new Map(repairTargets.map((contact) => [
+    contact.id,
+    getValidatedContactEvidenceRefs(contact, input, lifeContext, allowedSources),
+  ]));
   const textImageEvidence = collectTextImageEvidence(lifeContext);
   const roleName = roleDisplayName(input.character);
   const generationRequest = isContactThreadRepair
-    ? "这是一次联系人聊天记录专项修复。只为下面列出的缺少聊天记录的已有联系人生成独立 contactThreads，每人至少一条联系人消息和一条角色回复。不得新增、删除或合并联系人；不得生成用户聊天、日记、日程、浏览器、相册、朋友圈、音乐、备忘录、待办、通话或其他应用记录。联系人名称必须与待修复列表中的名称完全一致。"
+    ? "这是一次联系人聊天记录专项修复。只为下面列出的缺少聊天记录的已有联系人生成独立 contactThreads，每人至少一条联系人消息和一条角色回复。回复 contactId 必须逐字复制目标 ID，contactName 必须逐字复制目标名称。不得新增、删除或合并联系人；不得生成用户聊天、日记、日程、浏览器、相册、朋友圈、音乐、备忘录、待办、通话或其他应用记录。"
     : isInitialGeneration
     ? "这是该角色手机首次初始化。忽略前文可能出现的2—4条总量示例，以本条数量要求为准。请围绕同一个有证据的生活事件，批量生成完整但自然的手机生活：与用户的直接聊天 userThreadMessages 必须有 4—6 条且包含角色和用户双方；每一个有证据的非用户 NPC（包括关系网已连线 NPC）都必须在 contacts 中出现，并用 contactThreads 生成属于自己的聊天，不能把不同联系人混在同一线程；没有证据的人不要添加；浏览器 4—8 条搜索记录；未来 3—6 天内分布 1—3 条日程；日记、备忘录、待办合计 2—4 条；朋友圈至少 1 条，visibility 必须是 user（仅用户可见）或 private（仅自己可见）；音乐必须有曲目、收听历史、常听时段和当前正在收听曲目；相册至少保存一条与该事件有关的文字图描述。优先使用 userThreadMessages、contactThreads、browserEntries、scheduleItems、diaryEntries、noteEntries、todoEntries、posts、musicTracks、musicListening、musicNowPlaying 数组字段表达数量；同一事件可以投影到多个应用，但每条仍须有证据。"
     : "这是一次追加生活痕迹。请从最有依据的 2—4 个应用中随机选择少量记录，避免每次都选择相同应用或相同数量；不要为了填满首次初始化的数量而重复旧内容。";
@@ -794,7 +850,7 @@ export async function advanceCharacterPhoneWithResult(
       // mistake the old singular example for the active quantity contract.
       ...{
         message: isContactThreadRepair
-          ? `${generationRequest}\n只返回 JSON，不要 Markdown：{"lifeEventSummary":"与已有证据对应的简短事件","evidenceSourceIds":["只能从上下文给出的来源 ID 中选择"],"contactThreads":[{"contactName":"必须逐字匹配待修复联系人","messages":[{"sender":"contact或character","content":"自然的聊天消息"}]}]}。仅输出待修复联系人对应的聊天，不得输出其他字段。待修复联系人：${base.contacts.filter((contact) => !contact.removedAt && contact.source !== "user" && contact.kind !== "user" && Boolean(contact.sourceRefs?.length || contact.linkedCharacterId || contact.relationshipNetworkNpcId) && !base.threadMessages.some((message) => message.contactId === contact.id)).map((contact) => contact.name).join("、")}`
+          ? `${generationRequest}\n只返回 JSON，不要 Markdown：{"lifeEventSummary":"与已有证据对应的简短事件","evidenceSourceIds":["只能从上下文给出的来源 ID 中选择"],"contactThreads":[{"contactId":"必须逐字匹配待修复联系人 ID","contactName":"必须逐字匹配待修复联系人","messages":[{"sender":"contact或character","content":"自然的聊天消息"}]}]}。仅输出待修复联系人对应的聊天，不得输出其他字段。待修复联系人：${repairTargets.map((contact) => `${contact.id}｜${contact.name}`).join("；")}`
           : `${generationRequest}\n只返回 JSON，不要 Markdown。数量字段请优先使用数组：userThreadMessages:[{sender:"contact或character",content:"用户与角色的消息"}]、contactThreads:[{contactName:"联系人",messages:[{sender:"contact或character",content:"消息内容"}]}]、threadMessages:[{sender:"contact或character",content:"兼容旧版单联系人消息"}]、browserEntries:[{query:"搜索词",title:"记录标题",results:[{platform:"平台",title:"结果标题",snippet:"摘要"}],searchResults:[{platform:"平台",title:"结果标题",snippet:"摘要"}],reflection:"搜索后的私下反应"}]、scheduleItems:[{title:"日程标题",detail:"具体事项",daysFromNow:3}]、diaryEntries:[{title:"日记标题",body:"私密想法"}]、noteEntries:[{title:"备忘录标题",content:"具体内容"}]、todoEntries:[{text:"待办事项"}]、posts:[{content:"朋友圈内容",visibility:"user、private 或 public"}]、musicTracks:[{title:"曲目",artist:"艺术家",duration:"3:30",current:true}]、musicListening:[{trackTitle:"曲目",playedHoursAgo:2,durationSeconds:180,playCount:2}]、musicNowPlaying:{trackTitle:"当前曲目"}。同时保留 lifeEventSummary、evidenceSourceIds、contacts、threadContactName、callContactName、callDirection、galleryTitle、galleryCaption、hiddenGalleryTitle、hiddenGalleryCaption 等字段。首次初始化按上面的数量要求完整填写；追加生成只随机填写 2—4 个应用。没有证据的字段返回空数组或空字符串。`,
       },
       history: [],
@@ -833,25 +889,21 @@ export async function advanceCharacterPhoneWithResult(
   }
 
   const sourceFileName = input.character.sourceFileName;
-  const allowedSources = new Map(lifeContext.sourceRefs.map((source) => [`${source.kind}:${source.id}`, source]));
   const requestedSourceIds = Array.isArray(raw.evidenceSourceIds)
     ? raw.evidenceSourceIds.filter((value): value is string => typeof value === "string")
     : [];
   const validatedSourceRefs = requestedSourceIds
     .map((id) => allowedSources.get(id))
     .filter((source): source is NonNullable<typeof source> => Boolean(source));
-  // A phone trace is a projection of evidence, not a new Truth-layer fact.
-  // If the provider cannot point at any scoped source, keep the phone unchanged.
-  if (validatedSourceRefs.length === 0) {
+  // Regular generation requires provider citations. A contact repair can also
+  // use the persisted contact's own validated source references; requiring one
+  // global citation used to leave every missing NPC thread untouched when the
+  // provider omitted or malformed evidenceSourceIds.
+  if (validatedSourceRefs.length === 0 && !isContactThreadRepair) {
     return { phone: base, status: "no_change", reason: "missing_evidence", createdCount: 0 };
   }
   if (isContactThreadRepair) {
-    const threadedContactIds = new Set(base.threadMessages.map((message) => message.contactId));
-    const targets = base.contacts.filter((contact) => !contact.removedAt
-      && contact.source !== "user"
-      && contact.kind !== "user"
-      && Boolean(contact.sourceRefs?.length || contact.linkedCharacterId || contact.relationshipNetworkNpcId)
-      && !threadedContactIds.has(contact.id));
+    const targets = repairTargets;
     if (targets.length === 0) {
       return {
         phone: base,
@@ -865,23 +917,42 @@ export async function advanceCharacterPhoneWithResult(
     const updatedContacts = base.contacts.map((contact) => {
       const target = targets.find((candidate) => candidate.id === contact.id);
       if (!target) return contact;
+      const exactIdMatches = requestedThreads.filter((thread) => thread.contactId === target.id);
       const matchingThreads = requestedThreads.filter((thread) => contactKey(thread.contactName) === contactKey(target.name));
-      const requestedThread = matchingThreads.length === 1
-        && base.contacts.filter((candidate) => !candidate.removedAt && contactKey(candidate.name) === contactKey(target.name)).length === 1
-        ? matchingThreads[0]
-        : undefined;
+      const sameNameContacts = base.contacts.filter((candidate) => !candidate.removedAt
+        && candidate.source !== "user"
+        && candidate.kind !== "user"
+        && contactKey(candidate.name) === contactKey(target.name));
+      const requestedThread = exactIdMatches.length === 1
+        ? exactIdMatches[0]
+        : exactIdMatches.length === 0 && sameNameContacts.length === 1 && matchingThreads.length === 1
+          ? matchingThreads[0]
+          : undefined;
       const hasBothSenders = Boolean(requestedThread?.messages.some((message) => message.sender === "contact")
         && requestedThread?.messages.some((message) => message.sender === "character"));
-      const drafts = hasBothSenders
+      const existingMessages = base.threadMessages.filter((message) => message.contactId === target.id);
+      const existingSenders = new Set(existingMessages.map((message) => message.sender));
+      const requestedAdditions = hasBothSenders && existingMessages.length === 0
         ? requestedThread!.messages.slice(0, 6)
-        : buildInitialContactFallback(target, cleanGeneratedText(raw.lifeEventSummary, sourceFileName, 240), input.character);
+        : hasBothSenders
+          ? requestedThread!.messages.filter((message) => !existingSenders.has(message.sender)).slice(0, 6)
+          : [];
+      const fallback = buildInitialContactFallback(
+        target,
+        validatedSourceRefs.length > 0 ? cleanGeneratedText(raw.lifeEventSummary, sourceFileName, 240) : "",
+        input.character,
+      );
+      const drafts = requestedAdditions.length > 0
+        ? requestedAdditions
+        : fallback.filter((message) => !existingSenders.has(message.sender));
+      const targetSourceRefs = repairSourceRefsByContactId.get(target.id) ?? [];
       const createdMessages = drafts.map((draft, index): CharacterPhoneThreadMessage => ({
         id: createId("phone-contact-thread-repair"),
         contactId: target.id,
         sender: draft.sender,
         content: draft.content,
         timestamp: now - (drafts.length - index) * 60 * 1000,
-        sourceRefs: validatedSourceRefs,
+        sourceRefs: targetSourceRefs,
       }));
       repairMessages.push(...createdMessages);
       const latestMessage = createdMessages.at(-1);
