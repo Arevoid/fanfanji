@@ -62,8 +62,8 @@ const groupVoiceRecovery = await generateGroupReplyCandidates({
   request: { ...request, purpose: "group_chat_reply" }, members: [memberA], groupId: "group", disableBracketActions: false,
   createId: (index) => `recover-${index}`, currentTime: () => 12,
 });
-assert.equal(groupVoiceRecoveryCalls, 2, "a structured group bubble missing voice must be repaired before returning candidates");
-assert.equal(groupVoiceRecovery.innerVoices?.[0]?.content.content, "其实怕她听出我的担心");
+assert.equal(groupVoiceRecoveryCalls, 1, "missing group voices must not trigger per-member model calls");
+assert.equal(groupVoiceRecovery.innerVoices?.[0]?.content.source, "local_fallback");
 
 // Repeated sender blocks are intentional: a member may send multiple short
 // messages in one natural group interaction, without another AI request.

@@ -33,7 +33,7 @@ import { loadRelationships, saveRelationships } from "./core/storage/repositorie
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, retractConversationSummariesBySourceMessageIds, conversationSummaryRepository } from "./core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
-import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
+import { initializeInnerVoiceRepository, loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
 import { loadScheduleStore, saveScheduleStore, upsertAppointment } from "./core/storage/repositories/scheduleRepository";
 import { projectAppointmentsToScheduleEntries } from "./domain/schedule/scheduleProjection";
 import type { Appointment } from "./domain/schedule/scheduleTypes";
@@ -602,6 +602,12 @@ export default function App() {
   useRuntimeErrorMonitoring();
   const { resolvedTheme } = useTheme();
   useVisualViewport();
+
+  useEffect(() => {
+    void initializeInnerVoiceRepository([]).then((result) => {
+      if (!result.valid) console.warn("[inner-voice] IndexedDB hydration did not complete; legacy records remain available.");
+    });
+  }, []);
 
   useEffect(() => {
     const preloadIdleApps = () => IDLE_PRELOAD_APP_IDS.forEach((appId) => preloadApp(appId));
@@ -2891,7 +2897,11 @@ export default function App() {
         (records, characterId) => removeInnerVoicesByCharacter(records, characterId),
         innerVoices,
       );
-      if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
+      if (remainingInnerVoices.length !== innerVoices.length) {
+        void saveInnerVoiceRecords(remainingInnerVoices).then((saved) => {
+          if (!saved.success) console.warn("[inner-voice] Failed to remove records for deleted characters.");
+        });
+      }
       const imageRecords = loadImageGenerationRecords([]).value;
       const remainingImageRecords = deletedCharacterIds.reduce(
         (records, characterId) => removeImageGenerationRecordsByCharacter(records, characterId),

@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import type { Character, InnerVoiceRecord, MemoryItem, Message, UserSettings, WorldBookEntry } from "../../../types";
 import { getConversationId, type CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
-import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, saveInnerVoiceRecords, type InnerVoiceScope } from "../../../core/storage/repositories/innerVoiceRepository";
+import { findInnerVoiceByMessage, initializeInnerVoiceRepository, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, saveInnerVoiceRecord, type InnerVoiceScope } from "../../../core/storage/repositories/innerVoiceRepository";
 import { generateInnerVoice } from "../services/innerVoiceService";
 import { serializeMessageContentForPrompt } from "../prompts/messagePromptSerializer";
 
@@ -40,15 +40,15 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
     const conversationId = relationId
       ? activeRelationship?.conversationId || getConversationId(relationId)
-      : triggerMessage.conversationId || groupId;
+      : triggerMessage.conversationId || (groupId ? `group:${groupId}` : undefined);
     if (!conversationId || (!relationId && !groupId)) return { record: undefined, history: [] as InnerVoiceRecord[] };
     const scope: InnerVoiceScope = relationId
-      ? { kind: "direct", relationId, messageId: triggerMessage.id }
-      : { kind: "group", groupId: groupId!, conversationId, characterId: canonicalCharacterId, messageId: triggerMessage.id };
+      ? { kind: "direct", relationId, conversationId, characterId: canonicalCharacterId, userIdentityId: activeRelationship?.userIdentityId || settings.activeIdentityId, messageId: triggerMessage.id }
+      : { kind: "group", groupId: groupId!, conversationId, characterId: canonicalCharacterId, userIdentityId: settings.activeIdentityId, messageId: triggerMessage.id };
     const stored = loadInnerVoiceRecords([]).value;
     const scopedHistory = relationId
-      ? listInnerVoicesByRelation(stored, relationId)
-      : listInnerVoicesByGroup(stored, groupId!, conversationId, canonicalCharacterId);
+      ? listInnerVoicesByRelation(stored, relationId, conversationId, canonicalCharacterId, activeRelationship?.userIdentityId || settings.activeIdentityId)
+      : listInnerVoicesByGroup(stored, groupId!, conversationId, canonicalCharacterId, 10, settings.activeIdentityId);
     const existing = findInnerVoiceByMessage(stored, scope);
     const triggerSummary = serializeMessageContentForPrompt(triggerMessage, {
       mode: "history",
@@ -61,7 +61,8 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     };
   };
 
-  const refreshHistory = () => {
+  const refreshHistory = async () => {
+    await initializeInnerVoiceRepository([]);
     const lastOpen = lastOpenRef.current;
     if (!lastOpen) return;
     const canonicalCharacterId = resolveCanonicalCharacterId(lastOpen.targetCharacterId, characters);
@@ -69,12 +70,12 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
     const conversationId = relationId
       ? activeRelationship?.conversationId || getConversationId(relationId)
-      : lastOpen.triggerMessage.conversationId || groupId;
+      : lastOpen.triggerMessage.conversationId || (groupId ? `group:${groupId}` : undefined);
     if (!conversationId || (!relationId && !groupId)) return;
     const stored = loadInnerVoiceRecords([]).value;
     setHistory(relationId
-      ? listInnerVoicesByRelation(stored, relationId)
-      : listInnerVoicesByGroup(stored, groupId!, conversationId, canonicalCharacterId));
+      ? listInnerVoicesByRelation(stored, relationId, conversationId, canonicalCharacterId, activeRelationship?.userIdentityId || settings.activeIdentityId)
+      : listInnerVoicesByGroup(stored, groupId!, conversationId, canonicalCharacterId, 10, settings.activeIdentityId));
   };
 
   const changeMode = (nextMode: "current" | "history") => {
@@ -82,7 +83,7 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const lastOpen = lastOpenRef.current;
     if (!lastOpen) return;
     if (nextMode === "history") {
-      refreshHistory();
+      void refreshHistory();
       return;
     }
     const current = resolveStoredRecord(lastOpen.targetCharacterId, lastOpen.triggerMessage);
@@ -98,13 +99,18 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const isCurrentRecord = current.record?.id === generated.id
       || (generated.messageId === lastOpen.triggerMessage.id
         && (generated.relationId === activeRelationship?.id
-          || generated.groupId === (activeCharacter?.isGroupChat ? activeCharacter.id : undefined)));
+          || generated.groupId === (activeCharacter?.isGroupChat ? activeCharacter.id : undefined))
+        && generated.conversationId === (activeRelationship
+          ? activeRelationship.conversationId || getConversationId(activeRelationship.id)
+          : lastOpen.triggerMessage.conversationId || (activeCharacter?.isGroupChat ? `group:${activeCharacter.id}` : undefined))
+        && (!generated.userIdentityId || generated.userIdentityId === (activeRelationship?.userIdentityId || settings.activeIdentityId)));
     if (!isCurrentRecord) return;
     setRecord(generated);
     setHistory((previous) => [generated, ...previous.filter((item) => item.id !== generated.id)]);
   };
 
   const open = async (targetCharacterId: string, triggerMessage: Message, force = false) => {
+    await initializeInnerVoiceRepository([]);
     const canonicalCharacterId = resolveCanonicalCharacterId(targetCharacterId, characters);
     const targetCharacter = characters.find((item) => item.id === canonicalCharacterId);
     if (!targetCharacter) return;
@@ -112,15 +118,17 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     const groupId = relationId ? undefined : activeCharacter?.isGroupChat ? activeCharacter.id : undefined;
     const conversationId = relationId
       ? activeRelationship?.conversationId || getConversationId(relationId)
-      : triggerMessage.conversationId || groupId;
+      : triggerMessage.conversationId || (groupId ? `group:${groupId}` : undefined);
     if (!conversationId || (!relationId && !groupId)) return;
     // Keep direct-chat context strict. A stale message from another contact
     // must never be used to generate this character's private reflection.
     if (relationId && triggerMessage.relationId && triggerMessage.relationId !== relationId) return;
     const scope: InnerVoiceScope = relationId
-      ? { kind: "direct", relationId, messageId: triggerMessage.id }
-      : { kind: "group", groupId: groupId!, conversationId, characterId: canonicalCharacterId, messageId: triggerMessage.id };
-    const listHistory = (records: readonly InnerVoiceRecord[]) => relationId ? listInnerVoicesByRelation(records, relationId) : listInnerVoicesByGroup(records, groupId!, conversationId, canonicalCharacterId);
+      ? { kind: "direct", relationId, conversationId, characterId: canonicalCharacterId, userIdentityId: activeRelationship?.userIdentityId || settings.activeIdentityId, messageId: triggerMessage.id }
+      : { kind: "group", groupId: groupId!, conversationId, characterId: canonicalCharacterId, userIdentityId: settings.activeIdentityId, messageId: triggerMessage.id };
+    const listHistory = (records: readonly InnerVoiceRecord[]) => relationId
+      ? listInnerVoicesByRelation(records, relationId, conversationId, canonicalCharacterId, activeRelationship?.userIdentityId || settings.activeIdentityId)
+      : listInnerVoicesByGroup(records, groupId!, conversationId, canonicalCharacterId, 10, settings.activeIdentityId);
     lastOpenRef.current = { targetCharacterId: canonicalCharacterId, triggerMessage };
     setCharacter(targetCharacter); setMode("current"); setError(null);
     const current = resolveStoredRecord(canonicalCharacterId, triggerMessage);
@@ -158,6 +166,7 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
         conversationId,
         relationId,
         groupId,
+        userIdentityId: activeRelationship?.userIdentityId || settings.activeIdentityId,
         settings,
         offlineContinuityContext: getOfflineContinuityContext(triggerMessage),
         worldBookEntries,
@@ -166,14 +175,13 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
         setError("心声生成失败，请检查模型设置后重试。");
         return;
       }
-      const latest = loadInnerVoiceRecords([]).value;
-      const saved = saveInnerVoiceRecords([...latest.filter((item) => item.id !== generated.id), generated]);
+      const saved = await saveInnerVoiceRecord(generated);
       setRecord(generated);
       if (!saved.success) {
-        setError("心声已生成，但本地保存失败；请检查浏览器存储空间后重试。当前心声仍可查看。");
+        setError("心声已生成，当前仍可查看；IndexedDB 保存失败，请稍后重试。聊天消息不会因此被拦截。");
         return;
       }
-      setHistory(listHistory([...latest.filter((item) => item.id !== generated.id), generated]));
+      setHistory(listHistory(loadInnerVoiceRecords([]).value));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "心声生成失败，请检查模型设置后重试。");
     } finally {

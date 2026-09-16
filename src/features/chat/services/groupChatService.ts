@@ -12,7 +12,8 @@ import { serializeMessageContentForPrompt } from "../prompts/messagePromptSerial
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 import { buildGroupMemberPrivateContext, type GroupMemberPrivateContextInput } from "../prompts/groupMemberPrivateContext";
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage } from "../prompts/chatPromptBuilders";
-import { INLINE_GROUP_INNER_VOICE_INSTRUCTION, parseGroupTurnResponse, parseInnerVoiceResponse } from "./chatTurnResponseProtocol";
+import { createLocalInnerVoiceFallback, INLINE_GROUP_INNER_VOICE_INSTRUCTION, parseGroupTurnResponse } from "./chatTurnResponseProtocol";
+import type { InlineInnerVoicePayload } from "./chatTurnResponseProtocol";
 import { DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT, MAX_CHAT_CONTEXT_MEMORY_LIMIT } from "./chatMemoryRetrievalSettings";
 import { buildWorldBookScanText } from "../../../domain/worldbook/worldBookTriggerScan";
 
@@ -32,7 +33,7 @@ export type GroupChatTurnGenerator = (input: {
   createId: (index: number) => string;
   currentTime: () => number;
   signal?: AbortSignal;
-}) => Promise<{ messages: Message[]; members: Character[]; innerVoices?: Array<{ message: Message; member: Character; content: { content: string; emotionalState: string; translation?: string } }> }>;
+}) => Promise<{ messages: Message[]; members: Character[]; innerVoices?: Array<{ message: Message; member: Character; content: InlineInnerVoicePayload }> }>;
 
 export function buildGroupChatHistoryContext(input: {
   sourceMessages: readonly Message[];
@@ -152,7 +153,7 @@ export async function generateIsolatedGroupChatReplies(input: {
   createReplyId: () => string;
   currentTime: () => number;
   signal?: AbortSignal;
-}): Promise<{ messages: Message[]; members: Character[]; innerVoices?: Array<{ message: Message; member: Character; content: { content: string; emotionalState: string; translation?: string } }> } | null> {
+}): Promise<{ messages: Message[]; members: Character[]; innerVoices?: Array<{ message: Message; member: Character; content: InlineInnerVoicePayload }> } | null> {
   // One request is intentionally used for the whole public group turn. Sending
   // one request per member was expensive and also made the first-turn delivery
   // look stuck while several sequential calls were in flight. Private member
@@ -193,7 +194,7 @@ export async function generateGroupReplyCandidates(input: {
   disableBracketActions: boolean;
   createId: (index: number) => string;
   currentTime: () => number;
-}): Promise<{ messages: Message[]; members: Character[]; innerVoices?: Array<{ message: Message; member: Character; content: { content: string; emotionalState: string; translation?: string } }> }> {
+}): Promise<{ messages: Message[]; members: Character[]; innerVoices?: Array<{ message: Message; member: Character; content: InlineInnerVoicePayload }> }> {
   const data = await requestAiReply(input.requestAi, input.request);
   if (!data?.text) return { messages: [], members: [] };
   const structured = parseGroupTurnResponse(data.text);
@@ -215,42 +216,13 @@ export async function generateGroupReplyCandidates(input: {
     translation: containsNonChineseText(item.content) ? item.structuredReply?.translation : undefined,
     redPacketAction: item.structuredReply?.redPacketAction,
   }));
-  const innerVoices: Array<{ message: Message; member: Character; content: { content: string; emotionalState: string; translation?: string } }> = [];
+  const innerVoices: Array<{ message: Message; member: Character; content: InlineInnerVoicePayload }> = [];
   for (const [index, item] of valid.entries()) {
     const message = messages[index];
     if (!message || !item.content || message.redPacketAction === "claim_silent" || message.redPacketAction === "silent") continue;
-    let content = item.structuredReply?.innerVoice;
-    // The group reply envelope is intended to carry voice inline. Recover a
-    // missing/invalid field before delivery so the bubble never silently gets
-    // ahead of its private voice record.
-    if (!content && input.request.purpose === "group_chat_reply") {
-      let lastError: unknown;
-      for (let attempt = 0; attempt < 2 && !content; attempt += 1) {
-        if (input.request.signal?.aborted) throw Object.assign(new Error("群聊心声生成已取消。"), { code: "aborted" });
-        try {
-          const response = await requestAiReply(input.requestAi, {
-            ...input.request,
-            purpose: "inner_voice",
-            characterId: item.member.id,
-            conversationId: `group:${input.groupId}`,
-            message: `${input.request.message}\n\n【需要补全心声的群成员】\n${item.member.name}\n\n【该成员本轮实际发送的消息】\n${item.content}\n\n请只为这条消息生成该成员未说出口的心声。`,
-            systemInstruction: [input.request.systemInstruction, `现在只生成${item.member.name}的第一人称心声，不要替其他成员发言。只返回 JSON：{"content":"非空心声正文","emotionalState":"完整情绪短句"}。不得编造角色未知事实。`, attempt > 0 ? "上一轮格式无效；请重试并确保两个字段均为非空字符串。" : ""].filter(Boolean).join("\n\n"),
-            maxOutputTokens: 256,
-            retryReasons: [attempt === 0 ? "missing group inner voice" : "group inner voice format correction"],
-          });
-          content = parseInnerVoiceResponse(response.text);
-          if (!content) lastError = new Error("模型未返回有效的心声 JSON。");
-        } catch (error) {
-          lastError = error;
-        }
-      }
-      if (!content) {
-        throw Object.assign(
-          new Error(`群聊成员「${item.member.name}」的心声生成失败，本轮群消息已暂缓发送，请重试。${lastError instanceof Error ? `（${lastError.message}）` : ""}`),
-          { code: "inner_voice_generation_failed", cause: lastError },
-        );
-      }
-    }
+    // One group response covers every visible member bubble. Missing inline
+    // voices use the zero-token fallback instead of extra per-member calls.
+    const content = item.structuredReply?.innerVoice || createLocalInnerVoiceFallback();
     if (content) innerVoices.push({ message, member: item.member, content });
   }
   return {

@@ -12,6 +12,7 @@ import { characterPhoneDb } from "../../core/storage/characterPhoneDb";
 import { flushCharacterPhoneRepository } from "../../core/storage/repositories/characterPhoneRepository";
 import { SETTINGS_ASSET_OVERLAY_KEY } from "../../core/storage/settingsAssetRepository";
 import { SETTINGS_DURABLE_OVERLAY_KEY } from "../../core/storage/repositories/settingsRepository";
+import { flushInnerVoiceRepository, loadInnerVoiceRecords, loadInnerVoiceRecordsAsync, saveInnerVoiceRecords } from "../../core/storage/repositories/innerVoiceRepository";
 
 export const SYSTEM_BACKUP_FORMAT = "fanfanji-system-backup" as const;
 export const SYSTEM_BACKUP_VERSION = 3 as const;
@@ -28,6 +29,7 @@ export const SYSTEM_BACKUP_INDEXED_DB_KEYS = [
   "reading-co-reading-store",
   "reading-co-story-store",
   "character-phone-v1",
+  "inner-voice-v1",
   SETTINGS_ASSET_OVERLAY_KEY,
   SETTINGS_DURABLE_OVERLAY_KEY,
 ] as const;
@@ -61,9 +63,11 @@ export function filterSystemBackupLocalStorageForRestore(
   indexedDb: SystemBackupIndexedDb,
 ): [string, string | null][] {
   const hasMessageEntryBackup = Array.isArray(indexedDb["message-entry-v1"]);
+  const hasInnerVoiceBackup = Array.isArray(indexedDb["inner-voice-v1"]);
   return entries.filter(([key]) => {
     if (key === "phone_offline_stories") return false;
     if (hasMessageEntryBackup && LEGACY_MESSAGE_STORAGE_KEYS.has(key)) return false;
+    if (hasInnerVoiceBackup && key === "phone_inner_voice_records") return false;
     return true;
   });
 }
@@ -138,9 +142,14 @@ function includeCharacterPhoneLocalStorageKeys(storage: Storage, requestedKeys: 
 }
 
 const CHARACTER_PHONE_INDEXED_DB_KEY = "character-phone-v1";
+const INNER_VOICE_INDEXED_DB_KEY = "inner-voice-v1";
 
 async function loadSystemBackupIndexedDbValue(key: string): Promise<unknown | null> {
   if (key === CHARACTER_PHONE_INDEXED_DB_KEY) return characterPhoneDb.loadAll();
+  if (key === INNER_VOICE_INDEXED_DB_KEY) {
+    const loaded = await loadInnerVoiceRecordsAsync([]);
+    return loaded.valid ? loaded.value : loadInnerVoiceRecords([]).value;
+  }
   return readingAssetDb.loadMetadataValue<unknown>(key);
 }
 
@@ -150,12 +159,23 @@ async function saveSystemBackupIndexedDbValue(key: string, value: unknown): Prom
     await characterPhoneDb.replaceAll(value as never[]);
     return;
   }
+  if (key === INNER_VOICE_INDEXED_DB_KEY) {
+    if (!Array.isArray(value)) throw new Error("备份中的角色心声数据格式无效");
+    const saved = await saveInnerVoiceRecords(value as never[]);
+    if (!saved.success) throw new Error(`恢复心声数据失败：${saved.error || "write"}`);
+    return;
+  }
   await readingAssetDb.saveMetadataValue(key, cloneJson(value));
 }
 
 async function deleteSystemBackupIndexedDbValue(key: string): Promise<void> {
   if (key === CHARACTER_PHONE_INDEXED_DB_KEY) {
     await characterPhoneDb.clearAll();
+    return;
+  }
+  if (key === INNER_VOICE_INDEXED_DB_KEY) {
+    const cleared = await saveInnerVoiceRecords([]);
+    if (!cleared.success) throw new Error(`清理心声数据失败：${cleared.error || "write"}`);
     return;
   }
   await readingAssetDb.deleteMetadataValue(key);
@@ -180,6 +200,7 @@ export async function buildSystemBackup(
     flushCoReadingStore(),
     flushReadingCoStoryStore(),
     flushCharacterPhoneRepository(),
+    flushInnerVoiceRepository(),
   ]);
   const indexedDbEntries = await Promise.all(SYSTEM_BACKUP_INDEXED_DB_KEYS.map(async (key) => [
     key,
@@ -195,6 +216,9 @@ export async function buildSystemBackup(
     key,
     localStorageAfterFlush[key] ?? localStorageBeforeFlush[key] ?? null,
   ])) as SystemBackupLocalStorage;
+  if (Array.isArray(indexedDbEntries.find(([key]) => key === INNER_VOICE_INDEXED_DB_KEY)?.[1])) {
+    localStorage.phone_inner_voice_records = null;
+  }
 
   const envelope = {
     format: SYSTEM_BACKUP_FORMAT,
@@ -224,6 +248,7 @@ export async function snapshotSystemBackupIndexedDb(): Promise<SystemBackupIndex
     isMessageEntryStoreEnabled() ? messageEntryDb.loadAll().then((value) => [SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[0], value] as const) : Promise.resolve([SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[0], null] as const),
     isOfflineStoryEntryStoreEnabled() ? offlineStoryEntryDb.loadAll().then((value) => [SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[1], value] as const) : Promise.resolve([SYSTEM_BACKUP_CONTENT_ENTRY_KEYS[1], null] as const),
   ]);
+  await flushInnerVoiceRepository();
   return Object.fromEntries([...metadataEntries, ...contentEntries].map(([key, value]) => [key, value == null ? null : cloneJson(value)]));
 }
 
@@ -262,9 +287,21 @@ export function parseSystemBackup(value: unknown): {
         integrityWarning = "备份校验值不一致，文件可能来自旧版导出或曾被修改。";
       }
     }
+    const indexedDb = cloneJson(value.indexedDb);
+    if (!Array.isArray(indexedDb["inner-voice-v1"])) {
+      const legacyVoice = localStorage.phone_inner_voice_records;
+      if (typeof legacyVoice === "string") {
+        try {
+          const parsed = JSON.parse(legacyVoice);
+          if (Array.isArray(parsed)) indexedDb["inner-voice-v1"] = parsed;
+        } catch {
+          // Leave malformed legacy data available through its original key.
+        }
+      }
+    }
     return {
       localStorage,
-      indexedDb: cloneJson(value.indexedDb),
+      indexedDb,
       legacy: false,
       integrityWarning,
     };
@@ -282,6 +319,7 @@ export function parseSystemBackup(value: unknown): {
     ["phone_characters_v3", "phone_characters", "character-archive-v4"],
     ["phone_moments_v3", "phone_moments_v3", "moments-v4"],
     ["phone_messages_v3", "phone_messages", "message-entry-v1"],
+    ["phone_inner_voice_records", "phone_inner_voice_records", "inner-voice-v1"],
   ];
   for (const [preferredKey, fallbackKey, metadataKey] of legacyMappings) {
     const raw = localStorage[preferredKey] ?? localStorage[fallbackKey];

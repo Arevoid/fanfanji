@@ -16,6 +16,7 @@ export interface GenerateInnerVoiceInput {
   triggerMessage: Message;
   recentMessages: Message[];
   conversationId?: string;
+  userIdentityId?: string;
   relationId?: string;
   groupId?: string;
   context?: ChatRuntimeContext;
@@ -27,6 +28,7 @@ export interface GenerateInnerVoiceInput {
 export function createInlineInnerVoiceRecord(input: {
   character: Character;
   triggerMessage: Message;
+  userIdentityId?: string;
   relationId?: string;
   groupId?: string;
   conversationId: string;
@@ -41,6 +43,7 @@ export function createInlineInnerVoiceRecord(input: {
   return {
     id: createId("inner-voice"),
     characterId: input.character.id,
+    userIdentityId: input.userIdentityId,
     relationId: input.relationId,
     groupId: input.groupId,
     messageId: input.triggerMessage.id,
@@ -49,6 +52,7 @@ export function createInlineInnerVoiceRecord(input: {
     emotionalState: input.payload.emotionalState,
     state: input.payload.emotionalState,
     content: input.payload.content,
+    generationSource: input.payload.source || "inline",
     createdAt: Date.now(),
   };
 }
@@ -114,6 +118,7 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
   return {
     id: createId("inner-voice"),
     characterId: input.character.id,
+    userIdentityId: input.relationship?.userIdentityId || input.userIdentityId,
     relationId,
     groupId,
     messageId: input.triggerMessage.id,
@@ -122,6 +127,7 @@ export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promis
     emotionalState: parsed.emotionalState,
     state: parsed.emotionalState,
     content: parsed.content,
+    generationSource: "manual",
     createdAt: Date.now(),
   };
 }

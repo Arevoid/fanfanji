@@ -82,7 +82,11 @@ export function useChatRelationshipCleanupActions({
 
     const innerVoices = loadInnerVoiceRecords([]).value;
     const remainingInnerVoices = removeInnerVoicesByRelation(innerVoices, relationId);
-    if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
+    if (remainingInnerVoices.length !== innerVoices.length) {
+      void saveInnerVoiceRecords(remainingInnerVoices).then((saved) => {
+        if (!saved.success) console.warn("[inner-voice] Failed to clear records for the relationship.");
+      });
+    }
 
     const imageRecords = loadImageGenerationRecords([]).value;
     const removedImageRecords = imageRecords.filter((record) => record.relationId === relationId);

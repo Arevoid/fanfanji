@@ -1,6 +1,16 @@
 export interface InlineInnerVoicePayload {
   content: string;
   emotionalState: string;
+  source?: "inline" | "local_fallback";
+}
+
+/** Zero-token safety net used only when a valid chat reply omitted its inline voice. */
+export function createLocalInnerVoiceFallback(): InlineInnerVoicePayload {
+  return {
+    content: "我还在认真消化刚才这段对话，想听听你接下来会怎么说。",
+    emotionalState: "心里仍在整理刚才的话题，情绪随着对话轻轻起伏。",
+    source: "local_fallback",
+  };
 }
 
 export interface ParsedChatTurnResponse {

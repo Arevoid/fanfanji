@@ -95,9 +95,9 @@ const plainTextRepairRecovered = await requestDirectChatTurn({
         : { text: '{"content":"终于把话说清了","emotionalState":"松了口气"}' };
   },
 });
-assert.equal(plainTextRepairAttempts, 3);
+assert.equal(plainTextRepairAttempts, 2, "a successful chat reply without inline voice must not trigger a third voice-only request");
 assert.equal(plainTextRepairRecovered.text, "纯文本格式修复成功");
-assert.deepEqual(plainTextRepairRecovered.innerVoice, { content: "终于把话说清了", emotionalState: "松了口气" });
+assert.equal(plainTextRepairRecovered.innerVoice?.source, "local_fallback");
 
 const missingVoiceRequests: Array<{ purpose?: string; message: string; retryReasons?: readonly string[] }> = [];
 const missingVoiceRecovered = await requestDirectChatTurn({
@@ -111,11 +111,11 @@ const missingVoiceRecovered = await requestDirectChatTurn({
       : { text: '{"content":"其实很在意她刚才的话","emotionalState":"嘴上平静，心里微微发紧"}' };
   },
 });
-assert.equal(missingVoiceRequests.length, 2, "a valid reply without inline voice must request a focused voice recovery before returning");
+assert.equal(missingVoiceRequests.length, 1, "a valid reply without inline voice must not spend tokens on a second request");
 assert.equal(missingVoiceRecovered.text, "这条回复不能丢心声", "voice recovery must not replace the actual reply");
-assert.deepEqual(missingVoiceRecovered.innerVoice, { content: "其实很在意她刚才的话", emotionalState: "嘴上平静，心里微微发紧" });
-assert.equal(missingVoiceRequests[1].purpose, "inner_voice");
-assert.match(missingVoiceRequests[1].message, /这条回复不能丢心声/, "the focused voice request must include the exact reply it belongs to");
+assert.equal(missingVoiceRecovered.innerVoice?.source, "local_fallback");
+assert.ok(missingVoiceRecovered.innerVoice?.content, "the chat turn still carries a no-token fallback record");
+assert.equal(missingVoiceRequests[0].purpose, "chat_reply");
 
 let malformedVoiceRecoveryAttempts = 0;
 const malformedVoiceRecovered = await requestDirectChatTurn({
@@ -129,12 +129,12 @@ const malformedVoiceRecovered = await requestDirectChatTurn({
     return { text: '{"content":"把担心藏起来","emotionalState":"略感担忧"}' };
   },
 });
-assert.equal(malformedVoiceRecoveryAttempts, 3, "malformed recovered voice should receive one format correction retry");
+assert.equal(malformedVoiceRecoveryAttempts, 1, "malformed/missing inline voice must not issue voice-only retries");
 assert.equal(malformedVoiceRecovered.text, "格式异常时仍保留本轮回复");
-assert.equal(malformedVoiceRecovered.innerVoice?.emotionalState, "略感担忧");
+assert.equal(malformedVoiceRecovered.innerVoice?.source, "local_fallback");
 
 let failedVoiceAttempts = 0;
-await assert.rejects(() => requestDirectChatTurn({
+const failedVoiceRecovered = await requestDirectChatTurn({
   prompt,
   settings,
   includeInnerVoice: true,
@@ -144,8 +144,10 @@ await assert.rejects(() => requestDirectChatTurn({
       ? { text: '{"reply":"心声无法生成时不应静默发出"}' }
       : { text: "仍然不是有效心声" };
   },
-}), (error: unknown) => (error as { code?: string }).code === "inner_voice_generation_failed");
-assert.equal(failedVoiceAttempts, 3, "the controller must stop rather than silently return a reply after voice recovery fails");
+});
+assert.equal(failedVoiceAttempts, 1, "a missing heart voice never repeats the model request");
+assert.equal(failedVoiceRecovered.text, "心声无法生成时不应静默发出", "the actual chat reply must survive a missing heart voice");
+assert.equal(failedVoiceRecovered.innerVoice?.source, "local_fallback");
 
 assert.equal(isContextLengthError(Object.assign(new Error("request too long"), { code: "context_too_large" })), true);
 assert.equal(isContextLengthError(new Error("invalid api key")), false);

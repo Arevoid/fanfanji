@@ -98,7 +98,11 @@ export function useChatDeleteFriendAction({
 
     const innerVoices = loadInnerVoiceRecords([]).value;
     const remainingInnerVoices = removeInnerVoicesByRelation(innerVoices, relationId);
-    if (remainingInnerVoices.length !== innerVoices.length) saveInnerVoiceRecords(remainingInnerVoices);
+    if (remainingInnerVoices.length !== innerVoices.length) {
+      void saveInnerVoiceRecords(remainingInnerVoices).then((saved) => {
+        if (!saved.success) showToast("该关系的心声记录清理失败，请稍后重试。");
+      });
+    }
     const imageRecords = loadImageGenerationRecords([]).value;
     const removedImageRecords = imageRecords.filter((record) => record.relationId === relationId);
     if (removedImageRecords.length) {

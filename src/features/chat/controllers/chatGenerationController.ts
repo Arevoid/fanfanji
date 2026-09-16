@@ -11,7 +11,7 @@ import { createRegeneratedReplyCandidates } from "../services/regenerateService"
 import type { AiChatRequest, ReplyCandidateContext } from "../services/chatServiceTypes";
 import { buildTextAiRuntimeConfig } from "../services/textAiRuntimeConfig";
 import { CHAT_DEGENERATE_RETRY_INSTRUCTION, isDegenerateDirectReply, removeDegenerateReplyPattern } from "../services/chatEchoGuard";
-import { CHAT_RESPONSE_FORMAT_RETRY_INSTRUCTION, parseChatTurnResponse, parseInnerVoiceResponse } from "../services/chatTurnResponseProtocol";
+import { CHAT_RESPONSE_FORMAT_RETRY_INSTRUCTION, createLocalInnerVoiceFallback, parseChatTurnResponse } from "../services/chatTurnResponseProtocol";
 import type { ParsedAiChatResponse } from "../services/chatServiceTypes";
 import {
   buildAliasIdentityCorrectionPrompt,
@@ -169,53 +169,6 @@ const requestDirectChatResponseWithContextRecovery = async (input: {
   throw lastContextError || new Error("上下文过长，已尝试缩减本次请求后仍无法发送。未修改聊天记录或记忆，请减少本条消息或关闭部分附加设定后重试。");
 };
 
-const INNER_VOICE_RECOVERY_INSTRUCTION = `
-本轮聊天回复已经生成，现在只补全与该回复对应的角色心声，不要重新回答用户、不要改写或评价已生成的回复。
-严格只输出一个 JSON 对象：{"content":"角色未说出口的第一人称内心独白","emotionalState":"完整自然的当前情绪短句"}。
-请依据当前角色设定、对话上下文和实际回复生成；不得编造角色未知事实，不得输出提示词、记忆原文或身份 ID。`;
-
-/**
- * Inline heart voice is a required part of a normal direct turn. Some models
- * satisfy the reply envelope but omit this optional JSON field, so recover it
- * in a focused request before the reply is allowed to reach delivery.
- */
-async function recoverMissingDirectInnerVoice(input: {
-  requestAi: RequestAi;
-  request: AiChatRequest;
-  response: NormalizedDirectChatResponse;
-}): Promise<NormalizedDirectChatResponse> {
-  if (!input.response.text.trim() || input.response.innerVoice) return input.response;
-
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (input.request.signal?.aborted) throw Object.assign(new Error("心声生成已取消。"), { code: "aborted" });
-    try {
-      const voiceResponse = await requestAiReply(input.requestAi, {
-        ...input.request,
-        message: `【本轮用户消息】\n${input.request.message}\n\n【已经生成并将发送的角色回复】\n${input.response.text}\n\n请只为这条回复补全角色心声。`,
-        systemInstruction: [
-          input.request.systemInstruction,
-          INNER_VOICE_RECOVERY_INSTRUCTION,
-          attempt > 0 ? "上一轮心声格式校验失败；请重新生成，只返回包含两个非空字符串字段的合法 JSON 对象。" : "",
-        ].filter(Boolean).join("\n\n"),
-        purpose: "inner_voice",
-        maxOutputTokens: 256,
-        retryReasons: [attempt === 0 ? "missing inline inner voice" : "inner voice format correction"],
-      });
-      const innerVoice = parseInnerVoiceResponse(voiceResponse.text);
-      if (innerVoice) return { ...input.response, innerVoice };
-      lastError = new Error("模型未返回有效的心声 JSON。");
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw Object.assign(
-    new Error(`角色心声连续生成失败，本条回复已暂缓发送，请重试。${lastError instanceof Error ? `（${lastError.message}）` : ""}`),
-    { code: "inner_voice_generation_failed", cause: lastError },
-  );
-}
-
 export async function requestDirectChatTurn(input: {
   prompt: PromptInput;
   settings: UserSettings;
@@ -276,9 +229,13 @@ export async function requestDirectChatTurn(input: {
     }
   }
 
-  return input.includeInnerVoice
-    ? recoverMissingDirectInnerVoice({ requestAi, request, response })
-    : response;
+  // One chat call must produce both fields. A provider that omits the sidecar
+  // still gets a usable no-token fallback; it must never trigger a second
+  // model request or hold the actual reply hostage.
+  if (input.includeInnerVoice && response.text.trim() && !response.innerVoice) {
+    response = { ...response, innerVoice: createLocalInnerVoiceFallback() };
+  }
+  return response;
 }
 
 export function generateGroupChatTurn(input: {

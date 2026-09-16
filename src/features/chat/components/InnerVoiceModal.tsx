@@ -55,6 +55,9 @@ export function InnerVoiceModal({ character, mode, onModeChange, onClose, loadin
           {!loading && record && (
             <Card variant="secondary" padding="md" className="space-y-3">
               <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">此刻的心声</h3>
+              {record.generationSource === "local_fallback" && (
+                <p className="text-xs leading-5 text-[var(--color-text-secondary)]">本轮模型未返回有效心声；为避免额外请求并保证聊天正常发送，这里显示了免 token 兜底内容。点击刷新可主动重新生成。</p>
+              )}
               <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--color-text-primary)]">{record.content}</p>
               <div className="border-t border-[var(--divider)]" />
               <div className="space-y-1">
@@ -75,6 +78,9 @@ export function InnerVoiceModal({ character, mode, onModeChange, onClose, loadin
                   <span>{new Date(item.createdAt).toLocaleString("zh-CN", { hour12: false })}</span>
                 </div>
                 <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">此刻的心声</h3>
+                {item.generationSource === "local_fallback" && (
+                  <p className="text-xs leading-5 text-[var(--color-text-secondary)]">免 token 兜底内容（模型本轮未返回有效心声）</p>
+                )}
                 <p className="whitespace-pre-wrap text-sm leading-6">{item.content}</p>
                 <div className="border-t border-[var(--divider)]" />
                 <div className="space-y-1">

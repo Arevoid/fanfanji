@@ -24,6 +24,11 @@ Object.assign(globalThis, { indexedDB, window: { localStorage: storage } });
 
 const characters = [{ id: "character-a", name: "角色 A" }];
 const moments = [{ id: "moment-a", content: "朋友圈内容" }];
+const innerVoices = [{
+  id: "voice-backup", characterId: "character-a", relationId: "relation-a", userIdentityId: "identity-a",
+  conversationId: "direct:relation-a", messageId: "message-a", triggerMessageSummary: "给旧数据迁移",
+  state: "calm", content: "备份中的私密心声", createdAt: 1,
+}];
 await readingAssetDb.saveMetadataValue("character-archive-v4", characters);
 await readingAssetDb.saveMetadataValue("moments-v4", moments);
 const backupPhone = {
@@ -51,13 +56,17 @@ const backupPhone = {
 };
 await characterPhoneDb.replaceAll([backupPhone as never]);
 values.set("phone_worldbook_entries", JSON.stringify([{ id: "world-a" }]));
+values.set("phone_inner_voice_records", JSON.stringify(innerVoices));
 values.set("phone_characters_v3", JSON.stringify([{ id: "legacy-character" }]));
 values.set("phone_reading_analysis_store_v1", JSON.stringify({ version: 1, tasks: [] }));
 
-const backup = await buildSystemBackup(storage, ["phone_characters_v3", "phone_worldbook_entries"]);
+const backup = await buildSystemBackup(storage, ["phone_characters_v3", "phone_worldbook_entries", "phone_inner_voice_records"]);
 assert.deepEqual(backup.indexedDb["character-archive-v4"], characters);
 assert.deepEqual(backup.indexedDb["moments-v4"], moments);
 assert.deepEqual(backup.indexedDb["character-phone-v1"], [backupPhone]);
+assert.equal((backup.indexedDb["inner-voice-v1"] as typeof innerVoices)[0]?.content, innerVoices[0].content);
+assert.ok((backup.indexedDb["inner-voice-v1"] as Array<{ storageScopeKey?: string }>)[0]?.storageScopeKey);
+assert.equal(backup.localStorage.phone_inner_voice_records, null, "migrated heart voices are backed up only from IndexedDB");
 assert.equal(backup.localStorage.phone_worldbook_entries, JSON.stringify([{ id: "world-a" }]));
 assert.equal(backup.localStorage.phone_characters_v3, JSON.stringify([{ id: "legacy-character" }]), "legacy local data is retained when an IDB export is unavailable");
 assert.equal(backup.localStorage.phone_reading_analysis_store_v1, undefined, "only requested local keys are exported");
@@ -68,9 +77,10 @@ assert.equal(fullBackup.localStorage.phone_reading_analysis_store_v1, JSON.strin
 assert.deepEqual(
   filterSystemBackupLocalStorageForRestore([
     ["phone_messages_v3", "large-chat"],
+    ["phone_inner_voice_records", "legacy-voices"],
     ["phone_offline_stories", "large-offline"],
     ["phone_settings", "settings"],
-  ], { "message-entry-v1": [], "offline-story-entry-v1": [] }),
+  ], { "message-entry-v1": [], "offline-story-entry-v1": [], "inner-voice-v1": [] }),
   [["phone_settings", "settings"]],
   "entry-store backups must not recreate large LocalStorage content copies",
 );
@@ -101,6 +111,16 @@ assert.deepEqual(parsed.indexedDb["moments-v4"], moments);
 assert.equal(typeof backup.checksum, "string");
 const tamperedBackup = parseSystemBackup({ ...backup, localStorage: { ...backup.localStorage, phone_worldbook_entries: "changed" } });
 assert.match(tamperedBackup.integrityWarning || "", /校验值不一致/);
+const envelopedLegacyVoices = parseSystemBackup({
+  format: "fanfanji-system-backup", version: 3, exportedAt: 1,
+  localStorage: { phone_inner_voice_records: JSON.stringify(innerVoices) }, indexedDb: {},
+});
+assert.deepEqual(envelopedLegacyVoices.indexedDb["inner-voice-v1"], innerVoices, "older enveloped backups migrate localStorage voices into the IndexedDB restore channel");
+assert.deepEqual(
+  filterSystemBackupLocalStorageForRestore(Object.entries(envelopedLegacyVoices.localStorage), envelopedLegacyVoices.indexedDb),
+  [],
+  "restoring migrated voice records must not duplicate them in localStorage",
+);
 const restoreError = new SystemBackupRestoreError("restore failed", ["messages-v4: write failed"]);
 assert.deepEqual(restoreError.rollbackErrors, ["messages-v4: write failed"]);
 const serializedBackup = "备份内容".repeat(20);
@@ -111,15 +131,17 @@ const legacy = parseSystemBackup({
   phone_worldbook_entries: JSON.stringify([{ id: "legacy-world" }]),
   phone_characters_v3: JSON.stringify([{ id: "legacy-character" }]),
   phone_messages_v3: JSON.stringify([{ id: "legacy-message", content: "旧版聊天" }]),
+  phone_inner_voice_records: JSON.stringify(innerVoices),
 });
 assert.equal(legacy.legacy, true);
 assert.deepEqual(legacy.indexedDb["character-archive-v4"], [{ id: "legacy-character" }]);
 assert.deepEqual(legacy.indexedDb["message-entry-v1"], [{ id: "legacy-message", content: "旧版聊天" }]);
+assert.deepEqual(legacy.indexedDb["inner-voice-v1"], innerVoices);
 assert.deepEqual(
   filterSystemBackupLocalStorageForRestore(Object.entries(legacy.localStorage), legacy.indexedDb),
   [
     ["phone_worldbook_entries", JSON.stringify([{ id: "legacy-world" }])],
-    ["phone_characters_v3", JSON.stringify([{ id: "legacy-character" }])],
+      ["phone_characters_v3", JSON.stringify([{ id: "legacy-character" }])],
   ],
   "legacy chat is restored to the durable entry store instead of remaining only in LocalStorage",
 );
