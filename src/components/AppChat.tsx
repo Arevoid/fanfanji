@@ -2390,7 +2390,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       // Context-aware trigger scanning: current message plus three recent turns.
       const scanText = buildWorldBookScanText(
         currentMessageContextText,
-        (topicBoundary.mode === "shift" ? [] : currentChatMessages)
+        (topicBoundary.mode === "shift" ? [] : currentChatMessages.slice(-10))
           .map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name })),
       );
       const characterBehaviorPrompt = buildCharacterBehaviorPrompt({

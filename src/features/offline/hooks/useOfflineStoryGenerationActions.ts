@@ -8,6 +8,7 @@ import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from 
 import { resolveCanonicalCharacterId, resolveOfflineStoryCharacterIds } from "../../../domain/character/characterIdentity";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { collectOfflineWorldBookContext, formatOfflineWorldBookEntries } from "../prompts/offlineWorldBookContext";
+import { buildWorldBookScanText } from "../../../domain/worldbook/worldBookTriggerScan";
 import { applyOfflineStoryRegeneration, prepareOfflineStoryRegeneration } from "../../../domain/offlineStory/offlineStoryRegeneration";
 import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../../../domain/prompt/offlineIdentityBinding";
@@ -157,14 +158,14 @@ export function useOfflineStoryGenerationActions({
       const isGroupStory = Boolean((updatedStory.characterIds?.length || 0) > 1 && !updatedStory.relationId);
       const isImportedGroupStory = isGroupStory || Boolean(sourceChat?.isGroupChat);
 
-      const worldBookScanText = [
+      const worldBookScanText = buildWorldBookScanText(
         text || "",
-        ...updatedStory.messages.slice(-10).map((message) => serializeMessageContentForPrompt(message, {
+        updatedStory.messages.map((message) => serializeMessageContentForPrompt(message, {
           mode: "history",
           userName: settings.name,
           characterName: selectedChar.name,
         })),
-      ].filter(Boolean).join("\n");
+      );
       const scopedRelationship = updatedStory.relationId
         ? relationships.find((relation) => relation.id === updatedStory.relationId)
         : undefined;

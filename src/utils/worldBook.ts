@@ -1,4 +1,4 @@
-import { WorldBookEntry } from "../types";
+import type { WorldBookEntry, WorldBookPosition } from "../types";
 import { loadWorldBookEntries } from "../core/storage/repositories/worldBookRepository";
 import { isWorldBookEntryVisible, type WorldBookReadContext } from "../domain/worldbook/worldBookVisibility";
 import { isWorldBookEntryForCharacter } from "../domain/worldbook/worldBookVisibility";
@@ -41,6 +41,27 @@ export interface WorldBookDepthInjection {
   sourceId: string;
   depth: number;
   content: string;
+}
+
+const WORLD_BOOK_POSITION_LABELS: Record<Exclude<WorldBookPosition, "at_depth">, string> = {
+  after_main_prompt: "World Book Background: Main Prompt Extensions",
+  before_char_def: "World Book Background: Context Primers",
+  after_char_def: "World Book Background: Profile Extensions",
+  before_chat_history: "World Book Background: Story Anchor",
+};
+
+/** Preserve structural placement when a feature has only one system-text slot. */
+export function formatWorldBookForPrompt(blocks: Pick<WorldBookSystemBlocks, "after_main_prompt" | "before_char_def" | "after_char_def" | "before_chat_history">): string {
+  const positions: Array<Exclude<WorldBookPosition, "at_depth">> = [
+    "after_main_prompt",
+    "before_char_def",
+    "after_char_def",
+    "before_chat_history",
+  ];
+  return positions
+    .filter((position) => blocks[position].length > 0)
+    .map((position) => `[${WORLD_BOOK_POSITION_LABELS[position]}]\n${blocks[position].join("\n\n")}`)
+    .join("\n\n");
 }
 
 /**
@@ -139,10 +160,7 @@ export function buildWorldBookSystemBlocks(
 
   // at_depth entries are injected into the chronological history by
   // PromptComposer. Excluding them here prevents a second system-level copy.
-  const formattedAll = sortedTriggered
-    .filter(({ entry }) => entry.position !== "at_depth")
-    .map(({ text }) => text)
-    .join("\n\n");
+  const formattedAll = formatWorldBookForPrompt(entriesByPos);
 
   return {
     after_main_prompt: entriesByPos.after_main_prompt,

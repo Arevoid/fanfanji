@@ -300,7 +300,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       // Context-aware trigger scanning: current message plus three recent turns.
       const scanText = buildWorldBookScanText(
         currentMessageContextText,
-        (topicBoundary.mode === "shift" ? [] : previousMessages)
+        (topicBoundary.mode === "shift" ? [] : previousMessages.slice(-10))
           .map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name })),
       );
       const characterBehaviorPrompt = buildCharacterBehaviorPrompt({

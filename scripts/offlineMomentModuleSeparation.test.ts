@@ -34,7 +34,7 @@ const entry = (id: string, position: WorldBookEntry["position"]): WorldBookEntry
 
 assert.equal(
   formatOfflineWorldBookEntries([entry("before", "before_char_def"), entry("depth", "at_depth")]),
-  "【设定 - 标题before】\n内容before",
+  "[World Book Background: Context Primers]\n【设定 - 标题before】\n内容before",
 );
 
 console.log("offline/moments module separation tests passed");
