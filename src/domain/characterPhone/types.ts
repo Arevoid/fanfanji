@@ -26,6 +26,11 @@ export interface CharacterPhoneContact {
   id: string;
   name: string;
   relation: string;
+  /** Source identity and direct relationship for a role-phone user chat window. */
+  userIdentityId?: string;
+  relationId?: string;
+  /** Read-only legacy thread whose original identity/relation cannot be proven. */
+  historyOnly?: boolean;
   kind?: "user" | "character" | "npc" | "group";
   isLongTerm: boolean;
   isNpc: boolean;

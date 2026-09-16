@@ -128,6 +128,78 @@ assert.equal(phoneA.musicTracks?.length, 0, "does not seed a synthetic music lib
 assert.equal(phoneA.listeningHistory?.length, 0, "does not seed synthetic listening history without a user source");
 assert.equal(phoneA.musicPlaylists?.length, 0, "does not seed a synthetic playlist without a user source");
 
+const aliasIdentity: UserIdentity = {
+  id: "identity-alias",
+  name: "小号",
+  avatar: "🌿",
+  signature: "",
+  bio: "",
+  kind: "alias",
+  parentIdentityId: identity.id,
+};
+const aliasRelation = {
+  ...relation,
+  id: "relation-alias",
+  userIdentityId: aliasIdentity.id,
+  conversationId: "conversation-alias",
+};
+const aliasMessages: Message[] = [
+  ...messages,
+  { id: "alias-message-user", characterId: characterA.id, relationId: aliasRelation.id, conversationId: aliasRelation.conversationId, sender: "user", content: "这是小号发的。", timestamp: 30 },
+  { id: "alias-message-character", characterId: characterA.id, relationId: aliasRelation.id, conversationId: aliasRelation.conversationId, sender: "character", content: "我知道是你的小号。", timestamp: 31 },
+];
+const aliasPhone = ensureCharacterPhoneContent({
+  phone: emptyPhone("phone-alias-threads", characterA.id),
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  identities: [identity, aliasIdentity],
+  relationships: [relation, aliasRelation],
+  messages: aliasMessages,
+  moments,
+  worldBookEntries: worldBook,
+  now: 100,
+});
+const userContacts = aliasPhone.contacts.filter((contact) => contact.kind === "user");
+assert.equal(userContacts.length, 2, "creates a separate role-phone chat window for each identity relationship");
+const primaryUserContact = userContacts.find((contact) => contact.relationId === relation.id);
+const aliasUserContact = userContacts.find((contact) => contact.relationId === aliasRelation.id);
+assert.equal(primaryUserContact?.userIdentityId, identity.id);
+assert.equal(aliasUserContact?.userIdentityId, aliasIdentity.id);
+assert.ok(aliasPhone.threadMessages.some((message) => message.sourceMessageId === "message-a" && message.contactId === primaryUserContact?.id));
+assert.ok(aliasPhone.threadMessages.some((message) => message.sourceMessageId === "alias-message-user" && message.contactId === aliasUserContact?.id));
+assert.ok(aliasPhone.threadMessages.some((message) => message.sourceMessageId === "alias-message-character" && message.contactId === aliasUserContact?.id));
+const legacyAliasPhone = emptyPhone("phone-legacy-alias-threads", characterA.id);
+legacyAliasPhone.contacts = [{
+  id: "character-phone:phone-legacy-alias-threads:contact:user",
+  name: identity.name,
+  relation: "与角色聊天",
+  kind: "user",
+  isLongTerm: true,
+  isNpc: false,
+  source: "user",
+}];
+legacyAliasPhone.threadMessages = [
+  { id: "legacy-primary-copy", contactId: legacyAliasPhone.contacts[0].id, sender: "contact", content: "主号旧记录", timestamp: 10, sourceMessageId: "message-a" },
+  { id: "legacy-alias-copy", contactId: legacyAliasPhone.contacts[0].id, sender: "contact", content: "小号旧记录", timestamp: 30, sourceMessageId: "alias-message-user" },
+];
+const migratedAliasPhone = ensureCharacterPhoneContent({
+  phone: legacyAliasPhone,
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  identities: [identity, aliasIdentity],
+  relationships: [relation, aliasRelation],
+  messages: aliasMessages,
+  moments,
+  worldBookEntries: worldBook,
+  now: 200,
+});
+const migratedPrimaryContactId = migratedAliasPhone.contacts.find((contact) => contact.relationId === relation.id)?.id;
+const migratedAliasContactId = migratedAliasPhone.contacts.find((contact) => contact.relationId === aliasRelation.id)?.id;
+assert.ok(migratedAliasPhone.threadMessages.some((message) => message.sourceMessageId === "message-a" && message.contactId === migratedPrimaryContactId));
+assert.ok(migratedAliasPhone.threadMessages.some((message) => message.sourceMessageId === "alias-message-user" && message.contactId === migratedAliasContactId));
+
 const userContactId = phoneA.contacts.find((contact) => contact.kind === "user")?.id;
 assert.ok(userContactId, "creates the user chat contact");
 const mirroredMessage = phoneA.threadMessages.find((message) => message.sourceMessageId === "message-a");
@@ -358,9 +430,10 @@ const reconciledStaleUserThread = ensureCharacterPhoneContent({
 });
 assert.equal(
   reconciledStaleUserThread.threadMessages.some((message) => message.id === "stale-user-thread-message"),
-  false,
-  "role-phone user thread strictly mirrors the main chat and drops stale local messages",
+  true,
+  "unmatched legacy user messages are preserved in a separate history thread instead of being attributed to an identity",
 );
+assert.ok(reconciledStaleUserThread.contacts.some((contact) => contact.name === "历史聊天记录" && !contact.relationId && contact.historyOnly));
 
 const duplicatePhoneAlert = {
   id: "phone-discovery-action-2",

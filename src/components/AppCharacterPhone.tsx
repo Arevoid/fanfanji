@@ -1569,15 +1569,18 @@ export default function AppCharacterPhone({
     if (
       !currentPhone ||
       !selectedContact ||
+      selectedContact.historyOnly ||
       !draft.trim() ||
       !selectedCharacter
     )
       return;
     const now = Date.now();
-    const relation = relationships.find(
-      (item) => item.userIdentityId === userIdentityId && item.characterId === selectedCharacter.id,
-    );
-    const sourceMessageId = selectedContact.kind === "user" && relation && onSendMessage
+    const relation = (selectedContact.kind === "user" || selectedContact.source === "user") && selectedContact.relationId
+      ? relationships.find((item) => item.id === selectedContact.relationId
+        && (!selectedContact.userIdentityId || item.userIdentityId === selectedContact.userIdentityId)
+        && item.characterId === selectedCharacter.id)
+      : undefined;
+    const sourceMessageId = (selectedContact.kind === "user" || selectedContact.source === "user") && relation && onSendMessage
       ? `phone-user-thread-${now}`
       : undefined;
     const next = appendCharacterPhoneThreadMessage({
@@ -1611,7 +1614,7 @@ export default function AppCharacterPhone({
         content: draft.trim().slice(0, 1000),
         timestamp: now,
         sentFromCharacterPhone: true,
-      }), userIdentityId);
+      }), relation?.userIdentityId || selectedContact.userIdentityId || userIdentityId);
     } else {
       setPhoneNotice(`${selectedContact.remark || selectedContact.name}正在查看消息…`);
     }
@@ -2450,6 +2453,17 @@ export default function AppCharacterPhone({
   const endThreadMessagePress = () => clearThreadMessagePressTimer();
   const getPhoneMutationScopeForMessage = (message: CharacterPhoneThreadMessage): MessageMutationScope | undefined => {
     if (!message.sourceMessageId || !selectedCharacter) return undefined;
+    const contact = currentPhone?.contacts.find((candidate) => candidate.id === message.contactId);
+    if (contact && (contact.kind === "user" || contact.source === "user")) {
+      const relation = contact.relationId
+        ? relationships.find((candidate) => candidate.id === contact.relationId
+          && (!contact.userIdentityId || candidate.userIdentityId === contact.userIdentityId)
+          && candidate.characterId === selectedCharacter.id)
+        : undefined;
+      return relation
+        ? { characterId: selectedCharacter.id, relationId: relation.id, conversationId: relation.conversationId }
+        : undefined;
+    }
     const relation = relationships.find((candidate) =>
       candidate.userIdentityId === userIdentityId
       && candidate.characterId === selectedCharacter.id,
@@ -2884,17 +2898,23 @@ export default function AppCharacterPhone({
           {phoneNotice}
         </p>
       )}
-      <div className="flex shrink-0 gap-2 border-t border-black/5 bg-white/70 p-3">
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => { if (event.key === "Enter") sendAsCharacter(); }}
-          placeholder={`以${selectedCharacter.name}的身份发送`}
-          aria-label="角色手机聊天输入框"
-          className="min-w-0 flex-1 rounded-xl bg-neutral-100 px-3 py-2.5 text-xs outline-none"
-        />
-        <button type="button" onClick={sendAsCharacter} className="rounded-xl bg-neutral-900 px-4 py-2 text-xs font-bold text-white">发送</button>
-      </div>
+      {selectedContact.historyOnly ? (
+        <p className="shrink-0 border-t border-black/5 bg-white/70 px-3 py-4 text-center text-[11px] text-neutral-500">
+          这是无法确认归属身份的旧版聊天记录，仅供查看。请从对应身份的聊天窗口继续对话。
+        </p>
+      ) : (
+        <div className="flex shrink-0 gap-2 border-t border-black/5 bg-white/70 p-3">
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") sendAsCharacter(); }}
+            placeholder={`以${selectedCharacter.name}的身份发送`}
+            aria-label="角色手机聊天输入框"
+            className="min-w-0 flex-1 rounded-xl bg-neutral-100 px-3 py-2.5 text-xs outline-none"
+          />
+          <button type="button" onClick={sendAsCharacter} className="rounded-xl bg-neutral-900 px-4 py-2 text-xs font-bold text-white">发送</button>
+        </div>
+      )}
     </div>
   ) : phoneSocialTab === "moments" ? phoneMomentsView : phoneSocialTab === "me" ? phoneMeView : (
     <div className="flex h-full min-h-0 flex-col bg-white text-[var(--text-primary)]">

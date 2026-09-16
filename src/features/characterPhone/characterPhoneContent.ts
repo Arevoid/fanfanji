@@ -78,7 +78,11 @@ function verifiedContactIdentityKey(
   contact: CharacterPhoneContact,
   characters: readonly Character[],
 ): string | undefined {
-  if (contact.source === "user" || contact.kind === "user") return "user";
+  if (contact.source === "user" || contact.kind === "user") {
+    // Each direct relation is a distinct user chat window. A phone-wide
+    // `user` key incorrectly merged every alias conversation into one.
+    return `user:${contact.relationId || contact.id}`;
+  }
   const characterId = linkedCharacterId(contact);
   if (characterId) return `character:${resolveCanonicalCharacterId(characterId, characters)}`;
   const networkNpcId = contact.relationshipNetworkNpcId
@@ -154,11 +158,35 @@ function isCurrentUserMessage(
   return Boolean(message.conversationId && conversationIds.has(message.conversationId));
 }
 
-function makeUserContact(phone: CharacterPhoneRecord, identity?: UserIdentity): CharacterPhoneContact {
+function findRelationshipForMessage(
+  message: Message,
+  relations: CharacterRelationship[],
+): CharacterRelationship | undefined {
+  if (message.relationId) {
+    const matches = relations.filter((relation) => relation.id === message.relationId);
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+  if (!message.conversationId) return undefined;
+  const matches = relations.filter((relation) => relation.conversationId === message.conversationId);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function isUserPhoneContact(contact: CharacterPhoneContact): boolean {
+  return contact.kind === "user" || contact.source === "user";
+}
+
+function makeUserContact(
+  phone: CharacterPhoneRecord,
+  identity: UserIdentity | undefined,
+  relation?: CharacterRelationship,
+): CharacterPhoneContact {
+  const name = identity?.name?.trim() || "用户";
   return {
-    id: scopedId(phone.id, "contact", "user"),
-    name: identity?.name?.trim() || "用户",
-    relation: "与角色聊天",
+    id: scopedId(phone.id, "contact", relation ? `user-${relation.id}` : "user"),
+    name,
+    relation: relation ? `身份聊天 · ${name}` : "与角色聊天",
+    ...(identity?.id ? { userIdentityId: identity.id } : {}),
+    ...(relation ? { relationId: relation.id } : {}),
     kind: "user",
     isLongTerm: true,
     isNpc: false,
@@ -166,6 +194,19 @@ function makeUserContact(phone: CharacterPhoneRecord, identity?: UserIdentity): 
     source: "user",
     sourceRefs: identity?.id ? [{ kind: "character", id: identity.id }] : [],
   };
+}
+
+function makeUserContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[] {
+  const identities = input.identities ?? [];
+  const identityById = new Map(identities.map((identity) => [identity.id, identity]));
+  const relationsById = new Map(input.relationships.map((relation) => [relation.id, relation]));
+  const contacts = [...relationsById.values()].map((relation) => makeUserContact(
+    input.phone,
+    identityById.get(relation.userIdentityId)
+      || (relation.userIdentityId === input.phone.ownerIdentityId ? input.activeIdentity : undefined),
+    relation,
+  ));
+  return contacts.length > 0 ? contacts : [makeUserContact(input.phone, input.activeIdentity)];
 }
 
 function buildContextContacts(
@@ -230,7 +271,10 @@ function syncContacts(input: CharacterPhoneContentInput): {
   contacts: CharacterPhoneContact[];
   threadMessages: CharacterPhoneThreadMessage[];
 } {
-  const userContact = makeUserContact(input.phone, input.activeIdentity);
+  const userContacts = makeUserContacts(input);
+  const userContactByRelationId = new Map(userContacts
+    .filter((contact) => contact.relationId)
+    .map((contact) => [contact.relationId!, contact]));
   const roleCharacterId = resolveCanonicalCharacterId(input.character.id, input.characters);
   const networkContacts = listCharacterPhoneRelationshipNetworkContacts({
     character: input.character,
@@ -259,6 +303,37 @@ function syncContacts(input: CharacterPhoneContentInput): {
   // disappears from the visible inbox but its old thread and deletion fact
   // must remain available to the character's later reactions.
   const existing = input.phone.contacts ?? [];
+  const existingUserContacts = existing.filter(isUserPhoneContact);
+  const existingUserContactById = new Map(existingUserContacts.map((contact) => [contact.id, contact]));
+  const sourceMessagesById = new Map(input.messages.map((message) => [message.id, message]));
+  const threadMessages = (input.phone.threadMessages ?? []).map((message) => {
+    const oldContact = existingUserContactById.get(message.contactId);
+    if (!oldContact) return message;
+    const sourceMessage = message.sourceMessageId ? sourceMessagesById.get(message.sourceMessageId) : undefined;
+    const relation = sourceMessage
+      ? findRelationshipForMessage(sourceMessage, input.relationships)
+      : oldContact.relationId
+        ? input.relationships.find((candidate) => candidate.id === oldContact.relationId)
+        : undefined;
+    const userContact = relation ? userContactByRelationId.get(relation.id) : undefined;
+    return userContact ? { ...message, contactId: userContact.id } : message;
+  });
+  const unresolvedLegacyContactIds = new Set(threadMessages
+    .filter((message) => existingUserContactById.has(message.contactId))
+    .map((message) => message.contactId));
+  const historicalUserContacts = existingUserContacts
+    .filter((contact) => unresolvedLegacyContactIds.has(contact.id)
+      && !userContacts.some((userContact) => userContact.id === contact.id))
+    .map((contact) => contact.relationId
+      ? { ...contact, historyOnly: true }
+      : {
+          ...contact,
+          name: "历史聊天记录",
+          relation: "旧版记录 · 来源身份未确认",
+          userIdentityId: undefined,
+          relationId: undefined,
+          historyOnly: true,
+        });
   const knownContactNames = [
     ...input.characters.map((candidate) => candidate.name),
     ...networkContacts.map((contact) => contact.npc.name),
@@ -268,7 +343,7 @@ function syncContacts(input: CharacterPhoneContentInput): {
     return [verifiedContactIdentityKey(contact, input.characters), network] as const;
   }).filter((entry): entry is readonly [string, CharacterPhoneRelationshipNetworkContact] => Boolean(entry[0])));
   const normalizedExisting: CharacterPhoneContact[] = existing
-    .filter((contact) => contact.id !== userContact.id)
+    .filter((contact) => !isUserPhoneContact(contact))
     .filter((contact) => !isGenericContactName(contact.name))
     .flatMap((contact): CharacterPhoneContact[] => {
       const normalizedName = normalizeCharacterPhoneContactName(
@@ -378,10 +453,10 @@ function syncContacts(input: CharacterPhoneContentInput): {
     })
     .map(toNetworkContact);
   const generated = buildContextContacts(input.phone, input.character, input.worldBookEntries);
-  const nextContacts = [userContact, ...normalizedExisting, ...linkedContacts, ...networkLinkedContacts, ...generated];
+  const nextContacts = [...userContacts, ...historicalUserContacts, ...normalizedExisting, ...linkedContacts, ...networkLinkedContacts, ...generated];
   const existingThreadMessages = mergeVerifiedDuplicateContacts(
     nextContacts,
-    input.phone.threadMessages ?? [],
+    threadMessages,
     input.characters,
   );
   return existingThreadMessages;
@@ -411,42 +486,51 @@ function buildRelationshipNetworkPhoneContacts(
 function syncUserChat(
   phone: CharacterPhoneRecord,
   character: Character,
-  userContact: CharacterPhoneContact,
+  userContacts: CharacterPhoneContact[],
   messages: Message[],
   relations: CharacterRelationship[],
 ): { threadMessages: CharacterPhoneThreadMessage[]; lastMessageId?: string } {
-  const sourceMessages = messages
+  const sourceMessages = [...new Map(messages
     .filter((message) => isCurrentUserMessage(message, character.id, relations))
     // Phone-generated notifications are persisted in the main chat for
     // awareness reactions, but they are not part of the user's real thread
     // mirror and must not be copied back as ordinary chat history.
     .filter((message) => !message.id.startsWith("phone-proactive-"))
-    .sort((left, right) => left.timestamp - right.timestamp);
-  const sourceMessageIds = new Set(sourceMessages.map((message) => message.id));
-  const existing = (phone.threadMessages ?? []).filter((message) => message.contactId !== userContact.id
-    || Boolean(message.sourceMessageId && sourceMessageIds.has(message.sourceMessageId)));
-  const existingSyncedBySourceId = new Map<string, CharacterPhoneThreadMessage>();
-  (phone.threadMessages ?? [])
-    .filter((message) => message.contactId === userContact.id && message.sourceMessageId)
-    .forEach((message) => {
-      const sourceMessageId = message.sourceMessageId!;
-      const previous = existingSyncedBySourceId.get(sourceMessageId);
-      existingSyncedBySourceId.set(sourceMessageId, previous
-        ? {
-            ...previous,
-            ...message,
-            operatedByUser: previous.operatedByUser || message.operatedByUser,
-            recalledAt: message.recalledAt || previous.recalledAt,
-          }
-        : message);
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .map((message) => [message.id, message])).values()];
+  const currentUserContactIds = new Set(userContacts.map((contact) => contact.id));
+  const synced: CharacterPhoneThreadMessage[] = [];
+  userContacts.forEach((userContact) => {
+    const relation = userContact.relationId
+      ? relations.find((candidate) => candidate.id === userContact.relationId)
+      : undefined;
+    const relationMessages = relation
+      ? sourceMessages.filter((message) => findRelationshipForMessage(message, relations)?.id === relation.id)
+      : sourceMessages.filter((message) => !findRelationshipForMessage(message, relations));
+    const relationMessageIds = new Set(relationMessages.map((message) => message.id));
+    const existingBySourceId = new Map<string, CharacterPhoneThreadMessage>();
+    (phone.threadMessages ?? [])
+      .filter((message) => message.contactId === userContact.id && message.sourceMessageId)
+      .forEach((message) => {
+        const sourceMessageId = message.sourceMessageId!;
+        if (!relationMessageIds.has(sourceMessageId)) return;
+        const previous = existingBySourceId.get(sourceMessageId);
+        existingBySourceId.set(sourceMessageId, previous
+          ? {
+              ...previous,
+              ...message,
+              operatedByUser: previous.operatedByUser || message.operatedByUser,
+              recalledAt: message.recalledAt || previous.recalledAt,
+            }
+          : message);
+      });
+    relationMessages.forEach((sourceMessage) => {
+      const mirrored = toCharacterMessage(sourceMessage, phone.id, userContact.id);
+      const previous = existingBySourceId.get(sourceMessage.id);
+      synced.push(previous
+        ? { ...previous, ...mirrored, operatedByUser: previous.operatedByUser || mirrored.operatedByUser }
+        : mirrored);
     });
-  const merged = [...new Map(sourceMessages.map((sourceMessage) => [sourceMessage.id, sourceMessage])).values()]
-    .map((sourceMessage) => {
-    const message = toCharacterMessage(sourceMessage, phone.id, userContact.id);
-    const existingMessage = existingSyncedBySourceId.get(sourceMessage.id);
-    return existingMessage
-      ? { ...existingMessage, ...message, operatedByUser: existingMessage.operatedByUser || message.operatedByUser }
-      : message;
   });
   // The user conversation is a strict mirror of the scoped main-chat
   // messages. Keeping a phone-local fallback when the source thread is empty
@@ -454,7 +538,8 @@ function syncUserChat(
   // role phone even though the user's phone has no corresponding messages.
   // User-authored role-phone messages are written back to the main chat with a
   // sourceMessageId, so they are retained whenever their source still exists.
-  const threadMessages = [...existing.filter((message) => message.contactId !== userContact.id), ...merged];
+  const otherContactMessages = (phone.threadMessages ?? []).filter((message) => !currentUserContactIds.has(message.contactId));
+  const threadMessages = [...otherContactMessages, ...synced];
   return {
     threadMessages: threadMessages.sort((left, right) => left.timestamp - right.timestamp),
     lastMessageId: sourceMessages.at(-1)?.id,
@@ -934,8 +1019,8 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
   };
   const syncedContacts = syncContacts(scopedInput);
   const contacts = syncedContacts.contacts;
-  const userContact = contacts[0];
-  const chat = syncUserChat({ ...sourcePhone, threadMessages: syncedContacts.threadMessages }, input.character, userContact, lifeContext.messages, lifeContext.relationships);
+  const userContacts = contacts.filter((contact) => isUserPhoneContact(contact) && !contact.historyOnly);
+  const chat = syncUserChat({ ...sourcePhone, threadMessages: syncedContacts.threadMessages }, input.character, userContacts, lifeContext.messages, lifeContext.relationships);
   // During first-life initialization the generator owns the conversation
   // history. Do not seed every contact with the same generic one-line opener;
   // that makes every chat look identical and leaves no character reply.
