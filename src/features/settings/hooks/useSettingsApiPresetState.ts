@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ApiPreset, ImageApiPreset, ImageAspectRatio, UserSettings } from "../../../types";
 
 export function useSettingsApiPresetState(settings: UserSettings) {
-  const initialPresets: ApiPreset[] = settings.apiPresets || [
+  const defaultPresets: ApiPreset[] = [
     {
       id: "preset-gemini",
       name: "Default Gemini",
@@ -22,7 +22,10 @@ export function useSettingsApiPresetState(settings: UserSettings) {
       streamCompatible: false,
     },
   ];
-  const initialActiveId = settings.activeApiPresetId || "preset-gemini";
+  const initialPresets = settings.apiPresets?.length ? settings.apiPresets : defaultPresets;
+  const initialActiveId = settings.activeApiPresetId && initialPresets.some((preset) => preset.id === settings.activeApiPresetId)
+    ? settings.activeApiPresetId
+    : initialPresets[0]?.id || "preset-gemini";
   const initialPreset = initialPresets.find((preset) => preset.id === initialActiveId) || initialPresets[0];
 
   const [apiPresets, setApiPresets] = useState<ApiPreset[]>(initialPresets);
@@ -33,6 +36,27 @@ export function useSettingsApiPresetState(settings: UserSettings) {
   const [selectedModel, setSelectedModel] = useState(initialPreset?.selectedModel || "");
   const [apiTemperature, setApiTemperature] = useState(initialPreset?.apiTemperature !== undefined ? initialPreset.apiTemperature : 0.7);
   const [streamCompatible, setStreamCompatible] = useState(initialPreset?.streamCompatible || false);
+  const lastAppliedTextPresetSettings = useRef({ presets: settings.apiPresets, activeId: settings.activeApiPresetId });
+
+  useEffect(() => {
+    if (lastAppliedTextPresetSettings.current.presets === settings.apiPresets
+      && lastAppliedTextPresetSettings.current.activeId === settings.activeApiPresetId) return;
+    lastAppliedTextPresetSettings.current = { presets: settings.apiPresets, activeId: settings.activeApiPresetId };
+
+    const nextPresets = settings.apiPresets?.length ? settings.apiPresets : defaultPresets;
+    const nextActiveId = settings.activeApiPresetId && nextPresets.some((preset) => preset.id === settings.activeApiPresetId)
+      ? settings.activeApiPresetId
+      : nextPresets[0]?.id || "preset-gemini";
+    const nextPreset = nextPresets.find((preset) => preset.id === nextActiveId) || nextPresets[0];
+    setApiPresets(nextPresets);
+    setActiveApiPresetId(nextActiveId);
+    setPresetName(nextPreset?.name || "");
+    setApiEndpoint(nextPreset?.apiEndpoint || "");
+    setApiKey(nextPreset?.apiKey || "");
+    setSelectedModel(nextPreset?.selectedModel || "");
+    setApiTemperature(nextPreset?.apiTemperature ?? 0.7);
+    setStreamCompatible(nextPreset?.streamCompatible || false);
+  }, [settings.apiPresets, settings.activeApiPresetId]);
   const [showPassword, setShowPassword] = useState(false);
   const [modelSuggestions, setModelSuggestions] = useState<string[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);

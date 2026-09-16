@@ -164,7 +164,11 @@ export function useSettingsImageApiActions({
       referenceImageSupported: supportsReferenceImageForModel(protocol, imageSelectedModel),
     } : preset);
     setImageApiPresets(next);
-    onSaveSettings((previous) => ({ ...previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
+    const saved = onSaveSettings((previous) => ({ ...previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
+    if (!saved) {
+      setImageTestResult({ success: false, message: "图片 API 设置保存失败：浏览器未能保存设置，请检查浏览器存储空间后重试。当前页面中的草稿仍保留。" });
+      return;
+    }
     alert("图片 API 设置已保存。");
   };
 

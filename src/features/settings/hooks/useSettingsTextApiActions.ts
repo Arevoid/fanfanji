@@ -1,7 +1,9 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { useSettingsApiPresetState } from "./useSettingsApiPresetState";
+import { createId } from "../../../core/id/createId";
 import { apiFetchModels } from "../../../utils/apiHelper";
 import type { UserSettings } from "../../../types";
+import { updateTextApiPresetDraft } from "./textApiPresetDraft";
 
 type ApiPresetState = ReturnType<typeof useSettingsApiPresetState>;
 
@@ -23,8 +25,20 @@ export function useSettingsTextApiActions({ settings, onSaveSettings, apiState, 
   } = apiState;
 
   const handleSelectPreset = (presetId: string, currentPresets = apiPresets) => {
-    const preset = currentPresets.find((item) => item.id === presetId);
+    const currentPreset = currentPresets.find((item) => item.id === activeApiPresetId);
+    const presetsWithDraft = currentPreset
+      ? updateTextApiPresetDraft(currentPresets, activeApiPresetId, {
+        name: presetName.trim() || currentPreset.name,
+        apiEndpoint: apiEndpoint.trim(),
+        apiKey: apiKey.trim(),
+        selectedModel: selectedModel.trim(),
+        apiTemperature,
+        streamCompatible,
+      })
+      : currentPresets;
+    const preset = presetsWithDraft.find((item) => item.id === presetId);
     if (!preset) return;
+    if (presetsWithDraft !== currentPresets) setApiPresets(presetsWithDraft);
     setActiveApiPresetId(presetId);
     setPresetName(preset.name);
     setApiEndpoint(preset.apiEndpoint);
@@ -36,7 +50,7 @@ export function useSettingsTextApiActions({ settings, onSaveSettings, apiState, 
   };
 
   const handleAddPreset = () => {
-    const newId = `preset-${Date.now()}`;
+    const newId = createId("api-preset");
     const newPreset = {
       id: newId,
       name: `新建配置 ${apiPresets.length + 1}`,
@@ -77,17 +91,21 @@ export function useSettingsTextApiActions({ settings, onSaveSettings, apiState, 
   };
 
   const handleSaveApiConfig = () => {
-    const updatedPresets = apiPresets.map((preset) => preset.id === activeApiPresetId ? {
-      id: preset.id,
-      name: presetName.trim() || preset.name,
+    const currentPreset = apiPresets.find((preset) => preset.id === activeApiPresetId);
+    if (!currentPreset) {
+      alert("保存失败：当前 API 配置不存在，请重新选择配置后重试。");
+      return;
+    }
+    const updatedPresets = updateTextApiPresetDraft(apiPresets, activeApiPresetId, {
+      name: presetName.trim() || currentPreset.name,
       apiEndpoint: apiEndpoint.trim(),
       apiKey: apiKey.trim(),
       selectedModel: selectedModel.trim(),
       apiTemperature,
       streamCompatible,
-    } : preset);
+    });
     setApiPresets(updatedPresets);
-    onSaveSettings((previous) => ({
+    const saved = onSaveSettings((previous) => ({
       ...previous,
       apiPresets: updatedPresets,
       activeApiPresetId,
@@ -97,6 +115,10 @@ export function useSettingsTextApiActions({ settings, onSaveSettings, apiState, 
       apiTemperature,
       streamCompatible,
     }));
+    if (!saved) {
+      alert("API 配置保存失败：浏览器未能保存设置。请检查浏览器存储空间后重试；当前页面中的草稿仍保留。");
+      return;
+    }
     alert("API 配置保存成功！");
   };
 
