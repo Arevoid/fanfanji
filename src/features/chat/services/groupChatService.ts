@@ -14,6 +14,7 @@ import { buildGroupMemberPrivateContext, type GroupMemberPrivateContextInput } f
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage } from "../prompts/chatPromptBuilders";
 import { INLINE_GROUP_INNER_VOICE_INSTRUCTION, parseGroupTurnResponse } from "./chatTurnResponseProtocol";
 import { DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT, MAX_CHAT_CONTEXT_MEMORY_LIMIT } from "./chatMemoryRetrievalSettings";
+import { buildWorldBookScanText } from "../../../domain/worldbook/worldBookTriggerScan";
 
 export type GroupChatTurnGenerator = (input: {
   prompt: {
@@ -63,12 +64,10 @@ export function buildGroupChatHistoryContext(input: {
       ? `${input.userName} (机主): ${content}`
       : `${senderName}: ${content}`;
   }).join("\n");
-  const scanText = [input.scanMessage, ...messages]
-    .filter((message): message is Message => Boolean(message))
-    .slice(-10)
-    .map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: input.userName }))
-    .filter(Boolean)
-    .join("\n");
+  const scanText = buildWorldBookScanText(
+    input.scanMessage ? serializeMessageContentForPrompt(input.scanMessage, { mode: "current", userName: input.userName }) : "",
+    messages.map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: input.userName })),
+  );
   return { messages, historyText, scanText };
 }
 

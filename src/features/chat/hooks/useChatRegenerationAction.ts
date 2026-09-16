@@ -3,6 +3,7 @@ import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from ".
 import { buildAliasIdentityBoundaryPrompt, buildAliasIdentityFinalGuardPrompt } from "../../../domain/prompt/aliasIdentityBoundary";
 import { resolveRecentUserImageForTurn } from "../services/recentUserImageContext";
 import { resolveRegenerationTurnScope } from "../services/regenerationTurnScope";
+import { buildWorldBookScanText } from "../../../domain/worldbook/worldBookTriggerScan";
 
 /** Mechanical extraction of the existing regeneration path; dependencies stay explicit in the page context. */
 export function useChatRegenerationAction(context: Record<string, any>) {
@@ -296,12 +297,12 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         }).text
         : "";
 
-      // Context-aware trigger scanning: current message plus roughly ten recent messages.
-      const scanContextParts = [
+      // Context-aware trigger scanning: current message plus three recent turns.
+      const scanText = buildWorldBookScanText(
         currentMessageContextText,
-        ...(topicBoundary.mode === "shift" ? [] : previousMessages.slice(-10)).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name }))
-      ];
-      const scanText = scanContextParts.filter(Boolean).join("\n");
+        (topicBoundary.mode === "shift" ? [] : previousMessages)
+          .map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name })),
+      );
       const characterBehaviorPrompt = buildCharacterBehaviorPrompt({
         character: activeCharacter,
         currentMessage: currentMessageContextText,

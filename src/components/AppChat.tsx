@@ -46,6 +46,7 @@ import { shouldConvertBubbleToVoice } from "../features/chat/services/voiceBubbl
 import { RED_PACKET_STATUSES_KEY, getPaymentStatusKey, parseRedPacketPayload, removePaymentStatusesByRelation } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
 import { isWorldBookEntryForAnyCharacter, isWorldBookEntryVisible } from "../domain/worldbook/worldBookVisibility";
+import { buildWorldBookScanText } from "../domain/worldbook/worldBookTriggerScan";
 import { aiAnalyzeRemoteSticker, aiAnalyzeSticker, loadStickerImageBlob, stickerDb } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary } from "../domain/memory/MemoryService";
@@ -2386,12 +2387,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         }).text
         : "";
 
-      // Context-aware trigger scanning: current message plus roughly ten recent messages.
-      const scanContextParts = [
+      // Context-aware trigger scanning: current message plus three recent turns.
+      const scanText = buildWorldBookScanText(
         currentMessageContextText,
-        ...(topicBoundary.mode === "shift" ? [] : currentChatMessages.slice(-10)).map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name }))
-      ];
-      const scanText = scanContextParts.filter(Boolean).join("\n");
+        (topicBoundary.mode === "shift" ? [] : currentChatMessages)
+          .map(m => serializeMessageContentForPrompt(m, { mode: "history", userName: promptUserName, characterName: activeCharacter.name })),
+      );
       const characterBehaviorPrompt = buildCharacterBehaviorPrompt({
         character: activeCharacter,
         currentMessage: currentMessageContextText,
@@ -3812,7 +3813,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
       const recentConversation = analyzeRecentConversation(charMsgs, friend.id);
       const conversationGuidance = formatProactiveConversationGuidance(recentConversation);
-      const scanText = charMsgs.slice(-10).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: proactiveIdentityName, characterName: friend.name })).join("\n");
+      const scanText = buildWorldBookScanText(
+        "",
+        charMsgs.map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: proactiveIdentityName, characterName: friend.name })),
+      );
       const wbBlocks = buildWorldBookSystemBlocks(worldBookEntries || [], friend.id, scanText, {
         scenario: "chat",
         characterId: relationship.characterId,

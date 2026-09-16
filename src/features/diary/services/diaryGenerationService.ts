@@ -73,7 +73,7 @@ export const generateDiaryEntry = async (input: { relation: CharacterRelationshi
   const now = Date.now();
   const task: DiaryGenerationTask = { id: createDiaryId("diary-task"), ownerIdentityId: input.ownerIdentityId, relationId: input.relation.id, taskKey: `${input.relation.id}:${input.trigger}:${new Date(now).toDateString()}`, trigger: input.trigger, status: "running", startedAt: now, updatedAt: now };
   const occurredAt = Math.min(input.occurredAt ?? now, now - 1);
-  const context = input.messages.filter((message) => message.relationId === input.relation.id).slice(-12).map((message) => `${message.sender === "user" ? "用户" : input.character.name}: ${serializeMessageContentForPrompt(message, { mode: "history", characterName: input.character.name })}`).join("\n");
+  const context = input.messages.filter((message) => message.relationId === input.relation.id).slice(-6).map((message) => `${message.sender === "user" ? "用户" : input.character.name}: ${serializeMessageContentForPrompt(message, { mode: "history", characterName: input.character.name })}`).join("\n");
   if (!context.trim() && input.trigger === "lazy") return { task: { ...task, status: "completed", updatedAt: Date.now() } };
   const prompt = buildDiaryPrompt({ characterName: input.character.name, occurredAt, characterProfile: `${input.character.personality || ""}\n${input.character.backstory || ""}`, relationshipState: input.relation.relationship, context });
   const diaryWorldBook = buildWorldBookSystemBlocks([...(input.worldBookEntries || [])], input.character.id, context, {

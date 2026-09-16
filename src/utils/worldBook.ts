@@ -2,6 +2,7 @@ import { WorldBookEntry } from "../types";
 import { loadWorldBookEntries } from "../core/storage/repositories/worldBookRepository";
 import { isWorldBookEntryVisible, type WorldBookReadContext } from "../domain/worldbook/worldBookVisibility";
 import { isWorldBookEntryForCharacter } from "../domain/worldbook/worldBookVisibility";
+import { normalizeWorldBookTriggerText, splitWorldBookKeywords, worldBookKeywordMatches } from "../domain/worldbook/worldBookTriggerScan";
 
 export function getLatestWorldBookEntries(propEntries: WorldBookEntry[]): WorldBookEntry[] {
   try {
@@ -65,7 +66,7 @@ export function buildWorldBookSystemBlocks(
   readContext?: WorldBookReadContext,
 ): WorldBookSystemBlocks {
   const visibleWorldBookEntries = getVisibleWorldBookEntries(propEntries, characterId, readContext);
-  const scanTextLower = scanText.toLowerCase();
+  const scanTextNormalized = normalizeWorldBookTriggerText(scanText);
 
   const triggeredEntries: {
     entry: WorldBookEntry;
@@ -83,20 +84,16 @@ export function buildWorldBookSystemBlocks(
       isTriggered = true;
     } else if (entry.triggerType === "vector") {
       // Smart simulated vector term-overlap matching
-      const textToMatch = (entry.title + " " + (entry.keywords || "") + " " + entry.content).toLowerCase();
-      const userWords = scanTextLower.split(/[\s,.:;!?，。！？、；：]/).filter(w => w.length >= 2);
-      if (userWords.some(word => textToMatch.includes(word)) || scanTextLower.includes(entry.title.toLowerCase())) {
+      const textToMatch = normalizeWorldBookTriggerText(`${entry.title} ${entry.keywords || ""} ${entry.content}`);
+      const userWords = splitWorldBookKeywords(scanTextNormalized).filter((word) => word.length >= 2);
+      if (userWords.some((word) => textToMatch.includes(word)) || worldBookKeywordMatches(scanTextNormalized, entry.title)) {
         isTriggered = true;
       }
     } else {
       // "keys" trigger
       const kwStr = entry.keywords || entry.title || "";
-      const kws = kwStr
-        .split(/[,，;；\s\t]+/)
-        .map((k) => k.trim().toLowerCase())
-        .filter(Boolean);
-
-      if (kws.some((kw) => scanTextLower.includes(kw))) {
+      const kws = splitWorldBookKeywords(kwStr);
+      if (kws.some((kw) => worldBookKeywordMatches(scanTextNormalized, kw))) {
         isTriggered = true;
       }
     }
