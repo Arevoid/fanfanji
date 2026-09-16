@@ -46,7 +46,7 @@ assert.match(chatComposer, /if \(chatEnterKeyNewline\) return;/, "newline mode m
 assert.match(appSettings, /const saved = handleSave\(\{ chatEnterKeyNewline: nextValue \}\)/, "newline preference must only appear enabled after persistence succeeds");
 const app = readFileSync("src/App.tsx", "utf8");
 assert.match(app, /const canonicalCharacterId = resolveCanonicalCharacterId\(characterId, currentCharacters\)/, "character updates must canonicalize legacy contact instances");
-assert.match(app, /loadSettingsDurableOverlay/, "profile settings need an IndexedDB quota fallback");
+assert.match(app, /hydrateSettingsOverlays/, "profile and asset references must be hydrated before desktop image assets");
 const phone = readFileSync("src/components/AppCharacterPhone.tsx", "utf8");
 assert.match(phone, /draftsByContact/);
 const characterSaveSettings = readFileSync("src/features/chat/hooks/useChatSaveSettings.ts", "utf8");

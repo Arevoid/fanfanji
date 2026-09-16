@@ -83,6 +83,20 @@ assert.equal(durable?.wallpaperAssetId, assets.SETTINGS_WALLPAPER_ASSET_ID);
 assert.equal(durable?.customIconsAssetId, assets.SETTINGS_CUSTOM_ICONS_ASSET_ID);
 assert.equal("customIcons" in (durable || {}), false, "asset bytes must not be duplicated in the reference fallback");
 assert.ok(await repository.loadSettingsDurableOverlay(), "an unsynced durable overlay must remain available across restarts");
+
+// Startup must recover the durable IDs before reading asset bytes. If the
+// asset overlay is read first, applySettingsAssetOverlay sees no stable ID and
+// leaves both settings blank even though both IndexedDB records exist.
+let startupSettings = JSON.parse(values.get("phone_settings")!) as UserSettings;
+await repository.hydrateSettingsOverlays(
+  () => startupSettings,
+  (next) => { startupSettings = next; },
+);
+assert.equal(startupSettings.wallpaper, wallpaper);
+assert.equal(startupSettings.wallpaperAssetId, assets.SETTINGS_WALLPAPER_ASSET_ID);
+assert.deepEqual(startupSettings.customIcons, settings.customIcons);
+assert.equal(startupSettings.customIconsAssetId, assets.SETTINGS_CUSTOM_ICONS_ASSET_ID);
+
 const recovered = repository.applySettingsDurableOverlay(JSON.parse(values.get("phone_settings")!) as UserSettings, durable!);
 const recoveredWithAssets = assets.applySettingsAssetOverlay(recovered, loadedOverlay);
 assert.equal(recoveredWithAssets.wallpaper, wallpaper);

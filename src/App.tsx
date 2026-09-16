@@ -4,7 +4,7 @@ import { subscribeOfflineMemorySyncNotifications } from "./features/offline/serv
 import { createId } from "./core/id/createId";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
-import { applySettingsAssetOverlay, applySettingsDurableOverlay, loadSettings, loadSettingsAssetOverlay, loadSettingsDurableOverlay, resolveSettingsUpdate, saveSettings, saveSettingsAsync } from "./core/storage/repositories/settingsRepository";
+import { hydrateSettingsOverlays, loadSettings, resolveSettingsUpdate, saveSettings, saveSettingsAsync } from "./core/storage/repositories/settingsRepository";
 import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
@@ -709,33 +709,19 @@ export default function App() {
   useGlobalTypography(settings);
   const settingsRef = useRef<UserSettings>(settings);
 
-  // A quota fallback is intentionally hydrated after the synchronous
-  // localStorage bootstrap. It contains only profile/keyboard fields and is
-  // used to recover edits that could not fit in the legacy settings blob.
+  // Hydrate reference fallbacks before large IndexedDB-backed image assets.
+  // When localStorage is over quota, an asset's stable ID can exist only in
+  // the durable settings overlay; loading the asset map first would skip it.
   useEffect(() => {
     let active = true;
-    void loadSettingsDurableOverlay().then((overlay) => {
-      if (!active || !overlay) return;
-      const hydrated = applySettingsDurableOverlay(settingsRef.current, overlay);
-      settingsRef.current = hydrated;
-      setSettingsState(hydrated);
-    });
-    return () => { active = false; };
-  }, []);
-
-  // Wallpaper and custom icon bytes are stored in IndexedDB while the
-  // synchronous settings record keeps only small references. Hydrate the
-  // runtime copy after the initial localStorage bootstrap so every existing
-  // renderer can continue using the normal settings fields.
-  useEffect(() => {
-    let active = true;
-    void loadSettingsAssetOverlay().then((overlay) => {
-      if (!active || !overlay) return;
-      const hydrated = applySettingsAssetOverlay(settingsRef.current, overlay);
-      if (hydrated === settingsRef.current) return;
-      settingsRef.current = hydrated;
-      setSettingsState(hydrated);
-    });
+    void hydrateSettingsOverlays(
+      () => settingsRef.current,
+      (hydrated) => {
+        if (!active) return;
+        settingsRef.current = hydrated;
+        setSettingsState(hydrated);
+      },
+    );
     return () => { active = false; };
   }, []);
 

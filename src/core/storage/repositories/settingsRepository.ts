@@ -5,6 +5,8 @@ import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readingAssetDb } from "../readingAssetDb";
 import {
+  applySettingsAssetOverlay,
+  loadSettingsAssetOverlay,
   SETTINGS_CUSTOM_ICONS_ASSET_ID,
   SETTINGS_WALLPAPER_ASSET_ID,
 } from "../settingsAssetRepository";
@@ -148,6 +150,26 @@ export function applySettingsDurableOverlay(settings: UserSettings, overlay: Set
     ...(overlay.customIcons ? { customIcons: overlay.customIcons } : {}),
     ...(Object.hasOwn(overlay, "customIconsAssetId") ? { customIconsAssetId: overlay.customIconsAssetId } : {}),
   };
+}
+
+/**
+ * Hydrates settings references before the corresponding asset bytes. The
+ * reference overlay can be the only persisted copy when localStorage is full,
+ * so loading asset bytes first may otherwise skip them permanently at startup.
+ */
+export async function hydrateSettingsOverlays(
+  getCurrentSettings: () => UserSettings,
+  applyHydratedSettings: (settings: UserSettings) => void,
+): Promise<void> {
+  const durableOverlay = await loadSettingsDurableOverlay();
+  if (durableOverlay) {
+    applyHydratedSettings(applySettingsDurableOverlay(getCurrentSettings(), durableOverlay));
+  }
+
+  const assetOverlay = await loadSettingsAssetOverlay();
+  const currentSettings = getCurrentSettings();
+  const hydratedSettings = applySettingsAssetOverlay(currentSettings, assetOverlay);
+  if (hydratedSettings !== currentSettings) applyHydratedSettings(hydratedSettings);
 }
 
 /** Explicitly removes a durable fallback after its values are no longer needed. */
