@@ -3,6 +3,7 @@ import { loadWorldBookEntries } from "../core/storage/repositories/worldBookRepo
 import { isWorldBookEntryVisible, type WorldBookReadContext } from "../domain/worldbook/worldBookVisibility";
 import { isWorldBookEntryForCharacter } from "../domain/worldbook/worldBookVisibility";
 import { normalizeWorldBookTriggerText, splitWorldBookKeywords, worldBookKeywordMatches } from "../domain/worldbook/worldBookTriggerScan";
+import { rankWorldBookVectorEntries } from "../domain/worldbook/worldBookVector";
 
 export function getLatestWorldBookEntries(propEntries: WorldBookEntry[]): WorldBookEntry[] {
   try {
@@ -72,6 +73,12 @@ export function buildWorldBookSystemBlocks(
     entry: WorldBookEntry;
     text: string;
   }[] = [];
+  const vectorMatchedIds = new Set(
+    rankWorldBookVectorEntries(
+      scanTextNormalized,
+      visibleWorldBookEntries.filter((entry) => entry.triggerType === "vector"),
+    ).map((candidate) => candidate.entry.id),
+  );
 
   for (const entry of visibleWorldBookEntries) {
     let isTriggered = false;
@@ -83,12 +90,7 @@ export function buildWorldBookSystemBlocks(
     } else if (entry.triggerType === "constant") {
       isTriggered = true;
     } else if (entry.triggerType === "vector") {
-      // Smart simulated vector term-overlap matching
-      const textToMatch = normalizeWorldBookTriggerText(`${entry.title} ${entry.keywords || ""} ${entry.content}`);
-      const userWords = splitWorldBookKeywords(scanTextNormalized).filter((word) => word.length >= 2);
-      if (userWords.some((word) => textToMatch.includes(word)) || worldBookKeywordMatches(scanTextNormalized, entry.title)) {
-        isTriggered = true;
-      }
+      isTriggered = vectorMatchedIds.has(entry.id);
     } else {
       // "keys" trigger
       const kwStr = entry.keywords || entry.title || "";
