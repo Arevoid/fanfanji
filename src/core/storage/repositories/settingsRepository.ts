@@ -13,10 +13,9 @@ export { applySettingsAssetOverlay, loadSettingsAssetOverlay } from "../settings
 type SettingsRecord = Record<string, unknown>;
 
 /**
- * A deliberately small IndexedDB fallback for the fields that are needed to
- * keep profile edits usable when the legacy monolithic phone_settings value
- * has reached localStorage quota. It never contains API credentials or other
- * settings, and it is only written after the normal settings write fails.
+ * A deliberately small IndexedDB fallback for profile edits and asset
+ * references when the legacy monolithic phone_settings value has reached
+ * localStorage quota. It never contains API credentials or image bytes.
  */
 export interface SettingsDurableOverlay {
   version: 1;
@@ -27,9 +26,14 @@ export interface SettingsDurableOverlay {
   signature?: string;
   bio?: string;
   chatEnterKeyNewline?: boolean;
+  wallpaper?: string;
+  wallpaperSource?: UserSettings["wallpaperSource"];
+  wallpaperAssetId?: UserSettings["wallpaperAssetId"];
+  customIcons?: UserSettings["customIcons"];
+  customIconsAssetId?: UserSettings["customIconsAssetId"];
 }
 
-const SETTINGS_DURABLE_OVERLAY_KEY = "user-settings-durable-overlay-v1";
+export const SETTINGS_DURABLE_OVERLAY_KEY = "user-settings-durable-overlay-v1";
 let settingsOverlayWriteChain: Promise<void> = Promise.resolve();
 let settingsOverlayHydrated = false;
 const SETTINGS_OVERLAY_FIELDS = new Set([
@@ -51,6 +55,17 @@ const buildSettingsDurableOverlay = (settings: UserSettings): SettingsDurableOve
   signature: settings.signature,
   bio: settings.bio,
   chatEnterKeyNewline: settings.chatEnterKeyNewline,
+  // Data stays in the separate asset overlay. Only small clearing values and
+  // stable asset IDs are allowed in this fallback record.
+  ...(settings.wallpaperAssetId === SETTINGS_WALLPAPER_ASSET_ID || settings.wallpaper === ""
+    ? { wallpaper: settings.wallpaper }
+    : {}),
+  ...(settings.wallpaperSource !== undefined ? { wallpaperSource: settings.wallpaperSource } : {}),
+  ...(settings.wallpaperAssetId !== undefined ? { wallpaperAssetId: settings.wallpaperAssetId } : {}),
+  ...(settings.customIconsAssetId !== SETTINGS_CUSTOM_ICONS_ASSET_ID && Object.keys(settings.customIcons).length === 0
+    ? { customIcons: settings.customIcons }
+    : {}),
+  ...(settings.customIconsAssetId !== undefined ? { customIconsAssetId: settings.customIconsAssetId } : {}),
 });
 
 /**
@@ -72,8 +87,20 @@ const hasOnlyDurableOverlayChanges = (settings: UserSettings): boolean => {
   if (!previous.found || !previous.valid || !isRecord(previous.value)) return false;
   const currentRecord = settings as unknown as SettingsRecord;
   const previousRecord = previous.value;
+  const allowedFields = new Set(SETTINGS_OVERLAY_FIELDS);
+  if (settings.wallpaperAssetId === SETTINGS_WALLPAPER_ASSET_ID
+    || (settings.wallpaperAssetId == null && settings.wallpaper === "")) {
+    allowedFields.add("wallpaper");
+    allowedFields.add("wallpaperSource");
+    allowedFields.add("wallpaperAssetId");
+  }
+  if (settings.customIconsAssetId === SETTINGS_CUSTOM_ICONS_ASSET_ID
+    || (settings.customIconsAssetId == null && Object.keys(settings.customIcons).length === 0)) {
+    allowedFields.add("customIcons");
+    allowedFields.add("customIconsAssetId");
+  }
   const keys = new Set([...Object.keys(currentRecord), ...Object.keys(previousRecord)]);
-  return [...keys].every((key) => SETTINGS_OVERLAY_FIELDS.has(key)
+  return [...keys].every((key) => allowedFields.has(key)
     || JSON.stringify(currentRecord[key]) === JSON.stringify(previousRecord[key]));
 };
 
@@ -103,7 +130,7 @@ export async function loadSettingsDurableOverlay(): Promise<SettingsDurableOverl
   }
 }
 
-/** Applies only the small profile/keyboard overlay; all other settings stay unchanged. */
+/** Applies only small profile, keyboard, and asset-reference fallback fields. */
 export function applySettingsDurableOverlay(settings: UserSettings, overlay: SettingsDurableOverlay): UserSettings {
   if (overlay.version !== 1) return settings;
   return {
@@ -115,10 +142,15 @@ export function applySettingsDurableOverlay(settings: UserSettings, overlay: Set
     ...(overlay.signature !== undefined ? { signature: overlay.signature } : {}),
     ...(overlay.bio !== undefined ? { bio: overlay.bio } : {}),
     ...(overlay.chatEnterKeyNewline !== undefined ? { chatEnterKeyNewline: overlay.chatEnterKeyNewline } : {}),
+    ...(Object.hasOwn(overlay, "wallpaper") ? { wallpaper: overlay.wallpaper || "" } : {}),
+    ...(Object.hasOwn(overlay, "wallpaperSource") ? { wallpaperSource: overlay.wallpaperSource } : {}),
+    ...(Object.hasOwn(overlay, "wallpaperAssetId") ? { wallpaperAssetId: overlay.wallpaperAssetId } : {}),
+    ...(overlay.customIcons ? { customIcons: overlay.customIcons } : {}),
+    ...(Object.hasOwn(overlay, "customIconsAssetId") ? { customIconsAssetId: overlay.customIconsAssetId } : {}),
   };
 }
 
-/** Removes a consumed fallback after the in-memory settings have been hydrated. */
+/** Explicitly removes a durable fallback after its values are no longer needed. */
 export async function clearSettingsDurableOverlay(): Promise<void> {
   if (typeof indexedDB === "undefined") return;
   await new Promise<void>((resolve) => {
@@ -326,9 +358,9 @@ export function saveSettings(settings: UserSettings): StorageWriteResult {
   }
 
   // Keep the existing monolithic localStorage record as the source of truth
-  // whenever it fits. When a large legacy settings object has exhausted that
-  // quota, queue only profile/keyboard fields in the already-used IndexedDB
-  // metadata store so an avatar or Enter-mode edit is not silently lost.
+  // whenever it fits. If a large legacy settings object has exhausted quota,
+  // queue only scoped profile fields or references to assets already persisted
+  // separately in IndexedDB.
   if ((result.error === "quota" || result.error === "unavailable")
     && typeof indexedDB !== "undefined"
     && hasOnlyDurableOverlayChanges(persistedSettings)) {

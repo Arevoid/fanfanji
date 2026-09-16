@@ -3,6 +3,7 @@ import { indexedDB } from "fake-indexeddb";
 import type { UserSettings } from "../src/types";
 
 const values = new Map<string, string>();
+let forceSettingsQuota = false;
 const localStorage: Storage = {
   get length() { return values.size; },
   clear() { values.clear(); },
@@ -12,7 +13,7 @@ const localStorage: Storage = {
   setItem(key, value) {
     // Simulate a small browser quota. Asset-backed settings remain tiny even
     // when the runtime copy still contains large data URLs.
-    if (key === "phone_settings" && value.length > 2000) {
+    if (key === "phone_settings" && (forceSettingsQuota || value.length > 2000)) {
       const error = new Error("quota");
       Object.assign(error, { name: "QuotaExceededError", code: 22 });
       throw error;
@@ -64,4 +65,50 @@ const hydrated = assets.applySettingsAssetOverlay(persisted, loadedOverlay);
 assert.equal(hydrated.wallpaper, wallpaper);
 assert.deepEqual(hydrated.customIcons, settings.customIcons);
 
-console.log("PASS wallpaper and custom icon assets persist in IndexedDB without bloating phone_settings");
+// Reproduce an older installation where legacy image data already filled the
+// settings bucket. The IndexedDB asset write has succeeded, but even the small
+// reference-only localStorage write is rejected; the settings reference must
+// then survive through the scoped durable overlay.
+values.set("phone_settings", JSON.stringify({
+  ...persisted,
+  wallpaper: `data:image/jpeg;base64,${"l".repeat(8000)}`,
+  wallpaperAssetId: undefined,
+  customIcons: { chat: `data:image/png;base64,${"o".repeat(4000)}` },
+  customIconsAssetId: undefined,
+}));
+forceSettingsQuota = true;
+assert.equal(repository.saveSettings(settings).success, true, "asset references should use the durable overlay when phone_settings remains over quota");
+const durable = await repository.loadSettingsDurableOverlay();
+assert.equal(durable?.wallpaperAssetId, assets.SETTINGS_WALLPAPER_ASSET_ID);
+assert.equal(durable?.customIconsAssetId, assets.SETTINGS_CUSTOM_ICONS_ASSET_ID);
+assert.equal("customIcons" in (durable || {}), false, "asset bytes must not be duplicated in the reference fallback");
+assert.ok(await repository.loadSettingsDurableOverlay(), "an unsynced durable overlay must remain available across restarts");
+const recovered = repository.applySettingsDurableOverlay(JSON.parse(values.get("phone_settings")!) as UserSettings, durable!);
+const recoveredWithAssets = assets.applySettingsAssetOverlay(recovered, loadedOverlay);
+assert.equal(recoveredWithAssets.wallpaper, wallpaper);
+assert.deepEqual(recoveredWithAssets.customIcons, settings.customIcons);
+forceSettingsQuota = false;
+assert.equal(repository.saveSettings(recoveredWithAssets).success, true);
+assert.equal(await repository.loadSettingsDurableOverlay(), null, "once the compact settings record is saved, its durable overlay can be removed");
+
+forceSettingsQuota = true;
+const reset = {
+  ...recoveredWithAssets,
+  wallpaper: "",
+  wallpaperSource: null,
+  wallpaperAssetId: null,
+  customIcons: {},
+  customIconsAssetId: null,
+};
+assert.equal(repository.saveSettings(reset).success, true, "asset reset references should also survive localStorage quota");
+const resetOverlay = await repository.loadSettingsDurableOverlay();
+const resetSettings = repository.applySettingsDurableOverlay(recoveredWithAssets, resetOverlay!);
+assert.equal(resetSettings.wallpaper, "");
+assert.equal(resetSettings.wallpaperAssetId, null);
+assert.deepEqual(resetSettings.customIcons, {});
+assert.equal(resetSettings.customIconsAssetId, null);
+forceSettingsQuota = false;
+assert.equal(repository.saveSettings(reset).success, true);
+assert.equal(await repository.loadSettingsDurableOverlay(), null);
+
+console.log("PASS wallpaper and custom icon assets survive localStorage quota via IndexedDB references");

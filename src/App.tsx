@@ -4,7 +4,7 @@ import { subscribeOfflineMemorySyncNotifications } from "./features/offline/serv
 import { createId } from "./core/id/createId";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
-import { applySettingsAssetOverlay, applySettingsDurableOverlay, clearSettingsDurableOverlay, loadSettings, loadSettingsAssetOverlay, loadSettingsDurableOverlay, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
+import { applySettingsAssetOverlay, applySettingsDurableOverlay, loadSettings, loadSettingsAssetOverlay, loadSettingsDurableOverlay, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
@@ -719,7 +719,6 @@ export default function App() {
       const hydrated = applySettingsDurableOverlay(settingsRef.current, overlay);
       settingsRef.current = hydrated;
       setSettingsState(hydrated);
-      void clearSettingsDurableOverlay();
     });
     return () => { active = false; };
   }, []);

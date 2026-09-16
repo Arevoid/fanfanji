@@ -11,6 +11,7 @@ import { offlineStoryEntryDb } from "../../core/storage/offlineStoryEntryDb";
 import { characterPhoneDb } from "../../core/storage/characterPhoneDb";
 import { flushCharacterPhoneRepository } from "../../core/storage/repositories/characterPhoneRepository";
 import { SETTINGS_ASSET_OVERLAY_KEY } from "../../core/storage/settingsAssetRepository";
+import { SETTINGS_DURABLE_OVERLAY_KEY } from "../../core/storage/repositories/settingsRepository";
 
 export const SYSTEM_BACKUP_FORMAT = "fanfanji-system-backup" as const;
 export const SYSTEM_BACKUP_VERSION = 3 as const;
@@ -28,6 +29,7 @@ export const SYSTEM_BACKUP_INDEXED_DB_KEYS = [
   "reading-co-story-store",
   "character-phone-v1",
   SETTINGS_ASSET_OVERLAY_KEY,
+  SETTINGS_DURABLE_OVERLAY_KEY,
 ] as const;
 export const SYSTEM_BACKUP_CONTENT_ENTRY_KEYS = ["message-entry-v1", "offline-story-entry-v1"] as const;
 

@@ -41,6 +41,16 @@ export async function saveSettingsAssetOverlay(value: SettingsAssetOverlay): Pro
   await readingAssetDb.saveMetadataValue(SETTINGS_ASSET_OVERLAY_KEY, value);
 }
 
+/** Restores the previous durable value if the settings-reference write fails. */
+export async function restoreSettingsAssetOverlay(value: SettingsAssetOverlay | null): Promise<void> {
+  if (value) {
+    await saveSettingsAssetOverlay(value);
+    return;
+  }
+  if (typeof indexedDB === "undefined") throw new Error("IndexedDB is unavailable");
+  await readingAssetDb.deleteMetadataValue(SETTINGS_ASSET_OVERLAY_KEY);
+}
+
 export function applySettingsAssetOverlay(settings: UserSettings, overlay: SettingsAssetOverlay | null): UserSettings {
   if (!overlay || overlay.version !== 1) return settings;
   let hydrated = settings;
