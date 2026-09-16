@@ -128,6 +128,49 @@ assert.equal(phoneA.musicTracks?.length, 0, "does not seed a synthetic music lib
 assert.equal(phoneA.listeningHistory?.length, 0, "does not seed synthetic listening history without a user source");
 assert.equal(phoneA.musicPlaylists?.length, 0, "does not seed a synthetic playlist without a user source");
 
+const userContactId = phoneA.contacts.find((contact) => contact.kind === "user")?.id;
+assert.ok(userContactId, "creates the user chat contact");
+const mirroredMessage = phoneA.threadMessages.find((message) => message.sourceMessageId === "message-a");
+assert.ok(mirroredMessage, "mirrors source chat messages into the role phone");
+const duplicatedMirrorPhone = {
+  ...phoneA,
+  threadMessages: [
+    ...phoneA.threadMessages,
+    { ...mirroredMessage, operatedByUser: true },
+    { ...mirroredMessage },
+  ],
+};
+const repairedMirrorPhone = ensureCharacterPhoneContent({
+  phone: duplicatedMirrorPhone,
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages,
+  moments,
+  worldBookEntries: worldBook,
+  now: 200,
+});
+const repairedCopies = repairedMirrorPhone.threadMessages.filter((message) => message.sourceMessageId === "message-a");
+assert.equal(repairedCopies.length, 1, "deduplicates old repeated mirror rows by their stable source message id");
+assert.equal(repairedCopies[0].operatedByUser, true, "preserves user-operation metadata while collapsing mirror duplicates");
+const resyncedMirrorPhone = ensureCharacterPhoneContent({
+  phone: repairedMirrorPhone,
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages,
+  moments,
+  worldBookEntries: worldBook,
+  now: 300,
+});
+assert.equal(
+  resyncedMirrorPhone.threadMessages.filter((message) => message.sourceMessageId === "message-a").length,
+  1,
+  "reopening/synchronizing a role phone is idempotent for mirrored messages",
+);
+
 const roleContactCopy: Character = {
   ...characterA,
   id: "legacy-role-contact-copy",

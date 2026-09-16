@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -949,6 +949,7 @@ export default function AppCharacterPhone({
   const [musicProgress, setMusicProgress] = useState(0.42);
   const [input, setInput] = useState("");
   const [selectedContactId, setSelectedContactId] = useState("");
+  const [threadVisibleCount, setThreadVisibleCount] = useState(48);
   // Keep an unsent draft per contact. Menu/remark actions replace the phone
   // snapshot, and a single component-wide draft used to be lost when that
   // snapshot temporarily re-rendered or the selected contact changed.
@@ -971,6 +972,8 @@ export default function AppCharacterPhone({
   const hidingTapCountRef = useRef(0);
   const hidingTapTimeoutRef = useRef<number | null>(null);
   const diaryScrollTopRef = useRef(0);
+  const threadScrollContainerRef = useRef<HTMLDivElement>(null);
+  const pendingThreadScrollHeightRef = useRef<number | null>(null);
   const gallerySwipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const desktopSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const [isDiaryFabVisible, setIsDiaryFabVisible] = useState(true);
@@ -998,6 +1001,17 @@ export default function AppCharacterPhone({
   const phoneScopeRef = useRef({ ownerIdentityId: userIdentityId, characterId: selectedCharacterId });
   const syncedPhonePostsRef = useRef<Record<string, string>>({});
   phoneScopeRef.current = { ownerIdentityId: userIdentityId, characterId: selectedCharacterId };
+  useEffect(() => {
+    setThreadVisibleCount(48);
+    pendingThreadScrollHeightRef.current = null;
+  }, [selectedContactId]);
+  useLayoutEffect(() => {
+    const previousHeight = pendingThreadScrollHeightRef.current;
+    const container = threadScrollContainerRef.current;
+    if (previousHeight === null || !container) return;
+    container.scrollTop += container.scrollHeight - previousHeight;
+    pendingThreadScrollHeightRef.current = null;
+  }, [threadVisibleCount, selectedContactId]);
   useEffect(() => {
     if (!phone || !selectedCharacter) return;
     const persisted = getCharacterPhone(userIdentityId, selectedCharacter.id);
@@ -2405,9 +2419,16 @@ export default function AppCharacterPhone({
     }
     diaryScrollTopRef.current = scrollTop;
   };
-  const currentThreadMessages = selectedContact
-    ? listCharacterPhoneThreadMessages(currentPhone, selectedContact.id).slice(-48)
+  const allCurrentThreadMessages = selectedContact
+    ? listCharacterPhoneThreadMessages(currentPhone, selectedContact.id)
     : [];
+  const currentThreadMessages = allCurrentThreadMessages.slice(-threadVisibleCount);
+  const loadOlderThreadMessages = () => {
+    const container = threadScrollContainerRef.current;
+    if (!container || currentThreadMessages.length >= allCurrentThreadMessages.length) return;
+    pendingThreadScrollHeightRef.current = container.scrollHeight;
+    setThreadVisibleCount((count) => Math.min(count + 48, allCurrentThreadMessages.length));
+  };
   const clearThreadMessagePressTimer = () => {
     if (threadMessagePressTimerRef.current !== null) {
       window.clearTimeout(threadMessagePressTimerRef.current);
@@ -2805,7 +2826,17 @@ export default function AppCharacterPhone({
           <button type="button" onClick={removePhoneContact} className="mt-2 w-full rounded-xl bg-rose-50 px-3 py-2 text-left text-xs font-bold text-rose-600">删除好友（保留聊天记录）</button>
         </div>
       )}
-      <div className="character-phone-chat-messages min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain touch-pan-y px-3 py-4">
+      <div ref={threadScrollContainerRef} className="character-phone-chat-messages min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain touch-pan-y px-3 py-4">
+        {currentThreadMessages.length < allCurrentThreadMessages.length && (
+          <button
+            type="button"
+            onClick={loadOlderThreadMessages}
+            className="mx-auto block rounded-full bg-neutral-100 px-3 py-2 text-[11px] text-neutral-600 hover:bg-neutral-200"
+            aria-label={`加载更早的 ${Math.min(48, allCurrentThreadMessages.length - currentThreadMessages.length)} 条聊天记录`}
+          >
+            查看更早的聊天记录（还有 {allCurrentThreadMessages.length - currentThreadMessages.length} 条）
+          </button>
+        )}
         {currentThreadMessages.map((message) => {
           const canOperate = message.sender === "character" && message.operatedByUser;
           const isSelected = selectedThreadMessageId === message.id;

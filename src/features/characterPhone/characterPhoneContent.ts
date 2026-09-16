@@ -425,11 +425,25 @@ function syncUserChat(
   const sourceMessageIds = new Set(sourceMessages.map((message) => message.id));
   const existing = (phone.threadMessages ?? []).filter((message) => message.contactId !== userContact.id
     || Boolean(message.sourceMessageId && sourceMessageIds.has(message.sourceMessageId)));
-  const synced = sourceMessages.map((message) => toCharacterMessage(message, phone.id, userContact.id));
-  const existingSynced = (phone.threadMessages ?? []).filter((message) => message.contactId === userContact.id && message.sourceMessageId);
-  const bySourceId = new Map(existingSynced.map((message) => [message.sourceMessageId, message]));
-  const merged = synced.map((message) => {
-    const existingMessage = bySourceId.get(message.sourceMessageId || "");
+  const existingSyncedBySourceId = new Map<string, CharacterPhoneThreadMessage>();
+  (phone.threadMessages ?? [])
+    .filter((message) => message.contactId === userContact.id && message.sourceMessageId)
+    .forEach((message) => {
+      const sourceMessageId = message.sourceMessageId!;
+      const previous = existingSyncedBySourceId.get(sourceMessageId);
+      existingSyncedBySourceId.set(sourceMessageId, previous
+        ? {
+            ...previous,
+            ...message,
+            operatedByUser: previous.operatedByUser || message.operatedByUser,
+            recalledAt: message.recalledAt || previous.recalledAt,
+          }
+        : message);
+    });
+  const merged = [...new Map(sourceMessages.map((sourceMessage) => [sourceMessage.id, sourceMessage])).values()]
+    .map((sourceMessage) => {
+    const message = toCharacterMessage(sourceMessage, phone.id, userContact.id);
+    const existingMessage = existingSyncedBySourceId.get(sourceMessage.id);
     return existingMessage
       ? { ...existingMessage, ...message, operatedByUser: existingMessage.operatedByUser || message.operatedByUser }
       : message;
@@ -440,7 +454,7 @@ function syncUserChat(
   // role phone even though the user's phone has no corresponding messages.
   // User-authored role-phone messages are written back to the main chat with a
   // sourceMessageId, so they are retained whenever their source still exists.
-  const threadMessages = [...existing, ...merged];
+  const threadMessages = [...existing.filter((message) => message.contactId !== userContact.id), ...merged];
   return {
     threadMessages: threadMessages.sort((left, right) => left.timestamp - right.timestamp),
     lastMessageId: sourceMessages.at(-1)?.id,
