@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { WorldBookEntry, Character, type WorldBookPosition } from "../types";
+import { WorldBookEntry, Character, type WorldBookPosition, type WorldBookPurpose, type WorldBookScope, type WorldBookVisibility } from "../types";
 import { Plus, Trash2, Edit, Search, ChevronLeft, BookOpen, Layers, Globe, Key, Zap, Link2, ChevronDown, ChevronRight } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernEntry, parseTextToWorldBookEntries, safeParseDocx } from "../utils/pngParser";
 import { buildUniqueCharacterOptions } from "../domain/worldbook/characterOptions";
@@ -57,11 +57,8 @@ export const parseWorldBookEntryItem = (e: any, defaultCharId?: string): WorldBo
   // Depth (1-15)
   let depth = 5;
   const rawDepth = e.insertion_order !== undefined ? e.insertion_order : (e.depth !== undefined ? e.depth : 5);
-  if (typeof rawDepth === "number") {
-    depth = Math.min(15, Math.max(1, rawDepth));
-  } else if (e.depth !== undefined) {
-    depth = Math.min(15, Math.max(1, Number(e.depth)));
-  }
+  const parsedDepth = Number(rawDepth);
+  if (Number.isFinite(parsedDepth)) depth = Math.min(15, Math.max(1, Math.round(parsedDepth)));
 
   // Active status
   let isActive = true;
@@ -293,6 +290,9 @@ export default function AppWorldBook({
   const [isActive, setIsActive] = useState(true);
   const [position, setPosition] = useState<WorldBookPosition>("after_char_def");
   const [depth, setDepth] = useState<number>(5);
+  const [preservedScope, setPreservedScope] = useState<WorldBookScope | undefined>();
+  const [preservedVisibility, setPreservedVisibility] = useState<WorldBookVisibility | undefined>();
+  const [preservedPurpose, setPreservedPurpose] = useState<WorldBookPurpose | undefined>();
   const [formError, setFormError] = useState("");
   const [isCreatingNewCategory, setIsCreatingNewCategory] = useState(false);
 
@@ -307,6 +307,9 @@ export default function AppWorldBook({
     setIsActive(true);
     setPosition("after_char_def");
     setDepth(5);
+    setPreservedScope(undefined);
+    setPreservedVisibility(undefined);
+    setPreservedPurpose(undefined);
     setFormError("");
     setEditingId(null);
     setIsEditing(false);
@@ -331,6 +334,9 @@ export default function AppWorldBook({
     setIsActive(entry.isActive !== false);
     setPosition(entry.position || "after_char_def");
     setDepth(entry.depth || 5);
+    setPreservedScope(entry.scope);
+    setPreservedVisibility(entry.visibility);
+    setPreservedPurpose(entry.purpose);
     setFormError("");
     setIsEditing(true);
     setIsCreatingNewCategory(false);
@@ -358,17 +364,26 @@ export default function AppWorldBook({
     const selectedCharacterIds: string[] = Array.from(new Set<string>(boundCharacterIds))
       .filter((id) => characterOptions.some((option) => option.id === id));
 
+    const nextScope: WorldBookScope = preservedScope?.kind === "identity" || preservedScope?.kind === "relationship"
+      ? preservedScope
+      : bindingType === "global"
+        ? { kind: "global" }
+        : { kind: "characters", characterIds: selectedCharacterIds };
+    const nextCharacterIds = nextScope.kind === "characters" ? nextScope.characterIds : undefined;
+    const nextCharacterId = nextScope.kind === "character" || nextScope.kind === "relationship"
+      ? nextScope.characterId
+      : nextCharacterIds?.[0] || "global";
     const newEntry: WorldBookEntry = {
       id: editingId || Date.now().toString(),
       title: title.trim(),
       category: category.trim() || "常规",
       content: content.trim(),
       timestamp: Date.now(),
-      characterId: bindingType === "global" ? "global" : selectedCharacterIds[0],
-      characterIds: bindingType === "global" ? undefined : selectedCharacterIds,
-      scope: bindingType === "global"
-        ? { kind: "global" }
-        : { kind: "characters", characterIds: selectedCharacterIds },
+      characterId: nextCharacterId,
+      characterIds: nextCharacterIds,
+      scope: nextScope,
+      visibility: preservedVisibility,
+      purpose: preservedPurpose,
       triggerType,
       keywords: triggerType === "keys" ? keywords.trim() : "",
       isActive,

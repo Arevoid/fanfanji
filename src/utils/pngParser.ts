@@ -217,17 +217,44 @@ export const mapSillyTavernEntry = (stEntry: any, characterId: string): WorldBoo
   }
 
   let trigger: "keys" | "constant" | "vector" = "keys";
-  if (stEntry.constant === true || !kwString.trim()) {
+  if (stEntry.vector === true || stEntry.triggerType === "vector") {
+    trigger = "vector";
+  } else if (stEntry.constant === true || stEntry.always_active === true || !kwString.trim()) {
     trigger = "constant";
   }
+
+  const importedCharacterIds: string[] | undefined = Array.isArray(stEntry.characterIds)
+    ? (stEntry.characterIds as unknown[])
+      .filter((id: unknown): id is string => typeof id === "string" && id.trim().length > 0)
+      .map((id: string) => id.trim())
+    : undefined;
+  const targetCharacterIds = importedCharacterIds?.length
+    ? [...new Set(importedCharacterIds)]
+    : characterId && characterId !== "global" ? [characterId] : undefined;
+  const importedScope = stEntry.scope && typeof stEntry.scope === "object" && !Array.isArray(stEntry.scope)
+    ? stEntry.scope
+    : targetCharacterIds?.length
+      ? { kind: "characters", characterIds: targetCharacterIds }
+      : { kind: "global" };
+  const visibility = stEntry.visibility === "public" || stEntry.visibility === "private" ? stEntry.visibility : undefined;
+  const purpose = stEntry.purpose === "world_canon"
+    || stEntry.purpose === "persona_rule"
+    || stEntry.purpose === "relationship_context"
+    || stEntry.purpose === "generation_rule"
+    ? stEntry.purpose
+    : undefined;
 
   return {
     id: createId(`wb-entry-${characterId}`),
     title: String(title),
-    category: "世界书",
+    category: typeof stEntry.category === "string" && stEntry.category.trim() ? stEntry.category.trim() : "世界书",
     content: String(stEntry.content || ""),
     timestamp: Date.now(),
-    characterId: characterId || "global",
+    characterId: targetCharacterIds?.[0] || "global",
+    characterIds: targetCharacterIds,
+    scope: importedScope,
+    visibility,
+    purpose,
     triggerType: trigger,
     keywords: kwString || undefined,
     isActive: stEntry.enabled !== false,
