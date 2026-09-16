@@ -41,6 +41,8 @@ assert.match(chatSource, /message-quote message-quote__header[\s\S]*message-quot
 assert.match(redPacketSource, /special-payment-card__note wechat-redpacket__title/);
 assert.match(redPacketSource, /wechat-redpacket__footer[\s\S]*微信红包/);
 assert.match(redPacketSource, /redpacket-card__legacy-title/);
+assert.match(chatSource, /useWechatSemanticLayout=\{hasWechatRedPacketSemanticTheme\}/);
+assert.match(redPacketSource, /data-redpacket-layout=\{useWechatSemanticLayout \? "wechat" : "default"\}/);
 for (const hook of [
   "message-quote__author",
   "message-quote__separator",

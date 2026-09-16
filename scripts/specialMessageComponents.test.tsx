@@ -4,11 +4,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { parseQuoteReply, QuotedMessagePreview } from "../src/features/chat/components/QuotedMessagePreview";
 import { RedPacketCard } from "../src/features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../src/features/chat/components/SpecialMessage/TransferCard";
+import { hasWechatRedPacketSemanticCss } from "../src/features/chat/styles/redPacketSemanticCss";
 import type { Message } from "../src/types";
 
 const message = (content: string): Message => ({ id: "m", characterId: "a", sender: "character", content, timestamp: 1 });
 const quote = (content: string) => renderToStaticMarkup(<QuotedMessagePreview message={message(content)} senderName="沈安" onClear={() => undefined} closeIcon={<span>×</span>} />);
-const packet = (status: "unclaimed" | "claimed" | "expired" | "refunded") => renderToStaticMarkup(<RedPacketCard amount="168.00" greeting="恭喜发财，大吉大利！" status={status} isSelf={false} onClick={() => undefined} />);
+const packet = (status: "unclaimed" | "claimed" | "expired" | "refunded", useWechatSemanticLayout = false) => renderToStaticMarkup(<RedPacketCard amount="168.00" greeting="恭喜发财，大吉大利！" status={status} isSelf={false} useWechatSemanticLayout={useWechatSemanticLayout} onClick={() => undefined} />);
 const transfer = (status: "pending" | "confirmed" | "refunded") => renderToStaticMarkup(<TransferCard amount="88.00" memo="晚餐" status={status} onClick={() => undefined} />);
 const css = readFileSync("src/features/chat/components/SpecialMessage/specialMessage.css", "utf8");
 const checks: Array<[string, boolean]> = [
@@ -33,6 +34,11 @@ const checks: Array<[string, boolean]> = [
   ["packet semantic footer text", packet("unclaimed").includes("wechat-redpacket__footer") && packet("unclaimed").includes("微信红包")],
   ["packet keeps legacy default layer", packet("unclaimed").includes("redpacket-card__default-layer") && packet("unclaimed").includes('special-payment-card__brand redpacket-card__brand">Pay')],
   ["packet gates semantic layer", packet("unclaimed").includes("redpacket-card__wechat-layer")],
+  ["default packet selects legacy layout", packet("unclaimed").includes('data-redpacket-layout="default"')],
+  ["wechat CSS can select semantic layout", packet("unclaimed", true).includes('data-redpacket-layout="wechat"')],
+  ["generic custom CSS keeps default packet layout", !hasWechatRedPacketSemanticCss([".chat-message--text { color: red; }"])],
+  ["wechat packet hooks opt into semantic layout", hasWechatRedPacketSemanticCss([".chat-message--red-packet .wechat-redpacket__main { display: flex; }"])],
+  ["comments do not opt into semantic layout", !hasWechatRedPacketSemanticCss(["/* .wechat-redpacket__main */ .chat-message--text { color: red; }"])],
   ["packet semantic hooks", [
     "wechat-redpacket__main",
     "wechat-redpacket__icon",

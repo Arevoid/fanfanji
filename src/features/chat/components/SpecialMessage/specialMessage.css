@@ -120,10 +120,10 @@
 .redpacket-card__default-layer { display: contents; }
 .redpacket-card__wechat-layer { display: none; }
 
-#conv-screen.user-custom-chat-css:not([data-chat-settings-open="true"]) .redpacket-card__default-layer {
+#conv-screen:not([data-chat-settings-open="true"]) .redpacket-card[data-redpacket-layout="wechat"] .redpacket-card__default-layer {
   display: none !important;
 }
-#conv-screen.user-custom-chat-css:not([data-chat-settings-open="true"]) .redpacket-card__wechat-layer {
+#conv-screen:not([data-chat-settings-open="true"]) .redpacket-card[data-redpacket-layout="wechat"] .redpacket-card__wechat-layer {
   display: contents !important;
 }
 

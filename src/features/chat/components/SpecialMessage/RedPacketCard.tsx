@@ -5,6 +5,7 @@ interface RedPacketCardProps {
   greeting: string;
   status: RedPacketStatus;
   isSelf: boolean;
+  useWechatSemanticLayout?: boolean;
   onClick: () => void;
 }
 
@@ -16,14 +17,14 @@ const statusLabel: Record<RedPacketStatus, string> = {
   refunded: "已退回",
 };
 
-export function RedPacketCard({ amount, greeting, status, isSelf, onClick }: RedPacketCardProps) {
+export function RedPacketCard({ amount, greeting, status, isSelf, useWechatSemanticLayout = false, onClick }: RedPacketCardProps) {
   const action = status === "unclaimed" ? (isSelf ? "等待对方拆开" : "点击拆红包") : statusLabel[status];
   return (
-    <button type="button" onClick={onClick} className="chat-message--payment chat-message--red-packet special-payment-card redpacket-card cv-transfer" data-status={status} title="查看红包">
+    <button type="button" onClick={onClick} className="chat-message--payment chat-message--red-packet special-payment-card redpacket-card cv-transfer" data-status={status} data-redpacket-layout={useWechatSemanticLayout ? "wechat" : "default"} title="查看红包">
       {/*
        * Keep the original four-node card as the default layer. The WeChat
-       * layer below is switched on only while user chat CSS is active, so
-       * adding semantic hooks cannot alter the built-in card geometry.
+       * layer below is switched on only when the saved CSS references its
+       * semantic hooks, so unrelated custom CSS cannot alter the default card.
        */}
       <div className="redpacket-card__default-layer">
         <div className="special-payment-card__top">

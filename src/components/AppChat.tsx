@@ -154,6 +154,7 @@ import { useChatDraftChatIcon } from "../features/chat/hooks/useChatDraftChatIco
 import { useChatRegenerationAction } from "../features/chat/hooks/useChatRegenerationAction";
 import { useVoiceCallTimers } from "../features/chat/hooks/useVoiceCallTimers";
 import { resolveActiveChatStylePreset } from "../features/chat/styles/chatStylePreset";
+import { hasWechatRedPacketSemanticCss } from "../features/chat/styles/redPacketSemanticCss";
 import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
 import { COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE } from "../features/chat/styles/chatThemeTemplate";
 import { ChatSettingsSwitch as SettingsSwitch } from "../features/chat/components/ChatSettingsSwitch";
@@ -712,6 +713,7 @@ export default function AppChat({
   // bubbleCss remains a scoped legacy compatibility source.
   const userCustomChatCssSources = [settings.bubbleCss, settings.chatGlobalCSS, characterCustomChatCss];
   const hasUserCustomChatCss = userCustomChatCssSources.some((css) => Boolean(css && css.trim()));
+  const hasWechatRedPacketSemanticTheme = hasWechatRedPacketSemanticCss(userCustomChatCssSources);
   useChatCustomCss(userCustomChatCssSources, activeCharacter?.chatBg);
 
   // Long-lived callbacks can outlive the render in which they were created.
@@ -7451,7 +7453,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       })() : isRedPacketMarkup(msg.content) ? (() => {
                         const packet = parseRedPacketPayload(msg);
                         const status = getRedPacketActualStatus(msg);
-                        return <RedPacketCard amount={packet.totalAmount.toFixed(2)} greeting={packet.greeting} status={status} isSelf={isSelf} onClick={() => {
+                        return <RedPacketCard amount={packet.totalAmount.toFixed(2)} greeting={packet.greeting} status={status} isSelf={isSelf} useWechatSemanticLayout={hasWechatRedPacketSemanticTheme} onClick={() => {
                           const char = characters.find((character) => character.id === msg.characterId);
                           setOpenRedPacketDetail({ id: msg.id, amount: packet.totalAmount.toFixed(2), greeting: packet.greeting, senderName: char?.remark || char?.name || "未知好友", senderAvatar: char?.avatar || "🧧", sender: msg.sender as "user" | "character", timestamp: msg.timestamp, message: msg, mode: packet.mode, count: packet.count, recipientId: packet.recipientId, recipientName: packet.recipientName });
                           setShowRedPacketOpenModal(true);
