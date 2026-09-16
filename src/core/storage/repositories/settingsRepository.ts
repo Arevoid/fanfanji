@@ -373,6 +373,38 @@ export function saveSettings(settings: UserSettings): StorageWriteResult {
   return result;
 }
 
+/**
+ * Asset uploads use an awaited variant so the UI does not report success
+ * until a quota fallback (when needed) has committed to IndexedDB.
+ */
+export async function saveSettingsAsync(settings: UserSettings): Promise<StorageWriteResult> {
+  const persistedSettings = toPersistedSettings(settings);
+  const result = writeJson(storageKeys.settings, persistedSettings);
+  if (result.success) {
+    if (settingsOverlayHydrated && typeof indexedDB !== "undefined") {
+      enqueueSettingsOverlayWrite(() => readingAssetDb.deleteMetadataValue(SETTINGS_DURABLE_OVERLAY_KEY));
+    }
+    return result;
+  }
+
+  if ((result.error === "quota" || result.error === "unavailable")
+    && typeof indexedDB !== "undefined"
+    && hasOnlyDurableOverlayChanges(persistedSettings)) {
+    try {
+      await settingsOverlayWriteChain;
+      await readingAssetDb.saveMetadataValue(
+        SETTINGS_DURABLE_OVERLAY_KEY,
+        buildSettingsDurableOverlay(persistedSettings),
+      );
+      return { success: true };
+    } catch (error) {
+      console.warn("[settings] Awaited durable settings fallback failed.", error);
+      return { success: false, error: "write" };
+    }
+  }
+  return result;
+}
+
 export function resolveSettingsUpdate(previous: UserSettings, update: UserSettingsUpdate): UserSettings {
   return typeof update === "function" ? update(previous) : update;
 }

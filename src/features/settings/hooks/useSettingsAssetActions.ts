@@ -12,6 +12,7 @@ import {
 interface UseSettingsAssetActionsOptions {
   settings: UserSettings;
   handleSave: (updatedFields: Partial<UserSettings>) => boolean;
+  handleSaveAsync?: (updatedFields: Partial<UserSettings>) => Promise<boolean>;
   setAvatar: Dispatch<SetStateAction<string>>;
   setWallpaper: Dispatch<SetStateAction<string>>;
   onIconStatusChange?: (message: string) => void;
@@ -21,10 +22,14 @@ interface UseSettingsAssetActionsOptions {
 export function useSettingsAssetActions({
   settings,
   handleSave,
+  handleSaveAsync,
   setAvatar,
   setWallpaper,
   onIconStatusChange,
 }: UseSettingsAssetActionsOptions) {
+  const persistAssetSettings = (updatedFields: Partial<UserSettings>) =>
+    handleSaveAsync ? handleSaveAsync(updatedFields) : Promise.resolve(handleSave(updatedFields));
+
   const handleAvatarUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
     const file = event.target.files?.[0];
@@ -60,7 +65,7 @@ export function useSettingsAssetActions({
         // as a compatibility fallback when it still has enough space.
         console.warn("[settings] Wallpaper IndexedDB fallback unavailable; using local settings storage.", error);
       }
-      const saved = handleSave({
+      const saved = await persistAssetSettings({
         wallpaper: compressed,
         wallpaperSource: "user",
         wallpaperAssetId: savedInIndexedDb ? SETTINGS_WALLPAPER_ASSET_ID : null,
@@ -99,7 +104,7 @@ export function useSettingsAssetActions({
       } catch (error) {
         console.warn("[settings] Custom icon IndexedDB fallback unavailable; using local settings storage.", error);
       }
-      const saved = handleSave({
+      const saved = await persistAssetSettings({
         customIcons,
         customIconsAssetId: savedInIndexedDb ? SETTINGS_CUSTOM_ICONS_ASSET_ID : null,
       });
@@ -126,7 +131,7 @@ export function useSettingsAssetActions({
     } catch (error) {
       console.warn("[settings] Custom icon IndexedDB reset unavailable; using local settings storage.", error);
     }
-    const saved = handleSave({
+    const saved = await persistAssetSettings({
       customIcons: {},
       customIconsAssetId: savedInIndexedDb ? SETTINGS_CUSTOM_ICONS_ASSET_ID : null,
     });

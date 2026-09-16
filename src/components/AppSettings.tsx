@@ -96,6 +96,7 @@ interface AppSettingsProps {
   bubbleStylePreset?: "default" | "floating-cute" | "liquid-glass";
   presets: StylePreset[];
   onSaveSettings: (update: UserSettingsUpdate) => boolean;
+  onSaveSettingsAsync?: (update: UserSettingsUpdate) => Promise<boolean>;
   onSavePreset: (preset: StylePreset) => void;
   onDeletePreset: (id: string) => void;
   onSwitchIdentity?: (id: string) => void;
@@ -312,6 +313,7 @@ export default function AppSettings({
   bubbleStylePreset,
   presets,
   onSaveSettings,
+  onSaveSettingsAsync,
   onSavePreset,
   onDeletePreset,
   onSwitchIdentity,
@@ -477,7 +479,7 @@ export default function AppSettings({
     voiceState: voiceConfigState,
   });
 
-  const { handleSave } = useSettingsScopedSave({ onSaveSettings });
+  const { handleSave, handleSaveAsync } = useSettingsScopedSave({ onSaveSettings, onSaveSettingsAsync });
 
   const {
     handleExportChatTheme,
@@ -537,6 +539,7 @@ export default function AppSettings({
   const { handleAvatarUpload, handleWallpaperUpload, handleIconUpload, handleRestoreAllIcons } = useSettingsAssetActions({
     settings,
     handleSave,
+    handleSaveAsync,
     setAvatar,
     setWallpaper,
     onIconStatusChange: setIconUploadMessage,

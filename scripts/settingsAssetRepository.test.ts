@@ -77,7 +77,7 @@ values.set("phone_settings", JSON.stringify({
   customIconsAssetId: undefined,
 }));
 forceSettingsQuota = true;
-assert.equal(repository.saveSettings(settings).success, true, "asset references should use the durable overlay when phone_settings remains over quota");
+assert.equal((await repository.saveSettingsAsync(settings)).success, true, "asset references should await the durable overlay when phone_settings remains over quota");
 const durable = await repository.loadSettingsDurableOverlay();
 assert.equal(durable?.wallpaperAssetId, assets.SETTINGS_WALLPAPER_ASSET_ID);
 assert.equal(durable?.customIconsAssetId, assets.SETTINGS_CUSTOM_ICONS_ASSET_ID);

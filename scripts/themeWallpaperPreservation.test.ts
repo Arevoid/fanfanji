@@ -9,7 +9,7 @@ const presetWallpaper = resolveDesktopBackground({ resolvedTheme: "light", wallp
 const backup = readFileSync(new URL("../src/features/home/desktopModuleBackup.ts", import.meta.url), "utf8");
 
 assert.equal(userWallpaper.hasUserWallpaper, true);
-assert.equal(userWallpaper.background, `url(${source}) center/cover no-repeat`);
+assert.equal(userWallpaper.background, `url(${source}) center top / cover no-repeat`);
 assert.equal(source, sourceBefore, "background resolution must not mutate the persisted wallpaper value");
 assert.equal(presetWallpaper.hasUserWallpaper, true);
 assert.equal(presetWallpaper.background, "linear-gradient(135deg, #123456, #654321)");

@@ -31,6 +31,8 @@ export function resolveDesktopBackground({
   const value = wallpaper!.trim();
   return {
     hasUserWallpaper: true,
-    background: value.startsWith("linear-gradient") ? value : `url(${value}) center/cover no-repeat`,
+    // Pin to the top edge so a small viewport-height change (browser chrome /
+    // PWA safe area on refresh) does not recenter and visibly shift the image.
+    background: value.startsWith("linear-gradient") ? value : `url(${value}) center top / cover no-repeat`,
   };
 }

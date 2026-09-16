@@ -4,7 +4,7 @@ import { subscribeOfflineMemorySyncNotifications } from "./features/offline/serv
 import { createId } from "./core/id/createId";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
-import { applySettingsAssetOverlay, applySettingsDurableOverlay, loadSettings, loadSettingsAssetOverlay, loadSettingsDurableOverlay, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
+import { applySettingsAssetOverlay, applySettingsDurableOverlay, loadSettings, loadSettingsAssetOverlay, loadSettingsDurableOverlay, resolveSettingsUpdate, saveSettings, saveSettingsAsync } from "./core/storage/repositories/settingsRepository";
 import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
@@ -744,6 +744,18 @@ export default function App() {
     const result = saveSettings(nextSettings);
     if (!result.success) {
       console.error("Failed to save settings to localStorage:", result.error);
+      return false;
+    }
+    settingsRef.current = nextSettings;
+    setSettingsState(nextSettings);
+    return true;
+  };
+
+  const setSettingsAsync = async (update: UserSettingsUpdate): Promise<boolean> => {
+    const nextSettings = applyLiquidGlassTextDefaults(resolveSettingsUpdate(settingsRef.current, update));
+    const result = await saveSettingsAsync(nextSettings);
+    if (!result.success) {
+      console.error("Failed to persist settings update:", result.error);
       return false;
     }
     settingsRef.current = nextSettings;
@@ -5219,6 +5231,7 @@ export default function App() {
                       onSwitchIdentity={handleSwitchIdentity}
                       presets={presets}
                       onSaveSettings={setSettings}
+                      onSaveSettingsAsync={setSettingsAsync}
                       onSavePreset={handleSavePreset}
                       onDeletePreset={handleDeletePreset}
                       onClose={() => setActiveApp(null)}

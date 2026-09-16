@@ -11,7 +11,7 @@ assert.match(hook, /updatedFields\.avatar !== undefined/);
 assert.match(hook, /updatedFields\.signature !== undefined/);
 assert.match(hook, /updatedFields\.bio !== undefined/);
 assert.match(hook, /updateIdentityProfile/);
-assert.match(page, /useSettingsScopedSave\(\{ onSaveSettings \}\)/);
+assert.match(page, /useSettingsScopedSave\(\{ onSaveSettings, onSaveSettingsAsync \}\)/);
 assert.doesNotMatch(page, /const handleSave = \(updatedFields: Partial<UserSettings>\)/);
 
 console.log("Settings scoped save Hook: identity synchronization contract passed");
