@@ -45,7 +45,7 @@ import type { VoiceCallStatus } from "../features/chat/services/messageTypes";
 import { shouldConvertBubbleToVoice } from "../features/chat/services/voiceBubbleEligibility";
 import { RED_PACKET_STATUSES_KEY, getPaymentStatusKey, parseRedPacketPayload, removePaymentStatusesByRelation } from "../features/chat/services/paymentScope";
 import { getWorldBookLocationReferences } from "../domain/worldbook/locationReferences";
-import { isWorldBookEntryForAnyCharacter } from "../domain/worldbook/worldBookVisibility";
+import { isWorldBookEntryForAnyCharacter, isWorldBookEntryVisible } from "../domain/worldbook/worldBookVisibility";
 import { aiAnalyzeRemoteSticker, aiAnalyzeSticker, loadStickerImageBlob, stickerDb } from "../utils/stickerDb";
 import { LIVING_HUMAN_PROMPT, MOMENT_CHARACTER_EXPRESSION_PROMPT } from "../utils/livingPrompt";
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary } from "../domain/memory/MemoryService";
@@ -972,7 +972,17 @@ export default function AppChat({
   // Get location addresses from World Book entries related to this character
   const getDynamicLocations = () => {
     if (!activeCharacter) return [];
-    return getWorldBookLocationReferences(getLatestWorldBookEntries(worldBookEntries), activeCharacter.id);
+    return getWorldBookLocationReferences(
+      getLatestWorldBookEntries(worldBookEntries),
+      activeCharacter.id,
+      15,
+      {
+        scenario: "chat",
+        characterId: activeRelationship?.characterId || activeCharacter.id,
+        userIdentityId: activeRelationship?.userIdentityId || activeIdentityId,
+        relationId: activeRelationship?.id,
+      },
+    );
   };
 
   const {
@@ -2038,15 +2048,17 @@ export default function AppChat({
       const existingPhone = character.id === activeCharacter.id
         ? getCharacterPhone(resolvedCharacterPhoneOwnerIdentityId, activeCharacter.id)
         : getCharacterPhone(resolvedCharacterPhoneOwnerIdentityId, character.id);
+      const phoneRelationship = turnRelationship
+        && resolveCanonicalCharacterId(turnRelationship.characterId, characters) === character.id
+        ? turnRelationship
+        : undefined;
       const worldBookContext = (worldBookEntries || [])
-        .filter((entry) => entry.characterId === character.id
-          || entry.characterIds?.includes(character.id)
-          || (!entry.characterId && !entry.characterIds && (!entry.scope || entry.scope.kind === "global"))
-          || (entry.scope?.kind === "character" && entry.scope.characterId === character.id)
-          || (entry.scope?.kind === "characters" && entry.scope.characterIds.includes(character.id))
-          || (entry.scope?.kind === "identity" && entry.scope.userIdentityId === activeIdentityId)
-          || (entry.scope?.kind === "relationship" && entry.scope.characterId === character.id
-            && entry.scope.userIdentityId === activeIdentityId))
+        .filter((entry) => isWorldBookEntryVisible(entry, {
+          scenario: "chat",
+          characterId: character.id,
+          userIdentityId: phoneRelationship?.userIdentityId || activeIdentityId,
+          relationId: phoneRelationship?.id,
+        }))
         .slice(-20)
         .map((entry) => `${entry.title}:${entry.content}`);
       const recentMessages = messages

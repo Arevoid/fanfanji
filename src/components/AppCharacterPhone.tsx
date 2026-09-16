@@ -118,6 +118,7 @@ import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../domain/r
 import { stickerDb } from "../utils/stickerDb";
 import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
 import { clearRebuildableCache } from "../core/storage/rebuildableCache";
+import { isWorldBookEntryVisible } from "../domain/worldbook/worldBookVisibility";
 import type { MessageMutationScope } from "../features/chat/context/directInteractionScope";
 
 interface AppCharacterPhoneProps {
@@ -370,15 +371,17 @@ function buildCharacterPhonePasscodeContext(
   context?: CharacterPhoneOpenContext,
 ): string {
   if (!context) return "";
+  const relationship = context.relationships.find((candidate) =>
+    candidate.userIdentityId === context.activeIdentity?.id
+      && candidate.characterId === character.id,
+  );
   const worldBook = context.worldBookEntries
-    .filter((entry) => entry.characterId === character.id
-      || entry.characterIds?.includes(character.id)
-      || (!entry.characterId && !entry.characterIds && (!entry.scope || entry.scope.kind === "global"))
-      || (entry.scope?.kind === "character" && entry.scope.characterId === character.id)
-      || (entry.scope?.kind === "characters" && entry.scope.characterIds.includes(character.id))
-      || (entry.scope?.kind === "identity" && entry.scope.userIdentityId === context.activeIdentity?.id)
-      || (entry.scope?.kind === "relationship" && entry.scope.characterId === character.id
-        && entry.scope.userIdentityId === context.activeIdentity?.id))
+    .filter((entry) => isWorldBookEntryVisible(entry, {
+      scenario: "chat",
+      characterId: character.id,
+      userIdentityId: context.activeIdentity?.id,
+      relationId: relationship?.id,
+    }))
     .slice(-20)
     .map((entry) => `${entry.title}:${entry.content}`);
   const recentMessages = context.messages
@@ -1831,15 +1834,16 @@ export default function AppCharacterPhone({
         : failedAttempts >= 3
           ? 1
           : (currentPhone.awarenessLevel ?? 0);
+    const relation = relationships.find(
+      (item) => item.userIdentityId === userIdentityId && item.characterId === selectedCharacter.id,
+    );
     const roleWorldBookContext = worldBookEntries
-      .filter((entry) => entry.characterId === selectedCharacter.id
-        || entry.characterIds?.includes(selectedCharacter.id)
-        || (!entry.characterId && !entry.characterIds && (!entry.scope || entry.scope.kind === "global"))
-        || (entry.scope?.kind === "character" && entry.scope.characterId === selectedCharacter.id)
-        || (entry.scope?.kind === "characters" && entry.scope.characterIds.includes(selectedCharacter.id))
-        || (entry.scope?.kind === "identity" && entry.scope.userIdentityId === activeIdentity?.id)
-        || (entry.scope?.kind === "relationship" && entry.scope.characterId === selectedCharacter.id
-          && entry.scope.userIdentityId === activeIdentity?.id))
+      .filter((entry) => isWorldBookEntryVisible(entry, {
+        scenario: "chat",
+        characterId: selectedCharacter.id,
+        userIdentityId: activeIdentity?.id || userIdentityId,
+        relationId: relation?.id,
+      }))
       .slice(-8)
       .map((entry) => `${entry.title}:${entry.content}`);
     const recentRoleContext = [
@@ -1876,11 +1880,6 @@ export default function AppCharacterPhone({
             unread: true,
           }
         : null;
-    const relation = relationships.find(
-      (item) =>
-        item.userIdentityId === userIdentityId &&
-        item.characterId === selectedCharacter.id,
-    );
     if (awarenessMessage && relation) {
       if (legacyAwarenessMessage && onUpdateMessage) {
         onUpdateMessage(legacyAwarenessMessage.id, { content: awarenessMessage.body });
