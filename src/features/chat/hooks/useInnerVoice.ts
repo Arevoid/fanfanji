@@ -24,8 +24,8 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<InnerVoiceRecord[]>([]);
-  // Retained as a compatibility marker for older callers; new turns are
-  // persisted during reply delivery and never start a second request here.
+  // Deduplicates concurrent automatic backfills and explicit refreshes for the
+  // same message while still allowing a later user-initiated retry.
   const requestsRef = useRef(new Set<string>());
   const lastOpenRef = useRef<{ targetCharacterId: string; triggerMessage: Message } | null>(null);
 
@@ -133,14 +133,9 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
     // different message's newest record as a fallback, otherwise every
     // message without an exact match would display the same inner voice.
     if (compatibleExisting && !force) { setRecord(compatibleExisting); setLoading(false); return; }
-    // A normal avatar click only reads the inline record created with the chat
-    // reply. Manual generation is reserved for the explicit refresh action.
-    if (!force) {
-      setRecord(null);
-      setLoading(false);
-      setError(null);
-      return;
-    }
+    // New replies normally carry an inline record. Legacy replies, interrupted
+    // turns, and storage failures may not; clicking their avatar backfills the
+    // exact message instead of leaving the modal in a permanent empty state.
     const requestKey = `${scope.kind}:${scope.kind === "direct" ? scope.relationId : `${scope.groupId}:${scope.conversationId}:${scope.characterId}`}:${scope.messageId}`;
     if (requestsRef.current.has(requestKey)) return;
     requestsRef.current.add(requestKey);
@@ -172,9 +167,13 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
         return;
       }
       const latest = loadInnerVoiceRecords([]).value;
-      saveInnerVoiceRecords([...latest.filter((item) => item.id !== generated.id), generated]);
+      const saved = saveInnerVoiceRecords([...latest.filter((item) => item.id !== generated.id), generated]);
       setRecord(generated);
-      setHistory(listHistory([...latest, generated]));
+      if (!saved.success) {
+        setError("心声已生成，但本地保存失败；请检查浏览器存储空间后重试。当前心声仍可查看。");
+        return;
+      }
+      setHistory(listHistory([...latest.filter((item) => item.id !== generated.id), generated]));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "心声生成失败，请检查模型设置后重试。");
     } finally {

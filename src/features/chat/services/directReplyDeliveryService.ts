@@ -28,6 +28,8 @@ export async function deliverDirectReplyCandidates(input: {
   signal?: AbortSignal;
   shouldCancel: () => boolean;
   onTyping: (typing: boolean) => void;
+  /** Persist turn-scoped metadata immediately before each bubble is committed. */
+  onBeforeSend?: (message: Message, index: number, total: number) => void | Promise<void>;
   onSendMessage: (message: Message) => void | Promise<void>;
   now?: () => number;
   random?: () => number;
@@ -47,6 +49,8 @@ export async function deliverDirectReplyCandidates(input: {
       await wait(Math.max(500, duration));
       if (input.signal?.aborted || input.shouldCancel()) break;
 
+      await input.onBeforeSend?.(message, index, input.candidates.messages.length);
+      if (input.signal?.aborted || input.shouldCancel()) break;
       message.timestamp = now();
       const callSpeechCompletion = input.onSendMessage(message);
       createdMessages.push(message);

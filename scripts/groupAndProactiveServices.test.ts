@@ -39,6 +39,32 @@ assert.deepEqual(group.messages.map((message) => message.conversationId), ["grou
 assert.equal(group.messages.length, 2);
 assert.equal(group.members.includes(outsider), false);
 
+const repeatedSender = await generateGroupReplyCandidates({
+  requestAi: async () => ({ text: JSON.stringify({ replies: [
+    { sender: "A", content: "第一条", innerVoice: { content: "第一条对应的心声", emotionalState: "期待" } },
+    { sender: "A", content: "第二条", innerVoice: { content: "第二条对应的心声", emotionalState: "放心" } },
+  ] }) }),
+  request, members: [memberA], groupId: "group", disableBracketActions: false,
+  createId: (index) => `repeat-${index}`, currentTime: () => 10,
+});
+assert.deepEqual(repeatedSender.messages.map((message) => message.content), ["第一条", "第二条"]);
+assert.deepEqual(repeatedSender.innerVoices?.map((voice) => voice.content.content), ["第一条对应的心声", "第二条对应的心声"], "each repeated sender bubble must retain its own matching voice");
+
+let groupVoiceRecoveryCalls = 0;
+const groupVoiceRecovery = await generateGroupReplyCandidates({
+  requestAi: async (input) => {
+    groupVoiceRecoveryCalls += 1;
+    assert.equal(input.purpose, groupVoiceRecoveryCalls === 1 ? "group_chat_reply" : "inner_voice");
+    return groupVoiceRecoveryCalls === 1
+      ? { text: JSON.stringify({ replies: [{ sender: "A", content: "嘴硬地回一句" }] }) }
+      : { text: '{"content":"其实怕她听出我的担心","emotionalState":"外表镇定，心里有些紧张"}' };
+  },
+  request: { ...request, purpose: "group_chat_reply" }, members: [memberA], groupId: "group", disableBracketActions: false,
+  createId: (index) => `recover-${index}`, currentTime: () => 12,
+});
+assert.equal(groupVoiceRecoveryCalls, 2, "a structured group bubble missing voice must be repaired before returning candidates");
+assert.equal(groupVoiceRecovery.innerVoices?.[0]?.content.content, "其实怕她听出我的担心");
+
 // Repeated sender blocks are intentional: a member may send multiple short
 // messages in one natural group interaction, without another AI request.
 let multiTurnRequests = 0;

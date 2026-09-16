@@ -7,7 +7,7 @@ import { readJson, readString, remove as removeStoredValue, writeJson, writeStri
 import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { createId } from "../core/id/createId";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "../types";
+import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type InnerVoiceRecord, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "../types";
 import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proactiveOfflinePreference";
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
@@ -1826,7 +1826,13 @@ export default function AppChat({
               payload: item.content,
               settings,
             }));
-          if (additions.length) saveInnerVoiceRecords([...latest, ...additions]);
+          if (additions.length) {
+            const saved = saveInnerVoiceRecords([...latest, ...additions]);
+            if (!saved.success) {
+              showToast("⚠️ [心声保存失败]：本轮群聊消息未发送，浏览器存储写入失败；请检查存储空间后重试。");
+              return;
+            }
+          }
           additions.forEach((record) => innerVoiceController.syncInlineRecord(record));
         }
         repliesScheduled = false;
@@ -1858,6 +1864,7 @@ export default function AppChat({
     } catch (err) {
       if (signal?.aborted) return;
       console.error("Group chat response generation failed:", err);
+      showToast(err instanceof Error ? `⚠️ [群聊回复未发送]：${err.message}` : "⚠️ [群聊回复未发送]：心声生成失败，请检查模型设置后重试。");
     } finally {
       if (!repliesScheduled) {
         setIsTyping(false);
@@ -2599,6 +2606,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
       type PreparedDirectReplyResponse = {
         data: Awaited<ReturnType<typeof requestDirectChatTurn>>;
+        innerVoiceRecord?: InnerVoiceRecord;
         proactiveOfflineResponseParse?: ReturnType<typeof parseProactiveOfflineResponseDirective>;
         proactiveOfflineParse?: ReturnType<typeof parseProactiveOfflineInvitationDirective>;
       };
@@ -2687,6 +2695,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             timestamp: Date.now(), isOffline: true, isNarration: false,
           }];
         generatedCandidateIds = newMsgs.map((message) => message.id);
+        const offlineInlineRelationship = turnRelationship
+          || (replyContext.relationId ? relationships.find((relation) => relation.id === replyContext.relationId) : undefined);
+        let offlineInnerVoiceRecordId: string | undefined;
         lifecyclePhase = "delivering";
         for (let idx = 0; idx < newMsgs.length; idx++) {
           if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
@@ -2696,9 +2707,33 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           const duration = Math.max(800, Math.min(3500, chars * 100)) + (Math.floor(Math.random() * 500) - 200);
           await new Promise(resolve => setTimeout(resolve, Math.max(500, duration)));
           if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
+          if (data.innerVoice && offlineInlineRelationship) {
+            const previousRecordId = offlineInnerVoiceRecordId;
+            const generatedRecord = createInlineInnerVoiceRecord({
+              character: turnCharacter,
+              triggerMessage: m,
+              relationId: offlineInlineRelationship.id,
+              conversationId: offlineInlineRelationship.conversationId || getConversationId(offlineInlineRelationship.id),
+              payload: data.innerVoice,
+              settings,
+            });
+            const record = previousRecordId ? { ...generatedRecord, id: previousRecordId } : generatedRecord;
+            const latest = loadInnerVoiceRecords([]).value;
+            const saved = saveInnerVoiceRecords([...latest.filter((item) => item.id !== previousRecordId
+              && !(item.relationId === offlineInlineRelationship.id && item.messageId === m.id)), record]);
+            if (!saved.success) {
+              publishReplyError("⚠️ [心声保存失败]：本条离线消息未发送，浏览器存储写入失败；请检查存储空间后重试。");
+              return buildOutcome("failed", "delivering", { kind: "delivery", recoverable: true });
+            }
+            offlineInnerVoiceRecordId = record.id;
+          }
           m.timestamp = Date.now();
           onSendMessageRaw(m);
           deliveredMessageIds.push(m.id);
+          if (data.innerVoice && offlineInlineRelationship) {
+            const stored = loadInnerVoiceRecords([]).value.find((item) => item.id === offlineInnerVoiceRecordId);
+            if (stored?.messageId === m.id) innerVoiceController.syncInlineRecord(stored);
+          }
           setIsTyping(false);
           if (idx < newMsgs.length - 1) {
             await new Promise(resolve => setTimeout(resolve, Math.max(400, Math.floor(Math.random() * 400) + 400)));
@@ -2753,6 +2788,29 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             onTyping: setIsTyping,
             onSendMessage: isConnectedVoiceCall ? onSendMessage : onSendMessageRaw,
           }),
+          beforeSend: (prepared, message) => {
+            const payload = prepared.data.innerVoice;
+            const inlineRelationship = turnRelationship
+              || (replyContext.relationId ? relationships.find((relation) => relation.id === replyContext.relationId) : undefined);
+            if (!payload || !inlineRelationship) return;
+            const previousRecordId = prepared.innerVoiceRecord?.id;
+            const generatedRecord = createInlineInnerVoiceRecord({
+              character: turnCharacter,
+              triggerMessage: message,
+              relationId: inlineRelationship.id,
+              conversationId: inlineRelationship.conversationId || getConversationId(inlineRelationship.id),
+              payload,
+              settings,
+            });
+            const record = previousRecordId ? { ...generatedRecord, id: previousRecordId } : generatedRecord;
+            const latest = loadInnerVoiceRecords([]).value;
+            const saved = saveInnerVoiceRecords([...latest.filter((item) => item.id !== previousRecordId
+              && !(item.relationId === inlineRelationship.id && item.messageId === message.id)), record]);
+            if (!saved.success) {
+              throw new Error("心声已生成，但本地保存失败；本条回复未发送。请检查浏览器存储空间后重试。");
+            }
+            prepared.innerVoiceRecord = record;
+          },
         },
         durableCompletion: async () => confirmMessageDurability(),
         postReply: ({ response: prepared, deliveredMessages: createdMessages }) => {
@@ -2761,19 +2819,26 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             || (replyContext.relationId ? relationships.find((relation) => relation.id === replyContext.relationId) : undefined);
           if (data.innerVoice && inlineRelationship) {
             const triggerMessage = createdMessages[createdMessages.length - 1];
-            const latest = loadInnerVoiceRecords([]).value;
-            const scope = { kind: "direct" as const, relationId: inlineRelationship.id, messageId: triggerMessage.id };
-            if (!findInnerVoiceByMessage(latest, scope)) {
-              const record = createInlineInnerVoiceRecord({
-                character: turnCharacter,
-                triggerMessage,
-                relationId: inlineRelationship.id,
-                conversationId: inlineRelationship.conversationId || getConversationId(inlineRelationship.id),
-                payload: data.innerVoice,
-                settings,
-              });
-              saveInnerVoiceRecords([...latest, record]);
-              innerVoiceController.syncInlineRecord(record);
+            if (prepared.innerVoiceRecord?.messageId === triggerMessage.id) {
+              innerVoiceController.syncInlineRecord(prepared.innerVoiceRecord);
+            } else {
+              const latest = loadInnerVoiceRecords([]).value;
+              const scope = { kind: "direct" as const, relationId: inlineRelationship.id, messageId: triggerMessage.id };
+              if (!findInnerVoiceByMessage(latest, scope)) {
+                const record = createInlineInnerVoiceRecord({
+                  character: turnCharacter,
+                  triggerMessage,
+                  relationId: inlineRelationship.id,
+                  conversationId: inlineRelationship.conversationId || getConversationId(inlineRelationship.id),
+                  payload: data.innerVoice,
+                  settings,
+                });
+                const saved = saveInnerVoiceRecords([...latest, record]);
+                if (!saved.success) {
+                  publishReplyError("⚠️ [心声保存失败]：回复已发送，但心声未能保存。点击角色头像可重新生成，请检查浏览器存储空间。");
+                }
+                innerVoiceController.syncInlineRecord(record);
+              }
             }
           }
           recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);

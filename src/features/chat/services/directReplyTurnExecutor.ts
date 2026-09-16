@@ -17,6 +17,7 @@ export interface DirectReplyTurnDeliveryInput {
   candidates: ReplyCandidatesResult;
   signal?: AbortSignal;
   shouldCancel: () => boolean;
+  beforeSend?: (message: Message, index: number, total: number) => void | Promise<void>;
 }
 
 /** A caller-owned adapter may bind delivery to voice/UI scope without exposing it to the executor. */
@@ -27,12 +28,13 @@ export function createDirectReplyTurnDelivery(input: {
   onTyping: (typing: boolean) => void;
   onSendMessage: (message: Message) => void | Promise<void>;
 }): DirectReplyTurnDelivery {
-  return ({ candidates, signal, shouldCancel }) => deliverDirectReplyCandidates({
+  return ({ candidates, signal, shouldCancel, beforeSend }) => deliverDirectReplyCandidates({
     candidates,
     signal,
     shouldCancel,
     onTyping: input.onTyping,
     onSendMessage: input.onSendMessage,
+    onBeforeSend: beforeSend,
   });
 }
 
@@ -41,6 +43,8 @@ export interface DirectReplyTurnExecutorInput<PreparedResponse> {
   normalizeResponse: (response: ParsedAiChatResponse) => PreparedResponse | Promise<PreparedResponse>;
   hasReplyText: (response: PreparedResponse) => boolean;
   createCandidateContext: (response: PreparedResponse) => DirectReplyTurnCandidateContext;
+  /** Persist message-bound sidecar data before each candidate becomes visible. */
+  beforeSend?: (response: PreparedResponse, message: Message, index: number, total: number) => void | Promise<void>;
   deliver: DirectReplyTurnDelivery;
   signal?: AbortSignal;
   shouldCancel?: () => boolean;
@@ -145,6 +149,9 @@ export async function executeDirectReplyTurn<PreparedResponse>(
       candidates,
       signal,
       shouldCancel: input.shouldCancel || (() => false),
+      beforeSend: input.beforeSend
+        ? (message, index, total) => input.beforeSend!(preparedResponse, message, index, total)
+        : undefined,
     });
   } catch (error) {
     if (isAbortFailure(error, signal)) {

@@ -7,7 +7,7 @@ const settings = { apiKey: "key", selectedModel: "model" } as any;
 const baseRequest = {
   prompt: { scenario: "direct-chat" as const, message: "hello", history: [], systemInstruction: "system" },
   settings,
-  includeInnerVoice: true,
+  includeInnerVoice: false,
 };
 const baseCandidateContext = (rawText: string) => ({
   rawText,
@@ -23,6 +23,7 @@ let requestCount = 0;
 let candidateContextCount = 0;
 let deliveryCount = 0;
 let deliveryOrder: string[] = [];
+const beforeSendMessages: string[] = [];
 const normal = await executeDirectReplyTurn({
   request: {
     ...baseRequest,
@@ -40,9 +41,15 @@ const normal = await executeDirectReplyTurn({
     candidateContextCount += 1;
     return baseCandidateContext(response.text);
   },
-  deliver: async ({ candidates }) => {
+  beforeSend: (response, message, index, total) => {
+    beforeSendMessages.push(`${response.text}:${message.id}:${index + 1}/${total}`);
+  },
+  deliver: async ({ candidates, beforeSend }) => {
     deliveryCount += 1;
     deliveryOrder = candidates.messages.map((message) => message.id);
+    for (let index = 0; index < candidates.messages.length; index += 1) {
+      await beforeSend?.(candidates.messages[index], index, candidates.messages.length);
+    }
     return candidates.messages;
   },
 });
@@ -54,6 +61,7 @@ assert.equal(normal.status, "delivered");
 assert.deepEqual(deliveryOrder, ["reply-0", "reply-1"], "candidate order must reach delivery unchanged");
 assert.deepEqual(normal.generatedCandidateIds, ["reply-0", "reply-1"]);
 assert.deepEqual(normal.deliveredMessageIds, ["reply-0", "reply-1"]);
+assert.deepEqual(beforeSendMessages, ["第一条\n\n第二条:reply-0:1/2", "第一条\n\n第二条:reply-1:2/2"], "prepared response metadata must be provided per visible bubble");
 
 let candidateCalled = false;
 let deliveryCalled = false;

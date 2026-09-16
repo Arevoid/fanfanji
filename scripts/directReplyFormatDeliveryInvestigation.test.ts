@@ -37,7 +37,7 @@ const candidateContext = (rawText: string) => ({
 // A: a valid provider result reaches candidate creation and delivery.
 let deliveredCount = 0;
 const valid = await executeDirectReplyTurn({
-  request: { ...baseRequest, requestAi: async () => ({ text: "正常回复" }) },
+  request: { ...baseRequest, includeInnerVoice: false, requestAi: async () => ({ text: "正常回复" }) },
   normalizeResponse: (response) => response,
   hasReplyText: (response) => Boolean(response.text),
   createCandidateContext: (response) => candidateContext(response.text),
@@ -102,7 +102,7 @@ assert.match(String(exhausted.error), /格式异常/);
 
 // D: a response can normalize to no candidate; the executor exposes no_response.
 const noCandidate = await executeDirectReplyTurn({
-  request: { ...baseRequest, requestAi: async () => ({ text: "（发送了一张照片）" }) },
+  request: { ...baseRequest, includeInnerVoice: false, requestAi: async () => ({ text: "（发送了一张照片）" }) },
   normalizeResponse: (response) => response,
   hasReplyText: (response) => Boolean(response.text),
   createCandidateContext: (response) => candidateContext(response.text),

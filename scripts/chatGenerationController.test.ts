@@ -90,11 +90,62 @@ const plainTextRepairRecovered = await requestDirectChatTurn({
     plainTextRepairAttempts += 1;
     return plainTextRepairAttempts === 1
       ? { text: '{"innerVoice":{"content":"未说出口","emotionalState":"平静"}}' }
-      : { text: "纯文本格式修复成功" };
+      : plainTextRepairAttempts === 2
+        ? { text: "纯文本格式修复成功" }
+        : { text: '{"content":"终于把话说清了","emotionalState":"松了口气"}' };
   },
 });
-assert.equal(plainTextRepairAttempts, 2);
+assert.equal(plainTextRepairAttempts, 3);
 assert.equal(plainTextRepairRecovered.text, "纯文本格式修复成功");
+assert.deepEqual(plainTextRepairRecovered.innerVoice, { content: "终于把话说清了", emotionalState: "松了口气" });
+
+const missingVoiceRequests: Array<{ purpose?: string; message: string; retryReasons?: readonly string[] }> = [];
+const missingVoiceRecovered = await requestDirectChatTurn({
+  prompt,
+  settings,
+  includeInnerVoice: true,
+  requestAi: async (input) => {
+    missingVoiceRequests.push(input);
+    return missingVoiceRequests.length === 1
+      ? { text: '{"reply":"这条回复不能丢心声"}' }
+      : { text: '{"content":"其实很在意她刚才的话","emotionalState":"嘴上平静，心里微微发紧"}' };
+  },
+});
+assert.equal(missingVoiceRequests.length, 2, "a valid reply without inline voice must request a focused voice recovery before returning");
+assert.equal(missingVoiceRecovered.text, "这条回复不能丢心声", "voice recovery must not replace the actual reply");
+assert.deepEqual(missingVoiceRecovered.innerVoice, { content: "其实很在意她刚才的话", emotionalState: "嘴上平静，心里微微发紧" });
+assert.equal(missingVoiceRequests[1].purpose, "inner_voice");
+assert.match(missingVoiceRequests[1].message, /这条回复不能丢心声/, "the focused voice request must include the exact reply it belongs to");
+
+let malformedVoiceRecoveryAttempts = 0;
+const malformedVoiceRecovered = await requestDirectChatTurn({
+  prompt,
+  settings,
+  includeInnerVoice: true,
+  requestAi: async () => {
+    malformedVoiceRecoveryAttempts += 1;
+    if (malformedVoiceRecoveryAttempts === 1) return { text: '{"reply":"格式异常时仍保留本轮回复"}' };
+    if (malformedVoiceRecoveryAttempts === 2) return { text: '{"content":"缺少情绪字段"}' };
+    return { text: '{"content":"把担心藏起来","emotionalState":"略感担忧"}' };
+  },
+});
+assert.equal(malformedVoiceRecoveryAttempts, 3, "malformed recovered voice should receive one format correction retry");
+assert.equal(malformedVoiceRecovered.text, "格式异常时仍保留本轮回复");
+assert.equal(malformedVoiceRecovered.innerVoice?.emotionalState, "略感担忧");
+
+let failedVoiceAttempts = 0;
+await assert.rejects(() => requestDirectChatTurn({
+  prompt,
+  settings,
+  includeInnerVoice: true,
+  requestAi: async () => {
+    failedVoiceAttempts += 1;
+    return failedVoiceAttempts === 1
+      ? { text: '{"reply":"心声无法生成时不应静默发出"}' }
+      : { text: "仍然不是有效心声" };
+  },
+}), (error: unknown) => (error as { code?: string }).code === "inner_voice_generation_failed");
+assert.equal(failedVoiceAttempts, 3, "the controller must stop rather than silently return a reply after voice recovery fails");
 
 assert.equal(isContextLengthError(Object.assign(new Error("request too long"), { code: "context_too_large" })), true);
 assert.equal(isContextLengthError(new Error("invalid api key")), false);
@@ -137,7 +188,11 @@ assert.equal(corrected.text, "没怪你，过来抱一下");
 assert.match(retryInstruction, /previous draft was rejected because it copied the user/);
 
 const member = { id: "a", name: "甲", avatar: "", personality: "", backstory: "" } as Character;
-const groupAi = (async () => ({ text: "[SENDER_NAME: 甲]\n你好" })) as typeof apiChat;
+const groupAi = (async () => ({ text: JSON.stringify({ replies: [{
+  sender: "甲",
+  content: "你好",
+  innerVoice: { content: "有点想听她继续说", emotionalState: "心里期待，表面自然" },
+}] }) })) as typeof apiChat;
 const group = await generateGroupChatTurn({ prompt: { ...prompt, scenario: "group-chat" }, settings, members: [member], groupId: "g", disableBracketActions: false, createId: () => "gm", currentTime: () => 1, requestAi: groupAi });
 assert.deepEqual(group.messages.map((message) => message.content), ["你好"]);
 assert.deepEqual(group.members.map((item) => item.id), ["a"]);

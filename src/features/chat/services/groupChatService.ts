@@ -12,7 +12,7 @@ import { serializeMessageContentForPrompt } from "../prompts/messagePromptSerial
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 import { buildGroupMemberPrivateContext, type GroupMemberPrivateContextInput } from "../prompts/groupMemberPrivateContext";
 import { buildGroupChatSystemInstruction, buildGroupChatTaskMessage } from "../prompts/chatPromptBuilders";
-import { INLINE_GROUP_INNER_VOICE_INSTRUCTION, parseGroupTurnResponse } from "./chatTurnResponseProtocol";
+import { INLINE_GROUP_INNER_VOICE_INSTRUCTION, parseGroupTurnResponse, parseInnerVoiceResponse } from "./chatTurnResponseProtocol";
 import { DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT, MAX_CHAT_CONTEXT_MEMORY_LIMIT } from "./chatMemoryRetrievalSettings";
 import { buildWorldBookScanText } from "../../../domain/worldbook/worldBookTriggerScan";
 
@@ -203,8 +203,9 @@ export async function generateGroupReplyCandidates(input: {
   const matched = matchGroupReplyMembers(rawReplies, input.members);
   const valid = matched.map((item) => ({
     ...item,
-    structuredReply: structured?.find((reply) => reply.sender.toLowerCase() === item.member.name.toLowerCase()
-      || (item.member.remark && reply.sender.toLowerCase() === item.member.remark.toLowerCase())),
+    // Match by the original reply index, not sender name: a member may send
+    // several bubbles in one turn, each with a different inner voice/action.
+    structuredReply: structured?.[item.index],
     content: normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(item.reply.content.trim(), input.disableBracketActions))),
   })).filter((item) => Boolean(item.content) || item.structuredReply?.redPacketAction === "claim_silent" || item.structuredReply?.redPacketAction === "silent");
   const messages = valid.map((item) => createGroupCharacterMessage({
@@ -214,17 +215,47 @@ export async function generateGroupReplyCandidates(input: {
     translation: containsNonChineseText(item.content) ? item.structuredReply?.translation : undefined,
     redPacketAction: item.structuredReply?.redPacketAction,
   }));
+  const innerVoices: Array<{ message: Message; member: Character; content: { content: string; emotionalState: string; translation?: string } }> = [];
+  for (const [index, item] of valid.entries()) {
+    const message = messages[index];
+    if (!message || !item.content || message.redPacketAction === "claim_silent" || message.redPacketAction === "silent") continue;
+    let content = item.structuredReply?.innerVoice;
+    // The group reply envelope is intended to carry voice inline. Recover a
+    // missing/invalid field before delivery so the bubble never silently gets
+    // ahead of its private voice record.
+    if (!content && input.request.purpose === "group_chat_reply") {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 2 && !content; attempt += 1) {
+        if (input.request.signal?.aborted) throw Object.assign(new Error("群聊心声生成已取消。"), { code: "aborted" });
+        try {
+          const response = await requestAiReply(input.requestAi, {
+            ...input.request,
+            purpose: "inner_voice",
+            characterId: item.member.id,
+            conversationId: `group:${input.groupId}`,
+            message: `${input.request.message}\n\n【需要补全心声的群成员】\n${item.member.name}\n\n【该成员本轮实际发送的消息】\n${item.content}\n\n请只为这条消息生成该成员未说出口的心声。`,
+            systemInstruction: [input.request.systemInstruction, `现在只生成${item.member.name}的第一人称心声，不要替其他成员发言。只返回 JSON：{"content":"非空心声正文","emotionalState":"完整情绪短句"}。不得编造角色未知事实。`, attempt > 0 ? "上一轮格式无效；请重试并确保两个字段均为非空字符串。" : ""].filter(Boolean).join("\n\n"),
+            maxOutputTokens: 256,
+            retryReasons: [attempt === 0 ? "missing group inner voice" : "group inner voice format correction"],
+          });
+          content = parseInnerVoiceResponse(response.text);
+          if (!content) lastError = new Error("模型未返回有效的心声 JSON。");
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (!content) {
+        throw Object.assign(
+          new Error(`群聊成员「${item.member.name}」的心声生成失败，本轮群消息已暂缓发送，请重试。${lastError instanceof Error ? `（${lastError.message}）` : ""}`),
+          { code: "inner_voice_generation_failed", cause: lastError },
+        );
+      }
+    }
+    if (content) innerVoices.push({ message, member: item.member, content });
+  }
   return {
     members: valid.map((item) => item.member),
     messages,
-    innerVoices: structured ? valid.flatMap((item, index) => {
-      const structuredReply = structured.find((reply) => reply.sender.toLowerCase() === item.member.name.toLowerCase()
-        || (item.member.remark && reply.sender.toLowerCase() === item.member.remark.toLowerCase()));
-      return structuredReply?.innerVoice && messages[index]
-      && messages[index].redPacketAction !== "claim_silent"
-      && messages[index].redPacketAction !== "silent"
-      ? [{ message: messages[index], member: item.member, content: structuredReply.innerVoice }]
-      : [];
-    }) : [],
+    innerVoices,
   };
 }
