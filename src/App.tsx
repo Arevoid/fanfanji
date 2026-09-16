@@ -708,6 +708,7 @@ export default function App() {
   });
   useGlobalTypography(settings);
   const settingsRef = useRef<UserSettings>(settings);
+  const [settingsOverlaysReady, setSettingsOverlaysReady] = useState(false);
 
   // Hydrate reference fallbacks before large IndexedDB-backed image assets.
   // When localStorage is over quota, an asset's stable ID can exist only in
@@ -721,7 +722,13 @@ export default function App() {
         settingsRef.current = hydrated;
         setSettingsState(hydrated);
       },
-    );
+    )
+      .catch((error) => {
+        console.warn("[settings] Could not hydrate settings overlays before first paint.", error);
+      })
+      .finally(() => {
+        if (active) setSettingsOverlaysReady(true);
+      });
     return () => { active = false; };
   }, []);
 
@@ -3863,6 +3870,16 @@ export default function App() {
         minHeight: (typeof window !== "undefined" && window.innerWidth < 768) ? 0 : undefined,
       }}
     >
+      {!settingsOverlaysReady && (
+        <div
+          className="absolute inset-0 z-[1000] flex items-center justify-center bg-[#f5f5f7]"
+          data-settings-hydration-splash
+          role="status"
+          aria-live="polite"
+        >
+          <span className="h-7 w-7 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" aria-label="正在载入" />
+        </div>
+      )}
       {memoryEvidenceDevBuild && (
         <div className="fixed bottom-2 left-2 z-[9999] flex gap-1 rounded bg-black/80 p-1 text-[10px] text-white" data-memory-evidence-controls>
           <button type="button" onClick={() => runMemoryEvidenceControl("start")}>Evidence start</button>
@@ -4439,6 +4456,9 @@ export default function App() {
         ref={phoneScreenRef}
         className="w-full md:h-[812px] md:w-[375px] md:rounded-[40px] md:shadow-2xl overflow-hidden relative flex flex-col bg-slate-100 border-none phone-screen-container"
         style={{
+          // Keep the first paint from showing placeholder wallpaper/icons and
+          // then visibly jumping when IndexedDB-backed settings are restored.
+          visibility: settingsOverlaysReady ? "visible" : "hidden",
           background: resolveDesktopBackground({
             resolvedTheme,
             wallpaper: settings.wallpaper,
@@ -4451,7 +4471,7 @@ export default function App() {
           height: typeof window !== "undefined"
             ? window.innerWidth < 768 ? "100%" : "min(812px, 100dvh)"
             : undefined,
-          transition: "background 0.3s ease, width 0.3s ease",
+          transition: "width 0.3s ease",
         }}
       >
         {/* Real-time Status Bar (Wi-Fi, Battery, Cellular) is now overlaid absolutely at the bottom of the container to stay on top of everything */}

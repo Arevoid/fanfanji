@@ -161,14 +161,15 @@ export async function hydrateSettingsOverlays(
   getCurrentSettings: () => UserSettings,
   applyHydratedSettings: (settings: UserSettings) => void,
 ): Promise<void> {
-  const durableOverlay = await loadSettingsDurableOverlay();
-  if (durableOverlay) {
-    applyHydratedSettings(applySettingsDurableOverlay(getCurrentSettings(), durableOverlay));
-  }
-
-  const assetOverlay = await loadSettingsAssetOverlay();
+  const [durableOverlay, assetOverlay] = await Promise.all([
+    loadSettingsDurableOverlay(),
+    loadSettingsAssetOverlay(),
+  ]);
   const currentSettings = getCurrentSettings();
-  const hydratedSettings = applySettingsAssetOverlay(currentSettings, assetOverlay);
+  const withReferences = durableOverlay
+    ? applySettingsDurableOverlay(currentSettings, durableOverlay)
+    : currentSettings;
+  const hydratedSettings = applySettingsAssetOverlay(withReferences, assetOverlay);
   if (hydratedSettings !== currentSettings) applyHydratedSettings(hydratedSettings);
 }
 
