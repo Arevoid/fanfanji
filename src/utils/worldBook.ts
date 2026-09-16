@@ -5,6 +5,9 @@ import { isWorldBookEntryForCharacter } from "../domain/worldbook/worldBookVisib
 import { normalizeWorldBookTriggerText, splitWorldBookKeywords, worldBookKeywordMatches } from "../domain/worldbook/worldBookTriggerScan";
 import { rankWorldBookVectorEntries } from "../domain/worldbook/worldBookVector";
 
+export const WORLD_BOOK_ENTRY_MAX_CHARS = 2400;
+export const WORLD_BOOK_TOTAL_MAX_CHARS = 12000;
+
 export function getLatestWorldBookEntries(propEntries: WorldBookEntry[]): WorldBookEntry[] {
   try {
     const storedResult = loadWorldBookEntries(propEntries);
@@ -131,6 +134,16 @@ export function buildWorldBookSystemBlocks(
   // Sort entries by depth ascending (smaller depth is closer / higher priority)
   const sortedTriggered = triggeredEntries
     .sort((a, b) => (a.entry.depth || 5) - (b.entry.depth || 5));
+  let usedChars = 0;
+  const budgetedTriggered = sortedTriggered.flatMap(({ entry }) => {
+    if (usedChars >= WORLD_BOOK_TOTAL_MAX_CHARS) return [];
+    const content = entry.content.slice(0, WORLD_BOOK_ENTRY_MAX_CHARS);
+    const text = `【设定 - ${entry.title}】\n${content}`;
+    const remaining = WORLD_BOOK_TOTAL_MAX_CHARS - usedChars;
+    if (text.length > remaining && usedChars > 0) return [];
+    usedChars += text.length;
+    return [{ entry, text }];
+  });
 
   const entriesByPos = {
     after_main_prompt: [] as string[],
@@ -140,7 +153,7 @@ export function buildWorldBookSystemBlocks(
   };
   const atDepth: WorldBookDepthInjection[] = [];
 
-  sortedTriggered.forEach(({ entry, text }) => {
+  budgetedTriggered.forEach(({ entry, text }) => {
     const pos = entry.position || "after_char_def";
     if (pos === "at_depth") {
       atDepth.push({
@@ -168,7 +181,7 @@ export function buildWorldBookSystemBlocks(
     after_char_def: entriesByPos.after_char_def,
     before_chat_history: entriesByPos.before_chat_history,
     at_depth: atDepth,
-    allTriggered: sortedTriggered.map(t => t.entry),
+    allTriggered: budgetedTriggered.map(t => t.entry),
     formattedAll
   };
 }

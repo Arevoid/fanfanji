@@ -23,8 +23,12 @@ export function finalizeCharacterChatSystemInstruction(input: {
   if (assembly.diagnostics.duplicateBlockIds.length || assembly.diagnostics.duplicateSourceIds.length || assembly.diagnostics.duplicateContentBlockIds.length) {
     console.warn(`[${input.diagnosticLabel}] duplicate blocks removed`, assembly.diagnostics);
   }
-  const personaRuleReminder = input.finalPersonaRules?.length
-    ? `\n\n[本轮常驻角色规则]\n${input.finalPersonaRules.join("\n\n").slice(0, 1800)}`
+  const personaRules = input.finalPersonaRules?.filter((rule) => {
+    const body = rule.split("\n").slice(1).join("\n").trim();
+    return !body || !assembly.systemInstruction.includes(body);
+  }) || [];
+  const personaRuleReminder = personaRules.length
+    ? `\n\n[本轮常驻角色规则]\n${personaRules.join("\n\n").slice(0, 1800)}`
     : "";
   const finalPriorityInstructions = input.finalPriorityInstructions?.filter(Boolean).join("\n\n") || "";
   const finalPriorityText = finalPriorityInstructions
@@ -102,8 +106,12 @@ export function buildProactiveChatSystemInstruction(input: {
   finalPersonaRules?: readonly string[];
   finalLanguageInstruction: string;
 }): string {
-  const personaRuleReminder = input.finalPersonaRules?.length
-    ? `\n\n[本轮常驻角色规则]\n${input.finalPersonaRules.join("\n\n").slice(0, 1800)}`
+  const personaRules = input.finalPersonaRules?.filter((rule) => {
+    const body = rule.split("\n").slice(1).join("\n").trim();
+    return !body || !input.worldBook.includes(body);
+  }) || [];
+  const personaRuleReminder = personaRules.length
+    ? `\n\n[本轮常驻角色规则]\n${personaRules.join("\n\n").slice(0, 1800)}`
     : "";
   return `${LIVING_HUMAN_PROMPT}
 
