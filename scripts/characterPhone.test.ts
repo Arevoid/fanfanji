@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { inferCharacterPhoneLocation } from "../src/features/characterPhone/characterPhoneLocation";
+import { listCharacterPhoneSelectableCharacters } from "../src/features/characterPhone/characterPhoneSelection";
+import type { Character, UserIdentity } from "../src/types";
 
 const component = readFileSync(new URL("../src/components/AppCharacterPhone.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("../src/index.css", import.meta.url), "utf8");
@@ -31,6 +33,9 @@ const generatePhoneContentBlock = component.slice(
 );
 
 assert.match(component, /选择人物/);
+assert.match(component, /listCharacterPhoneSelectableCharacters/);
+assert.match(component, /selectableCharacters\.map/);
+assert.match(component, /档案\$\{ordinal\}/);
 assert.match(component, /忘记密码/);
 assert.match(component, /取消并返回桌面/);
 assert.match(component, /CHARACTER_PHONE_UNLOCK_PAD/);
@@ -93,6 +98,32 @@ assert.match(component, /aria-pressed=\{Boolean\(selectedGallery\.hidden\)\}/);
 assert.match(component, /隐藏相册密码/);
 assert.match(component, /解锁隐藏相册/);
 assert.doesNotMatch(component, /当前测试密码|3737/);
+
+const pickerPrimary: UserIdentity = { id: "picker-primary", name: "主号", avatar: "", signature: "", bio: "", kind: "primary" };
+const pickerAlias: UserIdentity = { id: "picker-alias", name: "马甲", avatar: "", signature: "", bio: "", kind: "alias", parentIdentityId: pickerPrimary.id };
+const pickerOtherPrimary: UserIdentity = { id: "picker-other", name: "另一个主人设", avatar: "", signature: "", bio: "", kind: "primary" };
+const pickerCharacter = (id: string, name: string, ownerIdentityId: string, extra: Partial<Character> = {}): Character => ({
+  id,
+  name,
+  ownerIdentityId,
+  avatar: "",
+  personality: "",
+  backstory: "",
+  ...extra,
+});
+const selectablePhoneCharacters = listCharacterPhoneSelectableCharacters([
+  pickerCharacter("owned-role-a", "同名角色", pickerPrimary.id),
+  pickerCharacter("legacy-copy", "同名角色", pickerPrimary.id, { isContactInstance: true, profileSourceId: "owned-role-a" }),
+  pickerCharacter("owned-role-b", "同名角色", pickerPrimary.id),
+  pickerCharacter("alias-owned-role", "马甲角色", pickerAlias.id),
+  pickerCharacter("group-chat", "群聊", pickerPrimary.id, { isGroupChat: true }),
+  pickerCharacter("other-owner-role", "其他主人设角色", pickerOtherPrimary.id),
+], pickerPrimary.id, [pickerPrimary, pickerAlias, pickerOtherPrimary]);
+assert.deepEqual(
+  selectablePhoneCharacters.map((character) => character.id),
+  ["owned-role-a", "owned-role-b", "alias-owned-role"],
+  "password picker excludes contact copies/groups/other identity roots but preserves distinct same-name roles and same-workspace aliases",
+);
 assert.match(component, /overflow-hidden overscroll-none bg-black/);
 assert.match(component, /activeApp === "gallery"/);
 assert.match(component, /const isGalleryDetail = activeApp === "gallery" && Boolean\(selectedGallery\)/);

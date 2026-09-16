@@ -120,6 +120,7 @@ import { StorageCachePanel } from "../features/settings/components/StorageCacheP
 import { clearRebuildableCache } from "../core/storage/rebuildableCache";
 import { isWorldBookEntryVisible } from "../domain/worldbook/worldBookVisibility";
 import type { MessageMutationScope } from "../features/chat/context/directInteractionScope";
+import { listCharacterPhoneSelectableCharacters } from "../features/characterPhone/characterPhoneSelection";
 
 interface AppCharacterPhoneProps {
   userIdentityId: string;
@@ -818,12 +819,30 @@ export default function AppCharacterPhone({
   onOpenChat,
   onClose,
 }: AppCharacterPhoneProps) {
-  const [selectedCharacterId, setSelectedCharacterId] = useState(
-    characters[0]?.id || "",
+  const selectableCharacters = useMemo(
+    () => listCharacterPhoneSelectableCharacters(characters, userIdentityId, identities),
+    [characters, userIdentityId, identities],
   );
-  const selectedCharacter = characters.find(
+  const [selectedCharacterId, setSelectedCharacterId] = useState(
+    selectableCharacters[0]?.id || "",
+  );
+  const selectedCharacter = selectableCharacters.find(
     (character) => character.id === selectedCharacterId,
   );
+  const characterOptionLabels = useMemo(() => {
+    const counts = new Map<string, number>();
+    selectableCharacters.forEach((character) => counts.set(character.name, (counts.get(character.name) ?? 0) + 1));
+    const ordinals = new Map<string, number>();
+    return new Map(selectableCharacters.map((character) => {
+      const count = counts.get(character.name) ?? 0;
+      if (count <= 1) return [character.id, character.name] as const;
+      const ordinal = (ordinals.get(character.name) ?? 0) + 1;
+      ordinals.set(character.name, ordinal);
+      const remark = character.remark?.trim();
+      const qualifier = remark && remark !== character.name ? remark : `档案${ordinal}`;
+      return [character.id, `${character.name}（${qualifier}）`] as const;
+    }));
+  }, [selectableCharacters]);
   const phoneContext = useMemo(() => ({
     activeIdentity,
     identities,
@@ -854,11 +873,13 @@ export default function AppCharacterPhone({
   );
   const previousIdentityIdRef = useRef(userIdentityId);
   useEffect(() => {
-    if (!selectedCharacterId && characters[0]) {
-      setSelectedCharacterId(characters[0].id);
-      setPhone(openCharacterPhone(userIdentityId, characters[0], phoneContext));
+    const selectedExists = selectableCharacters.some((character) => character.id === selectedCharacterId);
+    if (!selectedExists) {
+      const nextCharacter = selectableCharacters[0];
+      setSelectedCharacterId(nextCharacter?.id || "");
+      setPhone(nextCharacter ? openCharacterPhone(userIdentityId, nextCharacter, phoneContext) : null);
     }
-  }, [characters, selectedCharacterId, userIdentityId]);
+  }, [selectableCharacters, selectedCharacterId, userIdentityId, phoneContext]);
   useEffect(() => {
     const handleGalleryUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ ownerIdentityId?: string; characterId?: string }>).detail;
@@ -1683,7 +1704,7 @@ export default function AppCharacterPhone({
   };
 
   const selectCharacter = (characterId: string) => {
-    const character = characters.find((item) => item.id === characterId);
+    const character = selectableCharacters.find((item) => item.id === characterId);
     if (!character) return;
     generationRequestRef.current += 1;
     initialGenerationPhoneIdRef.current = null;
@@ -2329,7 +2350,7 @@ export default function AppCharacterPhone({
           </button>
         </header>
         <div className="flex flex-1 items-center justify-center px-8 text-center text-sm text-[var(--text-muted)]">
-          请先创建至少一个角色，才能查看角色手机。
+          当前身份没有可用的角色档案；角色手机不支持联系人副本或群聊。
         </div>
       </div>
     );
@@ -4311,15 +4332,15 @@ export default function AppCharacterPhone({
             <label className="relative mt-1 flex cursor-pointer items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-2 text-xs font-semibold text-white/95 shadow-lg backdrop-blur-md">
               <Users className="h-4 w-4" />
               <span>选择人物</span>
-              <span className="max-w-[92px] truncate text-white/65">{selectedCharacter.name}</span>
+              <span className="max-w-[140px] truncate text-white/65">{characterOptionLabels.get(selectedCharacter.id) || selectedCharacter.name}</span>
               <select
                 aria-label="选择人物"
                 value={selectedCharacter.id}
                 onChange={(event) => selectCharacter(event.target.value)}
                 className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
               >
-                {characters.map((character) => (
-                  <option key={character.id} value={character.id}>{character.name}</option>
+                {selectableCharacters.map((character) => (
+                  <option key={character.id} value={character.id}>{characterOptionLabels.get(character.id) || character.name}</option>
                 ))}
               </select>
             </label>
