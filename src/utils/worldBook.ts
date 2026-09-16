@@ -8,11 +8,16 @@ export function getLatestWorldBookEntries(propEntries: WorldBookEntry[]): WorldB
     const storedResult = loadWorldBookEntries(propEntries);
     if (!storedResult.found || !storedResult.valid) return propEntries;
     const stored = storedResult.value;
-
-    const propMax = propEntries.length > 0 ? Math.max(0, ...propEntries.map(e => e.timestamp || 0)) : 0;
-    const storedMax = stored.length > 0 ? Math.max(0, ...stored.map(e => e.timestamp || 0)) : 0;
-
-    return propMax >= storedMax ? propEntries : stored;
+    const freshest = new Map<string, WorldBookEntry>();
+    // Prefer the in-memory prop on timestamp ties; it represents the current
+    // React state and avoids replacing a just-edited record with its storage
+    // copy when both writes share the same millisecond.
+    for (const entry of propEntries) freshest.set(entry.id, entry);
+    for (const entry of stored) {
+      const current = freshest.get(entry.id);
+      if (!current || (entry.timestamp || 0) > (current.timestamp || 0)) freshest.set(entry.id, entry);
+    }
+    return [...freshest.values()];
   } catch (err) {
     console.error("Error reading freshest world book entries:", err);
     return propEntries;
