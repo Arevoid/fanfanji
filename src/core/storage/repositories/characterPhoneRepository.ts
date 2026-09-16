@@ -878,6 +878,7 @@ export function clearCharacterPhoneData(
     updatedAt: now,
     lastOpenedAt: undefined,
     lastGeneratedAt: undefined,
+    generationCooldowns: undefined,
     contentSeededAt: undefined,
     initialContentGeneratedAt: undefined,
     initialContentPending: true,

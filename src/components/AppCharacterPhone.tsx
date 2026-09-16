@@ -109,6 +109,10 @@ import { imageAssetDb } from "../utils/imageAssetDb";
 import { normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
 import { buildCharacterPhoneBrowserDetail } from "../features/characterPhone/characterPhoneBrowserDetails";
 import { resolveCharacterPhoneContactAvatar } from "../features/characterPhone/characterPhoneContactVisuals";
+import {
+  formatCharacterPhoneCooldownRemaining,
+  getCharacterPhoneGenerationCooldowns,
+} from "../features/characterPhone/characterPhoneGenerationCooldown";
 import { CharacterPhoneCallApp, type CharacterPhoneDialerTab } from "../features/characterPhone/components/CharacterPhoneCallApp";
 import { CharacterPhoneCameraApp } from "../features/characterPhone/components/CharacterPhoneCameraApp";
 import { resolveCharacterPhoneHiddenGalleryPasscode } from "../features/characterPhone/characterPhoneGallerySecurity";
@@ -349,6 +353,10 @@ function characterPhoneGenerationNoChangeNotice(
       return "模型返回格式无法识别，请重试或更换模型";
     case "missing_evidence":
       return "暂时没有可引用的聊天或世界书证据，请先补充最近对话后重试";
+    case "cooldown":
+      return "所选应用暂无新内容，请稍后再试";
+    case "incomplete_content":
+      return "模型没有为所选应用生成足够的新内容，本次未保存也未启动冷却；请稍后重试";
     case "context_synced":
       return "已同步现有聊天和联系人，暂未生成新的生活痕迹";
     case "duplicate_content":
@@ -1764,6 +1772,24 @@ export default function AppCharacterPhone({
     if (isInitialGeneration && (!basePhone.initialContentPending || basePhone.initialContentGeneratedAt || initialGenerationPhoneIdRef.current === basePhone.id)) return;
     if (isInitialGeneration) initialGenerationPhoneIdRef.current = basePhone.id;
     const now = Date.now();
+    const requestedApps = options.selectedApps
+      ? [...new Set(options.selectedApps)]
+      : CHARACTER_PHONE_GENERATABLE_APPS.map((app) => app.id);
+    const activeCooldowns = !isInitialGeneration && !isContactThreadRepair
+      ? getCharacterPhoneGenerationCooldowns(basePhone, requestedApps, now)
+      : [];
+    const coolingAppIds = new Set(activeCooldowns.map((cooldown) => cooldown.appId));
+    const runnableApps = isContactThreadRepair
+      ? []
+      : requestedApps.filter((appId) => !coolingAppIds.has(appId));
+    if (!isInitialGeneration && !isContactThreadRepair && runnableApps.length === 0 && activeCooldowns.length > 0) {
+      const latestCooldown = Math.max(...activeCooldowns.map((cooldown) => cooldown.until));
+      setPhoneNotice(`所选应用暂无新内容，约${formatCharacterPhoneCooldownRemaining(latestCooldown, now)}后可再次生成`);
+      return;
+    }
+    const skippedCooldownLabels = activeCooldowns.map((cooldown) =>
+      CHARACTER_PHONE_GENERATABLE_APPS.find((app) => app.id === cooldown.appId)?.label || cooldown.appId,
+    );
     const requestId = generationRequestRef.current + 1;
     generationRequestRef.current = requestId;
     const requestScope = {
@@ -1799,7 +1825,7 @@ export default function AppCharacterPhone({
           settings,
           initial: isInitialGeneration,
           contactThreadRepair: isContactThreadRepair,
-          selectedApps: options.selectedApps,
+          selectedApps: isContactThreadRepair ? options.selectedApps : runnableApps,
         }),
         timeoutPromise,
       ]);
@@ -1834,9 +1860,12 @@ export default function AppCharacterPhone({
       // Keep one generation from flooding the main phone's feed. The newest
       // generated post is enough to establish the shared social trace.
       newGeneratedPosts.sort((left, right) => right.timestamp - left.timestamp).slice(0, 1).forEach(syncCharacterPhonePost);
-      setPhoneNotice(advancedResult.status === "generated"
+      const completionNotice = advancedResult.status === "generated"
         ? isInitialGeneration ? "角色手机已完成首次生活初始化" : isContactThreadRepair ? "已补全联系人聊天记录" : "角色手机已生成新的生活痕迹"
-        : characterPhoneGenerationNoChangeNotice(advancedResult.reason));
+        : characterPhoneGenerationNoChangeNotice(advancedResult.reason);
+      setPhoneNotice(skippedCooldownLabels.length > 0
+        ? `${completionNotice}；已跳过冷却中的应用：${skippedCooldownLabels.join("、")}`
+        : completionNotice);
     } catch (error) {
       if (timedOut && mountedRef.current && generationRequestRef.current === requestId) {
         // Invalidate a late provider response so it cannot overwrite a retry.

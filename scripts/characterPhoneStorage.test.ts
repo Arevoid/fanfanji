@@ -46,6 +46,7 @@ const phone: CharacterPhoneRecord = {
   failedAttempts: 0,
   createdAt: 1,
   updatedAt: 1,
+  generationCooldowns: { browser: 3_600_000 },
   wallpaper: "linear-gradient(white, white)",
   appOrder: ["chat", "browser", "schedule", "gallery", "diary", "notes", "music", "settings"],
   messages: [],
@@ -82,6 +83,7 @@ assert.equal(values.has("phone_character_phones_v1"), false, "new phones no long
 const loaded = getCharacterPhone(phone.ownerIdentityId, phone.characterId);
 assert.equal(loaded?.galleryItems[0]?.dataUrl, undefined);
 assert.equal(loaded?.galleryItems[0]?.textImageForId, "phone-text-image-storage");
+assert.equal(loaded?.generationCooldowns?.browser, 3_600_000, "per-app cooldown survives phone persistence and reload");
 assert.equal(loaded?.passcode, "0000", "persisted legacy passwords remain unchanged for backwards compatibility");
 const usage = getCharacterPhoneStorageUsage(phone.ownerIdentityId, phone.characterId);
 assert.ok(usage.currentPhoneBytes > 0);
@@ -142,6 +144,7 @@ assert.equal(cleared.passcode, "1234");
 assert.equal(cleared.wallpaper, "custom-wallpaper");
 assert.deepEqual(cleared.appIcons, { chat: "custom-icon" });
 assert.equal(cleared.updatedAt, 99);
+assert.equal(cleared.generationCooldowns, undefined, "clearing the phone also clears old app cooldowns");
 assert.equal(cleared.messages.length, 0);
 assert.equal(cleared.contacts.length, 0);
 assert.equal(cleared.threadMessages.length, 0);

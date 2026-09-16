@@ -31,6 +31,10 @@ import { buildCharacterPhoneLifeContext, type CharacterPhoneLifeContext } from "
 import { listCharacterPhoneRelationshipNetworkContacts } from "./characterPhoneRelationshipNetwork";
 import { createCharacterPhoneTextImageDataUrl } from "./characterPhoneTextImage";
 import { createCharacterPhoneInitialAvatar, normalizeCharacterPhoneContactName } from "./characterPhoneContactVisuals";
+import {
+  getCharacterPhoneGenerationCooldowns,
+  recordCharacterPhoneGenerationCooldowns,
+} from "./characterPhoneGenerationCooldown";
 
 type GeneratedContactDraft = {
   name: string;
@@ -79,10 +83,12 @@ type GeneratedPhonePayload = {
   callContactName?: unknown;
   callDirection?: unknown;
   callDurationSeconds?: unknown;
+  phoneCalls?: unknown;
   postContent?: unknown;
   posts?: unknown;
   galleryTitle?: unknown;
   galleryCaption?: unknown;
+  galleryEntries?: unknown;
   hiddenGalleryTitle?: unknown;
   hiddenGalleryCaption?: unknown;
   musicTracks?: unknown;
@@ -427,6 +433,69 @@ function buildRecentContext(input: {
   ].join("\n");
 }
 
+function isContextuallySupportedContact(name: string, relation: string, context: string): boolean {
+  const evidence = context.toLocaleLowerCase();
+  const candidate = `${name} ${relation}`.toLocaleLowerCase();
+  const scenarios: Array<{ evidence: RegExp; contact: RegExp }> = [
+    { evidence: /求婚|婚礼|订婚|结婚|婚庆|钻戒|婚戒|婚纱|婚房/, contact: /婚|酒店|钻石|戒指|婚纱|宴会|策划|场地/ },
+    { evidence: /旅行|旅游|度假|出差|机票|车票|酒店|返程/, contact: /旅行|旅游|导游|酒店|票务|航班|车站|租车/ },
+    { evidence: /生病|发烧|医院|体检|检查|看诊|吃药|复诊/, contact: /医生|护士|诊所|医院|药师|药店|检验/ },
+    { evidence: /面试|工作|项目|加班|辞职|升职|客户|合同|入职/, contact: /同事|客户|经理|人事|hr|招聘|项目|法务/ },
+    { evidence: /搬家|装修|租房|买房|房子|搬到|搬去/, contact: /房产|中介|房东|装修|物业|搬家/ },
+    { evidence: /考试|上学|毕业|论文|选课|补课/, contact: /老师|同学|导师|教务|辅导|培训/ },
+    { evidence: /生日|聚会|见面|散步|电影|吃饭|约好|邀请|礼物/, contact: /朋友|家人|同事|同学|店员|摄影|预订/ },
+  ];
+  return scenarios.some((scenario) => scenario.evidence.test(evidence) && scenario.contact.test(candidate));
+}
+
+function buildContextualScenarioContacts(context: string): GeneratedContactDraft[] {
+  if (/求婚|婚礼|订婚|结婚|婚庆|钻戒|婚戒|婚纱|婚房/.test(context)) {
+    return [
+      { name: "婚庆顾问", relation: "婚礼筹备服务联系人" },
+      { name: "酒店预订顾问", relation: "婚宴场地与档期联系人" },
+      { name: "钻石定制顾问", relation: "婚戒定制咨询联系人" },
+    ];
+  }
+  if (/旅行|旅游|度假|出差|机票|车票|酒店|返程/.test(context)) {
+    return [
+      { name: "旅行顾问", relation: "行程规划联系人" },
+      { name: "酒店预订顾问", relation: "住宿安排联系人" },
+      { name: "票务顾问", relation: "交通票务联系人" },
+    ];
+  }
+  if (/生病|发烧|医院|体检|检查|看诊|吃药|复诊/.test(context)) {
+    return [
+      { name: "门诊护士", relation: "就诊流程联系人" },
+      { name: "主治医生", relation: "复诊与检查联系人" },
+      { name: "药房药师", relation: "用药咨询联系人" },
+    ];
+  }
+  if (/搬家|装修|租房|买房|房子|搬到|搬去/.test(context)) {
+    return [
+      { name: "房产中介", relation: "租房或看房联系人" },
+      { name: "装修顾问", relation: "房屋布置联系人" },
+      { name: "物业管家", relation: "入住安排联系人" },
+    ];
+  }
+  if (/面试|工作|项目|加班|辞职|升职|客户|合同|入职/.test(context)) {
+    return [
+      { name: "项目同事", relation: "工作事项联系人" },
+      { name: "客户联系人", relation: "项目沟通联系人" },
+      { name: "人事顾问", relation: "面试或入职联系人" },
+    ];
+  }
+  return [];
+}
+
+function isInitialNpcConversationContact(contact: CharacterPhoneContact): boolean {
+  return !contact.removedAt
+    && contact.source !== "user"
+    && contact.kind !== "user"
+    && contact.kind !== "character"
+    && contact.kind !== "group"
+    && contact.isNpc !== false;
+}
+
 function parseContactDrafts(
   value: unknown,
   character: Character,
@@ -442,7 +511,7 @@ function parseContactDrafts(
     const name = normalizeCharacterPhoneContactName(cleanText(candidate.name, sourceFileName, 40));
     const relation = cleanText(candidate.relation, sourceFileName, 80);
     if (!name || name === character.name || name === sourceStem || name === "这个角色" || name === "角色") continue;
-    if (!context.includes(name)) continue;
+    if (!context.includes(name) && !isContextuallySupportedContact(name, relation, context)) continue;
     if (drafts.some((draft) => draft.name.toLocaleLowerCase() === name.toLocaleLowerCase())) continue;
     const kind = candidate.kind === "group" || /群聊|群组/.test(relation) ? "group" : "npc";
     const memberNames = Array.isArray(candidate.memberNames)
@@ -532,6 +601,27 @@ function parseGeneratedContactThreads(
   }).slice(0, 12);
 }
 
+function parseGeneratedGalleryEntries(value: unknown, sourceFileName?: string): Array<{ title: string; caption: string; hidden: boolean }> {
+  return generatedRecords(value).flatMap((record) => {
+    const caption = cleanGeneratedText(record.caption ?? record.description ?? record.content, sourceFileName);
+    const title = cleanGeneratedText(record.title, sourceFileName, 160) || deriveGeneratedTitle(caption, sourceFileName);
+    return title || caption ? [{ title: title || caption.slice(0, 24), caption: caption || title, hidden: record.hidden === true }] : [];
+  }).slice(0, 8);
+}
+
+function parseGeneratedPhoneCalls(value: unknown, sourceFileName?: string): Array<{ contactName: string; direction: "incoming" | "outgoing" | "missed"; durationSeconds?: number }> {
+  return generatedRecords(value).flatMap((record) => {
+    const contactName = cleanGeneratedText(record.contactName ?? record.name, sourceFileName, 80);
+    const direction: "incoming" | "outgoing" | "missed" | undefined = record.direction === "incoming" || record.direction === "outgoing" || record.direction === "missed"
+      ? record.direction
+      : undefined;
+    const durationSeconds = finiteNumber(record.durationSeconds);
+    return contactName && direction
+      ? [{ contactName, direction, ...(durationSeconds !== undefined ? { durationSeconds } : {}) }]
+      : [];
+  }).slice(0, 8);
+}
+
 function createGeneratedUserContact(
   phone: CharacterPhoneRecord,
   identity?: UserIdentity,
@@ -558,6 +648,24 @@ function buildInitialContactFallback(
   lifeEventSummary: string,
   character: Character,
 ): GeneratedThreadDraft[] {
+  if (contact.name.includes("婚庆顾问")) {
+    return [
+      { sender: "contact", content: "我先按你们想要的氛围整理两套小型婚礼方案，日期和大概人数确定后，预算还能再细化。" },
+      { sender: "character", content: "先把周末档期和套餐差异发我吧，我想先跟家里商量好人数，再决定要不要把场地定下来。" },
+    ];
+  }
+  if (contact.name.includes("酒店预订顾问")) {
+    return [
+      { sender: "contact", content: "周末宴会厅目前还有两个时段可以选，我把场地、餐标和取消规则一起整理给你。" },
+      { sender: "character", content: "麻烦先按两边家人都方便的时间查一下，人数还没完全确定，先别替我锁定。" },
+    ];
+  }
+  if (contact.name.includes("钻石定制顾问")) {
+    return [
+      { sender: "contact", content: "你看中的那类戒托可以做小一号的爪镶，我把尺寸、证书和改圈周期列给你确认。" },
+      { sender: "character", content: "先把几种日常佩戴不容易勾衣服的款式发我，预算范围也一起标一下，我想慢慢挑。" },
+    ];
+  }
   const context = lifeEventSummary ? lifeEventSummary.slice(0, 30) : "刚才那件事";
   const variants = contact.kind === "group"
     ? [
@@ -709,6 +817,8 @@ export type CharacterPhoneGenerationNoChangeReason =
   | "provider_error"
   | "invalid_response"
   | "missing_evidence"
+  | "cooldown"
+  | "incomplete_content"
   | "duplicate_content"
   | "context_synced";
 
@@ -753,8 +863,16 @@ export async function advanceCharacterPhoneWithResult(
   const now = input.now ?? Date.now();
   const isInitialGeneration = Boolean(input.initial);
   const isContactThreadRepair = Boolean(input.contactThreadRepair);
-  const selectedApps = input.selectedApps ? new Set(input.selectedApps) : undefined;
+  const requestedApps = input.selectedApps
+    ?? (isInitialGeneration ? CHARACTER_PHONE_GENERATABLE_APPS.map((app) => app.id) : undefined);
+  const selectedApps = requestedApps ? new Set(requestedApps) : undefined;
   const isAppSelected = (appId: CharacterPhoneGeneratedAppId) => !selectedApps || selectedApps.has(appId);
+  if (!isInitialGeneration && !isContactThreadRepair && requestedApps) {
+    const coolingApps = getCharacterPhoneGenerationCooldowns(input.phone, requestedApps, now);
+    if (coolingApps.length > 0) {
+      return { phone: input.phone, status: "no_change", reason: "cooldown", createdCount: 0 };
+    }
+  }
   const chatSelected = isInitialGeneration || isAppSelected("chat");
   const selectedAppLabels = input.selectedApps?.map((appId) =>
     CHARACTER_PHONE_GENERATABLE_APPS.find((app) => app.id === appId)?.label || appId,
@@ -863,12 +981,17 @@ export async function advanceCharacterPhoneWithResult(
   const generationRequest = isContactThreadRepair
     ? "这是一次联系人聊天记录专项修复。只为下面列出的缺少聊天记录的已有联系人生成独立 contactThreads，每人至少一条联系人消息和一条角色回复。回复 contactId 必须逐字复制目标 ID，contactName 必须逐字复制目标名称。不得新增、删除或合并联系人；不得生成用户聊天、日记、日程、浏览器、相册、朋友圈、音乐、备忘录、待办、通话或其他应用记录。"
     : isInitialGeneration
-    ? "这是该角色手机首次初始化。忽略前文可能出现的2—4条总量示例，以本条数量要求为准。请围绕同一个有证据的生活事件，批量生成完整但自然的手机生活。用户与角色的直接聊天必须严格以主聊天已有记录为准，禁止模拟用户发言或生成伪造的 userThreadMessages；每一个有证据的非用户 NPC（包括关系网已连线 NPC）都必须在 contacts 中出现，并用 contactThreads 生成属于自己的聊天，不能把不同联系人混在同一线程；没有证据的人不要添加；浏览器 4—8 条搜索记录；未来 3—6 天内分布 1—3 条日程；日记、备忘录、待办合计 2—4 条；朋友圈至少 1 条，visibility 必须是 user（仅用户可见）或 private（仅自己可见）；音乐必须有曲目、收听历史、常听时段和当前正在收听曲目；相册至少保存一条与该事件有关的文字图描述。优先使用 contactThreads、browserEntries、scheduleItems、diaryEntries、noteEntries、todoEntries、posts、musicTracks、musicListening、musicNowPlaying 数组字段表达数量；同一事件可以投影到多个应用，但每条仍须有证据。"
+    ? "这是该角色手机首次初始化。忽略前文可能出现的其他数量要求，以本条硬性合同为准。围绕同一个有证据的生活事件，批量生成完整但自然的手机生活。用户与角色的直接聊天只能镜像主聊天已有记录，禁止模拟用户发言；另外必须创建3—5位非用户NPC的独立联系人聊天，每位2—5条新消息，不把联系人混在线程。NPC可依据角色资料/世界书/关系网或最近事件合理推演（如求婚对应婚庆、酒店、钻石顾问），不得把用户、马甲或其他角色人设算作NPC。9个可生成应用都须各生成2—5条本次新增、非空、可见内容。未来日程安排在3—6天内；朋友圈至少一条设为 user/private；音乐须有曲目及收听记录。优先使用批量数组字段；同一事件可投影到多个应用，但内容必须彼此有差异且有上下文依据。"
     : selectedAppLabels
       ? allAppsSelected
-        ? `这是用户选择“全部应用”的定向更新。请尽量为以下每一个可生成应用各追加 1 条有依据的新记录：${selectedAppLabels.join("、")}。不得遗漏应用，但某应用确实没有任何证据时宁可留空、绝不编造。选择了聊天时，可生成角色自己发给用户的新消息（放入 userThreadMessages，sender 只能是 character），并为有证据的联系人生成 contactThreads；绝不能伪造用户发言。`
-        : `这是用户指定应用的定向更新，只生成以下应用的新内容：${selectedAppLabels.join("、")}。未选择的应用必须完全不生成数据；每个所选应用最多补充 1—2 条有依据的新记录。选择了聊天时，可生成角色自己发给用户的新消息（放入 userThreadMessages，sender 只能是 character），并为有证据的联系人生成 contactThreads；绝不能伪造用户发言。`
+        ? `这是用户选择“全部应用”的定向更新。为以下每一个可生成应用各追加2—5条有依据的新记录：${selectedAppLabels.join("、")}。不得遗漏所选应用；可依据最近事件合理推演但不得脱离上下文。选择聊天时可生成角色发给用户的新消息（userThreadMessages，sender只能是character），并为有依据的联系人生成contactThreads；绝不能伪造用户发言。`
+        : `这是用户指定应用的定向更新，只生成以下应用的新内容：${selectedAppLabels.join("、")}。未选择的应用必须完全不生成数据；每个所选应用必须追加2—5条有依据的新记录。可依据最近事件合理推演但不得脱离上下文。选择聊天时可生成角色发给用户的新消息（userThreadMessages，sender只能是character），并为有依据的联系人生成contactThreads；绝不能伪造用户发言。`
       : "这是一次追加生活痕迹。请从最有依据的 2—4 个应用中随机选择少量记录，避免每次都选择相同应用或相同数量；不要为了填满首次初始化的数量而重复旧内容。";
+  const generationContract = isContactThreadRepair
+    ? ""
+    : isInitialGeneration
+      ? "不可覆盖的硬性数量合同：首次必须为3—5位非用户NPC建立独立聊天，每位NPC至少2条、最多5条新消息；用户、用户马甲、其他角色人设不能计入NPC。可结合最近聊天事件推演相关服务类NPC（如求婚/婚礼对应婚庆、酒店、钻石定制顾问），聊天必须围绕事件。全部9个可生成应用每个都写入2—5条本次新增、非空、可见记录；聊天按NPC会话数计算，其他应用按应用可见条目数计算。电话和相册也必须用数组提供2—5条。"
+      : `不可覆盖的硬性数量合同：只处理本次选中的应用。每个选中应用必须追加2—5条本次新增、非空且可见的记录；聊天按新增消息条数计算，其他应用按新增条目数计算。若上下文不足，可从最近聊天事件合理推演相关记录和NPC；绝不能用空数据冒充成功。应用范围：${selectedAppLabels?.join("、") || "由本次请求指定"}。`;
   let response;
   try {
     response = await apiChat({
@@ -882,20 +1005,21 @@ export async function advanceCharacterPhoneWithResult(
           : `${generationRequest}\n只返回 JSON，不要 Markdown。使用批量字段：userThreadMessages:[{sender:"character",content:"角色新发给用户的消息"}]（只可含角色一方消息，禁止模拟用户发言）；contactThreads:[{contactName:"NPC或群聊",messages:[{sender:"contact或character",content:"消息内容"}]}]；browserEntries:[{query:"搜索词",title:"记录标题",results:[{platform:"平台",title:"结果标题",snippet:"摘要"}],searchResults:[{platform:"平台",title:"结果标题",snippet:"摘要"}],reflection:"搜索后的私下反应"}]；scheduleItems:[{title:"日程标题",detail:"具体事项",daysFromNow:3}]；diaryEntries:[{title:"日记标题",body:"私密想法"}]；noteEntries:[{title:"备忘录标题",content:"具体内容"}]；todoEntries:[{text:"待办事项"}]；posts:[{content:"朋友圈内容",visibility:"user、private 或 public"}]；musicTracks:[{title:"曲目",artist:"艺术家",duration:"3:30",current:true}]；musicListening:[{trackTitle:"曲目",playedHoursAgo:2,durationSeconds:180,playCount:2}]；musicNowPlaying:{trackTitle:"当前曲目"}。电话使用 callContactName/callDirection/callDurationSeconds，相册使用 galleryTitle/galleryCaption/hiddenGalleryTitle/hiddenGalleryCaption。始终保留 lifeEventSummary、evidenceSourceIds；contacts 仅在选择聊天应用时提供。未选择的应用数据一律返回空/省略。`,
       },
       history: [],
-      systemInstruction: `你扮演真实存在的角色“${roleName}”，正在整理他自己的手机。\n${context}\n\n${generationRequest}\n严格规则：
+      systemInstruction: `你扮演真实存在的角色“${roleName}”，正在整理他自己的手机。\n${context}\n\n${generationRequest}\n${generationContract}\n严格规则：
 1. 所有内容必须来自角色人设、世界书、最近上下文或已有手机记录的合理延伸；不能凭空制造与角色无关的人和事件。
 2. 联系人只能是角色现实中可能认识的人：用户、已有角色关系、世界书/人设明确提到的家人朋友同事，或有明确依据的新 NPC。群聊必须有明确的群名称或成员依据。不要读取或生成用户不认识该角色的好友。name 只能填写真实的人名或群聊名，不能填写“我可”“我都开始怀疑你是不”这类句子片段；无法确定正式名称时请留空并不要添加该联系人。
 3. userThreadMessages 只表示角色发给用户的直接消息；主聊天中的用户发言必须来自真实主聊天镜像，严禁模型代替用户发言。contactThreads/threadMessages 只表示 NPC 或群聊。${isContactThreadRepair ? "专项修复只可为指定待修复联系人写独立 contactThreads；这些联系人都已存在，不得返回或改动 contacts。" : "每个有证据的非用户联系人（尤其是关系网已连线 NPC）都必须对应 contacts 和自己的 contactThreads；每个 contactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成该线程。"}不要把 NPC 聊天塞进用户与角色的聊天镜像。
-4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isContactThreadRepair ? "联系人聊天修复只生成指定联系人双方自然、简短的消息，不写入其他应用。" : isInitialGeneration ? "首次初始化时必须覆盖所有支持内容生成的应用，并满足 NPC 聊天、浏览器4—8条、未来3—6天的1—3条日程、日记/备忘录/待办合计2—4条、至少一条仅用户可见或仅自己可见的朋友圈和音乐收听/常听时段/正在收听数据；不要使用模板标题。直接用户聊天只能镜像真实记录。" : allAppsSelected ? `用户选择全部应用，必须尽量为每个所选应用（${selectedAppLabels?.join("、")}）各追加一条有依据的新记录；只有该应用确实无证据时才留空。` : selectedAppLabels ? `本次必须严格限制在用户选择的应用（${selectedAppLabels.join("、")}）；未选择的应用不得填写。` : "后续生活推进从最有依据的2—4个应用随机选择少量记录，不要每个应用都强行生成一条，也不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。"}
+4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isContactThreadRepair ? "联系人聊天修复只生成指定联系人双方自然、简短的消息，不写入其他应用。" : isInitialGeneration ? "首次初始化覆盖所有可生成应用；用户直接聊天只镜像真实记录，NPC聊天独立生成。" : allAppsSelected ? `仅生成用户选择的应用（${selectedAppLabels?.join("、")}）。` : selectedAppLabels ? `本次严格限制在用户选择的应用（${selectedAppLabels.join("、")}）；未选择的应用不得填写。` : "后续生活推进从最有依据的2—4个应用生成，不要使用模板标题。"}
 5. 角色真实姓名、备注名和人设文件名是不同概念。绝不能把文件名、输入字段名、世界书标题当作角色姓名或正文内容。
 6. 日记必须是角色不会公开展示的私密想法；备忘录和日程必须是具体事项；浏览器输出搜索记录标题和 2—3 条不同平台的 AI 结果卡片，不能输出网址或引导查看原始页面；相册字段只描述角色真实可能保存的图片或文字图，不要凭空输出图片文件名。主手机的文字图只以描述形式参考，角色手机会在本地渲染文字图，不要声称有真实照片。
  7. lifeEventSummary 必须是本次唯一的生活事件；生成的应用字段必须是这个事件在不同应用中的自然痕迹，时间和人物不能互相矛盾。
 8. searchReflection 必须是 1—3 句、约 15—90 字的第一人称私下反应：回答“为什么偏偏现在搜”“哪一点马上有用”“还有什么没想通或准备怎么做”。允许短句、停顿、犹豫、自我纠正和轻微情绪，必须贴合角色口吻与当下事件；不要复述搜索词，不要写成百科总结、心理分析、鸡汤或“我查这个是为了……”模板，也不要提到 AI、提示词或应用规则。若没有明确搜索动机就留空。
 9. evidenceSourceIds 只能从“可引用的证据来源ID”原样选择；没有证据就返回空数组，不得编造 ID。
 10. 隐藏相册字段只允许承载明确私密/隐秘证据，且生成的条目必须是 hidden=true 的私藏文字图；普通日常、公开动态和普通聊天图片不得放入隐藏相册。
-11. ${isContactThreadRepair ? "联系人聊天修复只允许返回 evidenceSourceIds、lifeEventSummary 和 contactThreads；禁止填充或修改其他应用数据。" : isInitialGeneration ? "首次初始化必须优先使用批量数组字段满足各应用数量下限，并让所有记录围绕同一事件；直接用户聊天只从真实主聊天同步；只有在字段确实没有任何证据时才留空。" : allAppsSelected ? `用户选择全部应用时，按可用证据为每个应用追加内容；用户选中的应用字段不应遗漏，其他字段必须为空。` : selectedAppLabels ? `只允许生成这些应用：${selectedAppLabels.join("、")}；其他应用字段必须为空，不得通过兼容旧字段绕过范围限制。` : "每次随机选择 2—4 个最有依据的字段生成，其余全部留空；宁可少写，不要为了填满字段编造内容。"}
+11. ${isContactThreadRepair ? "联系人聊天修复只允许返回 evidenceSourceIds、lifeEventSummary 和 contactThreads；禁止填充或修改其他应用数据。" : isInitialGeneration ? "首次初始化必须优先使用批量数组字段满足数量下限，并让所有记录围绕同一事件；直接用户聊天只从真实主聊天同步；NPC和服务联系人可依最近事件合理推演。" : allAppsSelected ? `用户选择全部应用时，按上下文为每个选中应用追加内容，其他字段必须为空。` : selectedAppLabels ? `只允许生成这些应用：${selectedAppLabels.join("、")}；其他应用字段必须为空，不得通过兼容旧字段绕过范围限制。` : "每次随机选择 2—4 个最有依据的字段生成，其余全部留空；不要为了填满字段编造无依据内容。"}
 12. 角色手机解锁密码和隐藏相册密码在手机创建时已经由系统按该角色资料先行设置并持久化；不要创建、修改、猜测或透露任何密码，也不要因为上下文中出现一串数字就回写密码字段。密码相关内容若确有证据，只能作为普通生活记录保留。
-13. 不要生成解释、旁白、占位符、统一问候或应用说明；只返回 JSON。`,
+13. 不要生成解释、旁白、占位符、统一问候或应用说明；只返回 JSON。
+14. 最终数量与结构以本条为准，覆盖前文任何相反的数量/留空要求：${isContactThreadRepair ? "仅输出指定联系人的2—5条独立聊天消息，不生成其他内容。" : isInitialGeneration ? "9个可生成应用必须每个新增2—5条可见内容；聊天必须有3—5位非用户NPC，每人2—5条消息；直接用户聊天不得伪造。" : `本次选中的每个应用必须新增2—5条可见内容；仅限：${selectedAppLabels?.join("、") || "本次请求应用"}。`} 统一使用批量字段：contactThreads:[{contactName,messages:[{sender,content}]}]；browserEntries:[{query,title,results,reflection}]；scheduleItems:[{title,detail,daysFromNow}]；diaryEntries:[{title,body}]；noteEntries:[{title,content}]；todoEntries:[{text}]；posts:[{content,visibility}]；musicTracks:[{title,artist,duration,current}] 和 musicListening:[{trackTitle,playedHoursAgo,durationSeconds,playCount}]；电话使用 phoneCalls:[{contactName,direction,durationSeconds}]；相册使用 galleryEntries:[{title,caption,hidden}]。批量字段优先，不要只返回旧版单条字段。成功与否由应用校验，若某项无法满足数量，就提供有上下文依据的不同记录，不要输出空内容。`,
       apiKey: input.settings.apiKey,
       model: input.settings.selectedModel,
       apiEndpoint: input.settings.apiEndpoint,
@@ -1005,11 +1129,22 @@ export async function advanceCharacterPhoneWithResult(
     input.character.personality,
     input.character.backstory,
     ...lifeContext.worldBookEntries.map((entry) => entry.content),
+    ...lifeContext.recentMessages.map((message) => message.content),
+    ...lifeContext.recentMoments.map((moment) => moment.content),
     ...base.contacts.flatMap((contact) => [contact.name, contact.remark, ...(contact.memberNames ?? [])]),
   ].filter(Boolean).join("\n");
-  const contactDrafts = chatSelected
+  const recentScenarioEvidenceText = [
+    ...lifeContext.recentMessages.map((message) => message.content),
+    ...lifeContext.recentMoments.map((moment) => moment.content),
+    ...lifeContext.worldBookEntries.map((entry) => entry.content),
+  ].filter(Boolean).join("\n");
+  const parsedContactDrafts = chatSelected
     ? parseContactDrafts(raw.contacts, input.character, sourceFileName, contactEvidenceText)
     : [];
+  const scenarioContactDrafts = isInitialGeneration
+    ? buildContextualScenarioContacts(recentScenarioEvidenceText)
+    : [];
+  const contactDrafts = [...parsedContactDrafts, ...scenarioContactDrafts];
   const mergedContacts = mergeGeneratedContacts(base, contactDrafts, validatedSourceRefs);
   const requestedThreadContact = cleanGeneratedText(raw.threadContactName, sourceFileName, 40);
   // An initial response with several contacts must not silently attach every
@@ -1056,9 +1191,15 @@ export async function advanceCharacterPhoneWithResult(
   if (!isInitialGeneration && chatSelected && userThreadDrafts.length === 0 && !threadContact && !requestedThreadContact && outgoing) {
     userThreadDrafts = [{ sender: "character", content: outgoing }];
   }
-  const contactThreadDrafts = chatSelected
+  let contactThreadDrafts = chatSelected
     ? parseGeneratedContactThreads(raw.contactThreads, sourceFileName)
     : [];
+  if (isInitialGeneration && threadContact && threadDrafts.length > 0) {
+    contactThreadDrafts = [
+      ...contactThreadDrafts,
+      { contactId: threadContact.id, contactName: threadContact.name, messages: threadDrafts },
+    ];
+  }
   const explicitContactThreadIds = new Set(contactThreadDrafts.flatMap((thread) => {
     const matches = mergedContacts.contacts.filter((contact) => !contact.removedAt
       && contact.source !== "user"
@@ -1078,6 +1219,7 @@ export async function advanceCharacterPhoneWithResult(
       .filter((contact) => !contact.removedAt
         && contact.source !== "user"
         && contact.kind !== "user"
+        && (!isInitialGeneration || isInitialNpcConversationContact(contact))
         && Boolean(contact.sourceRefs?.length || contact.linkedCharacterId || contact.relationshipNetworkNpcId)
         && !explicitContactThreadIds.has(contact.id)
         && !existingThreadContactIds.has(contact.id))
@@ -1092,6 +1234,38 @@ export async function advanceCharacterPhoneWithResult(
           messages: buildInitialContactFallback(contact, lifeEventSummary, input.character),
         });
       });
+  }
+  if (isInitialGeneration) {
+    const explicitByContactId = new Map<string, GeneratedContactThreadDraft>();
+    contactThreadDrafts.forEach((thread) => {
+      const matches = mergedContacts.contacts.filter((contact) => isInitialNpcConversationContact(contact)
+        && (thread.contactId ? contact.id === thread.contactId : contactKey(contact.name) === contactKey(thread.contactName)));
+      if (matches.length === 1) explicitByContactId.set(matches[0].id, thread);
+    });
+    const npcCandidates = mergedContacts.contacts
+      .filter((contact) => isInitialNpcConversationContact(contact)
+        && getValidatedContactEvidenceRefs(contact, input, lifeContext, allowedSources).length > 0)
+      .sort((left, right) => {
+        const priority = (contact: CharacterPhoneContact) => Number(explicitByContactId.has(contact.id)) * 4
+          + Number(Boolean(contact.relationshipNetworkNpcId)) * 2
+          + Number(mergedContacts.added.some((added) => added.id === contact.id));
+        return priority(right) - priority(left) || left.name.localeCompare(right.name);
+      });
+    contactThreadDrafts = npcCandidates.slice(0, 5).map((contact) => {
+      const requestedThread = explicitByContactId.get(contact.id);
+      const draftMessages = requestedThread?.messages?.slice(0, 5) ?? [];
+      const completedMessages = draftMessages.length > 0
+        ? completeInitialThreadDrafts(
+            draftMessages,
+            draftMessages.find((message) => message.sender === "contact")?.content || "",
+            draftMessages.find((message) => message.sender === "character")?.content || "",
+            contact,
+            input.character,
+            lifeEventSummary,
+          ).slice(0, 5)
+        : buildInitialContactFallback(contact, lifeEventSummary, input.character);
+      return { contactId: contact.id, contactName: contact.name, messages: completedMessages };
+    });
   }
   const next: CharacterPhoneRecord = {
     ...base,
@@ -1110,7 +1284,6 @@ export async function advanceCharacterPhoneWithResult(
     musicPlaylists: [...(base.musicPlaylists ?? [])],
     lifeEvents: [...(base.lifeEvents ?? [])],
   };
-  let generated = mergedContacts.added.length > 0;
   const lifeEventId = createId("phone-life-event");
   const artifactRefs: CharacterPhoneLifeEvent["artifactRefs"] = [];
   const artifactApps = new Set<CharacterPhoneLifeEvent["artifactRefs"][number]["app"]>();
@@ -1128,13 +1301,13 @@ export async function advanceCharacterPhoneWithResult(
     // Follow-up generations stay intentionally small even when a provider
     // returns an unexpectedly large array. First initialization is the one
     // place where the requested multi-record baseline is allowed.
-    if (!isInitialGeneration && (artifactCounts.get(app) ?? 0) >= 2) return false;
+    const maxArtifactCount = isInitialGeneration && app === "chat" ? Number.MAX_SAFE_INTEGER : 5;
+    if ((artifactCounts.get(app) ?? 0) >= maxArtifactCount) return false;
     item.lifeEventId = lifeEventId;
     items.push(item);
     artifactApps.add(app);
     artifactCounts.set(app, (artifactCounts.get(app) ?? 0) + 1);
     artifactRefs.push({ app, id: item.id });
-    generated = true;
     return true;
   };
 
@@ -1151,7 +1324,7 @@ export async function advanceCharacterPhoneWithResult(
     });
   }
 
-  if (chatSelected && threadContact && threadDrafts.length > 0) {
+  if (!isInitialGeneration && chatSelected && threadContact && threadDrafts.length > 0) {
     threadDrafts.forEach((draft, index) => {
       const message: CharacterPhoneThreadMessage = {
         id: createId(`phone-life-thread-${draft.sender}`),
@@ -1167,6 +1340,8 @@ export async function advanceCharacterPhoneWithResult(
   contactThreadDrafts.forEach((thread) => {
     const matchingContacts = mergedContacts.contacts.filter((candidate) => !candidate.removedAt
       && candidate.source !== "user"
+      && candidate.kind !== "user"
+      && (!isInitialGeneration || isInitialNpcConversationContact(candidate))
       && (thread.contactId
         ? candidate.id === thread.contactId
         : contactKey(candidate.name) === contactKey(thread.contactName)));
@@ -1175,39 +1350,44 @@ export async function advanceCharacterPhoneWithResult(
     // an arbitrary identity.
     const contact = matchingContacts.length === 1 ? matchingContacts[0] : undefined;
     if (!contact) return;
-    thread.messages.forEach((draft, index) => {
+    const threadMessages = isInitialGeneration ? thread.messages.slice(0, 5) : thread.messages;
+    threadMessages.forEach((draft, index) => {
       const message: CharacterPhoneThreadMessage = {
         id: createId(`phone-life-contact-thread-${draft.sender}`),
         contactId: contact.id,
         sender: draft.sender,
         content: draft.content,
-        timestamp: now - (thread.messages.length - index) * 60 * 1000,
+        timestamp: now - (threadMessages.length - index) * 60 * 1000,
       };
       pushArtifact("chat", next.threadMessages, message, (value) => `${value.contactId}|${value.sender}|${normalizeArtifactText(value.content)}`);
     });
   });
 
   const callContactName = cleanGeneratedText(raw.callContactName, sourceFileName, 40);
-  const callContact = callContactName
-    ? mergedContacts.contacts.find((contact) => !contact.removedAt && contactKey(contact.name) === contactKey(callContactName))
-    : undefined;
   const callDirection = raw.callDirection === "incoming" || raw.callDirection === "outgoing" || raw.callDirection === "missed"
     ? raw.callDirection
     : undefined;
-  if (callContact && callDirection) {
-    const durationSeconds = typeof raw.callDurationSeconds === "number" && Number.isFinite(raw.callDurationSeconds)
-      ? Math.max(0, Math.min(24 * 60 * 60, Math.round(raw.callDurationSeconds)))
-      : undefined;
+  const callDrafts = parseGeneratedPhoneCalls(raw.phoneCalls, sourceFileName);
+  if (callDrafts.length === 0 && callContactName && callDirection) {
+    const durationSeconds = finiteNumber(raw.callDurationSeconds);
+    callDrafts.push({ contactName: callContactName, direction: callDirection, ...(durationSeconds !== undefined ? { durationSeconds } : {}) });
+  }
+  callDrafts.forEach((draft, index) => {
+    const matchingContacts = mergedContacts.contacts.filter((contact) => !contact.removedAt
+      && contactKey(contact.name) === contactKey(draft.contactName));
+    const callContact = matchingContacts.length === 1 ? matchingContacts[0] : undefined;
+    if (!callContact) return;
+    const durationSeconds = draft.durationSeconds;
     const call: CharacterPhoneCallRecord = {
       id: createId("phone-life-call"),
       contactId: callContact.id,
       contactName: callContact.remark || callContact.name,
-      direction: callDirection,
-      timestamp: now - 3 * 60 * 1000,
-      ...(callDirection !== "missed" && durationSeconds !== undefined ? { durationSeconds } : {}),
+      direction: draft.direction,
+      timestamp: now - (3 + index * 11) * 60 * 1000,
+      ...(draft.direction !== "missed" && durationSeconds !== undefined ? { durationSeconds: Math.max(0, Math.min(24 * 60 * 60, Math.round(durationSeconds))) } : {}),
     };
     pushArtifact("phone", next.phoneCalls ?? (next.phoneCalls = []), call, (value) => `${value.contactId}|${value.direction}|${value.timestamp}`);
-  }
+  });
 
   const searchQuery = cleanGeneratedText(raw.searchQuery, sourceFileName, 180);
   const searchTitle = cleanGeneratedText(raw.searchTitle, sourceFileName, 180) || deriveGeneratedTitle(searchQuery, sourceFileName);
@@ -1289,6 +1469,7 @@ export async function advanceCharacterPhoneWithResult(
   });
   const requestedGalleryCaption = cleanGeneratedText(raw.galleryCaption, sourceFileName);
   const requestedGalleryTitle = cleanGeneratedText(raw.galleryTitle, sourceFileName, 160);
+  const galleryDrafts = parseGeneratedGalleryEntries(raw.galleryEntries, sourceFileName);
   const referencedTextImage = !requestedGalleryCaption && !requestedGalleryTitle
     ? textImageEvidence
       .slice()
@@ -1306,20 +1487,25 @@ export async function advanceCharacterPhoneWithResult(
     || deriveGeneratedTitle(galleryCaption, sourceFileName)
     || (referencedTextImage ? referencedTextImage.label : "")
     || (isInitialGeneration && galleryCaption ? `${roleName}的生活记录` : "");
-  if (galleryTitle || galleryCaption) {
-    const textImageTitle = normalizeGalleryTextImageTitle(galleryTitle || galleryCaption.slice(0, 24));
+  if (galleryDrafts.length === 0 && (galleryTitle || galleryCaption)) {
+    galleryDrafts.push({ title: galleryTitle || galleryCaption.slice(0, 24), caption: galleryCaption || galleryTitle, hidden: false });
+  }
+  galleryDrafts.forEach((draft, index) => {
+    if (draft.hidden && !isPrivateGalleryEvidence(`${draft.title} ${draft.caption}`)) return;
+    const textImageTitle = normalizeGalleryTextImageTitle(draft.title || draft.caption.slice(0, 24));
     const entry: CharacterPhoneGalleryItem = {
       id: createId("phone-life-gallery"),
       title: textImageTitle,
-      caption: galleryCaption || galleryTitle,
-      timestamp: now - 25 * 60 * 1000,
+      caption: draft.caption || draft.title,
+      timestamp: now - (25 + index * 7) * 60 * 1000,
+      ...(draft.hidden ? { hidden: true } : {}),
       source: "generated",
       textImageForId: `phone-life-gallery-${lifeEventId}`,
-      dataUrl: createCharacterPhoneTextImageDataUrl(galleryCaption || galleryTitle, galleryTitle),
+      dataUrl: createCharacterPhoneTextImageDataUrl(draft.caption || draft.title, draft.title),
       ...(referencedTextImage ? { sourceId: referencedTextImage.sourceId } : {}),
     };
     pushArtifact("gallery", next.galleryItems, entry, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.caption)}`);
-  }
+  });
   const requestedHiddenGalleryCaption = cleanGeneratedText(raw.hiddenGalleryCaption, sourceFileName);
   const requestedHiddenGalleryTitle = cleanGeneratedText(raw.hiddenGalleryTitle, sourceFileName, 160);
   const validatedPrivateTextImage = textImageEvidence
@@ -1413,8 +1599,7 @@ export async function advanceCharacterPhoneWithResult(
         durationSeconds,
         source: "generated",
       };
-      listeningHistory.push(record);
-      generated = true;
+      pushArtifact("music", listeningHistory, record, (value) => `${value.trackId}|${value.startedAt}|${value.durationSeconds}`);
     });
     if (isInitialGeneration && next.musicTracks.length > 0 && listeningHistory.length > 0) {
       const nowPlayingRecord = raw.musicNowPlaying && typeof raw.musicNowPlaying === "object" && !Array.isArray(raw.musicNowPlaying)
@@ -1448,16 +1633,50 @@ export async function advanceCharacterPhoneWithResult(
     next.lifeEvents?.push({ id: lifeEventId, summary, startedAt, generatedAt: now, sourceRefs: validatedSourceRefs, artifactRefs });
   }
 
-  if (generated) {
+  const allGeneratedAppIds = CHARACTER_PHONE_GENERATABLE_APPS.map((app) => app.id);
+  const appsToValidate = isContactThreadRepair ? [] : requestedApps ?? [...artifactApps].filter(
+    (app): app is CharacterPhoneGeneratedAppId => allGeneratedAppIds.includes(app as CharacterPhoneGeneratedAppId),
+  );
+  const completedInitialNpcThreadIds = isInitialGeneration
+    ? mergedContacts.contacts
+      .filter(isInitialNpcConversationContact)
+      .filter((contact) => {
+        const thread = next.threadMessages.filter((message) => message.contactId === contact.id && message.lifeEventId === lifeEventId);
+        return thread.some((message) => message.sender === "contact")
+          && thread.some((message) => message.sender === "character");
+      })
+      .map((contact) => contact.id)
+    : [];
+  const incompleteApps = appsToValidate.filter((app) => {
+    if (isInitialGeneration && app === "chat") {
+      return completedInitialNpcThreadIds.length < 3 || completedInitialNpcThreadIds.length > 5;
+    }
+    const count = artifactCounts.get(app) ?? 0;
+    return count < 2 || count > 5;
+  });
+  if (incompleteApps.length > 0 || artifactRefs.length === 0) {
     return {
-      phone: {
-        ...next,
-        lastGeneratedAt: now,
-        ...(isInitialGeneration ? { initialContentGeneratedAt: now } : {}),
-        ...(isInitialGeneration ? { initialContentPending: false } : {}),
-        ...(isInitialGeneration ? { sourceHydrationSuppressedAt: undefined } : {}),
-        updatedAt: now,
-      },
+      phone: base,
+      status: "no_change",
+      reason: "incomplete_content",
+      createdCount: 0,
+    };
+  }
+
+  if (artifactRefs.length > 0) {
+    const successfulPhoneBase = {
+      ...next,
+      ...(!isContactThreadRepair ? { lastGeneratedAt: now } : {}),
+      ...(isInitialGeneration ? { initialContentGeneratedAt: now } : {}),
+      ...(isInitialGeneration ? { initialContentPending: false } : {}),
+      ...(isInitialGeneration ? { sourceHydrationSuppressedAt: undefined } : {}),
+      updatedAt: now,
+    };
+    const successfulPhone = isContactThreadRepair
+      ? successfulPhoneBase
+      : recordCharacterPhoneGenerationCooldowns(successfulPhoneBase, appsToValidate, now);
+    return {
+      phone: successfulPhone,
       status: "generated",
       createdCount: artifactRefs.length + mergedContacts.added.length,
     };

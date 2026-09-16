@@ -213,6 +213,7 @@ export interface CharacterPhoneListeningRecord {
   startedAt: number;
   durationSeconds: number;
   source?: "generated" | "user-library";
+  lifeEventId?: string;
 }
 
 export interface CharacterPhoneMusicPlaylist {
@@ -298,6 +299,8 @@ export interface CharacterPhoneRecord {
   contentSeededAt?: number;
   /** Set only after the first full phone-life generation completes. */
   initialContentGeneratedAt?: number;
+  /** Successful generation cooldowns are isolated per generated app. */
+  generationCooldowns?: Partial<Record<CharacterPhoneGeneratedAppId, number>>;
   /** Explicit marker for newly-created or cleared phones; absent on legacy records. */
   initialContentPending?: boolean;
   /** Storage/content migration version for role-phone records. */
