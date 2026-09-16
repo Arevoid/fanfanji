@@ -68,6 +68,7 @@ import type {
   CharacterPhoneAppId,
   CharacterPhoneActionRecord,
   CharacterPhoneContact,
+  CharacterPhoneGeneratedAppId,
   CharacterPhoneGalleryItem,
   CharacterPhoneImageSaveInput,
   CharacterPhoneNote,
@@ -78,6 +79,7 @@ import type {
   CharacterPhoneThreadMessage,
   CharacterPhoneTodo,
 } from "../domain/characterPhone/types";
+import { CHARACTER_PHONE_GENERATABLE_APPS } from "../domain/characterPhone/types";
 import type { Appointment, ScheduleEntry } from "../domain/schedule/scheduleTypes";
 import AppSchedule from "./AppSchedule";
 import { createCharacterTextMessage } from "../features/chat/services/messageFactory";
@@ -121,6 +123,13 @@ import { clearRebuildableCache } from "../core/storage/rebuildableCache";
 import { isWorldBookEntryVisible } from "../domain/worldbook/worldBookVisibility";
 import type { MessageMutationScope } from "../features/chat/context/directInteractionScope";
 import { listCharacterPhoneSelectableCharacters } from "../features/characterPhone/characterPhoneSelection";
+import { mirrorGeneratedCharacterPhoneChat } from "../features/characterPhone/characterPhoneChatMirror";
+import {
+  DEFAULT_CHARACTER_PHONE_GENERATION_SELECTION,
+  resolveCharacterPhoneGenerationApps,
+  toggleCharacterPhoneGenerationApp,
+  type CharacterPhoneGenerationSelection,
+} from "../features/characterPhone/characterPhoneGenerationSelection";
 
 interface AppCharacterPhoneProps {
   userIdentityId: string;
@@ -1013,6 +1022,8 @@ export default function AppCharacterPhone({
   const [phoneNotice, setPhoneNotice] = useState("");
   const [phoneDataNotice, setPhoneDataNotice] = useState("");
   const [isAdvancing, setIsAdvancing] = useState(false);
+  const [generationAppPickerOpen, setGenerationAppPickerOpen] = useState(false);
+  const [generationSelection, setGenerationSelection] = useState<CharacterPhoneGenerationSelection>(DEFAULT_CHARACTER_PHONE_GENERATION_SELECTION);
   const [selectedThreadMessageId, setSelectedThreadMessageId] = useState<string | null>(null);
   const generationRequestRef = useRef(0);
   const phoneReplyQueuesRef = useRef<Record<string, Promise<void>>>({});
@@ -1451,6 +1462,7 @@ export default function AppCharacterPhone({
   const closeCharacterPhone = () => {
     generationRequestRef.current += 1;
     setIsAdvancing(false);
+    setGenerationAppPickerOpen(false);
     initialGenerationPhoneIdRef.current = null;
     setUnlocked(false);
     setHiddenGalleryUnlocked(false);
@@ -1709,6 +1721,7 @@ export default function AppCharacterPhone({
     generationRequestRef.current += 1;
     initialGenerationPhoneIdRef.current = null;
     setIsAdvancing(false);
+    setGenerationAppPickerOpen(false);
     setSelectedCharacterId(characterId);
     setPhone(openCharacterPhone(userIdentityId, character, phoneContext));
     setUnlocked(false);
@@ -1742,7 +1755,7 @@ export default function AppCharacterPhone({
     setPhoneDataNotice("");
   };
 
-  const generateCharacterPhoneContent = async (options: { initial?: boolean; contactThreadRepair?: boolean; phone?: CharacterPhoneRecord } = {}) => {
+  const generateCharacterPhoneContent = async (options: { initial?: boolean; contactThreadRepair?: boolean; phone?: CharacterPhoneRecord; selectedApps?: readonly CharacterPhoneGeneratedAppId[] } = {}) => {
     const isInitialGeneration = Boolean(options.initial);
     const isContactThreadRepair = Boolean(options.contactThreadRepair);
     if ((!unlocked && !isInitialGeneration && !isContactThreadRepair) || !selectedCharacter || isAdvancing) return;
@@ -1786,6 +1799,7 @@ export default function AppCharacterPhone({
           settings,
           initial: isInitialGeneration,
           contactThreadRepair: isContactThreadRepair,
+          selectedApps: options.selectedApps,
         }),
         timeoutPromise,
       ]);
@@ -1794,7 +1808,15 @@ export default function AppCharacterPhone({
         || phoneScopeRef.current.ownerIdentityId !== requestScope.ownerIdentityId
         || phoneScopeRef.current.characterId !== requestScope.characterId
         || advancedResult.phone.id !== requestScope.phoneId) return;
-      const advancedPhone = advancedResult.phone;
+      const mirroredChat = mirrorGeneratedCharacterPhoneChat({
+        phone: advancedResult.phone,
+        previousPhone: basePhone,
+        character: selectedCharacter,
+        relationships,
+        mainMessages: messages,
+        now,
+      });
+      const advancedPhone = mirroredChat?.phone || advancedResult.phone;
       const discoveredPhone = discoverPhoneActions(advancedPhone, now);
       forwardDelayedPhoneDiscoveries(advancedPhone, discoveredPhone);
       const phoneToSave = isInitialGeneration && advancedResult.status === "generated"
@@ -1803,6 +1825,7 @@ export default function AppCharacterPhone({
       const saved = await saveCharacterPhoneWithCacheRecovery(phoneToSave, requestId);
       if (!saved) return;
       setPhone(phoneToSave);
+      mirroredChat?.messages.forEach((message) => onSendMessage?.(message, mirroredChat.ownerIdentityId));
       const newGeneratedPosts = phoneToSave.posts.filter(
         (post) => post.source === "generated"
           && post.authorId === selectedCharacter.id
@@ -4418,11 +4441,14 @@ export default function AppCharacterPhone({
               </button>
               <button
                 type="button"
-                onClick={() => void generateCharacterPhoneContent()}
+                onClick={() => {
+                  setGenerationSelection(DEFAULT_CHARACTER_PHONE_GENERATION_SELECTION);
+                  setGenerationAppPickerOpen(true);
+                }}
                 disabled={isAdvancing}
                 className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-black/5 disabled:cursor-wait disabled:opacity-70"
-                aria-label="生成角色手机内容"
-                title="生成角色手机内容"
+                aria-label="选择要更新的角色手机应用"
+                title="选择要更新的角色手机应用"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${isAdvancing ? "animate-spin" : ""}`} />
               </button>
@@ -4672,6 +4698,88 @@ export default function AppCharacterPhone({
             )}
           </div>
         )}
+      {generationAppPickerOpen && unlocked && activeApp === "home" && (
+        <div
+          className="absolute inset-0 z-[200] flex items-center justify-center bg-neutral-950/40 p-5 backdrop-blur-sm"
+          onClick={() => setGenerationAppPickerOpen(false)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="character-phone-generation-title"
+            className="flex max-h-[82%] w-full max-w-[360px] flex-col overflow-hidden rounded-[28px] border border-white/80 bg-[#fbfaf7] shadow-[0_24px_80px_rgba(0,0,0,0.28)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="flex items-start justify-between gap-4 px-5 pb-3 pt-5">
+              <div>
+                <h2 id="character-phone-generation-title" className="text-lg font-bold text-neutral-900">更新角色手机</h2>
+                <p className="mt-1 text-xs leading-5 text-neutral-500">选择要追加生活内容的应用</p>
+              </div>
+              <button type="button" onClick={() => setGenerationAppPickerOpen(false)} aria-label="关闭应用选择" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-500 hover:bg-neutral-200">
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={generationSelection.mode === "all"}
+                onClick={() => setGenerationSelection({ mode: "all" })}
+                className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition-colors ${generationSelection.mode === "all" ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 bg-white text-neutral-800 hover:bg-neutral-50"}`}
+              >
+                <span>
+                  <span className="block text-sm font-semibold">全部应用</span>
+                  <span className={`mt-0.5 block text-[11px] ${generationSelection.mode === "all" ? "text-white/65" : "text-neutral-400"}`}>追加更新所有可生成内容的应用</span>
+                </span>
+                <span className={`flex h-5 w-5 items-center justify-center rounded-full border ${generationSelection.mode === "all" ? "border-white bg-white text-neutral-900" : "border-neutral-300"}`}>
+                  {generationSelection.mode === "all" && <Check className="h-3.5 w-3.5" />}
+                </span>
+              </button>
+              <p className="mb-2 mt-5 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-400">单独选择应用 · 可多选</p>
+              <div className="space-y-2">
+                {CHARACTER_PHONE_GENERATABLE_APPS.map((app) => {
+                  const checked = generationSelection.mode === "selected" && generationSelection.appIds.includes(app.id);
+                  return (
+                    <button
+                      key={app.id}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={checked}
+                      onClick={() => setGenerationSelection((selection) => toggleCharacterPhoneGenerationApp(selection, app.id))}
+                      className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition-colors ${checked ? "border-neutral-300 bg-white shadow-sm" : "border-transparent bg-white/65 hover:bg-white"}`}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${APP_META[app.id].color} text-white`}>
+                          {React.cloneElement(APP_META[app.id].icon as React.ReactElement, { className: "h-4 w-4" })}
+                        </span>
+                        <span className="text-sm font-medium text-neutral-800">{app.label}</span>
+                      </span>
+                      <span className={`flex h-5 w-5 items-center justify-center rounded-md border ${checked ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 bg-white"}`}>
+                        {checked && <Check className="h-3.5 w-3.5" />}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <footer className="flex items-center gap-3 border-t border-neutral-200/80 bg-white/80 px-5 py-4">
+              <button type="button" onClick={() => setGenerationAppPickerOpen(false)} className="h-11 flex-1 rounded-2xl bg-neutral-100 text-sm font-semibold text-neutral-600 hover:bg-neutral-200">取消</button>
+              <button
+                type="button"
+                disabled={isAdvancing || (generationSelection.mode === "selected" && generationSelection.appIds.length === 0)}
+                onClick={() => {
+                  const selectedApps = resolveCharacterPhoneGenerationApps(generationSelection);
+                  setGenerationAppPickerOpen(false);
+                  void generateCharacterPhoneContent({ selectedApps });
+                }}
+                className="h-11 flex-[1.35] rounded-2xl bg-neutral-900 text-sm font-semibold text-white shadow-sm hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                确认生成
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

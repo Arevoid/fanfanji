@@ -621,6 +621,83 @@ try {
     now: 6_000,
   });
   assert.equal(secondNormalized.browserHistory.length, firstNormalized.browserHistory.length, "normalizes repeated browser traces instead of appending duplicates");
+
+  responsePayload = {
+    lifeEventSummary: "角色只写下一段日记",
+    evidenceSourceIds: ["chat:chat-generation"],
+    contacts: [{ name: "越界NPC", relation: "未经选择的聊天联系人" }],
+    userThreadMessages: [{ sender: "character", content: "这条聊天应用没有被选中。" }],
+    contactThreads: [{ contactName: "林晓", messages: [{ sender: "contact", content: "这条 NPC 聊天也不应写入。" }] }],
+    browserEntries: [{ query: "越界搜索", title: "不应新增浏览记录" }],
+    scheduleItems: [{ title: "不应新增日程", detail: "越界" }],
+    diaryEntries: [{ title: "今晚的念头", body: "只把这件事记在自己的日记里。" }],
+    noteEntries: [{ title: "越界备忘录", content: "不应写入" }],
+    todoEntries: [{ text: "不应新增待办" }],
+    posts: [{ content: "不应新增朋友圈", visibility: "public" }],
+    galleryTitle: "不应新增相册",
+    galleryCaption: "越界相册内容",
+    callContactName: "林晓",
+    callDirection: "incoming",
+    musicTracks: [{ title: "越界曲目", artist: "越界艺人", duration: "3:00" }],
+    musicListening: [{ trackTitle: "越界曲目", playedHoursAgo: 1 }],
+    musicNowPlaying: { trackTitle: "越界曲目" },
+  };
+  const selectedDiaryOnly = await advanceCharacterPhoneWithResult({
+    phone: { ...phone, initialContentGeneratedAt: 900 },
+    character,
+    activeIdentity: identity,
+    relationships: [relation],
+    messages,
+    moments: [],
+    worldBookEntries: worldBook,
+    settings,
+    selectedApps: ["diary"],
+    now: 7_000,
+  });
+  assert.equal(selectedDiaryOnly.status, "generated");
+  assert.ok(selectedDiaryOnly.phone.diaryEntries.some((entry) => entry.title === "今晚的念头"), "selected application receives its new content");
+  assert.ok(!selectedDiaryOnly.phone.contacts.some((contact) => contact.name === "越界NPC"), "unselected chat contacts are rejected even if returned by provider");
+  assert.ok(!selectedDiaryOnly.phone.threadMessages.some((entry) => entry.lifeEventId && entry.content.includes("不应写入")), "unselected chat threads are rejected");
+  assert.ok(!selectedDiaryOnly.phone.browserHistory.some((entry) => entry.query === "越界搜索"), "unselected browser data is rejected");
+  assert.ok(!selectedDiaryOnly.phone.scheduleItems.some((entry) => entry.title === "不应新增日程"), "unselected schedule data is rejected");
+  assert.ok(!selectedDiaryOnly.phone.notes?.some((entry) => entry.title === "越界备忘录"), "unselected notes are rejected");
+  assert.ok(!selectedDiaryOnly.phone.todos?.some((entry) => entry.text === "不应新增待办"), "unselected todos are rejected");
+  assert.ok(!selectedDiaryOnly.phone.posts.some((entry) => entry.content === "不应新增朋友圈"), "unselected moments are rejected");
+  assert.ok(!selectedDiaryOnly.phone.galleryItems.some((entry) => entry.title === "不应新增相册"), "unselected gallery data is rejected");
+  assert.equal(selectedDiaryOnly.phone.phoneCalls?.length || 0, phone.phoneCalls?.length || 0, "unselected calls are rejected");
+  assert.ok(!selectedDiaryOnly.phone.musicTracks?.some((entry) => entry.title === "越界曲目"), "unselected music tracks are rejected");
+  assert.ok(!selectedDiaryOnly.phone.listeningHistory?.some((entry) => entry.source === "generated"), "unselected listening history is rejected outside normal artifact insertion");
+  assert.deepEqual(new Set(selectedDiaryOnly.phone.lifeEvents?.at(-1)?.artifactRefs.map((ref) => ref.app)), new Set(["diary"]), "life event links only selected application artifacts");
+  const selectedDiaryRequest = requestBodies.at(-1);
+  assert.match(String(selectedDiaryRequest?.systemInstruction || ""), /只允许生成这些应用：日记/);
+  assert.match(String(selectedDiaryRequest?.message || ""), /只生成以下应用的新内容：日记/);
+
+  responsePayload = {
+    lifeEventSummary: "角色给用户发来一条消息",
+    evidenceSourceIds: ["chat:chat-generation"],
+    userThreadMessages: [
+      { sender: "contact", content: "不能伪造用户的话。" },
+      { sender: "character", content: "刚忙完，想跟你说一声。" },
+    ],
+  };
+  const selectedChatOnly = await advanceCharacterPhoneWithResult({
+    phone: { ...phone, initialContentGeneratedAt: 900 },
+    character,
+    activeIdentity: identity,
+    relationships: [relation],
+    messages,
+    moments: [],
+    worldBookEntries: worldBook,
+    settings,
+    selectedApps: ["chat"],
+    now: 8_000,
+  });
+  const selectedDirectContact = selectedChatOnly.phone.contacts.find((contact) => contact.kind === "user" && contact.relationId === relation.id);
+  const selectedDirectGenerated = selectedChatOnly.phone.threadMessages.filter((entry) => entry.contactId === selectedDirectContact?.id && entry.lifeEventId);
+  assert.equal(selectedDirectGenerated.length, 1, "chat update writes only the character-authored direct message");
+  assert.equal(selectedDirectGenerated[0]?.sender, "character", "does not generate an owner-side bubble");
+  assert.equal(selectedDirectGenerated[0]?.content, "刚忙完，想跟你说一声。");
+  assert.deepEqual(new Set(selectedChatOnly.phone.lifeEvents?.at(-1)?.artifactRefs.map((ref) => ref.app)), new Set(["chat"]));
 } finally {
   globalThis.fetch = originalFetch;
 }

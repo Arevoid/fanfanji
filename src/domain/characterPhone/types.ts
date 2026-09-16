@@ -2,6 +2,19 @@ import type { MomentVisibility } from "../../types";
 
 export type CharacterPhoneAppId = "chat" | "browser" | "schedule" | "gallery" | "diary" | "moments" | "notes" | "music" | "settings";
 export type CharacterPhoneLifeArtifactAppId = CharacterPhoneAppId | "phone" | "camera";
+export type CharacterPhoneGeneratedAppId = Exclude<CharacterPhoneAppId, "settings"> | "phone";
+
+export const CHARACTER_PHONE_GENERATABLE_APPS: readonly { id: CharacterPhoneGeneratedAppId; label: string }[] = [
+  { id: "chat", label: "聊天" },
+  { id: "browser", label: "浏览器" },
+  { id: "schedule", label: "日程" },
+  { id: "gallery", label: "相册" },
+  { id: "diary", label: "日记" },
+  { id: "moments", label: "朋友圈" },
+  { id: "notes", label: "备忘录" },
+  { id: "music", label: "音乐" },
+  { id: "phone", label: "电话" },
+];
 
 export type CharacterPhoneSourceRef = { kind: "character" | "worldbook" | "chat" | "moment" | "phone" | "relationship-network"; id: string };
 

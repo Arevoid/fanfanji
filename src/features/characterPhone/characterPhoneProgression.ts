@@ -5,6 +5,7 @@ import type { CharacterRelationship } from "../../domain/relationship/characterR
 import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../../domain/relationshipNetwork/relationshipNetworkTypes";
 import type {
   CharacterPhoneContact,
+  CharacterPhoneGeneratedAppId,
   CharacterPhoneDiaryEntry,
   CharacterPhoneGalleryItem,
   CharacterPhoneLifeEvent,
@@ -21,6 +22,7 @@ import type {
   CharacterPhoneThreadMessage,
   CharacterPhoneTodo,
 } from "../../domain/characterPhone/types";
+import { CHARACTER_PHONE_GENERATABLE_APPS } from "../../domain/characterPhone/types";
 import { parseTextImageDescription } from "../chat/services/messageParser";
 import { cleanAndExtractMoment } from "../moments/services/momentContent";
 import { ensureCharacterPhoneContent, hasCompleteCharacterPhoneContactThread } from "./characterPhoneContent";
@@ -533,6 +535,7 @@ function parseGeneratedContactThreads(
 function createGeneratedUserContact(
   phone: CharacterPhoneRecord,
   identity?: UserIdentity,
+  relation?: CharacterRelationship,
 ): CharacterPhoneContact {
   const name = identity?.name?.trim() || "用户";
   return {
@@ -540,6 +543,8 @@ function createGeneratedUserContact(
     name,
     relation: "与角色聊天",
     kind: "user",
+    ...(identity?.id ? { userIdentityId: identity.id } : {}),
+    ...(relation?.id ? { relationId: relation.id } : {}),
     isLongTerm: true,
     isNpc: false,
     avatar: identity?.avatar || createCharacterPhoneInitialAvatar(name),
@@ -732,6 +737,8 @@ type CharacterPhoneProgressionInput = {
   initial?: boolean;
   /** Repair missing NPC threads without regenerating other phone apps. */
   contactThreadRepair?: boolean;
+  /** Restricts an explicit user-triggered refresh to these applications. */
+  selectedApps?: readonly CharacterPhoneGeneratedAppId[];
   now?: number;
 };
 
@@ -746,6 +753,15 @@ export async function advanceCharacterPhoneWithResult(
   const now = input.now ?? Date.now();
   const isInitialGeneration = Boolean(input.initial);
   const isContactThreadRepair = Boolean(input.contactThreadRepair);
+  const selectedApps = input.selectedApps ? new Set(input.selectedApps) : undefined;
+  const isAppSelected = (appId: CharacterPhoneGeneratedAppId) => !selectedApps || selectedApps.has(appId);
+  const chatSelected = isInitialGeneration || isAppSelected("chat");
+  const selectedAppLabels = input.selectedApps?.map((appId) =>
+    CHARACTER_PHONE_GENERATABLE_APPS.find((app) => app.id === appId)?.label || appId,
+  );
+  const allAppsSelected = Boolean(selectedApps
+    && selectedApps.size === CHARACTER_PHONE_GENERATABLE_APPS.length
+    && CHARACTER_PHONE_GENERATABLE_APPS.every((app) => selectedApps.has(app.id)));
   const characters = input.characters ?? [input.character];
   const relationships = input.relationships ?? [];
   const messages = input.messages ?? [];
@@ -787,11 +803,19 @@ export async function advanceCharacterPhoneWithResult(
     // contacts (for example relationship-network links) come from the scoped
     // context or the validated generation response.
     contacts: isInitialGeneration && !(contextualPhone.contacts ?? []).some((contact) => contact.source === "user" || contact.kind === "user")
-      ? [createGeneratedUserContact(contextualPhone, input.activeIdentity), ...(contextualPhone.contacts ?? [])]
+      ? [createGeneratedUserContact(
+          contextualPhone,
+          input.activeIdentity,
+          relationships.find((relation) => relation.characterId === input.character.id && relation.userIdentityId === input.phone.ownerIdentityId),
+        ), ...(contextualPhone.contacts ?? [])]
       : contextualPhone.contacts ?? [],
     threadMessages: contextualPhone.threadMessages ?? [],
     posts: contextualPhone.posts ?? [],
   };
+
+  if (!isInitialGeneration && !isContactThreadRepair && selectedApps?.size === 0) {
+    return { phone: base, status: "no_change", reason: "duplicate_content", createdCount: 0 };
+  }
 
   // No API means no invented diary, schedule, search, contact, or chat. The
   // phone keeps real synchronized data instead of falling back to templates.
@@ -839,8 +863,12 @@ export async function advanceCharacterPhoneWithResult(
   const generationRequest = isContactThreadRepair
     ? "这是一次联系人聊天记录专项修复。只为下面列出的缺少聊天记录的已有联系人生成独立 contactThreads，每人至少一条联系人消息和一条角色回复。回复 contactId 必须逐字复制目标 ID，contactName 必须逐字复制目标名称。不得新增、删除或合并联系人；不得生成用户聊天、日记、日程、浏览器、相册、朋友圈、音乐、备忘录、待办、通话或其他应用记录。"
     : isInitialGeneration
-    ? "这是该角色手机首次初始化。忽略前文可能出现的2—4条总量示例，以本条数量要求为准。请围绕同一个有证据的生活事件，批量生成完整但自然的手机生活：与用户的直接聊天 userThreadMessages 必须有 4—6 条且包含角色和用户双方；每一个有证据的非用户 NPC（包括关系网已连线 NPC）都必须在 contacts 中出现，并用 contactThreads 生成属于自己的聊天，不能把不同联系人混在同一线程；没有证据的人不要添加；浏览器 4—8 条搜索记录；未来 3—6 天内分布 1—3 条日程；日记、备忘录、待办合计 2—4 条；朋友圈至少 1 条，visibility 必须是 user（仅用户可见）或 private（仅自己可见）；音乐必须有曲目、收听历史、常听时段和当前正在收听曲目；相册至少保存一条与该事件有关的文字图描述。优先使用 userThreadMessages、contactThreads、browserEntries、scheduleItems、diaryEntries、noteEntries、todoEntries、posts、musicTracks、musicListening、musicNowPlaying 数组字段表达数量；同一事件可以投影到多个应用，但每条仍须有证据。"
-    : "这是一次追加生活痕迹。请从最有依据的 2—4 个应用中随机选择少量记录，避免每次都选择相同应用或相同数量；不要为了填满首次初始化的数量而重复旧内容。";
+    ? "这是该角色手机首次初始化。忽略前文可能出现的2—4条总量示例，以本条数量要求为准。请围绕同一个有证据的生活事件，批量生成完整但自然的手机生活。用户与角色的直接聊天必须严格以主聊天已有记录为准，禁止模拟用户发言或生成伪造的 userThreadMessages；每一个有证据的非用户 NPC（包括关系网已连线 NPC）都必须在 contacts 中出现，并用 contactThreads 生成属于自己的聊天，不能把不同联系人混在同一线程；没有证据的人不要添加；浏览器 4—8 条搜索记录；未来 3—6 天内分布 1—3 条日程；日记、备忘录、待办合计 2—4 条；朋友圈至少 1 条，visibility 必须是 user（仅用户可见）或 private（仅自己可见）；音乐必须有曲目、收听历史、常听时段和当前正在收听曲目；相册至少保存一条与该事件有关的文字图描述。优先使用 contactThreads、browserEntries、scheduleItems、diaryEntries、noteEntries、todoEntries、posts、musicTracks、musicListening、musicNowPlaying 数组字段表达数量；同一事件可以投影到多个应用，但每条仍须有证据。"
+    : selectedAppLabels
+      ? allAppsSelected
+        ? `这是用户选择“全部应用”的定向更新。请尽量为以下每一个可生成应用各追加 1 条有依据的新记录：${selectedAppLabels.join("、")}。不得遗漏应用，但某应用确实没有任何证据时宁可留空、绝不编造。选择了聊天时，可生成角色自己发给用户的新消息（放入 userThreadMessages，sender 只能是 character），并为有证据的联系人生成 contactThreads；绝不能伪造用户发言。`
+        : `这是用户指定应用的定向更新，只生成以下应用的新内容：${selectedAppLabels.join("、")}。未选择的应用必须完全不生成数据；每个所选应用最多补充 1—2 条有依据的新记录。选择了聊天时，可生成角色自己发给用户的新消息（放入 userThreadMessages，sender 只能是 character），并为有证据的联系人生成 contactThreads；绝不能伪造用户发言。`
+      : "这是一次追加生活痕迹。请从最有依据的 2—4 个应用中随机选择少量记录，避免每次都选择相同应用或相同数量；不要为了填满首次初始化的数量而重复旧内容。";
   let response;
   try {
     response = await apiChat({
@@ -851,21 +879,21 @@ export async function advanceCharacterPhoneWithResult(
       ...{
         message: isContactThreadRepair
           ? `${generationRequest}\n只返回 JSON，不要 Markdown：{"lifeEventSummary":"与已有证据对应的简短事件","evidenceSourceIds":["只能从上下文给出的来源 ID 中选择"],"contactThreads":[{"contactId":"必须逐字匹配待修复联系人 ID","contactName":"必须逐字匹配待修复联系人","messages":[{"sender":"contact或character","content":"自然的聊天消息"}]}]}。仅输出待修复联系人对应的聊天，不得输出其他字段。待修复联系人：${repairTargets.map((contact) => `${contact.id}｜${contact.name}`).join("；")}`
-          : `${generationRequest}\n只返回 JSON，不要 Markdown。数量字段请优先使用数组：userThreadMessages:[{sender:"contact或character",content:"用户与角色的消息"}]、contactThreads:[{contactName:"联系人",messages:[{sender:"contact或character",content:"消息内容"}]}]、threadMessages:[{sender:"contact或character",content:"兼容旧版单联系人消息"}]、browserEntries:[{query:"搜索词",title:"记录标题",results:[{platform:"平台",title:"结果标题",snippet:"摘要"}],searchResults:[{platform:"平台",title:"结果标题",snippet:"摘要"}],reflection:"搜索后的私下反应"}]、scheduleItems:[{title:"日程标题",detail:"具体事项",daysFromNow:3}]、diaryEntries:[{title:"日记标题",body:"私密想法"}]、noteEntries:[{title:"备忘录标题",content:"具体内容"}]、todoEntries:[{text:"待办事项"}]、posts:[{content:"朋友圈内容",visibility:"user、private 或 public"}]、musicTracks:[{title:"曲目",artist:"艺术家",duration:"3:30",current:true}]、musicListening:[{trackTitle:"曲目",playedHoursAgo:2,durationSeconds:180,playCount:2}]、musicNowPlaying:{trackTitle:"当前曲目"}。同时保留 lifeEventSummary、evidenceSourceIds、contacts、threadContactName、callContactName、callDirection、galleryTitle、galleryCaption、hiddenGalleryTitle、hiddenGalleryCaption 等字段。首次初始化按上面的数量要求完整填写；追加生成只随机填写 2—4 个应用。没有证据的字段返回空数组或空字符串。`,
+          : `${generationRequest}\n只返回 JSON，不要 Markdown。使用批量字段：userThreadMessages:[{sender:"character",content:"角色新发给用户的消息"}]（只可含角色一方消息，禁止模拟用户发言）；contactThreads:[{contactName:"NPC或群聊",messages:[{sender:"contact或character",content:"消息内容"}]}]；browserEntries:[{query:"搜索词",title:"记录标题",results:[{platform:"平台",title:"结果标题",snippet:"摘要"}],searchResults:[{platform:"平台",title:"结果标题",snippet:"摘要"}],reflection:"搜索后的私下反应"}]；scheduleItems:[{title:"日程标题",detail:"具体事项",daysFromNow:3}]；diaryEntries:[{title:"日记标题",body:"私密想法"}]；noteEntries:[{title:"备忘录标题",content:"具体内容"}]；todoEntries:[{text:"待办事项"}]；posts:[{content:"朋友圈内容",visibility:"user、private 或 public"}]；musicTracks:[{title:"曲目",artist:"艺术家",duration:"3:30",current:true}]；musicListening:[{trackTitle:"曲目",playedHoursAgo:2,durationSeconds:180,playCount:2}]；musicNowPlaying:{trackTitle:"当前曲目"}。电话使用 callContactName/callDirection/callDurationSeconds，相册使用 galleryTitle/galleryCaption/hiddenGalleryTitle/hiddenGalleryCaption。始终保留 lifeEventSummary、evidenceSourceIds；contacts 仅在选择聊天应用时提供。未选择的应用数据一律返回空/省略。`,
       },
       history: [],
       systemInstruction: `你扮演真实存在的角色“${roleName}”，正在整理他自己的手机。\n${context}\n\n${generationRequest}\n严格规则：
 1. 所有内容必须来自角色人设、世界书、最近上下文或已有手机记录的合理延伸；不能凭空制造与角色无关的人和事件。
 2. 联系人只能是角色现实中可能认识的人：用户、已有角色关系、世界书/人设明确提到的家人朋友同事，或有明确依据的新 NPC。群聊必须有明确的群名称或成员依据。不要读取或生成用户不认识该角色的好友。name 只能填写真实的人名或群聊名，不能填写“我可”“我都开始怀疑你是不”这类句子片段；无法确定正式名称时请留空并不要添加该联系人。
-3. userThreadMessages 只表示用户与角色的直接对话；contactThreads/threadMessages 只表示 NPC 或群聊。${isContactThreadRepair ? "专项修复只可为指定待修复联系人写独立 contactThreads；这些联系人都已存在，不得返回或改动 contacts。" : "每个有证据的非用户联系人（尤其是关系网已连线 NPC）都必须对应 contacts 和自己的 contactThreads；每个 contactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成该线程。"}不要把 NPC 聊天塞进用户与角色的聊天镜像。
-4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isContactThreadRepair ? "联系人聊天修复只生成指定联系人双方自然、简短的消息，不写入其他应用。" : isInitialGeneration ? "首次初始化时必须覆盖所有支持内容生成的应用，并满足聊天4—6条、浏览器4—8条、未来3—6天的1—3条日程、日记/备忘录/待办合计2—4条、至少一条仅用户可见或仅自己可见的朋友圈和音乐收听/常听时段/正在收听数据；不要使用模板标题。" : "后续生活推进从最有依据的2—4个应用随机选择少量记录，不要每个应用都强行生成一条，也不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。"}
+3. userThreadMessages 只表示角色发给用户的直接消息；主聊天中的用户发言必须来自真实主聊天镜像，严禁模型代替用户发言。contactThreads/threadMessages 只表示 NPC 或群聊。${isContactThreadRepair ? "专项修复只可为指定待修复联系人写独立 contactThreads；这些联系人都已存在，不得返回或改动 contacts。" : "每个有证据的非用户联系人（尤其是关系网已连线 NPC）都必须对应 contacts 和自己的 contactThreads；每个 contactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成该线程。"}不要把 NPC 聊天塞进用户与角色的聊天镜像。
+4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isContactThreadRepair ? "联系人聊天修复只生成指定联系人双方自然、简短的消息，不写入其他应用。" : isInitialGeneration ? "首次初始化时必须覆盖所有支持内容生成的应用，并满足 NPC 聊天、浏览器4—8条、未来3—6天的1—3条日程、日记/备忘录/待办合计2—4条、至少一条仅用户可见或仅自己可见的朋友圈和音乐收听/常听时段/正在收听数据；不要使用模板标题。直接用户聊天只能镜像真实记录。" : allAppsSelected ? `用户选择全部应用，必须尽量为每个所选应用（${selectedAppLabels?.join("、")}）各追加一条有依据的新记录；只有该应用确实无证据时才留空。` : selectedAppLabels ? `本次必须严格限制在用户选择的应用（${selectedAppLabels.join("、")}）；未选择的应用不得填写。` : "后续生活推进从最有依据的2—4个应用随机选择少量记录，不要每个应用都强行生成一条，也不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。"}
 5. 角色真实姓名、备注名和人设文件名是不同概念。绝不能把文件名、输入字段名、世界书标题当作角色姓名或正文内容。
 6. 日记必须是角色不会公开展示的私密想法；备忘录和日程必须是具体事项；浏览器输出搜索记录标题和 2—3 条不同平台的 AI 结果卡片，不能输出网址或引导查看原始页面；相册字段只描述角色真实可能保存的图片或文字图，不要凭空输出图片文件名。主手机的文字图只以描述形式参考，角色手机会在本地渲染文字图，不要声称有真实照片。
  7. lifeEventSummary 必须是本次唯一的生活事件；生成的应用字段必须是这个事件在不同应用中的自然痕迹，时间和人物不能互相矛盾。
 8. searchReflection 必须是 1—3 句、约 15—90 字的第一人称私下反应：回答“为什么偏偏现在搜”“哪一点马上有用”“还有什么没想通或准备怎么做”。允许短句、停顿、犹豫、自我纠正和轻微情绪，必须贴合角色口吻与当下事件；不要复述搜索词，不要写成百科总结、心理分析、鸡汤或“我查这个是为了……”模板，也不要提到 AI、提示词或应用规则。若没有明确搜索动机就留空。
 9. evidenceSourceIds 只能从“可引用的证据来源ID”原样选择；没有证据就返回空数组，不得编造 ID。
 10. 隐藏相册字段只允许承载明确私密/隐秘证据，且生成的条目必须是 hidden=true 的私藏文字图；普通日常、公开动态和普通聊天图片不得放入隐藏相册。
-11. ${isContactThreadRepair ? "联系人聊天修复只允许返回 evidenceSourceIds、lifeEventSummary 和 contactThreads；禁止填充或修改其他应用数据。" : isInitialGeneration ? "首次初始化必须优先使用批量数组字段满足各应用数量下限，并让所有记录围绕同一事件；只有在字段确实没有任何证据时才留空。" : "每次随机选择 2—4 个最有依据的字段生成，其余全部留空；宁可少写，不要为了填满字段编造内容。"}
+11. ${isContactThreadRepair ? "联系人聊天修复只允许返回 evidenceSourceIds、lifeEventSummary 和 contactThreads；禁止填充或修改其他应用数据。" : isInitialGeneration ? "首次初始化必须优先使用批量数组字段满足各应用数量下限，并让所有记录围绕同一事件；直接用户聊天只从真实主聊天同步；只有在字段确实没有任何证据时才留空。" : allAppsSelected ? `用户选择全部应用时，按可用证据为每个应用追加内容；用户选中的应用字段不应遗漏，其他字段必须为空。` : selectedAppLabels ? `只允许生成这些应用：${selectedAppLabels.join("、")}；其他应用字段必须为空，不得通过兼容旧字段绕过范围限制。` : "每次随机选择 2—4 个最有依据的字段生成，其余全部留空；宁可少写，不要为了填满字段编造内容。"}
 12. 角色手机解锁密码和隐藏相册密码在手机创建时已经由系统按该角色资料先行设置并持久化；不要创建、修改、猜测或透露任何密码，也不要因为上下文中出现一串数字就回写密码字段。密码相关内容若确有证据，只能作为普通生活记录保留。
 13. 不要生成解释、旁白、占位符、统一问候或应用说明；只返回 JSON。`,
       apiKey: input.settings.apiKey,
@@ -979,7 +1007,9 @@ export async function advanceCharacterPhoneWithResult(
     ...lifeContext.worldBookEntries.map((entry) => entry.content),
     ...base.contacts.flatMap((contact) => [contact.name, contact.remark, ...(contact.memberNames ?? [])]),
   ].filter(Boolean).join("\n");
-  const contactDrafts = parseContactDrafts(raw.contacts, input.character, sourceFileName, contactEvidenceText);
+  const contactDrafts = chatSelected
+    ? parseContactDrafts(raw.contacts, input.character, sourceFileName, contactEvidenceText)
+    : [];
   const mergedContacts = mergeGeneratedContacts(base, contactDrafts, validatedSourceRefs);
   const requestedThreadContact = cleanGeneratedText(raw.threadContactName, sourceFileName, 40);
   // An initial response with several contacts must not silently attach every
@@ -990,7 +1020,7 @@ export async function advanceCharacterPhoneWithResult(
   const incoming = cleanGeneratedText(raw.threadIncoming || raw.threadMessage, sourceFileName);
   const outgoing = cleanGeneratedText(raw.threadOutgoing || raw.message, sourceFileName);
   const lifeEventSummary = cleanGeneratedText(raw.lifeEventSummary, sourceFileName, 240);
-  let threadDrafts = parseGeneratedThreadMessages(raw.threadMessages, sourceFileName);
+  let threadDrafts = chatSelected ? parseGeneratedThreadMessages(raw.threadMessages, sourceFileName) : [];
   if (threadDrafts.length === 0) {
     if (incoming) threadDrafts.push({ sender: "contact", content: incoming });
     if (outgoing) threadDrafts.push({ sender: "character", content: outgoing });
@@ -1005,45 +1035,30 @@ export async function advanceCharacterPhoneWithResult(
       lifeEventSummary,
     );
   }
-  const userContact = mergedContacts.contacts.find((contact) => contact.source === "user" || contact.kind === "user");
-  let userThreadDrafts = parseGeneratedThreadMessages(raw.userThreadMessages, sourceFileName);
-  // Older providers do not know userThreadMessages. Mirror the scoped main
-  // chat when it exists, and only then use the legacy singular response as a
-  // direct-chat fallback when no NPC was explicitly selected.
-  if (isInitialGeneration && userThreadDrafts.length === 0) {
-    userThreadDrafts = lifeContext.messages
-      .slice(-6)
-      .map((message) => ({
-        sender: message.sender === "character" ? "character" as const : "contact" as const,
-        content: cleanGeneratedText(message.content, sourceFileName),
-      }))
-      .filter((message) => Boolean(message.content));
-    if (userThreadDrafts.length === 0 && threadDrafts.length > 0 && !requestedThreadContact) {
-      userThreadDrafts = threadDrafts;
-      threadDrafts = [];
-    }
-    if (userThreadDrafts.length === 0 && userContact) {
-      userThreadDrafts = completeInitialThreadDrafts(
-        [],
-        lifeEventSummary ? `关于${lifeEventSummary.slice(0, 34)}，你现在方便聊聊吗？` : "你现在方便聊聊吗？",
-        lifeEventSummary ? `我刚处理完${lifeEventSummary.slice(0, 34)}，晚点跟你说。` : "我刚忙完，看到消息了。",
-        userContact,
-        input.character,
-        lifeEventSummary,
-      );
-    }
+  const ownerRelationIds = new Set(relationships
+    .filter((relation) => relation.characterId === input.character.id && relation.userIdentityId === input.phone.ownerIdentityId)
+    .map((relation) => relation.id));
+  const userContact = mergedContacts.contacts.find((contact) =>
+    !contact.removedAt
+    && !contact.historyOnly
+    && (contact.source === "user" || contact.kind === "user")
+    && (contact.userIdentityId === input.phone.ownerIdentityId
+      || (contact.relationId && ownerRelationIds.has(contact.relationId))));
+  const rawUserThreadDrafts = chatSelected
+    ? parseGeneratedThreadMessages(raw.userThreadMessages, sourceFileName)
+    : [];
+  // The phone's owner-side bubbles are a strict projection of real main-chat
+  // messages. Only a newly generated character-authored message may be
+  // promoted back to the main conversation; never synthesize an owner reply.
+  let userThreadDrafts = isInitialGeneration
+    ? []
+    : rawUserThreadDrafts.filter((draft) => draft.sender === "character");
+  if (!isInitialGeneration && chatSelected && userThreadDrafts.length === 0 && !threadContact && !requestedThreadContact && outgoing) {
+    userThreadDrafts = [{ sender: "character", content: outgoing }];
   }
-  if (isInitialGeneration && userContact && userThreadDrafts.length > 0) {
-    userThreadDrafts = completeInitialThreadDrafts(
-      userThreadDrafts,
-      "",
-      "",
-      userContact,
-      input.character,
-      lifeEventSummary,
-    );
-  }
-  const contactThreadDrafts = parseGeneratedContactThreads(raw.contactThreads, sourceFileName);
+  const contactThreadDrafts = chatSelected
+    ? parseGeneratedContactThreads(raw.contactThreads, sourceFileName)
+    : [];
   const explicitContactThreadIds = new Set(contactThreadDrafts.flatMap((thread) => {
     const matches = mergedContacts.contacts.filter((contact) => !contact.removedAt
       && contact.source !== "user"
@@ -1057,7 +1072,7 @@ export async function advanceCharacterPhoneWithResult(
   // generation did not create a thread. Backfill only contacts with source
   // evidence, and only after this response itself passes evidence validation.
   // Existing threads make the operation idempotent across retries/reloads.
-  if (validatedSourceRefs.length > 0) {
+  if (chatSelected && validatedSourceRefs.length > 0) {
     const existingThreadContactIds = new Set(base.threadMessages.map((message) => message.contactId));
     mergedContacts.contacts
       .filter((contact) => !contact.removedAt
@@ -1106,8 +1121,10 @@ export async function advanceCharacterPhoneWithResult(
     item: T,
     signature: (value: T) => string,
   ) => {
+    if (!isAppSelected(app as CharacterPhoneGeneratedAppId)) return false;
     if (items.some((existing) => signature(existing) === signature(item))) return false;
-    if (!artifactApps.has(app) && artifactApps.size >= (isInitialGeneration ? 10 : 4)) return false;
+    const maxAppCount = isInitialGeneration ? 10 : selectedApps?.size ?? 4;
+    if (!artifactApps.has(app) && artifactApps.size >= maxAppCount) return false;
     // Follow-up generations stay intentionally small even when a provider
     // returns an unexpectedly large array. First initialization is the one
     // place where the requested multi-record baseline is allowed.
@@ -1121,7 +1138,7 @@ export async function advanceCharacterPhoneWithResult(
     return true;
   };
 
-  if (userContact && userThreadDrafts.length > 0) {
+  if (!isInitialGeneration && userContact && userThreadDrafts.length > 0) {
     userThreadDrafts.slice(0, 6).forEach((draft, index) => {
       const message: CharacterPhoneThreadMessage = {
         id: createId(`phone-life-user-thread-${draft.sender}`),
@@ -1134,7 +1151,7 @@ export async function advanceCharacterPhoneWithResult(
     });
   }
 
-  if (threadContact && threadDrafts.length > 0) {
+  if (chatSelected && threadContact && threadDrafts.length > 0) {
     threadDrafts.forEach((draft, index) => {
       const message: CharacterPhoneThreadMessage = {
         id: createId(`phone-life-thread-${draft.sender}`),
@@ -1344,79 +1361,81 @@ export async function advanceCharacterPhoneWithResult(
     pushArtifact("moments", next.posts, entry, (value) => normalizeArtifactText(value.content));
   });
 
-  const musicDrafts = parseGeneratedMusicTracks(raw.musicTracks, sourceFileName);
-  const musicByTitle = new Map(next.musicTracks.map((track) => [normalizeArtifactText(track.title), track]));
-  musicDrafts.forEach((draft) => {
-    const key = normalizeArtifactText(draft.title);
-    if (musicByTitle.has(key)) return;
-    const track: CharacterPhoneMusicTrack = {
-      id: createId("phone-life-music"),
-      title: draft.title,
-      artist: draft.artist,
-      duration: draft.duration,
-    };
-    if (pushArtifact("music", next.musicTracks, track, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.artist)}`)) {
-      musicByTitle.set(key, track);
+  if (isAppSelected("music")) {
+    const musicDrafts = parseGeneratedMusicTracks(raw.musicTracks, sourceFileName);
+    const musicByTitle = new Map(next.musicTracks.map((track) => [normalizeArtifactText(track.title), track]));
+    musicDrafts.forEach((draft) => {
+      const key = normalizeArtifactText(draft.title);
+      if (musicByTitle.has(key)) return;
+      const track: CharacterPhoneMusicTrack = {
+        id: createId("phone-life-music"),
+        title: draft.title,
+        artist: draft.artist,
+        duration: draft.duration,
+      };
+      if (pushArtifact("music", next.musicTracks, track, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.artist)}`)) {
+        musicByTitle.set(key, track);
+      }
+    });
+    // A first-life phone should never have a completely empty music surface.
+    // When no local library and no provider track are available, create one
+    // clearly role-scoped listening trace rather than falling back to a shared
+    // demo song or another role's library.
+    if (isInitialGeneration && next.musicTracks.length === 0) {
+      const track: CharacterPhoneMusicTrack = {
+        id: createId("phone-life-music"),
+        title: `${roleName}的常听片段`,
+        artist: roleName,
+        duration: "3:30",
+      };
+      if (pushArtifact("music", next.musicTracks, track, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.artist)}`)) {
+        musicByTitle.set(normalizeArtifactText(track.title), track);
+      }
     }
-  });
-  // A first-life phone should never have a completely empty music surface.
-  // When no local library and no provider track are available, create one
-  // clearly role-scoped listening trace rather than falling back to a shared
-  // demo song or another role's library.
-  if (isInitialGeneration && next.musicTracks.length === 0) {
-    const track: CharacterPhoneMusicTrack = {
-      id: createId("phone-life-music"),
-      title: `${roleName}的常听片段`,
-      artist: roleName,
-      duration: "3:30",
-    };
-    if (pushArtifact("music", next.musicTracks, track, (value) => `${normalizeArtifactText(value.title)}|${normalizeArtifactText(value.artist)}`)) {
-      musicByTitle.set(normalizeArtifactText(track.title), track);
-    }
-  }
-  const listeningDrafts = parseGeneratedMusicListening(raw.musicListening);
-  const defaultListeningDrafts = isInitialGeneration && listeningDrafts.length === 0
-    ? next.musicTracks.slice(0, 4).map((track, index) => ({ trackTitle: track.title, playedHoursAgo: 2 + index * 5, durationSeconds: 180 + index * 30, playCount: 1 + index }))
-    : listeningDrafts;
-  const listeningHistory = next.listeningHistory;
-  defaultListeningDrafts.forEach((draft, index) => {
-    const track = draft.trackTitle
-      ? musicByTitle.get(normalizeArtifactText(draft.trackTitle))
-      : next.musicTracks[Math.max(0, Math.min(next.musicTracks.length - 1, Math.round(draft.trackIndex ?? index)))];
-    if (!track) return;
-    const playedHoursAgo = Math.max(0, Math.min(24 * 30, draft.playedHoursAgo ?? (2 + index * 4)));
-    const durationSeconds = Math.max(30, Math.min(4 * 60 * 60, Math.round(draft.durationSeconds ?? 210)));
-    const duplicate = listeningHistory.some((record) => record.trackId === track.id && Math.abs(record.startedAt - (now - playedHoursAgo * 60 * 60 * 1000)) < 60 * 1000);
-    if (duplicate) return;
-    const record: CharacterPhoneListeningRecord = {
-      id: createId("phone-life-listening"),
-      trackId: track.id,
-      startedAt: now - playedHoursAgo * 60 * 60 * 1000,
-      durationSeconds,
-      source: "generated",
-    };
-    listeningHistory.push(record);
-    generated = true;
-  });
-  if (isInitialGeneration && next.musicTracks.length > 0 && listeningHistory.length > 0) {
-    const nowPlayingRecord = raw.musicNowPlaying && typeof raw.musicNowPlaying === "object" && !Array.isArray(raw.musicNowPlaying)
-      ? raw.musicNowPlaying as Record<string, unknown>
-      : undefined;
-    const nowPlayingTitle = cleanGeneratedText(nowPlayingRecord?.trackTitle ?? nowPlayingRecord?.title, sourceFileName, 120);
-    const nowPlayingIndex = finiteNumber(nowPlayingRecord?.trackIndex);
-    const current = next.musicTracks.find((track) => musicDrafts.find((draft) => draft.current && normalizeArtifactText(draft.title) === normalizeArtifactText(track.title)))
-      || (nowPlayingTitle ? next.musicTracks.find((track) => normalizeArtifactText(track.title) === normalizeArtifactText(nowPlayingTitle)) : undefined)
-      || (nowPlayingIndex !== undefined ? next.musicTracks[Math.max(0, Math.min(next.musicTracks.length - 1, Math.round(nowPlayingIndex)))] : undefined)
-      || next.musicTracks[0];
-    next.currentlyPlayingTrackId = current.id;
-    next.currentlyPlayingSince = now - 18 * 60 * 1000;
-    next.frequentListeningHours = [...new Set(listeningHistory.map((record) => new Date(record.startedAt).getHours()))].sort((left, right) => left - right).slice(0, 6);
-    next.musicPlaylists = [{
-      id: createId("phone-life-playlist"),
-      name: "最近常听",
-      trackIds: next.musicTracks.slice(0, 8).map((track) => track.id),
-      source: "generated",
+    const listeningDrafts = parseGeneratedMusicListening(raw.musicListening);
+    const defaultListeningDrafts = isInitialGeneration && listeningDrafts.length === 0
+      ? next.musicTracks.slice(0, 4).map((track, index) => ({ trackTitle: track.title, playedHoursAgo: 2 + index * 5, durationSeconds: 180 + index * 30, playCount: 1 + index }))
+      : listeningDrafts;
+    const listeningHistory = next.listeningHistory;
+    defaultListeningDrafts.forEach((draft, index) => {
+      const track = draft.trackTitle
+        ? musicByTitle.get(normalizeArtifactText(draft.trackTitle))
+        : next.musicTracks[Math.max(0, Math.min(next.musicTracks.length - 1, Math.round(draft.trackIndex ?? index)))];
+      if (!track) return;
+      const playedHoursAgo = Math.max(0, Math.min(24 * 30, draft.playedHoursAgo ?? (2 + index * 4)));
+      const durationSeconds = Math.max(30, Math.min(4 * 60 * 60, Math.round(draft.durationSeconds ?? 210)));
+      const duplicate = listeningHistory.some((record) => record.trackId === track.id && Math.abs(record.startedAt - (now - playedHoursAgo * 60 * 60 * 1000)) < 60 * 1000);
+      if (duplicate) return;
+      const record: CharacterPhoneListeningRecord = {
+        id: createId("phone-life-listening"),
+        trackId: track.id,
+        startedAt: now - playedHoursAgo * 60 * 60 * 1000,
+        durationSeconds,
+        source: "generated",
+      };
+      listeningHistory.push(record);
+      generated = true;
+    });
+    if (isInitialGeneration && next.musicTracks.length > 0 && listeningHistory.length > 0) {
+      const nowPlayingRecord = raw.musicNowPlaying && typeof raw.musicNowPlaying === "object" && !Array.isArray(raw.musicNowPlaying)
+        ? raw.musicNowPlaying as Record<string, unknown>
+        : undefined;
+      const nowPlayingTitle = cleanGeneratedText(nowPlayingRecord?.trackTitle ?? nowPlayingRecord?.title, sourceFileName, 120);
+      const nowPlayingIndex = finiteNumber(nowPlayingRecord?.trackIndex);
+      const current = next.musicTracks.find((track) => musicDrafts.find((draft) => draft.current && normalizeArtifactText(draft.title) === normalizeArtifactText(track.title)))
+        || (nowPlayingTitle ? next.musicTracks.find((track) => normalizeArtifactText(track.title) === normalizeArtifactText(nowPlayingTitle)) : undefined)
+        || (nowPlayingIndex !== undefined ? next.musicTracks[Math.max(0, Math.min(next.musicTracks.length - 1, Math.round(nowPlayingIndex)))] : undefined)
+        || next.musicTracks[0];
+      next.currentlyPlayingTrackId = current.id;
+      next.currentlyPlayingSince = now - 18 * 60 * 1000;
+      next.frequentListeningHours = [...new Set(listeningHistory.map((record) => new Date(record.startedAt).getHours()))].sort((left, right) => left - right).slice(0, 6);
+      next.musicPlaylists = [{
+        id: createId("phone-life-playlist"),
+        name: "最近常听",
+        trackIds: next.musicTracks.slice(0, 8).map((track) => track.id),
+        source: "generated",
       }, ...next.musicPlaylists.filter((playlist) => playlist.name !== "最近常听")];
+    }
   }
 
   if (artifactRefs.length > 0) {

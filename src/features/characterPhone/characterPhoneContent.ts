@@ -528,7 +528,16 @@ function syncUserChat(
       const mirrored = toCharacterMessage(sourceMessage, phone.id, userContact.id);
       const previous = existingBySourceId.get(sourceMessage.id);
       synced.push(previous
-        ? { ...previous, ...mirrored, operatedByUser: previous.operatedByUser || mirrored.operatedByUser }
+        ? {
+            ...previous,
+            ...mirrored,
+            // Keep generated thread IDs stable: life-event artifactRefs point
+            // to them, while sourceMessageId is the separate main-chat link.
+            id: previous.id,
+            ...(previous.lifeEventId ? { lifeEventId: previous.lifeEventId } : {}),
+            operatedByUser: previous.operatedByUser || mirrored.operatedByUser,
+            recalledAt: mirrored.recalledAt || previous.recalledAt,
+          }
         : mirrored);
     });
   });

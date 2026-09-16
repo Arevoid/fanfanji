@@ -242,6 +242,38 @@ assert.equal(
   1,
   "reopening/synchronizing a role phone is idempotent for mirrored messages",
 );
+const generatedMainMessage: Message = {
+  id: "character-phone-generated:phone-a:generated-thread-message",
+  characterId: characterA.id,
+  relationId: relation.id,
+  conversationId: relation.conversationId,
+  sender: "character",
+  content: "我刚忙完，晚点和你说。",
+  timestamp: 250,
+};
+const generatedPhoneMessage = {
+  id: "generated-thread-message",
+  contactId: userContactId!,
+  sender: "character" as const,
+  content: generatedMainMessage.content,
+  timestamp: generatedMainMessage.timestamp,
+  sourceMessageId: generatedMainMessage.id,
+  lifeEventId: "generated-life-event",
+};
+const resyncedGeneratedThread = ensureCharacterPhoneContent({
+  phone: { ...resyncedMirrorPhone, threadMessages: [...resyncedMirrorPhone.threadMessages, generatedPhoneMessage] },
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages: [...messages, generatedMainMessage],
+  moments,
+  worldBookEntries: worldBook,
+  now: 400,
+});
+const resyncedGeneratedMessage = resyncedGeneratedThread.threadMessages.find((message) => message.sourceMessageId === generatedMainMessage.id);
+assert.equal(resyncedGeneratedMessage?.id, generatedPhoneMessage.id, "main-chat syncing preserves generated phone message IDs referenced by life events");
+assert.equal(resyncedGeneratedMessage?.lifeEventId, generatedPhoneMessage.lifeEventId, "main-chat syncing preserves the generated life-event link");
 
 const roleContactCopy: Character = {
   ...characterA,
