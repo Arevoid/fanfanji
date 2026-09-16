@@ -54,7 +54,7 @@ export function StorageDiagnosticsCard({
         </div>
         {diagnostics && (
           <div className="rounded-[12px] bg-slate-50 p-3 text-[10px] text-slate-600 space-y-1">
-            <div>LocalStorage：{formatStorageBytes(diagnostics.localStorageBytes)}</div>
+            <div>LocalStorage：{formatStorageBytes(diagnostics.localStorageBytes)}（有独立容量上限；下方状态仅表示浏览器总配额）</div>
             <div>浏览器总占用：{diagnostics.usage === undefined ? "不可用" : formatStorageBytes(diagnostics.usage)} / {diagnostics.quota === undefined ? "未知" : formatStorageBytes(diagnostics.quota)}</div>
             <div>应用版本：v{appVersion}</div>
             <div>数据版本：{diagnostics.dataSchemaVersion || "未设置（兼容模式）"}</div>
@@ -76,7 +76,7 @@ export function StorageDiagnosticsCard({
             {diagnostics.migrationState && diagnostics.migrationState.phase !== "completed" && diagnostics.migrationState.phase !== "failed" && diagnostics.migrationState.phase !== "cancelled" && <button type="button" disabled={contentMigrationRunning} onClick={onResumeInterruptedMigration} className="mt-2 rounded-[10px] bg-amber-600 px-3 py-2 font-bold text-white disabled:opacity-50">恢复未完成迁移</button>}
             {diagnostics.migrationState?.report && <div>迁移报告：完成 {diagnostics.migrationState.report.completed}，跳过 {diagnostics.migrationState.report.skipped}，修复 {diagnostics.migrationState.report.repaired}，失败 {diagnostics.migrationState.report.failed}</div>}
             {diagnostics.migrationLock && <div>迁移锁：{diagnostics.migrationLock.ownerId}，有效至 {new Date(diagnostics.migrationLock.expiresAt).toLocaleString()}</div>}
-            <div>状态：{diagnostics.pressure === "critical" ? "空间严重不足" : diagnostics.pressure === "warning" ? "空间偏高" : diagnostics.pressure === "normal" ? "正常" : "未知"}</div>
+            <div>浏览器总配额状态：{diagnostics.pressure === "critical" ? "空间严重不足" : diagnostics.pressure === "warning" ? "空间偏高" : diagnostics.pressure === "normal" ? "正常" : "未知"}</div>
             <div>健康扫描：已检查 {diagnostics.health.checkedCollections} 个数据集合，发现 {diagnostics.health.findings.length} 项待检查问题</div>
             {diagnostics.identitySummary && <div>身份关系摘要：{diagnostics.identitySummary.identityCount} 个身份，当前身份{diagnostics.identitySummary.activeIdentityIdPresent ? "有效" : "无效"}；{diagnostics.identitySummary.identities.map((identity) => `${identity.idFingerprint} 好友 ${identity.relationshipCount} 人`).join("、")}</div>}
             {diagnostics.health.indexedDb.length > 0 && <div>IndexedDB：{diagnostics.health.indexedDb.map((database) => `${database.name}（${database.records} 条）`).join("、")}</div>}

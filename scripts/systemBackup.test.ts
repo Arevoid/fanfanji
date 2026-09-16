@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { indexedDB } from "fake-indexeddb";
 import {
   buildSystemBackup,
+  checksumPayload,
   filterSystemBackupLocalStorageForRestore,
   parseSystemBackup,
   restoreSystemBackupIndexedDb,
@@ -24,6 +25,8 @@ Object.assign(globalThis, { indexedDB, window: { localStorage: storage } });
 
 const characters = [{ id: "character-a", name: "角色 A" }];
 const moments = [{ id: "moment-a", content: "朋友圈内容" }];
+const legacyMoment = { id: "legacy-moment", content: "仅在旧本地副本中的动态" };
+const mergedMoments = [...moments, legacyMoment];
 const innerVoices = [{
   id: "voice-backup", characterId: "character-a", relationId: "relation-a", userIdentityId: "identity-a",
   conversationId: "direct:relation-a", messageId: "message-a", triggerMessageSummary: "给旧数据迁移",
@@ -31,6 +34,7 @@ const innerVoices = [{
 }];
 await readingAssetDb.saveMetadataValue("character-archive-v4", characters);
 await readingAssetDb.saveMetadataValue("moments-v4", moments);
+values.set("phone_moments_v3", JSON.stringify([legacyMoment]));
 const backupPhone = {
   id: "phone-backup-test",
   ownerIdentityId: "identity-backup-test",
@@ -60,9 +64,10 @@ values.set("phone_inner_voice_records", JSON.stringify(innerVoices));
 values.set("phone_characters_v3", JSON.stringify([{ id: "legacy-character" }]));
 values.set("phone_reading_analysis_store_v1", JSON.stringify({ version: 1, tasks: [] }));
 
-const backup = await buildSystemBackup(storage, ["phone_characters_v3", "phone_worldbook_entries", "phone_inner_voice_records"]);
+const backup = await buildSystemBackup(storage, ["phone_characters_v3", "phone_worldbook_entries", "phone_inner_voice_records", "phone_moments_v3"]);
 assert.deepEqual(backup.indexedDb["character-archive-v4"], characters);
-assert.deepEqual(backup.indexedDb["moments-v4"], moments);
+assert.deepEqual(backup.indexedDb["moments-v4"], mergedMoments, "backup consolidates divergent local and IndexedDB Moment copies");
+assert.equal(backup.localStorage.phone_moments_v3, null, "merged Moments are exported once through IndexedDB");
 assert.deepEqual(backup.indexedDb["character-phone-v1"], [backupPhone]);
 assert.equal((backup.indexedDb["inner-voice-v1"] as typeof innerVoices)[0]?.content, innerVoices[0].content);
 assert.ok((backup.indexedDb["inner-voice-v1"] as Array<{ storageScopeKey?: string }>)[0]?.storageScopeKey);
@@ -83,11 +88,12 @@ assert.deepEqual(
   filterSystemBackupLocalStorageForRestore([
     ["phone_messages_v3", "large-chat"],
     ["phone_inner_voice_records", "legacy-voices"],
+    ["phone_moments_v3", "large-moments"],
     ["phone_offline_stories", "large-offline"],
     ["phone_settings", "settings"],
-  ], { "message-entry-v1": [], "offline-story-entry-v1": [], "inner-voice-v1": [] }),
+  ], { "message-entry-v1": [], "offline-story-entry-v1": [], "inner-voice-v1": [], "moments-v4": [] }),
   [["phone_settings", "settings"]],
-  "entry-store backups must not recreate large LocalStorage content copies",
+  "durable backups must not recreate large LocalStorage content copies",
 );
 assert.deepEqual(
   filterSystemBackupLocalStorageForRestore([
@@ -112,8 +118,15 @@ assert.deepEqual(
 
 const parsed = parseSystemBackup(backup);
 assert.equal(parsed.legacy, false);
-assert.deepEqual(parsed.indexedDb["moments-v4"], moments);
+assert.deepEqual(parsed.indexedDb["moments-v4"], mergedMoments);
+assert.equal(parsed.localStorage.phone_moments_v3, null);
 assert.equal(typeof backup.checksum, "string");
+const sanitizedPayload = {
+  ...backup,
+  localStorage: { ...backup.localStorage, phone_worldbook_entries: "sanitized" },
+};
+const resignedSanitizedBackup = { ...sanitizedPayload, checksum: checksumPayload(sanitizedPayload) };
+assert.equal(parseSystemBackup(resignedSanitizedBackup).integrityWarning, undefined, "re-signing an envelope that still has its old checksum must verify");
 const tamperedBackup = parseSystemBackup({ ...backup, localStorage: { ...backup.localStorage, phone_worldbook_entries: "changed" } });
 assert.match(tamperedBackup.integrityWarning || "", /校验值不一致/);
 const envelopedLegacyVoices = parseSystemBackup({

@@ -36,6 +36,7 @@ assert.equal(repository.saveMoments(moments).success, true);
 assert.equal((await repository.flushMoments()).success, true);
 const stored = await readingAssetDb.loadMetadataValue<typeof moments>("moments-v4");
 assert.deepEqual(stored, moments);
+assert.equal(values.has("phone_moments_v3"), false, "successful IndexedDB persistence must remove the large duplicate recovery snapshot");
 assert.equal(values.has("moments-v4-pending"), false, "a completed IndexedDB write must clear the stale localStorage marker");
 
 console.log("PASS Moments and comments migrate to and persist in IndexedDB");

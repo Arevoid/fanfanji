@@ -606,13 +606,14 @@ export default function App() {
 
   useEffect(() => {
     const onStorageWriteFailure = (event: Event) => {
-      const detail = (event as CustomEvent<{ error?: string }>).detail;
+      const detail = (event as CustomEvent<{ error?: string; key?: string }>).detail;
       const reason = detail?.error === "quota"
-        ? "浏览器本地空间不足"
+        ? "LocalStorage 空间不足"
         : detail?.error === "unavailable"
-          ? "浏览器本地存储不可用"
-          : "浏览器未能确认写入完成";
-      setStorageWriteWarning(`${reason}，部分更改可能尚未保存。请先导出系统备份，再检查本地存储诊断。`);
+          ? "LocalStorage 不可用"
+          : "LocalStorage 未能确认写入完成";
+      const keyHint = detail?.key ? `（数据项：${detail.key}）` : "";
+      setStorageWriteWarning(`${reason}${keyHint}，部分更改可能尚未保存。请先导出系统备份，再检查本地存储诊断。`);
     };
     window.addEventListener(STORAGE_WRITE_FAILURE_EVENT, onStorageWriteFailure);
     return () => window.removeEventListener(STORAGE_WRITE_FAILURE_EVENT, onStorageWriteFailure);
@@ -700,6 +701,7 @@ export default function App() {
   useEffect(() => {
     let active = true;
     initializeMomentRepository([]).then((result) => {
+      if (active) setMomentsStorageReady(true);
       if (active && result.valid) {
         momentsPersistenceReady.current = true;
         skipNextMomentsPersistenceRef.current = true;
@@ -799,6 +801,7 @@ export default function App() {
   }, []);
 
   const [moments, setMoments] = useState<Moment[]>(() => normalizeLoadedMoments(loadMoments([]).value));
+  const [momentsStorageReady, setMomentsStorageReady] = useState(false);
 
   const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets([]).value);
 
@@ -1707,7 +1710,7 @@ export default function App() {
   // canonical stores before clearing the legacy MemoryItem store; after a
   // successful cutover the React state must stop exposing those old records.
   useEffect(() => {
-    if (characters.length === 0 || relationships.length === 0) return;
+    if (!momentsStorageReady || characters.length === 0 || relationships.length === 0) return;
     const result = runLegacyCharacterKnowledgeMigration({
       characters,
       relationships,
@@ -1724,7 +1727,7 @@ export default function App() {
     result.migration.diagnostics.forEach((diagnostic) => {
       console.warn(`[character truth migration] ${diagnostic.recordId}: ${diagnostic.diagnostic}`);
     });
-  }, [characters, relationships, memories, offlineStories]);
+  }, [characters, relationships, memories, offlineStories, momentsStorageReady]);
 
   // Offline-story handoffs must be persisted before their story is marked as
   // synced. The ordinary effect remains the single path for every other memory

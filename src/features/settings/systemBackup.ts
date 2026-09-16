@@ -1,6 +1,6 @@
 import { readingAssetDb } from "../../core/storage/readingAssetDb";
 import { flushCharacters } from "../../core/storage/repositories/characterRepository";
-import { flushMoments } from "../../core/storage/repositories/momentRepository";
+import { flushMoments, mergeMomentSnapshots } from "../../core/storage/repositories/momentRepository";
 import { flushReadingStore } from "../../core/storage/repositories/readingRepository";
 import { flushCoReadingStore } from "../../core/storage/repositories/readingCoReadingRepository";
 import { flushReadingCoStoryStore } from "../../core/storage/repositories/readingCoStoryRepository";
@@ -13,7 +13,9 @@ import { flushCharacterPhoneRepository } from "../../core/storage/repositories/c
 import { SETTINGS_ASSET_OVERLAY_KEY } from "../../core/storage/settingsAssetRepository";
 import { SETTINGS_DURABLE_OVERLAY_KEY } from "../../core/storage/repositories/settingsRepository";
 import { flushInnerVoiceRepository, loadInnerVoiceRecords, loadInnerVoiceRecordsAsync, saveInnerVoiceRecords } from "../../core/storage/repositories/innerVoiceRepository";
+import { storageKeys } from "../../core/storage/storageKeys";
 import type { StorageWriteResult } from "../../core/storage/storageTypes";
+import type { Moment } from "../../types";
 
 export const SYSTEM_BACKUP_FORMAT = "fanfanji-system-backup" as const;
 export const SYSTEM_BACKUP_VERSION = 3 as const;
@@ -65,10 +67,12 @@ export function filterSystemBackupLocalStorageForRestore(
 ): [string, string | null][] {
   const hasMessageEntryBackup = Array.isArray(indexedDb["message-entry-v1"]);
   const hasInnerVoiceBackup = Array.isArray(indexedDb["inner-voice-v1"]);
+  const hasMomentBackup = Array.isArray(indexedDb["moments-v4"]);
   return entries.filter(([key]) => {
     if (key === "phone_offline_stories") return false;
     if (hasMessageEntryBackup && LEGACY_MESSAGE_STORAGE_KEYS.has(key)) return false;
     if (hasInnerVoiceBackup && key === "phone_inner_voice_records") return false;
+    if (hasMomentBackup && key === storageKeys.moments) return false;
     return true;
   });
 }
@@ -120,7 +124,15 @@ function cloneJson<T>(value: T): T {
 }
 
 export function checksumPayload(value: Pick<SystemBackupEnvelope, "format" | "version" | "exportedAt" | "localStorage" | "indexedDb">): string {
-  const serialized = JSON.stringify(value);
+  // Serialize only the signed envelope fields. Callers may pass an envelope
+  // that already has a stale `checksum` property while re-signing sanitized data.
+  const serialized = JSON.stringify({
+    format: value.format,
+    version: value.version,
+    exportedAt: value.exportedAt,
+    localStorage: value.localStorage,
+    indexedDb: value.indexedDb,
+  });
   let hash = 2166136261;
   for (let index = 0; index < serialized.length; index += 1) {
     hash ^= serialized.charCodeAt(index);
@@ -131,6 +143,21 @@ export function checksumPayload(value: Pick<SystemBackupEnvelope, "format" | "ve
 
 function readLocalStorage(storage: Storage, keys: readonly string[]): SystemBackupLocalStorage {
   return Object.fromEntries(keys.map((key) => [key, storage.getItem(key)]));
+}
+
+function mergeMomentBackupCopies(localStorage: SystemBackupLocalStorage, indexedDb: SystemBackupIndexedDb): void {
+  const storedMoments = indexedDb["moments-v4"];
+  const legacyRaw = localStorage[storageKeys.moments];
+  if (!Array.isArray(storedMoments) || typeof legacyRaw !== "string") return;
+  try {
+    const legacyMoments: unknown = JSON.parse(legacyRaw);
+    if (!Array.isArray(legacyMoments)) return;
+    indexedDb["moments-v4"] = mergeMomentSnapshots(storedMoments as Moment[], legacyMoments as Moment[]);
+    // The complete merged snapshot now travels through the durable channel.
+    localStorage[storageKeys.moments] = null;
+  } catch {
+    // Preserve an unparsable legacy payload instead of discarding possible recovery data.
+  }
 }
 
 function includeCharacterPhoneLocalStorageKeys(storage: Storage, requestedKeys: readonly string[]): string[] {
@@ -233,15 +260,18 @@ export async function buildSystemBackup(
     localStorage.phone_inner_voice_records = null;
   }
 
+  const indexedDb = Object.fromEntries([
+    ...indexedDbEntries,
+    ...contentEntries,
+  ].filter(([, value]) => value !== null && value !== undefined).map(([key, value]) => [key, cloneJson(value)]));
+  mergeMomentBackupCopies(localStorage, indexedDb);
+
   const envelope = {
     format: SYSTEM_BACKUP_FORMAT,
     version: SYSTEM_BACKUP_VERSION,
     exportedAt: Date.now(),
     localStorage,
-    indexedDb: Object.fromEntries([
-      ...indexedDbEntries,
-      ...contentEntries,
-    ].filter(([, value]) => value !== null && value !== undefined).map(([key, value]) => [key, cloneJson(value)])),
+    indexedDb,
   };
   return { ...envelope, checksum: checksumPayload(envelope) };
 }
@@ -301,6 +331,7 @@ export function parseSystemBackup(value: unknown): {
       }
     }
     const indexedDb = cloneJson(value.indexedDb);
+    mergeMomentBackupCopies(localStorage, indexedDb);
     if (!Array.isArray(indexedDb["inner-voice-v1"])) {
       const legacyVoice = localStorage.phone_inner_voice_records;
       if (typeof legacyVoice === "string") {
