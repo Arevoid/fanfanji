@@ -4,6 +4,11 @@ import { readJson, writeJson } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readingAssetDb } from "../readingAssetDb";
+import {
+  SETTINGS_CUSTOM_ICONS_ASSET_ID,
+  SETTINGS_WALLPAPER_ASSET_ID,
+} from "../settingsAssetRepository";
+export { applySettingsAssetOverlay, loadSettingsAssetOverlay } from "../settingsAssetRepository";
 
 type SettingsRecord = Record<string, unknown>;
 
@@ -47,6 +52,20 @@ const buildSettingsDurableOverlay = (settings: UserSettings): SettingsDurableOve
   bio: settings.bio,
   chatEnterKeyNewline: settings.chatEnterKeyNewline,
 });
+
+/**
+ * Keep large user-selected images out of the legacy monolithic localStorage
+ * record. The in-memory settings object intentionally still contains the data
+ * URLs so existing renderers remain synchronous; only the persisted copy is
+ * reduced to stable IndexedDB references.
+ */
+function toPersistedSettings(settings: UserSettings): UserSettings {
+  return {
+    ...settings,
+    ...(settings.wallpaperAssetId === SETTINGS_WALLPAPER_ASSET_ID ? { wallpaper: "" } : {}),
+    ...(settings.customIconsAssetId === SETTINGS_CUSTOM_ICONS_ASSET_ID ? { customIcons: {} } : {}),
+  };
+}
 
 const hasOnlyDurableOverlayChanges = (settings: UserSettings): boolean => {
   const previous = readJson<unknown>(storageKeys.settings, null);
@@ -295,7 +314,8 @@ export function loadSettings(defaultSettings: UserSettings): StorageResult<UserS
 }
 
 export function saveSettings(settings: UserSettings): StorageWriteResult {
-  const result = writeJson(storageKeys.settings, settings);
+  const persistedSettings = toPersistedSettings(settings);
+  const result = writeJson(storageKeys.settings, persistedSettings);
   if (result.success) {
     // Once startup has inspected the fallback, a later successful monolithic
     // save supersedes it. Queue the removal behind any pending overlay write.
@@ -311,10 +331,10 @@ export function saveSettings(settings: UserSettings): StorageWriteResult {
   // metadata store so an avatar or Enter-mode edit is not silently lost.
   if ((result.error === "quota" || result.error === "unavailable")
     && typeof indexedDB !== "undefined"
-    && hasOnlyDurableOverlayChanges(settings)) {
+    && hasOnlyDurableOverlayChanges(persistedSettings)) {
     enqueueSettingsOverlayWrite(() => readingAssetDb.saveMetadataValue(
       SETTINGS_DURABLE_OVERLAY_KEY,
-      buildSettingsDurableOverlay(settings),
+      buildSettingsDurableOverlay(persistedSettings),
     ));
     return { success: true };
   }

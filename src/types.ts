@@ -713,7 +713,11 @@ export interface UserSettings {
   wallpaper: string; // Wallpaper URL or base64
   /** Distinguishes an explicit user/preset wallpaper from legacy placeholder defaults. */
   wallpaperSource?: "user" | "preset" | "legacy-default";
+  /** When present, the actual wallpaper bytes live in IndexedDB. */
+  wallpaperAssetId?: string;
   customIcons: Record<string, string>; // appKey -> image base64/URL or empty
+  /** When present, custom icon bytes live in IndexedDB. */
+  customIconsAssetId?: string;
   /** Four applications that remain pinned in the bottom Dock. */
   dockApps?: string[];
   bubbleCss: string; // Custom bubble CSS

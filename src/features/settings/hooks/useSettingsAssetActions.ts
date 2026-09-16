@@ -1,6 +1,12 @@
 import type { ChangeEvent, Dispatch, SetStateAction } from "react";
 import type { UserSettings } from "../../../types";
 import { compressImage, compressImagePreservingTransparency } from "../../../utils/pngParser";
+import {
+  loadSettingsAssetOverlay,
+  saveSettingsAssetOverlay,
+  SETTINGS_CUSTOM_ICONS_ASSET_ID,
+  SETTINGS_WALLPAPER_ASSET_ID,
+} from "../../../core/storage/settingsAssetRepository";
 
 interface UseSettingsAssetActionsOptions {
   settings: UserSettings;
@@ -42,8 +48,22 @@ export function useSettingsAssetActions({
     if (!file) return;
     try {
       const compressed = await compressImage(file, 1000, 1000, 0.7);
-      setWallpaper(compressed);
-      handleSave({ wallpaper: compressed, wallpaperSource: "user" });
+      let savedInIndexedDb = false;
+      try {
+        const existing = await loadSettingsAssetOverlay();
+        await saveSettingsAssetOverlay({ ...(existing || { version: 1 }), wallpaper: compressed });
+        savedInIndexedDb = true;
+      } catch (error) {
+        // Older browsers may not expose IndexedDB. Keep the localStorage path
+        // as a compatibility fallback when it still has enough space.
+        console.warn("[settings] Wallpaper IndexedDB fallback unavailable; using local settings storage.", error);
+      }
+      const saved = handleSave({
+        wallpaper: compressed,
+        wallpaperSource: "user",
+        wallpaperAssetId: savedInIndexedDb ? SETTINGS_WALLPAPER_ASSET_ID : undefined,
+      });
+      if (saved) setWallpaper(compressed);
     } catch (error) {
       console.error("Wallpaper compression failed:", error);
     }
@@ -59,7 +79,23 @@ export function useSettingsAssetActions({
     if (!file) return;
     try {
       const compressed = await compressImagePreservingTransparency(file, 120, 120, 0.8);
-      const saved = handleSave({ customIcons: { ...settings.customIcons, [appKey]: compressed } });
+      let savedInIndexedDb = false;
+      let customIcons = { ...settings.customIcons, [appKey]: compressed };
+      try {
+        const existing = await loadSettingsAssetOverlay();
+        // The settings panel can be used before the asynchronous startup
+        // hydration finishes. Merge the durable map so an early upload cannot
+        // discard icons that were already stored in IndexedDB.
+        customIcons = { ...(existing?.customIcons || {}), ...customIcons };
+        await saveSettingsAssetOverlay({ ...(existing || { version: 1 }), customIcons });
+        savedInIndexedDb = true;
+      } catch (error) {
+        console.warn("[settings] Custom icon IndexedDB fallback unavailable; using local settings storage.", error);
+      }
+      const saved = handleSave({
+        customIcons,
+        customIconsAssetId: savedInIndexedDb ? SETTINGS_CUSTOM_ICONS_ASSET_ID : undefined,
+      });
       onIconStatusChange?.(saved
         ? "应用图标已更新"
         : "应用图标保存失败，请检查浏览器存储空间后重试");
@@ -69,7 +105,20 @@ export function useSettingsAssetActions({
     }
   };
 
-  const handleRestoreAllIcons = () => handleSave({ customIcons: {} });
+  const handleRestoreAllIcons = async () => {
+    let savedInIndexedDb = false;
+    try {
+      const existing = await loadSettingsAssetOverlay();
+      await saveSettingsAssetOverlay({ ...(existing || { version: 1 }), customIcons: {} });
+      savedInIndexedDb = true;
+    } catch (error) {
+      console.warn("[settings] Custom icon IndexedDB reset unavailable; using local settings storage.", error);
+    }
+    return handleSave({
+      customIcons: {},
+      customIconsAssetId: savedInIndexedDb ? SETTINGS_CUSTOM_ICONS_ASSET_ID : undefined,
+    });
+  };
 
   return { handleAvatarUpload, handleWallpaperUpload, handleIconUpload, handleRestoreAllIcons };
 }

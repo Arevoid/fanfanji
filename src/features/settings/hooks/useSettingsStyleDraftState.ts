@@ -20,6 +20,10 @@ export function useSettingsStyleDraftState(settings: UserSettings) {
     setGlobalFontUrlDraft(settings.globalFontUrl || "");
   }, [settings.globalFontSize, settings.globalFontUrl]);
 
+  useEffect(() => {
+    setWallpaper(settings.wallpaper);
+  }, [settings.wallpaper]);
+
   return {
     wallpaper, setWallpaper, bubbleCss, setBubbleCss, globalCss, setGlobalCss,
     chatGlobalCSS, setChatGlobalCSS, globalChatCssTemplateCopied, setGlobalChatCssTemplateCopied,

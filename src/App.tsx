@@ -4,7 +4,7 @@ import { subscribeOfflineMemorySyncNotifications } from "./features/offline/serv
 import { createId } from "./core/id/createId";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
-import { applySettingsDurableOverlay, clearSettingsDurableOverlay, loadSettings, loadSettingsDurableOverlay, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
+import { applySettingsAssetOverlay, applySettingsDurableOverlay, clearSettingsDurableOverlay, loadSettings, loadSettingsAssetOverlay, loadSettingsDurableOverlay, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
@@ -616,6 +616,7 @@ export default function App() {
     const handle = window.setTimeout(preloadIdleApps, 600);
     return () => window.clearTimeout(handle);
   }, []);
+
   const seedFreshDesktopDefaults = useRef(
     typeof window !== "undefined" && shouldSeedFreshDesktopDefaults(window.localStorage),
   ).current;
@@ -719,6 +720,22 @@ export default function App() {
       settingsRef.current = hydrated;
       setSettingsState(hydrated);
       void clearSettingsDurableOverlay();
+    });
+    return () => { active = false; };
+  }, []);
+
+  // Wallpaper and custom icon bytes are stored in IndexedDB while the
+  // synchronous settings record keeps only small references. Hydrate the
+  // runtime copy after the initial localStorage bootstrap so every existing
+  // renderer can continue using the normal settings fields.
+  useEffect(() => {
+    let active = true;
+    void loadSettingsAssetOverlay().then((overlay) => {
+      if (!active || !overlay) return;
+      const hydrated = applySettingsAssetOverlay(settingsRef.current, overlay);
+      if (hydrated === settingsRef.current) return;
+      settingsRef.current = hydrated;
+      setSettingsState(hydrated);
     });
     return () => { active = false; };
   }, []);

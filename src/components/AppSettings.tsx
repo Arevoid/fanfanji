@@ -1065,7 +1065,7 @@ export default function AppSettings({
                           type="button"
                           onClick={() => {
                             setWallpaper("");
-                            handleSave({ wallpaper: "", wallpaperSource: undefined });
+                            handleSave({ wallpaper: "", wallpaperSource: undefined, wallpaperAssetId: undefined });
                           }}
                           className="text-[10px] text-red-500 hover:text-red-600 font-semibold"
                         >
@@ -1095,7 +1095,7 @@ export default function AppSettings({
                             type="button"
                             onClick={() => {
                               setWallpaper("");
-                              handleSave({ wallpaper: "", wallpaperSource: undefined });
+                              handleSave({ wallpaper: "", wallpaperSource: undefined, wallpaperAssetId: undefined });
                             }}
                             className="bg-red-500/90 hover:bg-red-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm transition-colors"
                           >
