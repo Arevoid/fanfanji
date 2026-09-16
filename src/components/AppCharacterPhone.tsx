@@ -85,7 +85,7 @@ import {
   advanceCharacterPhoneWithResult,
   type CharacterPhoneGenerationNoChangeReason,
 } from "../features/characterPhone/characterPhoneProgression";
-import { ensureCharacterPhoneContent } from "../features/characterPhone/characterPhoneContent";
+import { ensureCharacterPhoneContent, hasMissingCharacterPhoneContactThreads } from "../features/characterPhone/characterPhoneContent";
 import { selectCharacterPhoneWorldBookEntries } from "../features/characterPhone/characterPhoneLifeContext";
 import { buildCharacterPhoneAwarenessMessage } from "../features/characterPhone/characterPhoneReaction";
 import { discoverCharacterPhoneActions } from "../features/characterPhone/characterPhoneDetection";
@@ -462,8 +462,9 @@ function openCharacterPhone(
     contextualPhone.lifeEvents,
   ].some((items) => items.length > 0);
   // New records (and old empty records created before the explicit marker was
-  // introduced) should run the one-time first-entry generation. Existing
-  // phones that already contain user data are left untouched.
+  // introduced) should run the one-time first-entry generation. A phone with
+  // imported conversations is already initialized; missing NPC history is
+  // repaired separately so other phone apps are not regenerated.
   const shouldQueueInitialGeneration = !contextualPhone.initialContentGeneratedAt
     && !contextualPhone.initialContentPending
     && !hasStoredPhoneContent;
@@ -476,7 +477,9 @@ function openCharacterPhone(
   // prevents this from running again on later opens.
   const shouldRepairInitialGeneration = Boolean(contextualPhone.initialContentGeneratedAt)
     && !contextualPhone.initialContentPending
-    && (!storedUserContact || !hasStoredUserThread || contextualPhone.galleryItems.length === 0);
+    && (!storedUserContact
+      || !hasStoredUserThread
+      || contextualPhone.galleryItems.length === 0);
   const preparedPhone = shouldRepairInitialGeneration
     ? { ...contextualPhone, initialContentGeneratedAt: undefined, initialContentPending: true }
     : shouldQueueInitialGeneration
@@ -1701,9 +1704,10 @@ export default function AppCharacterPhone({
     setPhoneDataNotice("");
   };
 
-  const generateCharacterPhoneContent = async (options: { initial?: boolean; phone?: CharacterPhoneRecord } = {}) => {
+  const generateCharacterPhoneContent = async (options: { initial?: boolean; contactThreadRepair?: boolean; phone?: CharacterPhoneRecord } = {}) => {
     const isInitialGeneration = Boolean(options.initial);
-    if ((!unlocked && !isInitialGeneration) || !selectedCharacter || isAdvancing) return;
+    const isContactThreadRepair = Boolean(options.contactThreadRepair);
+    if ((!unlocked && !isInitialGeneration && !isContactThreadRepair) || !selectedCharacter || isAdvancing) return;
     const basePhone = options.phone || currentPhone;
     if (!basePhone) return;
     if (isInitialGeneration && (!basePhone.initialContentPending || basePhone.initialContentGeneratedAt || initialGenerationPhoneIdRef.current === basePhone.id)) return;
@@ -1743,6 +1747,7 @@ export default function AppCharacterPhone({
           musicTracks,
           settings,
           initial: isInitialGeneration,
+          contactThreadRepair: isContactThreadRepair,
         }),
         timeoutPromise,
       ]);
@@ -1769,7 +1774,7 @@ export default function AppCharacterPhone({
       // generated post is enough to establish the shared social trace.
       newGeneratedPosts.sort((left, right) => right.timestamp - left.timestamp).slice(0, 1).forEach(syncCharacterPhonePost);
       setPhoneNotice(advancedResult.status === "generated"
-        ? isInitialGeneration ? "角色手机已完成首次生活初始化" : "角色手机已生成新的生活痕迹"
+        ? isInitialGeneration ? "角色手机已完成首次生活初始化" : isContactThreadRepair ? "已补全联系人聊天记录" : "角色手机已生成新的生活痕迹"
         : characterPhoneGenerationNoChangeNotice(advancedResult.reason));
     } catch (error) {
       if (timedOut && mountedRef.current && generationRequestRef.current === requestId) {
@@ -1824,6 +1829,8 @@ export default function AppCharacterPhone({
       setNotice("");
       if (openedPhone.initialContentPending && !openedPhone.initialContentGeneratedAt) {
         void generateCharacterPhoneContent({ initial: true, phone: openedPhone });
+      } else if (hasMissingCharacterPhoneContactThreads(openedPhone)) {
+        void generateCharacterPhoneContent({ contactThreadRepair: true, phone: openedPhone });
       }
       return;
     }

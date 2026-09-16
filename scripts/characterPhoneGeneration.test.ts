@@ -265,6 +265,90 @@ try {
   assert.ok((batchInitial.phone.musicTracks?.length || 0) >= 2 && (batchInitial.phone.listeningHistory?.length || 0) >= 2, "first initialization keeps music tracks and listening history");
   assert.ok(batchInitial.phone.currentlyPlayingTrackId, "first initialization persists the currently-playing track");
 
+  responsePayload = {
+    lifeEventSummary: "老妈提醒角色周末回家吃饭",
+    evidenceSourceIds: ["worldbook:world-generation"],
+  };
+  const npcHistoryRepair = await advanceCharacterPhoneWithResult({
+    phone: {
+      ...phone,
+      initialContentGeneratedAt: 900,
+      contacts: [...phone.contacts, {
+        id: "contact-mom-without-thread",
+        name: "老妈",
+        relation: "家人",
+        kind: "npc",
+        isLongTerm: true,
+        isNpc: true,
+        source: "generated",
+        sourceRefs: [{ kind: "worldbook", id: "world-generation" }],
+      }],
+    },
+    character,
+    activeIdentity: identity,
+    relationships: [relation],
+    messages,
+    moments: [],
+    worldBookEntries: worldBook,
+    settings,
+    initial: false,
+    now: 1_175,
+  });
+  const repairedNpcThread = npcHistoryRepair.phone.threadMessages.filter((message) => message.contactId === "contact-mom-without-thread");
+  assert.equal(npcHistoryRepair.status, "generated", "validated generation can repair an existing NPC contact after first initialization");
+  assert.equal(repairedNpcThread.length, 2, "an evidence-backed contact missing history receives a two-sided thread");
+  assert.ok(repairedNpcThread.some((message) => message.sender === "contact") && repairedNpcThread.some((message) => message.sender === "character"));
+
+  responsePayload = {
+    lifeEventSummary: "老妈提醒角色周末回家吃饭",
+    evidenceSourceIds: ["worldbook:world-generation"],
+    contactThreads: [{
+      contactName: "老妈",
+      messages: [
+        { sender: "contact", content: "周末回来吃饭吗？" },
+        { sender: "character", content: "好，我周六回去。" },
+      ],
+    }],
+    diaryEntries: [{ title: "不应写入", body: "专项修复不能写日记。" }],
+    scheduleItems: [{ title: "不应写入日程", detail: "专项修复不能写日程。", daysFromNow: 1 }],
+  };
+  const phoneWithExistingArtifacts = {
+    ...phone,
+    initialContentGeneratedAt: 900,
+    diaryEntries: [{ id: "diary-existing", title: "已有日记", body: "保持不变", timestamp: 850 }],
+    scheduleItems: [{ id: "schedule-existing", title: "已有日程", detail: "保持不变", timestamp: 950 }],
+    contacts: [...phone.contacts, {
+      id: "contact-mom-targeted-repair",
+      name: "老妈",
+      relation: "家人",
+      kind: "npc" as const,
+      isLongTerm: true,
+      isNpc: true,
+      source: "generated" as const,
+      sourceRefs: [{ kind: "worldbook" as const, id: "world-generation" }],
+    }],
+  };
+  const targetedNpcHistoryRepair = await advanceCharacterPhoneWithResult({
+    phone: phoneWithExistingArtifacts,
+    character,
+    activeIdentity: identity,
+    relationships: [relation],
+    messages,
+    moments: [],
+    worldBookEntries: worldBook,
+    settings,
+    contactThreadRepair: true,
+    now: 1_180,
+  });
+  assert.equal(targetedNpcHistoryRepair.status, "generated");
+  assert.equal(targetedNpcHistoryRepair.phone.initialContentGeneratedAt, 900, "contact-only repair preserves initialization marker");
+  assert.deepEqual(targetedNpcHistoryRepair.phone.diaryEntries, phoneWithExistingArtifacts.diaryEntries, "contact-only repair leaves diary untouched");
+  assert.deepEqual(targetedNpcHistoryRepair.phone.scheduleItems, phoneWithExistingArtifacts.scheduleItems, "contact-only repair leaves schedules untouched");
+  assert.equal(targetedNpcHistoryRepair.phone.browserHistory.length, phoneWithExistingArtifacts.browserHistory.length);
+  assert.equal(targetedNpcHistoryRepair.phone.threadMessages.filter((message) => message.contactId === "contact-mom-targeted-repair").length, 2);
+  assert.match(String(requestBodies.at(-1)?.message || ""), /联系人聊天记录专项修复/);
+  assert.match(String(requestBodies.at(-1)?.message || ""), /不得生成.*日记.*日程/);
+
   const missingApiConfig = await advanceCharacterPhoneWithResult({
     phone,
     character,

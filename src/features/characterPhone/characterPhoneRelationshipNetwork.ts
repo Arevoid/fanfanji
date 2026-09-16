@@ -5,6 +5,7 @@ import type {
   RelationshipNetworkNpc,
   RelationshipNetworkNode,
 } from "../../domain/relationshipNetwork/relationshipNetworkTypes";
+import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 
 /**
  * The role phone is a projection of the active identity's relationship graph.
@@ -77,9 +78,10 @@ export function listCharacterPhoneRelationshipNetworkContacts(input: {
   const labelsByNpcId = collectConnectedNpcIds(input.character, input.ownerIdentityId, input.maps);
   const linkedCharacterByNpcId = new Map(
     input.characters
+      .filter((candidate) => !candidate.isContactInstance)
       .filter((candidate) => (candidate.ownerIdentityId || "identity-1") === input.ownerIdentityId)
       .filter((candidate) => Boolean(candidate.relationshipNetworkNpcId))
-      .map((candidate) => [candidate.relationshipNetworkNpcId!, candidate.id]),
+      .map((candidate) => [candidate.relationshipNetworkNpcId!, resolveCanonicalCharacterId(candidate.id, input.characters)]),
   );
   return input.npcs
     .filter((npc) => npc.ownerIdentityId === input.ownerIdentityId && labelsByNpcId.has(npc.id))

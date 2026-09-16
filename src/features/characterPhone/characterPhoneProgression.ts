@@ -494,7 +494,8 @@ function findThreadContact(
 ): CharacterPhoneContact | undefined {
   const visibleNpcContacts = contacts.filter((contact) => !contact.removedAt && contact.source !== "user");
   if (requestedName) {
-    return visibleNpcContacts.find((contact) => contactKey(contact.name) === contactKey(requestedName));
+    const matchingContacts = visibleNpcContacts.filter((contact) => contactKey(contact.name) === contactKey(requestedName));
+    return matchingContacts.length === 1 ? matchingContacts[0] : undefined;
   }
   if (newlyAdded.length === 1) return newlyAdded[0];
   return visibleNpcContacts.length === 1 ? visibleNpcContacts[0] : undefined;
@@ -504,6 +505,8 @@ type GeneratedThreadDraft = { sender: "contact" | "character"; content: string }
 
 type GeneratedContactThreadDraft = {
   contactName: string;
+  /** Local deterministic backfills bind by stable contact ID, never display name. */
+  contactId?: string;
   messages: GeneratedThreadDraft[];
 };
 
@@ -684,6 +687,8 @@ type CharacterPhoneProgressionInput = {
   settings?: UserSettings;
   /** First unlock generation should establish a coherent trace in every supported app. */
   initial?: boolean;
+  /** Repair missing NPC threads without regenerating other phone apps. */
+  contactThreadRepair?: boolean;
   now?: number;
 };
 
@@ -697,6 +702,7 @@ export async function advanceCharacterPhoneWithResult(
 ): Promise<CharacterPhoneGenerationResult> {
   const now = input.now ?? Date.now();
   const isInitialGeneration = Boolean(input.initial);
+  const isContactThreadRepair = Boolean(input.contactThreadRepair);
   const characters = input.characters ?? [input.character];
   const relationships = input.relationships ?? [];
   const messages = input.messages ?? [];
@@ -774,7 +780,9 @@ export async function advanceCharacterPhoneWithResult(
   });
   const textImageEvidence = collectTextImageEvidence(lifeContext);
   const roleName = roleDisplayName(input.character);
-  const generationRequest = isInitialGeneration
+  const generationRequest = isContactThreadRepair
+    ? "这是一次联系人聊天记录专项修复。只为下面列出的缺少聊天记录的已有联系人生成独立 contactThreads，每人至少一条联系人消息和一条角色回复。不得新增、删除或合并联系人；不得生成用户聊天、日记、日程、浏览器、相册、朋友圈、音乐、备忘录、待办、通话或其他应用记录。联系人名称必须与待修复列表中的名称完全一致。"
+    : isInitialGeneration
     ? "这是该角色手机首次初始化。忽略前文可能出现的2—4条总量示例，以本条数量要求为准。请围绕同一个有证据的生活事件，批量生成完整但自然的手机生活：与用户的直接聊天 userThreadMessages 必须有 4—6 条且包含角色和用户双方；每一个有证据的非用户 NPC（包括关系网已连线 NPC）都必须在 contacts 中出现，并用 contactThreads 生成属于自己的聊天，不能把不同联系人混在同一线程；没有证据的人不要添加；浏览器 4—8 条搜索记录；未来 3—6 天内分布 1—3 条日程；日记、备忘录、待办合计 2—4 条；朋友圈至少 1 条，visibility 必须是 user（仅用户可见）或 private（仅自己可见）；音乐必须有曲目、收听历史、常听时段和当前正在收听曲目；相册至少保存一条与该事件有关的文字图描述。优先使用 userThreadMessages、contactThreads、browserEntries、scheduleItems、diaryEntries、noteEntries、todoEntries、posts、musicTracks、musicListening、musicNowPlaying 数组字段表达数量；同一事件可以投影到多个应用，但每条仍须有证据。"
     : "这是一次追加生活痕迹。请从最有依据的 2—4 个应用中随机选择少量记录，避免每次都选择相同应用或相同数量；不要为了填满首次初始化的数量而重复旧内容。";
   let response;
@@ -785,21 +793,23 @@ export async function advanceCharacterPhoneWithResult(
       // context, but send the current batch schema last so the model cannot
       // mistake the old singular example for the active quantity contract.
       ...{
-        message: `${generationRequest}\n只返回 JSON，不要 Markdown。数量字段请优先使用数组：userThreadMessages:[{sender:"contact或character",content:"用户与角色的消息"}]、contactThreads:[{contactName:"联系人",messages:[{sender:"contact或character",content:"消息内容"}]}]、threadMessages:[{sender:"contact或character",content:"兼容旧版单联系人消息"}]、browserEntries:[{query:"搜索词",title:"记录标题",results:[{platform:"平台",title:"结果标题",snippet:"摘要"}],searchResults:[{platform:"平台",title:"结果标题",snippet:"摘要"}],reflection:"搜索后的私下反应"}]、scheduleItems:[{title:"日程标题",detail:"具体事项",daysFromNow:3}]、diaryEntries:[{title:"日记标题",body:"私密想法"}]、noteEntries:[{title:"备忘录标题",content:"具体内容"}]、todoEntries:[{text:"待办事项"}]、posts:[{content:"朋友圈内容",visibility:"user、private 或 public"}]、musicTracks:[{title:"曲目",artist:"艺术家",duration:"3:30",current:true}]、musicListening:[{trackTitle:"曲目",playedHoursAgo:2,durationSeconds:180,playCount:2}]、musicNowPlaying:{trackTitle:"当前曲目"}。同时保留 lifeEventSummary、evidenceSourceIds、contacts、threadContactName、callContactName、callDirection、galleryTitle、galleryCaption、hiddenGalleryTitle、hiddenGalleryCaption 等字段。首次初始化按上面的数量要求完整填写；追加生成只随机填写 2—4 个应用。没有证据的字段返回空数组或空字符串。`,
+        message: isContactThreadRepair
+          ? `${generationRequest}\n只返回 JSON，不要 Markdown：{"lifeEventSummary":"与已有证据对应的简短事件","evidenceSourceIds":["只能从上下文给出的来源 ID 中选择"],"contactThreads":[{"contactName":"必须逐字匹配待修复联系人","messages":[{"sender":"contact或character","content":"自然的聊天消息"}]}]}。仅输出待修复联系人对应的聊天，不得输出其他字段。待修复联系人：${base.contacts.filter((contact) => !contact.removedAt && contact.source !== "user" && contact.kind !== "user" && Boolean(contact.sourceRefs?.length || contact.linkedCharacterId || contact.relationshipNetworkNpcId) && !base.threadMessages.some((message) => message.contactId === contact.id)).map((contact) => contact.name).join("、")}`
+          : `${generationRequest}\n只返回 JSON，不要 Markdown。数量字段请优先使用数组：userThreadMessages:[{sender:"contact或character",content:"用户与角色的消息"}]、contactThreads:[{contactName:"联系人",messages:[{sender:"contact或character",content:"消息内容"}]}]、threadMessages:[{sender:"contact或character",content:"兼容旧版单联系人消息"}]、browserEntries:[{query:"搜索词",title:"记录标题",results:[{platform:"平台",title:"结果标题",snippet:"摘要"}],searchResults:[{platform:"平台",title:"结果标题",snippet:"摘要"}],reflection:"搜索后的私下反应"}]、scheduleItems:[{title:"日程标题",detail:"具体事项",daysFromNow:3}]、diaryEntries:[{title:"日记标题",body:"私密想法"}]、noteEntries:[{title:"备忘录标题",content:"具体内容"}]、todoEntries:[{text:"待办事项"}]、posts:[{content:"朋友圈内容",visibility:"user、private 或 public"}]、musicTracks:[{title:"曲目",artist:"艺术家",duration:"3:30",current:true}]、musicListening:[{trackTitle:"曲目",playedHoursAgo:2,durationSeconds:180,playCount:2}]、musicNowPlaying:{trackTitle:"当前曲目"}。同时保留 lifeEventSummary、evidenceSourceIds、contacts、threadContactName、callContactName、callDirection、galleryTitle、galleryCaption、hiddenGalleryTitle、hiddenGalleryCaption 等字段。首次初始化按上面的数量要求完整填写；追加生成只随机填写 2—4 个应用。没有证据的字段返回空数组或空字符串。`,
       },
       history: [],
       systemInstruction: `你扮演真实存在的角色“${roleName}”，正在整理他自己的手机。\n${context}\n\n${generationRequest}\n严格规则：
 1. 所有内容必须来自角色人设、世界书、最近上下文或已有手机记录的合理延伸；不能凭空制造与角色无关的人和事件。
 2. 联系人只能是角色现实中可能认识的人：用户、已有角色关系、世界书/人设明确提到的家人朋友同事，或有明确依据的新 NPC。群聊必须有明确的群名称或成员依据。不要读取或生成用户不认识该角色的好友。name 只能填写真实的人名或群聊名，不能填写“我可”“我都开始怀疑你是不”这类句子片段；无法确定正式名称时请留空并不要添加该联系人。
-3. userThreadMessages 只表示用户与角色的直接对话；contactThreads/threadMessages 只表示 NPC 或群聊。每个有证据的非用户联系人（尤其是关系网已连线 NPC）都必须对应 contacts 和自己的 contactThreads；每个 contactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成该线程。不要把 NPC 聊天塞进用户与角色的聊天镜像。
-4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isInitialGeneration ? "首次初始化时必须覆盖所有支持内容生成的应用，并满足聊天4—6条、浏览器4—8条、未来3—6天的1—3条日程、日记/备忘录/待办合计2—4条、至少一条仅用户可见或仅自己可见的朋友圈和音乐收听/常听时段/正在收听数据；不要使用模板标题。" : "后续生活推进从最有依据的2—4个应用随机选择少量记录，不要每个应用都强行生成一条，也不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。"}
+3. userThreadMessages 只表示用户与角色的直接对话；contactThreads/threadMessages 只表示 NPC 或群聊。${isContactThreadRepair ? "专项修复只可为指定待修复联系人写独立 contactThreads；这些联系人都已存在，不得返回或改动 contacts。" : "每个有证据的非用户联系人（尤其是关系网已连线 NPC）都必须对应 contacts 和自己的 contactThreads；每个 contactName 必须对应 contacts 或已有联系人；无法判断具体联系人就不要生成该线程。"}不要把 NPC 聊天塞进用户与角色的聊天镜像。
+4. 内容要像真实手机记录：可以不完整、延迟、含蓄或不规律；${isContactThreadRepair ? "联系人聊天修复只生成指定联系人双方自然、简短的消息，不写入其他应用。" : isInitialGeneration ? "首次初始化时必须覆盖所有支持内容生成的应用，并满足聊天4—6条、浏览器4—8条、未来3—6天的1—3条日程、日记/备忘录/待办合计2—4条、至少一条仅用户可见或仅自己可见的朋友圈和音乐收听/常听时段/正在收听数据；不要使用模板标题。" : "后续生活推进从最有依据的2—4个应用随机选择少量记录，不要每个应用都强行生成一条，也不要使用“角色的日常”“角色需要记住的事”“又想了一下”等模板标题。"}
 5. 角色真实姓名、备注名和人设文件名是不同概念。绝不能把文件名、输入字段名、世界书标题当作角色姓名或正文内容。
 6. 日记必须是角色不会公开展示的私密想法；备忘录和日程必须是具体事项；浏览器输出搜索记录标题和 2—3 条不同平台的 AI 结果卡片，不能输出网址或引导查看原始页面；相册字段只描述角色真实可能保存的图片或文字图，不要凭空输出图片文件名。主手机的文字图只以描述形式参考，角色手机会在本地渲染文字图，不要声称有真实照片。
  7. lifeEventSummary 必须是本次唯一的生活事件；生成的应用字段必须是这个事件在不同应用中的自然痕迹，时间和人物不能互相矛盾。
 8. searchReflection 必须是 1—3 句、约 15—90 字的第一人称私下反应：回答“为什么偏偏现在搜”“哪一点马上有用”“还有什么没想通或准备怎么做”。允许短句、停顿、犹豫、自我纠正和轻微情绪，必须贴合角色口吻与当下事件；不要复述搜索词，不要写成百科总结、心理分析、鸡汤或“我查这个是为了……”模板，也不要提到 AI、提示词或应用规则。若没有明确搜索动机就留空。
 9. evidenceSourceIds 只能从“可引用的证据来源ID”原样选择；没有证据就返回空数组，不得编造 ID。
 10. 隐藏相册字段只允许承载明确私密/隐秘证据，且生成的条目必须是 hidden=true 的私藏文字图；普通日常、公开动态和普通聊天图片不得放入隐藏相册。
-11. ${isInitialGeneration ? "首次初始化必须优先使用批量数组字段满足各应用数量下限，并让所有记录围绕同一事件；只有在字段确实没有任何证据时才留空。" : "每次随机选择 2—4 个最有依据的字段生成，其余全部留空；宁可少写，不要为了填满字段编造内容。"}
+11. ${isContactThreadRepair ? "联系人聊天修复只允许返回 evidenceSourceIds、lifeEventSummary 和 contactThreads；禁止填充或修改其他应用数据。" : isInitialGeneration ? "首次初始化必须优先使用批量数组字段满足各应用数量下限，并让所有记录围绕同一事件；只有在字段确实没有任何证据时才留空。" : "每次随机选择 2—4 个最有依据的字段生成，其余全部留空；宁可少写，不要为了填满字段编造内容。"}
 12. 角色手机解锁密码和隐藏相册密码在手机创建时已经由系统按该角色资料先行设置并持久化；不要创建、修改、猜测或透露任何密码，也不要因为上下文中出现一串数字就回写密码字段。密码相关内容若确有证据，只能作为普通生活记录保留。
 13. 不要生成解释、旁白、占位符、统一问候或应用说明；只返回 JSON。`,
       apiKey: input.settings.apiKey,
@@ -834,6 +844,63 @@ export async function advanceCharacterPhoneWithResult(
   // If the provider cannot point at any scoped source, keep the phone unchanged.
   if (validatedSourceRefs.length === 0) {
     return { phone: base, status: "no_change", reason: "missing_evidence", createdCount: 0 };
+  }
+  if (isContactThreadRepair) {
+    const threadedContactIds = new Set(base.threadMessages.map((message) => message.contactId));
+    const targets = base.contacts.filter((contact) => !contact.removedAt
+      && contact.source !== "user"
+      && contact.kind !== "user"
+      && Boolean(contact.sourceRefs?.length || contact.linkedCharacterId || contact.relationshipNetworkNpcId)
+      && !threadedContactIds.has(contact.id));
+    if (targets.length === 0) {
+      return {
+        phone: base,
+        status: "no_change",
+        reason: contextualPhone !== input.phone ? "context_synced" : "duplicate_content",
+        createdCount: 0,
+      };
+    }
+    const requestedThreads = parseGeneratedContactThreads(raw.contactThreads, sourceFileName);
+    const repairMessages: CharacterPhoneThreadMessage[] = [];
+    const updatedContacts = base.contacts.map((contact) => {
+      const target = targets.find((candidate) => candidate.id === contact.id);
+      if (!target) return contact;
+      const matchingThreads = requestedThreads.filter((thread) => contactKey(thread.contactName) === contactKey(target.name));
+      const requestedThread = matchingThreads.length === 1
+        && base.contacts.filter((candidate) => !candidate.removedAt && contactKey(candidate.name) === contactKey(target.name)).length === 1
+        ? matchingThreads[0]
+        : undefined;
+      const hasBothSenders = Boolean(requestedThread?.messages.some((message) => message.sender === "contact")
+        && requestedThread?.messages.some((message) => message.sender === "character"));
+      const drafts = hasBothSenders
+        ? requestedThread!.messages.slice(0, 6)
+        : buildInitialContactFallback(target, cleanGeneratedText(raw.lifeEventSummary, sourceFileName, 240), input.character);
+      const createdMessages = drafts.map((draft, index): CharacterPhoneThreadMessage => ({
+        id: createId("phone-contact-thread-repair"),
+        contactId: target.id,
+        sender: draft.sender,
+        content: draft.content,
+        timestamp: now - (drafts.length - index) * 60 * 1000,
+        sourceRefs: validatedSourceRefs,
+      }));
+      repairMessages.push(...createdMessages);
+      const latestMessage = createdMessages.at(-1);
+      return latestMessage
+        ? { ...contact, lastMessage: latestMessage.content, lastMessageAt: latestMessage.timestamp }
+        : contact;
+    });
+    return {
+      phone: {
+        ...base,
+        contacts: updatedContacts,
+        threadMessages: [...base.threadMessages, ...repairMessages],
+        lastGeneratedAt: repairMessages.length > 0 ? now : base.lastGeneratedAt,
+        updatedAt: now,
+      },
+      status: repairMessages.length > 0 ? "generated" : "no_change",
+      ...(repairMessages.length === 0 ? { reason: "duplicate_content" as const } : {}),
+      createdCount: repairMessages.length,
+    };
   }
   const contactEvidenceText = [
     input.character.personality,
@@ -906,30 +973,36 @@ export async function advanceCharacterPhoneWithResult(
     );
   }
   const contactThreadDrafts = parseGeneratedContactThreads(raw.contactThreads, sourceFileName);
-  const explicitContactThreadNames = new Set([
-    ...contactThreadDrafts.map((thread) => contactKey(thread.contactName)),
-    ...(requestedThreadContact ? [contactKey(requestedThreadContact)] : []),
-  ]);
-  // The first-life response may still contain the legacy contacts array
-  // without contactThreads. Give each newly generated, evidence-backed NPC a
-  // distinct role-authored trace so the inbox is not one populated row plus a
-  // list of empty contacts. This is deliberately limited to initial records;
-  // later context-only contacts remain untouched.
-  if (isInitialGeneration && validatedSourceRefs.length > 0) {
+  const explicitContactThreadIds = new Set(contactThreadDrafts.flatMap((thread) => {
+    const matches = mergedContacts.contacts.filter((contact) => !contact.removedAt
+      && contact.source !== "user"
+      && contact.kind !== "user"
+      && contactKey(contact.name) === contactKey(thread.contactName));
+    return matches.length === 1 ? [matches[0].id] : [];
+  }));
+  if (threadContact && threadDrafts.length > 0) explicitContactThreadIds.add(threadContact.id);
+  // Providers can return contacts without their separate NPC threads, and an
+  // older phone can already contain evidence-backed contacts whose first-life
+  // generation did not create a thread. Backfill only contacts with source
+  // evidence, and only after this response itself passes evidence validation.
+  // Existing threads make the operation idempotent across retries/reloads.
+  if (validatedSourceRefs.length > 0) {
     const existingThreadContactIds = new Set(base.threadMessages.map((message) => message.contactId));
     mergedContacts.contacts
       .filter((contact) => !contact.removedAt
         && contact.source !== "user"
-        && (contact.sourceRefs?.length ?? 0) > 0
-        && !explicitContactThreadNames.has(contactKey(contact.name))
+        && contact.kind !== "user"
+        && Boolean(contact.sourceRefs?.length || contact.linkedCharacterId || contact.relationshipNetworkNpcId)
+        && !explicitContactThreadIds.has(contact.id)
         && !existingThreadContactIds.has(contact.id))
       .forEach((contact) => {
         // These contacts already came from relationship-network, character,
         // world-book, or validated provider evidence. The fallback is only a
         // two-sided local trace for that evidence; it never creates a new
-        // contact and never runs without a validated source reference.
+        // contact and runs only after the provider cites valid scoped evidence.
         contactThreadDrafts.push({
           contactName: contact.name,
+          contactId: contact.id,
           messages: buildInitialContactFallback(contact, lifeEventSummary, input.character),
         });
       });
@@ -1004,9 +1077,15 @@ export async function advanceCharacterPhoneWithResult(
   }
 
   contactThreadDrafts.forEach((thread) => {
-    const contact = mergedContacts.contacts.find((candidate) => !candidate.removedAt
+    const matchingContacts = mergedContacts.contacts.filter((candidate) => !candidate.removedAt
       && candidate.source !== "user"
-      && contactKey(candidate.name) === contactKey(thread.contactName));
+      && (thread.contactId
+        ? candidate.id === thread.contactId
+        : contactKey(candidate.name) === contactKey(thread.contactName)));
+    // Provider thread drafts currently identify recipients by display name.
+    // If multiple distinct contacts share that name, never attach history to
+    // an arbitrary identity.
+    const contact = matchingContacts.length === 1 ? matchingContacts[0] : undefined;
     if (!contact) return;
     thread.messages.forEach((draft, index) => {
       const message: CharacterPhoneThreadMessage = {

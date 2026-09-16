@@ -6,7 +6,8 @@ import type {
   WorldBookEntry,
   MusicTrack,
 } from "../../types";
-import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
+import { DEFAULT_IDENTITY_ID, type CharacterRelationship } from "../../domain/relationship/characterRelationship";
+import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 import { buildCharacterPhoneLifeContext } from "./characterPhoneLifeContext";
 import { listCharacterPhoneRelationshipNetworkContacts, type CharacterPhoneRelationshipNetworkContact } from "./characterPhoneRelationshipNetwork";
 import { createCharacterPhoneInitialAvatar, normalizeCharacterPhoneContactName } from "./characterPhoneContactVisuals";
@@ -65,6 +66,55 @@ function includesAny(text: string, words: string[]): boolean {
 
 function contactKey(name: string): string {
   return name.trim().toLocaleLowerCase();
+}
+
+function linkedCharacterId(contact: CharacterPhoneContact): string | undefined {
+  if (contact.linkedCharacterId) return contact.linkedCharacterId;
+  if (contact.source !== "linked" || contact.kind !== "character") return undefined;
+  return contact.sourceRefs?.find((source) => source.kind === "character")?.id;
+}
+
+function verifiedContactIdentityKey(
+  contact: CharacterPhoneContact,
+  characters: readonly Character[],
+): string | undefined {
+  if (contact.source === "user" || contact.kind === "user") return "user";
+  const characterId = linkedCharacterId(contact);
+  if (characterId) return `character:${resolveCanonicalCharacterId(characterId, characters)}`;
+  const networkNpcId = contact.relationshipNetworkNpcId
+    || contact.sourceRefs?.find((source) => source.kind === "relationship-network")?.id;
+  return networkNpcId ? `relationship-network:${networkNpcId}` : undefined;
+}
+
+function mergeVerifiedDuplicateContacts(
+  contacts: CharacterPhoneContact[],
+  threadMessages: CharacterPhoneThreadMessage[],
+  characters: readonly Character[],
+): { contacts: CharacterPhoneContact[]; threadMessages: CharacterPhoneThreadMessage[] } {
+  const keptByIdentity = new Map<string, CharacterPhoneContact>();
+  const keptById = new Map<string, CharacterPhoneContact>();
+  const remappedContactIds = new Map<string, string>();
+  const merged: CharacterPhoneContact[] = [];
+
+  contacts.forEach((contact) => {
+    const identityKey = verifiedContactIdentityKey(contact, characters);
+    const previous = (identityKey && keptByIdentity.get(identityKey)) || keptById.get(contact.id);
+    if (previous) {
+      remappedContactIds.set(contact.id, previous.id);
+      return;
+    }
+    merged.push(contact);
+    keptById.set(contact.id, contact);
+    if (identityKey) keptByIdentity.set(identityKey, contact);
+  });
+
+  return {
+    contacts: merged,
+    threadMessages: threadMessages.map((message) => {
+      const contactId = remappedContactIds.get(message.contactId);
+      return contactId ? { ...message, contactId } : message;
+    }),
+  };
 }
 
 function isGenericContactName(name: string): boolean {
@@ -176,16 +226,20 @@ function buildContextContacts(
     }));
 }
 
-function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[] {
+function syncContacts(input: CharacterPhoneContentInput): {
+  contacts: CharacterPhoneContact[];
+  threadMessages: CharacterPhoneThreadMessage[];
+} {
   const userContact = makeUserContact(input.phone, input.activeIdentity);
+  const roleCharacterId = resolveCanonicalCharacterId(input.character.id, input.characters);
   const networkContacts = listCharacterPhoneRelationshipNetworkContacts({
     character: input.character,
     ownerIdentityId: input.phone.ownerIdentityId,
     characters: input.characters,
     npcs: input.relationshipNetworkNpcs || [],
     maps: input.relationshipNetworkMaps || [],
-  });
-  const networkByName = new Map(networkContacts.map((contact) => [contact.npc.name.trim().toLocaleLowerCase(), contact]));
+  }).filter((network) => !network.linkedCharacterId
+    || resolveCanonicalCharacterId(network.linkedCharacterId, input.characters) !== roleCharacterId);
   const toNetworkContact = (network: CharacterPhoneRelationshipNetworkContact): CharacterPhoneContact => ({
     id: scopedId(input.phone.id, "contact", `network-${network.npc.id}`),
     name: network.npc.name,
@@ -209,10 +263,14 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
     ...input.characters.map((candidate) => candidate.name),
     ...networkContacts.map((contact) => contact.npc.name),
   ].filter(Boolean);
-  const normalizedExisting = existing
+  const networkByIdentity = new Map(networkContacts.map((network) => {
+    const contact = toNetworkContact(network);
+    return [verifiedContactIdentityKey(contact, input.characters), network] as const;
+  }).filter((entry): entry is readonly [string, CharacterPhoneRelationshipNetworkContact] => Boolean(entry[0])));
+  const normalizedExisting: CharacterPhoneContact[] = existing
     .filter((contact) => contact.id !== userContact.id)
     .filter((contact) => !isGenericContactName(contact.name))
-    .flatMap((contact) => {
+    .flatMap((contact): CharacterPhoneContact[] => {
       const normalizedName = normalizeCharacterPhoneContactName(
         contact.name,
         knownContactNames,
@@ -222,8 +280,35 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
       // as broken contacts after a phone refresh. Linked names are protected
       // by the known-name fast path above.
       if (!normalizedName) return [];
-      const normalizedContact = { ...contact, name: normalizedName };
-      const network = networkByName.get(contactKey(normalizedContact.name));
+      let normalizedContact = { ...contact, name: normalizedName };
+      const linkedId = linkedCharacterId(normalizedContact);
+      const canonicalLinkedId = linkedId ? resolveCanonicalCharacterId(linkedId, input.characters) : undefined;
+      if (canonicalLinkedId === roleCharacterId) {
+        // Old phone versions could project a legacy contact copy of the phone's
+        // own character. Keep it hidden and retain its old thread data.
+        return [{ ...normalizedContact, removedAt: normalizedContact.removedAt || (input.now ?? Date.now()) }];
+      }
+      const linkedProfile = canonicalLinkedId
+        ? input.characters.find((candidate) => candidate.id === canonicalLinkedId && !candidate.isContactInstance)
+        : undefined;
+      if (linkedProfile && (linkedProfile.ownerIdentityId || DEFAULT_IDENTITY_ID) !== input.phone.ownerIdentityId) {
+        // Older versions could copy a different alias's archive character into
+        // this shared phone. Preserve its old messages, but hide that row from
+        // the current primary-owned contact list.
+        return [{ ...normalizedContact, removedAt: normalizedContact.removedAt || (input.now ?? Date.now()) }];
+      }
+      if (canonicalLinkedId && linkedId !== canonicalLinkedId) {
+        normalizedContact = {
+          ...normalizedContact,
+          linkedCharacterId: canonicalLinkedId,
+          sourceRefs: normalizedContact.sourceRefs?.map((source) => source.kind === "character"
+            && source.id === linkedId
+            ? { ...source, id: canonicalLinkedId }
+            : source),
+        };
+      }
+      const identityKey = verifiedContactIdentityKey(normalizedContact, input.characters);
+      const network = identityKey ? networkByIdentity.get(identityKey) : undefined;
       if (!network) {
         const source = normalizedContact.source ?? (normalizedContact.isNpc
           ? (normalizedContact.linkedCharacterId || normalizedContact.relationshipNetworkNpcId ? "linked" : "generated")
@@ -258,19 +343,20 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
         remark: contact.remark === network.npc.role ? undefined : contact.remark,
       }];
     });
-  const linkedIds = new Set(
-    input.characters
-      .filter((candidate) => candidate.id !== input.character.id && !candidate.isGroupChat)
-      .filter((candidate) => {
-        const context = buildContext(input.character, input.worldBookEntries);
-        return context.includes(candidate.name.toLocaleLowerCase())
-          || normalizedExisting.some((contact) => contact.name === candidate.name);
-      })
-      .map((candidate) => candidate.id),
-  );
+  const contactEvidenceContext = [
+    input.character.personality,
+    input.character.backstory,
+    ...input.worldBookEntries.map((entry) => entry.content),
+  ].filter(Boolean).join(" ").toLocaleLowerCase();
   const linkedContacts = input.characters
-    .filter((candidate) => linkedIds.has(candidate.id))
-    .filter((candidate) => !normalizedExisting.some((contact) => contact.name === candidate.name))
+    .filter((candidate) => !candidate.isContactInstance && !candidate.isGroupChat)
+    .filter((candidate) => (candidate.ownerIdentityId || DEFAULT_IDENTITY_ID) === input.phone.ownerIdentityId)
+    .filter((candidate) => resolveCanonicalCharacterId(candidate.id, input.characters) !== roleCharacterId)
+    .filter((candidate) => contactEvidenceContext.includes(candidate.name.toLocaleLowerCase()))
+    .filter((candidate) => {
+      const identityKey = `character:${resolveCanonicalCharacterId(candidate.id, input.characters)}`;
+      return !normalizedExisting.some((contact) => verifiedContactIdentityKey(contact, input.characters) === identityKey);
+    })
     .map((candidate) => ({
       id: scopedId(input.phone.id, "contact", `linked-${candidate.id}`),
       name: candidate.name,
@@ -280,21 +366,25 @@ function syncContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[
       isNpc: true,
       avatar: candidate.avatar || createCharacterPhoneInitialAvatar(candidate.name),
       source: "linked" as const,
-      linkedCharacterId: candidate.id,
-      sourceRefs: [{ kind: "character" as const, id: candidate.id }],
+      linkedCharacterId: resolveCanonicalCharacterId(candidate.id, input.characters),
+      sourceRefs: [{ kind: "character" as const, id: resolveCanonicalCharacterId(candidate.id, input.characters) }],
     }));
   const networkLinkedContacts = networkContacts
-    .filter((network) => !normalizedExisting.some((contact) => contactKey(contact.name) === contactKey(network.npc.name)))
+    .filter((network) => {
+      const networkContact = toNetworkContact(network);
+      const identityKey = verifiedContactIdentityKey(networkContact, input.characters);
+      return !normalizedExisting.some((contact) => identityKey
+        && verifiedContactIdentityKey(contact, input.characters) === identityKey);
+    })
     .map(toNetworkContact);
   const generated = buildContextContacts(input.phone, input.character, input.worldBookEntries);
   const nextContacts = [userContact, ...normalizedExisting, ...linkedContacts, ...networkLinkedContacts, ...generated];
-  const seenNames = new Set<string>();
-  return nextContacts.filter((contact) => {
-    const key = contactKey(contact.name);
-    if (!key || seenNames.has(key)) return false;
-    seenNames.add(key);
-    return true;
-  });
+  const existingThreadMessages = mergeVerifiedDuplicateContacts(
+    nextContacts,
+    input.phone.threadMessages ?? [],
+    input.characters,
+  );
+  return existingThreadMessages;
 }
 
 function buildRelationshipNetworkPhoneContacts(
@@ -698,6 +788,15 @@ export function normalizeCharacterPhoneMessages(messages: CharacterPhoneMessage[
   });
 }
 
+export function hasMissingCharacterPhoneContactThreads(phone: CharacterPhoneRecord): boolean {
+  const threadedContactIds = new Set((phone.threadMessages ?? []).map((message) => message.contactId));
+  return (phone.contacts ?? []).some((contact) => !contact.removedAt
+    && contact.source !== "user"
+    && contact.kind !== "user"
+    && Boolean(contact.sourceRefs?.length || contact.linkedCharacterId || contact.relationshipNetworkNpcId)
+    && !threadedContactIds.has(contact.id));
+}
+
 export function normalizeCharacterPhoneProactiveMessages(messages: Message[]): Message[] {
   const seenGenerated = new Set<string>();
   return messages.filter((message) => {
@@ -819,9 +918,10 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
     moments: lifeContext.moments,
     worldBookEntries: lifeContext.worldBookEntries,
   };
-  const contacts = syncContacts(scopedInput);
+  const syncedContacts = syncContacts(scopedInput);
+  const contacts = syncedContacts.contacts;
   const userContact = contacts[0];
-  const chat = syncUserChat(sourcePhone, input.character, userContact, lifeContext.messages, lifeContext.relationships);
+  const chat = syncUserChat({ ...sourcePhone, threadMessages: syncedContacts.threadMessages }, input.character, userContact, lifeContext.messages, lifeContext.relationships);
   // During first-life initialization the generator owns the conversation
   // history. Do not seed every contact with the same generic one-line opener;
   // that makes every chat look identical and leaves no character reply.

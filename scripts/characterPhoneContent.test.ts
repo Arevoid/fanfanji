@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { ensureCharacterPhoneContent, normalizeCharacterPhoneMessages } from "../src/features/characterPhone/characterPhoneContent";
+import { ensureCharacterPhoneContent, hasMissingCharacterPhoneContactThreads, normalizeCharacterPhoneMessages } from "../src/features/characterPhone/characterPhoneContent";
 import type { Character, Message, Moment, UserIdentity, WorldBookEntry } from "../src/types";
 import type { CharacterPhoneRecord } from "../src/domain/characterPhone/types";
 import { createCharacterPhoneInitialAvatar, normalizeCharacterPhoneContactName } from "../src/features/characterPhone/characterPhoneContactVisuals";
@@ -127,6 +127,139 @@ assert.equal(phoneA.scheduleItems.length, 0, "does not seed a synthetic schedule
 assert.equal(phoneA.musicTracks?.length, 0, "does not seed a synthetic music library without a user source");
 assert.equal(phoneA.listeningHistory?.length, 0, "does not seed synthetic listening history without a user source");
 assert.equal(phoneA.musicPlaylists?.length, 0, "does not seed a synthetic playlist without a user source");
+
+const roleContactCopy: Character = {
+  ...characterA,
+  id: "legacy-role-contact-copy",
+  isContactInstance: true,
+  profileSourceId: characterA.id,
+};
+const friendProfile: Character = {
+  id: "friend-profile",
+  name: "顾南",
+  ownerIdentityId: identity.id,
+  avatar: "🍃",
+  personality: "可靠的朋友。",
+  backstory: "和阿宁认识多年。",
+};
+const friendContactCopy: Character = {
+  ...friendProfile,
+  id: "legacy-friend-contact-copy",
+  name: "小顾",
+  isContactInstance: true,
+  profileSourceId: friendProfile.id,
+};
+const sameNameIndependentCharacter: Character = {
+  id: "independent-same-name-character",
+  name: characterA.name,
+  ownerIdentityId: identity.id,
+  avatar: "🌱",
+  personality: "另一位独立角色。",
+  backstory: "档案中有单独提及阿宁。",
+};
+const aliasOwnedCharacter: Character = {
+  id: "alias-owned-character",
+  name: "林晓",
+  ownerIdentityId: "identity-alias",
+  avatar: "🪷",
+  personality: "别名身份自己的联系人。",
+  backstory: "不属于主号角色手机。",
+};
+const duplicatedRolePhone = emptyPhone("phone-duplicate-identities", characterA.id);
+duplicatedRolePhone.contacts = [
+  {
+    id: "old-self-contact",
+    name: characterA.name,
+    relation: "旧副本",
+    kind: "character",
+    isLongTerm: true,
+    isNpc: true,
+    source: "linked",
+    linkedCharacterId: roleContactCopy.id,
+    sourceRefs: [{ kind: "character", id: roleContactCopy.id }],
+  },
+  {
+    id: "friend-copy-contact",
+    name: friendContactCopy.name,
+    relation: "旧联系人副本",
+    kind: "character",
+    isLongTerm: true,
+    isNpc: true,
+    source: "linked",
+    linkedCharacterId: friendContactCopy.id,
+    sourceRefs: [{ kind: "character", id: friendContactCopy.id }],
+  },
+  {
+    id: "friend-canonical-contact",
+    name: friendProfile.name,
+    relation: "朋友",
+    kind: "character",
+    isLongTerm: true,
+    isNpc: true,
+    source: "linked",
+    linkedCharacterId: friendProfile.id,
+    sourceRefs: [{ kind: "character", id: friendProfile.id }],
+  },
+  {
+    id: "alias-owned-contact-row",
+    name: aliasOwnedCharacter.name,
+    relation: "别名联系人",
+    kind: "character",
+    isLongTerm: true,
+    isNpc: true,
+    source: "linked",
+    linkedCharacterId: aliasOwnedCharacter.id,
+    sourceRefs: [{ kind: "character", id: aliasOwnedCharacter.id }],
+  },
+];
+duplicatedRolePhone.threadMessages = [
+  { id: "self-history", contactId: "old-self-contact", sender: "contact", content: "旧副本历史保留", timestamp: 31 },
+  { id: "friend-copy-history", contactId: "friend-copy-contact", sender: "contact", content: "旧称呼下的历史", timestamp: 32 },
+  { id: "friend-canonical-history", contactId: "friend-canonical-contact", sender: "character", content: "规范联系人下的历史", timestamp: 33 },
+];
+const repairedRolePhoneIdentities = ensureCharacterPhoneContent({
+  phone: duplicatedRolePhone,
+  character: characterA,
+  characters: [characterA, characterB, roleContactCopy, friendProfile, friendContactCopy, sameNameIndependentCharacter, aliasOwnedCharacter],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages,
+  moments,
+  worldBookEntries: worldBook,
+  now: 110,
+});
+assert.equal(repairedRolePhoneIdentities.contacts.some((contact) => !contact.removedAt && contact.linkedCharacterId === characterA.id), false, "a verified legacy copy of the phone's own character is hidden");
+const friendContacts = repairedRolePhoneIdentities.contacts.filter((contact) => contact.linkedCharacterId === friendProfile.id);
+assert.equal(friendContacts.length, 1, "a legacy contact copy and its archive profile resolve to one canonical contact");
+assert.deepEqual(
+  repairedRolePhoneIdentities.threadMessages.filter((message) => message.contactId === friendContacts[0].id).map((message) => message.content).sort(),
+  ["旧称呼下的历史", "规范联系人下的历史"],
+  "merging verified duplicate contacts preserves both threads under the retained contact ID",
+);
+assert.ok(repairedRolePhoneIdentities.contacts.some((contact) => contact.linkedCharacterId === sameNameIndependentCharacter.id), "same-name characters with distinct canonical IDs are not merged by name");
+assert.ok(!repairedRolePhoneIdentities.contacts.some((contact) => !contact.removedAt && contact.linkedCharacterId === aliasOwnedCharacter.id), "characters owned by another identity do not leak into the primary role phone");
+assert.ok(repairedRolePhoneIdentities.contacts.some((contact) => contact.id === "alias-owned-contact-row" && Boolean(contact.removedAt)), "legacy alias-owned contact rows are hidden while their data remains stored");
+assert.equal(hasMissingCharacterPhoneContactThreads(repairedRolePhoneIdentities), true, "an evidence-backed contact without a thread is detected for repair");
+const threadRepairState = emptyPhone("phone-thread-repair-state", characterA.id);
+threadRepairState.contacts = [{
+  id: "evidence-contact",
+  name: "林晓",
+  relation: "朋友",
+  kind: "npc",
+  isLongTerm: true,
+  isNpc: true,
+  source: "generated",
+  sourceRefs: [{ kind: "worldbook", id: "world-a" }],
+}];
+assert.equal(hasMissingCharacterPhoneContactThreads(threadRepairState), true, "an evidence-backed NPC with no history schedules a repair");
+threadRepairState.threadMessages = [{
+  id: "evidence-contact-thread",
+  contactId: "evidence-contact",
+  sender: "contact",
+  content: "我到了。",
+  timestamp: 34,
+}];
+assert.equal(hasMissingCharacterPhoneContactThreads(threadRepairState), false, "a repaired NPC conversation does not trigger repeated generation");
 
 const clearedPhone = ensureCharacterPhoneContent({
   phone: {
