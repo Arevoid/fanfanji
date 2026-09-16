@@ -22,7 +22,7 @@ import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslan
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./src/utils/fetchWithTimeout";
 import { CONTENT_SECURITY_POLICY } from "./src/core/security/contentSecurityPolicy";
 import { assertImageGenerationTrigger } from "./src/features/chat/services/imageGenerationIntent";
-import { createNeteaseMusicAdapter, NeteaseMusicApiError } from "./src/server/neteaseMusicAdapter";
+import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "./src/server/neteaseMusicAdapter";
 import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "./src/server/neteaseMusicSession";
 
 dotenv.config();
@@ -100,6 +100,9 @@ async function startServer() {
     return createNeteaseMusicAdapter({ baseUrl, cookie: getNeteaseUpstreamCookie(req.headers.cookie) });
   };
   const neteaseError = (res: express.Response, error: unknown, fallback = "网易云服务暂时不可用。") => {
+    if (isNeteaseAuthenticationError(error)) {
+      return res.status(401).json({ success: false, code: "netease_not_authenticated", error: "网易云登录已失效，请重新扫码连接。" });
+    }
     const typed = error instanceof NeteaseMusicApiError ? error : null;
     const status = typed?.status && typed.status >= 400 && typed.status < 600 ? typed.status : 502;
     return res.status(status).json({ success: false, code: typed?.code || "netease-provider", error: error instanceof Error ? error.message : fallback });

@@ -27,6 +27,7 @@ import {
   getNeteaseDailyRecommendations,
   getNeteasePlaylistTracks,
   getNeteasePlaylists,
+  isNeteaseAuthenticationError,
   logoutNetease,
   searchNeteaseTracks,
 } from "../../features/music/services/neteaseMusicApi";
@@ -36,6 +37,7 @@ import { loadMusicRemoteLibrary, toggleMusicRemoteLibraryItem } from "../../core
 import type { MusicRemoteLibraryItem } from "../../types";
 
 type MusicLibraryTab = "home" | "home-reference" | "local" | "netease" | "search";
+type NeteaseAuthState = "checking" | "authenticated" | "unauthenticated" | "error";
 
 interface MusicLibraryPanelProps {
   tracks: MusicTrack[];
@@ -74,6 +76,9 @@ export default function MusicLibraryPanel({
   const [dailyRemoteTracks, setDailyRemoteTracks] = useState<NeteaseTrack[]>([]);
   const [qrSession, setQrSession] = useState<NeteaseQrSession | null>(null);
   const [loading, setLoading] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [authState, setAuthState] = useState<NeteaseAuthState>("checking");
+  const [libraryError, setLibraryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedRemoteTracks, setSavedRemoteTracks] = useState<MusicRemoteLibraryItem[]>([]);
 
@@ -84,24 +89,76 @@ export default function MusicLibraryPanel({
     return localTracks.filter((track) => `${track.title} ${track.artist}`.toLowerCase().includes(needle));
   }, [localTracks, query]);
 
+  const clearAccountState = () => {
+    setAccount(null);
+    setPlaylists([]);
+    setSelectedPlaylist(null);
+    setPlaylistTracks([]);
+    setDailyRemoteTracks([]);
+    setLibraryError(null);
+  };
+
+  const markUnauthenticated = () => {
+    clearAccountState();
+    setQrSession(null);
+    setAuthState("unauthenticated");
+  };
+
+  const loadPlaylists = async (): Promise<boolean> => {
+    setLibraryLoading(true);
+    setLibraryError(null);
+    try {
+      const nextLibrary = await getNeteasePlaylists();
+      setPlaylists(nextLibrary.playlists);
+      return true;
+    } catch (nextError) {
+      if (isNeteaseAuthenticationError(nextError)) {
+        markUnauthenticated();
+        setError("网易云登录已失效，请重新扫码连接。");
+        return false;
+      }
+      setPlaylists([]);
+      setLibraryError(nextError instanceof Error ? nextError.message : "网易云歌单读取失败，请稍后重试。");
+      return false;
+    } finally {
+      setLibraryLoading(false);
+    }
+  };
+
   const loadAccount = async () => {
     setLoading(true);
     setError(null);
+    setLibraryError(null);
+    setAuthState("checking");
     try {
-      const [nextAccount, nextLibrary] = await Promise.all([getNeteaseAccount(), getNeteasePlaylists()]);
+      // Validate the persisted session independently. A temporary playlist
+      // failure must never make a valid account look logged out.
+      const nextAccount = await getNeteaseAccount();
       setAccount(nextAccount);
-      setPlaylists(nextLibrary.playlists);
+      setAuthState("authenticated");
+      const libraryLoaded = await loadPlaylists();
+      if (!libraryLoaded) return;
       try {
         setDailyRemoteTracks(await getNeteaseDailyRecommendations());
-      } catch {
+      } catch (nextError) {
+        if (isNeteaseAuthenticationError(nextError)) {
+          markUnauthenticated();
+          setError("网易云登录已失效，请重新扫码连接。");
+          return;
+        }
+        // Daily recommendations are optional and should not invalidate the
+        // account or the playlists that were already loaded.
         setDailyRemoteTracks([]);
       }
     } catch (nextError) {
-      setAccount(null);
-      setPlaylists([]);
-      setDailyRemoteTracks([]);
-      const message = nextError instanceof Error ? nextError.message : "网易云账号尚未连接。";
-      if (!message.includes("请先连接")) setError(message);
+      if (isNeteaseAuthenticationError(nextError)) {
+        markUnauthenticated();
+        return;
+      }
+      // Keep any account/list already displayed. This is a provider/network
+      // error, not proof that the persisted login has disappeared.
+      setAuthState(account ? "authenticated" : "error");
+      setError(nextError instanceof Error ? nextError.message : "网易云登录状态暂时无法确认，请重试。");
     } finally {
       setLoading(false);
     }
@@ -138,6 +195,7 @@ export default function MusicLibraryPanel({
     setError(null);
     try {
       setQrSession(await createNeteaseQrSession());
+      setAuthState("unauthenticated");
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "网易云二维码创建失败。");
     } finally {
@@ -149,11 +207,8 @@ export default function MusicLibraryPanel({
     setLoading(true);
     try {
       await logoutNetease();
-      setAccount(null);
-      setPlaylists([]);
-      setSelectedPlaylist(null);
-      setPlaylistTracks([]);
-      setQrSession(null);
+      markUnauthenticated();
+      setError(null);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "网易云退出失败。");
     } finally {
@@ -169,6 +224,11 @@ export default function MusicLibraryPanel({
     try {
       setPlaylistTracks(await getNeteasePlaylistTracks(playlist.id));
     } catch (nextError) {
+      if (isNeteaseAuthenticationError(nextError)) {
+        markUnauthenticated();
+        setError("网易云登录已失效，请重新扫码连接。");
+        return;
+      }
       setPlaylistTracks([]);
       setError(nextError instanceof Error ? nextError.message : "歌单歌曲读取失败。");
     } finally {
@@ -185,6 +245,11 @@ export default function MusicLibraryPanel({
     try {
       setRemoteResults(await searchNeteaseTracks(query.trim()));
     } catch (nextError) {
+      if (isNeteaseAuthenticationError(nextError)) {
+        markUnauthenticated();
+        setError("网易云登录已失效，请重新扫码连接。");
+        return;
+      }
       setRemoteResults([]);
       setError(nextError instanceof Error ? nextError.message : "网易云搜索失败。");
     } finally {
@@ -216,6 +281,27 @@ export default function MusicLibraryPanel({
 
   const renderNetease = () => {
     if (!account) {
+      if (authState === "checking") {
+        return (
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-raised)] p-8 text-center">
+            <Loader2 className="mx-auto h-6 w-6 animate-spin text-[var(--text-secondary)]" />
+            <p className="mt-3 text-xs font-bold text-[var(--text-primary)]">正在检查网易云登录状态…</p>
+            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">会话验证完成后再决定是否需要扫码。</p>
+          </div>
+        );
+      }
+      if (authState === "error") {
+        return (
+          <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 text-center text-amber-800">
+            <Cloud className="mx-auto h-6 w-6" />
+            <p className="mt-3 text-xs font-bold">暂时无法确认网易云登录状态</p>
+            <p className="mt-1 text-[11px] leading-5">这通常是网络或服务暂时不可用，已有会话不会被清除。</p>
+            <button type="button" onClick={() => void loadAccount()} disabled={loading} className="mt-4 rounded-2xl bg-amber-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+              {loading ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : "重试检查"}
+            </button>
+          </div>
+        );
+      }
       return (
         <div className="space-y-4">
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface-raised)] p-5">
@@ -250,7 +336,10 @@ export default function MusicLibraryPanel({
         {selectedPlaylist ? (
           <div className="space-y-3"><h2 className="text-base font-extrabold text-[var(--text-primary)]">{selectedPlaylist.name}</h2>{loading ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : playlistTracks.length ? playlistTracks.map((track, index) => renderTrack(createNeteaseMusicTrack({ accountUserId: account.userId, track }), index, true)) : <p className="py-10 text-center text-xs text-[var(--text-secondary)]">这个歌单暂时没有可读取的歌曲。</p>}</div>
         ) : (
-          <div className="grid grid-cols-2 gap-3">{playlists.map((playlist) => <button type="button" key={playlist.id} onClick={() => void handleSelectPlaylist(playlist)} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] text-left hover:bg-[var(--surface-muted)]"><div className="flex aspect-square items-center justify-center bg-[var(--surface-muted)] text-red-400">{playlist.coverUrl ? <img src={playlist.coverUrl} alt="" className="h-full w-full object-cover" /> : <ListMusic className="h-8 w-8" />}</div><div className="p-3"><p className="truncate text-xs font-bold text-[var(--text-primary)]">{playlist.name}</p><p className="mt-1 text-[10px] text-[var(--text-secondary)]">{formatCount(playlist.trackCount || 0)}</p></div></button>)}</div>
+          <>
+            {libraryError && <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-[11px] text-amber-800"><p>{libraryError}</p><button type="button" onClick={() => void loadPlaylists()} disabled={libraryLoading} className="mt-2 font-bold underline disabled:opacity-50">{libraryLoading ? "读取中…" : "重试读取歌单"}</button></div>}
+            {libraryLoading ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : <div className="grid grid-cols-2 gap-3">{playlists.map((playlist) => <button type="button" key={playlist.id} onClick={() => void handleSelectPlaylist(playlist)} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] text-left hover:bg-[var(--surface-muted)]"><div className="flex aspect-square items-center justify-center bg-[var(--surface-muted)] text-red-400">{playlist.coverUrl ? <img src={playlist.coverUrl} alt="" className="h-full w-full object-cover" /> : <ListMusic className="h-8 w-8" />}</div><div className="p-3"><p className="truncate text-xs font-bold text-[var(--text-primary)]">{playlist.name}</p><p className="mt-1 text-[10px] text-[var(--text-secondary)]">{formatCount(playlist.trackCount || 0)}</p></div></button>)}</div>}
+          </>
         )}
       </div>
     );

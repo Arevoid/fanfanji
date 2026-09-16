@@ -20,6 +20,8 @@ for (const source of [server, worker]) {
 
 assert.match(server, /buildNeteaseSessionCookie/);
 assert.match(worker, /buildNeteaseSessionCookie/);
+assert.match(server, /isNeteaseAuthenticationError/);
+assert.match(worker, /isNeteaseAuthenticationError/);
 assert.doesNotMatch(server, /res\.json\(.*sessionCookie/);
 assert.doesNotMatch(worker, /json\(.*sessionCookie/);
 

@@ -20,6 +20,16 @@ export class NeteaseMusicClientError extends Error {
   }
 }
 
+/**
+ * Only a response that explicitly says the session is unauthenticated should
+ * send the UI back to the QR login flow. Network, provider and content errors
+ * must not make a previously authenticated account look logged out.
+ */
+export const isNeteaseAuthenticationError = (error: unknown): boolean => {
+  if (!(error instanceof NeteaseMusicClientError)) return false;
+  return error.status === 401 || error.code === "netease_not_authenticated";
+};
+
 type ApiPayload = Record<string, unknown>;
 
 async function requestJson(path: string, init: RequestInit = {}): Promise<ApiPayload> {

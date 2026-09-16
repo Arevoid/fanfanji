@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createNeteaseMusicAdapter, NeteaseMusicApiError } from "../src/server/neteaseMusicAdapter";
+import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "../src/server/neteaseMusicAdapter";
 
 type MockResponse = { status?: number; body: unknown; ok?: boolean };
 
@@ -67,5 +67,12 @@ const failing = createNeteaseMusicAdapter({
   fetchImpl: createMockFetch([{ body: { code: 502, msg: "风控" } }]).fetchMock,
 });
 await assert.rejects(() => failing.getAccount(), (error: unknown) => error instanceof NeteaseMusicApiError && error.code === 502 && error.message === "风控");
+
+const expired = createNeteaseMusicAdapter({
+  baseUrl: "https://ncm.example.test",
+  fetchImpl: createMockFetch([{ body: { code: 301, msg: "需要登录" } }]).fetchMock,
+});
+await assert.rejects(() => expired.getAccount(), (error: unknown) => isNeteaseAuthenticationError(error));
+assert.equal(isNeteaseAuthenticationError(new NeteaseMusicApiError("网络错误")), false);
 
 console.log("neteaseMusicAdapter tests passed");

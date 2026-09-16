@@ -15,6 +15,12 @@ export class NeteaseMusicApiError extends Error {
   }
 }
 
+/** NetEase Cloud Music uses code 301 for an expired/missing login session. */
+export const isNeteaseAuthenticationError = (error: unknown): boolean => {
+  if (!(error instanceof NeteaseMusicApiError)) return false;
+  return error.status === 401 || error.code === 301;
+};
+
 export interface NeteaseMusicAdapterOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;

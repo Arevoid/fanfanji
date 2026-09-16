@@ -5,7 +5,7 @@ import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput 
 import { buildTranslationPrompt, callTextProvider, fetchTextModels, normalizeTextApiError } from "../server/textProtocolAdapters";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 import { CONTENT_SECURITY_POLICY } from "../core/security/contentSecurityPolicy";
-import { createNeteaseMusicAdapter, NeteaseMusicApiError } from "../server/neteaseMusicAdapter";
+import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "../server/neteaseMusicAdapter";
 import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "../server/neteaseMusicSession";
 
 interface Env {
@@ -51,6 +51,9 @@ function textErrorResponse(error: unknown, fallbackMessage: string) {
 }
 
 function neteaseErrorResponse(error: unknown, fallbackMessage: string) {
+  if (isNeteaseAuthenticationError(error)) {
+    return json({ success: false, code: "netease_not_authenticated", error: "网易云登录已失效，请重新扫码连接。" }, 401);
+  }
   const typed = error instanceof NeteaseMusicApiError ? error : null;
   const status = typed?.status && typed.status >= 400 && typed.status < 600 ? typed.status : 502;
   return json({ success: false, code: typed?.code || "netease-provider", error: error instanceof Error ? error.message : fallbackMessage }, status);
