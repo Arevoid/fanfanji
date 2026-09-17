@@ -4,7 +4,7 @@ import { subscribeOfflineMemorySyncNotifications } from "./features/offline/serv
 import { createId } from "./core/id/createId";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
-import { applySettingsDurableOverlay, clearSettingsDurableOverlay, loadSettings, loadSettingsDurableOverlay, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
+import { applySettingsDurableOverlay, loadSettings, loadSettingsDurableOverlay, resolveSettingsUpdate, saveSettings } from "./core/storage/repositories/settingsRepository";
 import { readString, remove as removeStoredValue, writeJson, writeString } from "./core/storage/storageAdapter";
 import { readArray } from "./core/storage/repositories/repositoryUtils";
 import { flushCharacters, initializeCharacterRepository, loadCharacters, saveCharacters } from "./core/storage/repositories/characterRepository";
@@ -33,7 +33,7 @@ import { loadRelationships, saveRelationships } from "./core/storage/repositorie
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, retractConversationSummariesBySourceMessageIds, conversationSummaryRepository } from "./core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
-import { loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
+import { initializeInnerVoiceRepository, loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
 import { loadScheduleStore, saveScheduleStore, upsertAppointment } from "./core/storage/repositories/scheduleRepository";
 import { projectAppointmentsToScheduleEntries } from "./domain/schedule/scheduleProjection";
 import type { Appointment } from "./domain/schedule/scheduleTypes";
@@ -709,8 +709,8 @@ export default function App() {
   const settingsRef = useRef<UserSettings>(settings);
 
   // A quota fallback is intentionally hydrated after the synchronous
-  // localStorage bootstrap. It contains only profile/keyboard fields and is
-  // used to recover edits that could not fit in the legacy settings blob.
+  // localStorage bootstrap. It contains durable profile/appearance fields and
+  // is used to recover edits that could not fit in the legacy settings blob.
   useEffect(() => {
     let active = true;
     void loadSettingsDurableOverlay().then((overlay) => {
@@ -718,7 +718,6 @@ export default function App() {
       const hydrated = applySettingsDurableOverlay(settingsRef.current, overlay);
       settingsRef.current = hydrated;
       setSettingsState(hydrated);
-      void clearSettingsDurableOverlay();
     });
     return () => { active = false; };
   }, []);
@@ -832,6 +831,14 @@ export default function App() {
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => hydrateRelationshipNetworkRelationships(loadRelationships([]).value));
   const relationshipsRef = useRef<CharacterRelationship[]>(relationships);
   relationshipsRef.current = relationships;
+
+  useEffect(() => {
+    let active = true;
+    void initializeInnerVoiceRepository().catch((error) => {
+      if (active) console.warn("[inner-voice] Startup hydration did not complete:", error);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

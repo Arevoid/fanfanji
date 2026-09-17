@@ -11,6 +11,7 @@ import {
 } from "../src/features/settings/systemBackup";
 import { readingAssetDb } from "../src/core/storage/readingAssetDb";
 import { characterPhoneDb } from "../src/core/storage/characterPhoneDb";
+import { INNER_VOICE_DURABLE_KEY, saveDurableInnerVoiceRecords } from "../src/core/storage/repositories/innerVoiceRepository";
 
 const values = new Map<string, string>();
 const storage = {
@@ -50,6 +51,8 @@ const backupPhone = {
   activities: [],
 };
 await characterPhoneDb.replaceAll([backupPhone as never]);
+const innerVoiceRecords = [{ id: "voice-backup-test", characterId: "character-a", messageId: "message-a", content: "private thought", state: "calm", createdAt: 1 }];
+await saveDurableInnerVoiceRecords(innerVoiceRecords);
 values.set("phone_worldbook_entries", JSON.stringify([{ id: "world-a" }]));
 values.set("phone_characters_v3", JSON.stringify([{ id: "legacy-character" }]));
 values.set("phone_reading_analysis_store_v1", JSON.stringify({ version: 1, tasks: [] }));
@@ -58,6 +61,7 @@ const backup = await buildSystemBackup(storage, ["phone_characters_v3", "phone_w
 assert.deepEqual(backup.indexedDb["character-archive-v4"], characters);
 assert.deepEqual(backup.indexedDb["moments-v4"], moments);
 assert.deepEqual(backup.indexedDb["character-phone-v1"], [backupPhone]);
+assert.deepEqual(backup.indexedDb[INNER_VOICE_DURABLE_KEY], innerVoiceRecords);
 assert.equal(backup.localStorage.phone_worldbook_entries, JSON.stringify([{ id: "world-a" }]));
 assert.equal(backup.localStorage.phone_characters_v3, JSON.stringify([{ id: "legacy-character" }]), "legacy local data is retained when an IDB export is unavailable");
 assert.equal(backup.localStorage.phone_reading_analysis_store_v1, undefined, "only requested local keys are exported");
@@ -82,6 +86,14 @@ assert.deepEqual(
   ], {}),
   [["phone_messages_v3", "legacy-chat"], ["phone_settings", "settings"]],
   "legacy chat remains restorable when an entry-store payload is absent",
+);
+assert.deepEqual(
+  filterSystemBackupLocalStorageForRestore(
+    [["phone_inner_voice_records", JSON.stringify(innerVoiceRecords)]],
+    { [INNER_VOICE_DURABLE_KEY]: innerVoiceRecords },
+  ),
+  [],
+  "durable inner-voice backups must not recreate a second LocalStorage copy",
 );
 const originalPrototype = Object.prototype as { polluted?: boolean };
 delete originalPrototype.polluted;

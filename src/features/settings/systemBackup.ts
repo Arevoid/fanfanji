@@ -10,6 +10,14 @@ import { messageEntryDb } from "../../core/storage/messageEntryDb";
 import { offlineStoryEntryDb } from "../../core/storage/offlineStoryEntryDb";
 import { characterPhoneDb } from "../../core/storage/characterPhoneDb";
 import { flushCharacterPhoneRepository } from "../../core/storage/repositories/characterPhoneRepository";
+import {
+  INNER_VOICE_DURABLE_KEY,
+  flushInnerVoiceRepository,
+  loadDurableInnerVoiceRecords,
+  saveDurableInnerVoiceRecords,
+  deleteDurableInnerVoiceRecords,
+} from "../../core/storage/repositories/innerVoiceRepository";
+import { SETTINGS_DURABLE_OVERLAY_KEY } from "../../core/storage/repositories/settingsRepository";
 
 export const SYSTEM_BACKUP_FORMAT = "fanfanji-system-backup" as const;
 export const SYSTEM_BACKUP_VERSION = 3 as const;
@@ -26,6 +34,8 @@ export const SYSTEM_BACKUP_INDEXED_DB_KEYS = [
   "reading-co-reading-store",
   "reading-co-story-store",
   "character-phone-v1",
+  INNER_VOICE_DURABLE_KEY,
+  SETTINGS_DURABLE_OVERLAY_KEY,
 ] as const;
 export const SYSTEM_BACKUP_CONTENT_ENTRY_KEYS = ["message-entry-v1", "offline-story-entry-v1"] as const;
 
@@ -57,9 +67,11 @@ export function filterSystemBackupLocalStorageForRestore(
   indexedDb: SystemBackupIndexedDb,
 ): [string, string | null][] {
   const hasMessageEntryBackup = Array.isArray(indexedDb["message-entry-v1"]);
+  const hasInnerVoiceBackup = Array.isArray(indexedDb[INNER_VOICE_DURABLE_KEY]);
   return entries.filter(([key]) => {
     if (key === "phone_offline_stories") return false;
     if (hasMessageEntryBackup && LEGACY_MESSAGE_STORAGE_KEYS.has(key)) return false;
+    if (key === "phone_inner_voice_records" && hasInnerVoiceBackup) return false;
     return true;
   });
 }
@@ -137,6 +149,7 @@ const CHARACTER_PHONE_INDEXED_DB_KEY = "character-phone-v1";
 
 async function loadSystemBackupIndexedDbValue(key: string): Promise<unknown | null> {
   if (key === CHARACTER_PHONE_INDEXED_DB_KEY) return characterPhoneDb.loadAll();
+  if (key === INNER_VOICE_DURABLE_KEY) return loadDurableInnerVoiceRecords();
   return readingAssetDb.loadMetadataValue<unknown>(key);
 }
 
@@ -146,12 +159,20 @@ async function saveSystemBackupIndexedDbValue(key: string, value: unknown): Prom
     await characterPhoneDb.replaceAll(value as never[]);
     return;
   }
+  if (key === INNER_VOICE_DURABLE_KEY) {
+    await saveDurableInnerVoiceRecords(value);
+    return;
+  }
   await readingAssetDb.saveMetadataValue(key, cloneJson(value));
 }
 
 async function deleteSystemBackupIndexedDbValue(key: string): Promise<void> {
   if (key === CHARACTER_PHONE_INDEXED_DB_KEY) {
     await characterPhoneDb.clearAll();
+    return;
+  }
+  if (key === INNER_VOICE_DURABLE_KEY) {
+    await deleteDurableInnerVoiceRecords();
     return;
   }
   await readingAssetDb.deleteMetadataValue(key);
@@ -176,6 +197,7 @@ export async function buildSystemBackup(
     flushCoReadingStore(),
     flushReadingCoStoryStore(),
     flushCharacterPhoneRepository(),
+    flushInnerVoiceRepository(),
   ]);
   const indexedDbEntries = await Promise.all(SYSTEM_BACKUP_INDEXED_DB_KEYS.map(async (key) => [
     key,

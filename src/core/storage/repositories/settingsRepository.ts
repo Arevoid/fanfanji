@@ -8,36 +8,126 @@ import { readingAssetDb } from "../readingAssetDb";
 type SettingsRecord = Record<string, unknown>;
 
 /**
- * A deliberately small IndexedDB fallback for the fields that are needed to
- * keep profile edits usable when the legacy monolithic phone_settings value
- * has reached localStorage quota. It never contains API credentials or other
- * settings, and it is only written after the normal settings write fails.
+ * An IndexedDB fallback for profile and presentation fields that must remain
+ * usable when the legacy monolithic phone_settings value reaches localStorage
+ * quota. It deliberately excludes API credentials and other operational data.
  */
-export interface SettingsDurableOverlay {
+type DurableSettingsFields = Pick<UserSettings,
+  | "identities"
+  | "activeIdentityId"
+  | "name"
+  | "avatar"
+  | "signature"
+  | "bio"
+  | "chatEnterKeyNewline"
+  | "wallpaper"
+  | "wallpaperSource"
+  | "customIcons"
+  | "dockApps"
+  | "bubbleCss"
+  | "globalCss"
+  | "chatGlobalCSS"
+  | "chatIcons"
+  | "globalChatStylePreset"
+  | "liquidGlassTextDefaultsApplied"
+  | "liquidGlassVisualDefaultsApplied"
+  | "liquidGlassPaletteMigrationVersion"
+  | "liquidGlassOtherBubbleBg"
+  | "liquidGlassOtherBubbleColor"
+  | "liquidGlassOtherBubbleOpacity"
+  | "liquidGlassOtherBubbleRadius"
+  | "liquidGlassSelfBubbleBg"
+  | "liquidGlassSelfBubbleColor"
+  | "liquidGlassSelfBubbleOpacity"
+  | "liquidGlassSelfBubbleRadius"
+  | "liquidGlassBubbleTailEnabled"
+  | "liquidGlassBubbleTailVertical"
+  | "liquidGlassBubblePosition"
+  | "liquidGlassBubbleBorderEnabled"
+  | "liquidGlassBubbleBorderWidth"
+  | "liquidGlassOtherBubbleBorderColor"
+  | "liquidGlassSelfBubbleBorderColor"
+  | "activePreset"
+  | "momentsCover"
+  | "showHomeButton"
+  | "hideStatusBar"
+  | "dockColor"
+  | "dockOpacity"
+  | "widgetOpacity"
+  | "customFontName"
+  | "customFontData"
+  | "globalFontSource"
+  | "globalFontName"
+  | "globalFontUrl"
+  | "globalFontAssetId"
+  | "globalFontSize"
+  | "iconBorderRadius"
+  | "iconBgOpacity"
+  | "iconBorderWidth"
+  | "iconBorderOpacity"
+  | "hideAppNames"
+  | "desktopAppTextColor"
+  | "desktopIconMode"
+  | "homeButtonPosition"
+  | "avatarBorderRadius"
+  | "otherBubbleBg"
+  | "otherBubbleColor"
+  | "classicBubblePaletteMigrationVersion"
+  | "otherBubbleRadius"
+  | "otherBubbleOpacity"
+  | "selfBubbleBg"
+  | "selfBubbleColor"
+  | "selfBubbleRadius"
+  | "selfBubbleOpacity"
+  | "collapseConsecutiveAvatars"
+  | "hideHomeWelcomeWidget"
+  | "dockBorderRadius"
+  | "widgetBorderRadius"
+  | "iconBorderEnabled"
+  | "bubbleTailEnabled"
+  | "bubbleTailVertical"
+  | "bubblePosition"
+  | "bubbleSpacing"
+  | "hideNicknames"
+  | "bubbleBorderEnabled"
+  | "bubbleBorderWidth"
+  | "otherBubbleBorderColor"
+  | "selfBubbleBorderColor"
+  | "avatarBorderEnabled"
+  | "avatarBorderWidth"
+  | "avatarBorderColor"
+>;
+
+export interface SettingsDurableOverlay extends Partial<DurableSettingsFields> {
   version: 1;
-  identities?: UserSettings["identities"];
-  activeIdentityId?: string;
-  name?: string;
-  avatar?: string;
-  signature?: string;
-  bio?: string;
-  chatEnterKeyNewline?: boolean;
 }
 
-const SETTINGS_DURABLE_OVERLAY_KEY = "user-settings-durable-overlay-v1";
+export const SETTINGS_DURABLE_OVERLAY_KEY = "user-settings-durable-overlay-v1" as const;
 let settingsOverlayWriteChain: Promise<void> = Promise.resolve();
 let settingsOverlayHydrated = false;
-const SETTINGS_OVERLAY_FIELDS = new Set([
-  "identities",
-  "activeIdentityId",
-  "name",
-  "avatar",
-  "signature",
-  "bio",
-  "chatEnterKeyNewline",
+const SETTINGS_OVERLAY_FIELDS = new Set<string>([
+  "identities", "activeIdentityId", "name", "avatar", "signature", "bio", "chatEnterKeyNewline",
+  "wallpaper", "wallpaperSource", "customIcons", "dockApps", "bubbleCss", "globalCss", "chatGlobalCSS",
+  "chatIcons", "globalChatStylePreset", "liquidGlassTextDefaultsApplied", "liquidGlassVisualDefaultsApplied",
+  "liquidGlassPaletteMigrationVersion", "liquidGlassOtherBubbleBg", "liquidGlassOtherBubbleColor",
+  "liquidGlassOtherBubbleOpacity", "liquidGlassOtherBubbleRadius", "liquidGlassSelfBubbleBg",
+  "liquidGlassSelfBubbleColor", "liquidGlassSelfBubbleOpacity", "liquidGlassSelfBubbleRadius",
+  "liquidGlassBubbleTailEnabled", "liquidGlassBubbleTailVertical", "liquidGlassBubblePosition",
+  "liquidGlassBubbleBorderEnabled", "liquidGlassBubbleBorderWidth", "liquidGlassOtherBubbleBorderColor",
+  "liquidGlassSelfBubbleBorderColor", "activePreset", "momentsCover", "showHomeButton", "hideStatusBar",
+  "dockColor", "dockOpacity", "widgetOpacity", "customFontName", "customFontData", "globalFontSource",
+  "globalFontName", "globalFontUrl", "globalFontAssetId", "globalFontSize", "iconBorderRadius", "iconBgOpacity",
+  "iconBorderWidth", "iconBorderOpacity", "hideAppNames", "desktopAppTextColor", "desktopIconMode",
+  "homeButtonPosition", "avatarBorderRadius", "otherBubbleBg", "otherBubbleColor",
+  "classicBubblePaletteMigrationVersion", "otherBubbleRadius", "otherBubbleOpacity", "selfBubbleBg",
+  "selfBubbleColor", "selfBubbleRadius", "selfBubbleOpacity", "collapseConsecutiveAvatars",
+  "hideHomeWelcomeWidget", "dockBorderRadius", "widgetBorderRadius", "iconBorderEnabled", "bubbleTailEnabled",
+  "bubbleTailVertical", "bubblePosition", "bubbleSpacing", "hideNicknames", "bubbleBorderEnabled",
+  "bubbleBorderWidth", "otherBubbleBorderColor", "selfBubbleBorderColor", "avatarBorderEnabled",
+  "avatarBorderWidth", "avatarBorderColor",
 ]);
 
-const buildSettingsDurableOverlay = (settings: UserSettings): SettingsDurableOverlay => ({
+export const buildSettingsDurableOverlay = (settings: UserSettings): SettingsDurableOverlay => ({
   version: 1,
   identities: settings.identities,
   activeIdentityId: settings.activeIdentityId,
@@ -46,6 +136,82 @@ const buildSettingsDurableOverlay = (settings: UserSettings): SettingsDurableOve
   signature: settings.signature,
   bio: settings.bio,
   chatEnterKeyNewline: settings.chatEnterKeyNewline,
+  wallpaper: settings.wallpaper,
+  wallpaperSource: settings.wallpaperSource,
+  customIcons: settings.customIcons,
+  dockApps: settings.dockApps,
+  bubbleCss: settings.bubbleCss,
+  globalCss: settings.globalCss,
+  chatGlobalCSS: settings.chatGlobalCSS,
+  chatIcons: settings.chatIcons,
+  globalChatStylePreset: settings.globalChatStylePreset,
+  liquidGlassTextDefaultsApplied: settings.liquidGlassTextDefaultsApplied,
+  liquidGlassVisualDefaultsApplied: settings.liquidGlassVisualDefaultsApplied,
+  liquidGlassPaletteMigrationVersion: settings.liquidGlassPaletteMigrationVersion,
+  liquidGlassOtherBubbleBg: settings.liquidGlassOtherBubbleBg,
+  liquidGlassOtherBubbleColor: settings.liquidGlassOtherBubbleColor,
+  liquidGlassOtherBubbleOpacity: settings.liquidGlassOtherBubbleOpacity,
+  liquidGlassOtherBubbleRadius: settings.liquidGlassOtherBubbleRadius,
+  liquidGlassSelfBubbleBg: settings.liquidGlassSelfBubbleBg,
+  liquidGlassSelfBubbleColor: settings.liquidGlassSelfBubbleColor,
+  liquidGlassSelfBubbleOpacity: settings.liquidGlassSelfBubbleOpacity,
+  liquidGlassSelfBubbleRadius: settings.liquidGlassSelfBubbleRadius,
+  liquidGlassBubbleTailEnabled: settings.liquidGlassBubbleTailEnabled,
+  liquidGlassBubbleTailVertical: settings.liquidGlassBubbleTailVertical,
+  liquidGlassBubblePosition: settings.liquidGlassBubblePosition,
+  liquidGlassBubbleBorderEnabled: settings.liquidGlassBubbleBorderEnabled,
+  liquidGlassBubbleBorderWidth: settings.liquidGlassBubbleBorderWidth,
+  liquidGlassOtherBubbleBorderColor: settings.liquidGlassOtherBubbleBorderColor,
+  liquidGlassSelfBubbleBorderColor: settings.liquidGlassSelfBubbleBorderColor,
+  activePreset: settings.activePreset,
+  momentsCover: settings.momentsCover,
+  showHomeButton: settings.showHomeButton,
+  hideStatusBar: settings.hideStatusBar,
+  dockColor: settings.dockColor,
+  dockOpacity: settings.dockOpacity,
+  widgetOpacity: settings.widgetOpacity,
+  customFontName: settings.customFontName,
+  customFontData: settings.customFontData,
+  globalFontSource: settings.globalFontSource,
+  globalFontName: settings.globalFontName,
+  globalFontUrl: settings.globalFontUrl,
+  globalFontAssetId: settings.globalFontAssetId,
+  globalFontSize: settings.globalFontSize,
+  iconBorderRadius: settings.iconBorderRadius,
+  iconBgOpacity: settings.iconBgOpacity,
+  iconBorderWidth: settings.iconBorderWidth,
+  iconBorderOpacity: settings.iconBorderOpacity,
+  hideAppNames: settings.hideAppNames,
+  desktopAppTextColor: settings.desktopAppTextColor,
+  desktopIconMode: settings.desktopIconMode,
+  homeButtonPosition: settings.homeButtonPosition,
+  avatarBorderRadius: settings.avatarBorderRadius,
+  otherBubbleBg: settings.otherBubbleBg,
+  otherBubbleColor: settings.otherBubbleColor,
+  classicBubblePaletteMigrationVersion: settings.classicBubblePaletteMigrationVersion,
+  otherBubbleRadius: settings.otherBubbleRadius,
+  otherBubbleOpacity: settings.otherBubbleOpacity,
+  selfBubbleBg: settings.selfBubbleBg,
+  selfBubbleColor: settings.selfBubbleColor,
+  selfBubbleRadius: settings.selfBubbleRadius,
+  selfBubbleOpacity: settings.selfBubbleOpacity,
+  collapseConsecutiveAvatars: settings.collapseConsecutiveAvatars,
+  hideHomeWelcomeWidget: settings.hideHomeWelcomeWidget,
+  dockBorderRadius: settings.dockBorderRadius,
+  widgetBorderRadius: settings.widgetBorderRadius,
+  iconBorderEnabled: settings.iconBorderEnabled,
+  bubbleTailEnabled: settings.bubbleTailEnabled,
+  bubbleTailVertical: settings.bubbleTailVertical,
+  bubblePosition: settings.bubblePosition,
+  bubbleSpacing: settings.bubbleSpacing,
+  hideNicknames: settings.hideNicknames,
+  bubbleBorderEnabled: settings.bubbleBorderEnabled,
+  bubbleBorderWidth: settings.bubbleBorderWidth,
+  otherBubbleBorderColor: settings.otherBubbleBorderColor,
+  selfBubbleBorderColor: settings.selfBubbleBorderColor,
+  avatarBorderEnabled: settings.avatarBorderEnabled,
+  avatarBorderWidth: settings.avatarBorderWidth,
+  avatarBorderColor: settings.avatarBorderColor,
 });
 
 const hasOnlyDurableOverlayChanges = (settings: UserSettings): boolean => {
@@ -84,19 +250,15 @@ export async function loadSettingsDurableOverlay(): Promise<SettingsDurableOverl
   }
 }
 
-/** Applies only the small profile/keyboard overlay; all other settings stay unchanged. */
+/** Applies only the durable profile/appearance overlay; API credentials stay in the normal settings record. */
 export function applySettingsDurableOverlay(settings: UserSettings, overlay: SettingsDurableOverlay): UserSettings {
   if (overlay.version !== 1) return settings;
-  return {
-    ...settings,
-    ...(overlay.identities ? { identities: overlay.identities } : {}),
-    ...(overlay.activeIdentityId ? { activeIdentityId: overlay.activeIdentityId } : {}),
-    ...(overlay.name !== undefined ? { name: overlay.name } : {}),
-    ...(overlay.avatar !== undefined ? { avatar: overlay.avatar } : {}),
-    ...(overlay.signature !== undefined ? { signature: overlay.signature } : {}),
-    ...(overlay.bio !== undefined ? { bio: overlay.bio } : {}),
-    ...(overlay.chatEnterKeyNewline !== undefined ? { chatEnterKeyNewline: overlay.chatEnterKeyNewline } : {}),
-  };
+  const updates: Partial<UserSettings> = {};
+  for (const key of SETTINGS_OVERLAY_FIELDS) {
+    const value = overlay[key as keyof SettingsDurableOverlay];
+    if (value !== undefined) updates[key] = value as never;
+  }
+  return { ...settings, ...updates };
 }
 
 /** Removes a consumed fallback after the in-memory settings have been hydrated. */
@@ -111,6 +273,21 @@ export async function clearSettingsDurableOverlay(): Promise<void> {
       }
     });
   });
+}
+
+/** Persists a sanitized appearance/profile subset when the monolithic settings value cannot fit. */
+export async function saveSettingsDurableOverlayFromValue(value: unknown): Promise<void> {
+  if (!isRecord(value)) throw new Error("Invalid settings backup data");
+  if (typeof indexedDB === "undefined") throw new Error("IndexedDB is unavailable");
+  const overlay: SettingsDurableOverlay = { version: 1 };
+  for (const key of SETTINGS_OVERLAY_FIELDS) {
+    if (Object.hasOwn(value, key) && value[key] !== undefined) {
+      (overlay as unknown as Record<string, unknown>)[key] = value[key];
+    }
+  }
+  await settingsOverlayWriteChain;
+  await readingAssetDb.saveMetadataValue(SETTINGS_DURABLE_OVERLAY_KEY, overlay);
+  settingsOverlayHydrated = true;
 }
 
 function isRecord(value: unknown): value is SettingsRecord {

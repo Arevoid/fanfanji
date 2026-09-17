@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import type { Character, InnerVoiceRecord, MemoryItem, Message, UserSettings, WorldBookEntry } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
-import { findInnerVoiceByMessage, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, saveInnerVoiceRecords, type InnerVoiceScope } from "../../../core/storage/repositories/innerVoiceRepository";
+import { findInnerVoiceByMessage, initializeInnerVoiceRepository, listInnerVoicesByGroup, listInnerVoicesByRelation, loadInnerVoiceRecords, saveInnerVoiceRecords, type InnerVoiceScope } from "../../../core/storage/repositories/innerVoiceRepository";
 import { generateInnerVoice } from "../services/innerVoiceService";
 import { serializeMessageContentForPrompt } from "../prompts/messagePromptSerializer";
 
@@ -101,6 +101,10 @@ export function useInnerVoice({ characters, activeCharacter, activeRelationship,
   };
 
   const open = async (targetCharacterId: string, triggerMessage: Message, force = false) => {
+    // Resolve the durable mirror before reading the scoped history. This avoids
+    // a first-open race where a quota-recovered voice would briefly look absent
+    // while the asynchronous app bootstrap is still hydrating IndexedDB.
+    await initializeInnerVoiceRepository();
     const canonicalCharacterId = resolveCanonicalCharacterId(targetCharacterId, characters);
     const targetCharacter = characters.find((item) => item.id === canonicalCharacterId);
     if (!targetCharacter) return;

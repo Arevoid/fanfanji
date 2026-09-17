@@ -7,6 +7,8 @@ import { mergeOfflineStoryCollections } from "../../../core/storage/repositories
 import { buildSystemBackup, checksumPayload, filterSystemBackupLocalStorageForRestore, inspectSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb, snapshotSystemBackupIndexedDb, splitSystemBackupJson } from "../systemBackup";
 import { readString, remove as removeStoredValue, writeString } from "../../../core/storage/storageAdapter";
 import { storageKeys } from "../../../core/storage/storageKeys";
+import { INNER_VOICE_DURABLE_KEY } from "../../../core/storage/repositories/innerVoiceRepository";
+import { SETTINGS_DURABLE_OVERLAY_KEY, saveSettingsDurableOverlayFromValue } from "../../../core/storage/repositories/settingsRepository";
 
 interface UseSystemBackupActionsOptions {
   backupKeys: ReadonlySet<string>;
@@ -41,6 +43,10 @@ function downloadOriginalBackupFile(file: File): void {
 }
 
 async function assertBackupStorageCapacity(entries: readonly [string, string | null][]): Promise<void> {
+  // LocalStorage has a small per-origin limit that is not represented by the
+  // browser-wide quota estimate. These two modules have IndexedDB fallbacks,
+  // so let their writes attempt that path rather than rejecting the restore.
+  if (entries.some(([key]) => key === "phone_settings" || key === "phone_inner_voice_records")) return;
   if (typeof navigator === "undefined" || !navigator.storage?.estimate) return;
   const estimate = await navigator.storage.estimate();
   if (!estimate.quota || estimate.usage === undefined) return;
@@ -113,24 +119,54 @@ export function useSystemBackupActions({ backupKeys, fullBackupKeys, lightBackup
           ? `${parsedBackup.integrityWarning}\n\n文件结构仍然完整，但无法证明内容未被修改。确定仍要尝试恢复吗？这将覆盖当前所有对话、人设、设置和世界书数据，且不可撤销！`
           : "确定要导入此备份吗？这将会覆盖当前所有对话、人设、设置和世界书数据且不可撤销！";
         if (!confirm(confirmationMessage)) return;
-        const entriesToWrite = filterSystemBackupLocalStorageForRestore(entries, parsedBackup.indexedDb);
+        const indexedDbToRestore: Record<string, unknown> = { ...parsedBackup.indexedDb };
+        const settingsEntry = entries.find(([key, value]) => key === "phone_settings" && typeof value === "string")?.[1];
+        const hasSettingsOverlay = Object.hasOwn(indexedDbToRestore, SETTINGS_DURABLE_OVERLAY_KEY);
+        const innerVoiceEntry = entries.find(([key, value]) => key === "phone_inner_voice_records" && typeof value === "string")?.[1];
+        if (!Object.hasOwn(indexedDbToRestore, INNER_VOICE_DURABLE_KEY) && typeof innerVoiceEntry === "string") {
+          try {
+            const parsedInnerVoice = JSON.parse(innerVoiceEntry) as unknown;
+            if (Array.isArray(parsedInnerVoice)) indexedDbToRestore[INNER_VOICE_DURABLE_KEY] = parsedInnerVoice;
+          } catch {
+            // Leave malformed legacy data on the normal validation path.
+          }
+        }
+        const entriesToWrite = filterSystemBackupLocalStorageForRestore(entries, indexedDbToRestore);
         await assertBackupStorageCapacity(entriesToWrite);
         const snapshot = snapshotLocalStorage();
         const indexedDbSnapshot = await snapshotSystemBackupIndexedDb();
         const writtenKeys: string[] = [];
         const previousOfflineStories = await offlineStoryDb.loadAll();
         let indexedDbRestoreReport = { restoredKeys: [] as string[], skippedKeys: [] as string[] };
+        let settingsOverlayFallbackWritten = false;
         const hasOfflineEntryBackup = Array.isArray(parsedBackup.indexedDb["offline-story-entry-v1"]);
         const restoredOfflineStories = hasOfflineEntryBackup ? undefined : entries.find(([key]) => key === "phone_offline_stories")?.[1];
         try {
           for (const [key, value] of entriesToWrite) {
             if (typeof value !== "string") continue;
-            writtenKeys.push(key);
             const restoredValue = sanitizeValue(key, value, parsedBackup.localStorage) || value;
             const writeResult = writeString(key, restoredValue);
-            if (!writeResult.success) throw new Error(`恢复 ${key} 失败：${writeResult.error || "write"}`);
+            if (!writeResult.success) {
+              if (key === "phone_settings" && (writeResult.error === "quota" || writeResult.error === "unavailable" || writeResult.error === "rollback")) {
+                try {
+                  await saveSettingsDurableOverlayFromValue(JSON.parse(restoredValue));
+                  settingsOverlayFallbackWritten = true;
+                  continue;
+                } catch (fallbackError) {
+                  throw new Error(`恢复 phone_settings 失败：${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+                }
+              }
+              throw new Error(`恢复 ${key} 失败：${writeResult.error || "write"}`);
+            }
+            writtenKeys.push(key);
           }
-          indexedDbRestoreReport = await restoreSystemBackupIndexedDb(parsedBackup.indexedDb);
+          if (typeof settingsEntry === "string" && !hasSettingsOverlay && !settingsOverlayFallbackWritten) {
+            // Legacy backups have no explicit overlay. A successful
+            // monolithic restore must not be overwritten by a stale fallback
+            // left on the current device during the next startup.
+            indexedDbToRestore[SETTINGS_DURABLE_OVERLAY_KEY] = null;
+          }
+          indexedDbRestoreReport = await restoreSystemBackupIndexedDb(indexedDbToRestore);
           if (typeof restoredOfflineStories === "string") {
             const parsedStories = JSON.parse(restoredOfflineStories) as unknown;
             if (!Array.isArray(parsedStories)) throw new Error("线下故事备份格式无效");

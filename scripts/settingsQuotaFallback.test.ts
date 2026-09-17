@@ -63,9 +63,11 @@ assert.equal("apiKey" in (overlay || {}), false, "credentials must never enter t
 
 assert.equal(
   repository.saveSettings({ ...settings, wallpaper: "wallpaper-change" }).success,
-  false,
-  "non-profile settings must not be reported as saved when the monolithic record is full",
+  true,
+  "appearance settings must survive when the monolithic record is full",
 );
+const appearanceOverlay = await repository.loadSettingsDurableOverlay();
+assert.equal(appearanceOverlay?.wallpaper, "wallpaper-change");
 
 const merged = repository.applySettingsDurableOverlay({ ...settings, name: "旧身份", chatEnterKeyNewline: false }, overlay!);
 assert.equal(merged.name, "新身份");
