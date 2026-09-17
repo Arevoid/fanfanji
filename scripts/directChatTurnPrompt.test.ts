@@ -19,7 +19,9 @@ import {
 } from "../src/features/chat/prompts/directChatTurnPrompt";
 
 const mainPrompt = buildDirectChatMainPrompt({ characterName: "测试角色", disableBracketActions: false });
-assert.match(mainPrompt, /RED PACKET CAPABILITY/);
+assert.doesNotMatch(mainPrompt, /RED PACKET CAPABILITY|金额校准建议|红包金额/);
+assert.match(mainPrompt, /Never invent payment artifacts/);
+assert.match(mainPrompt, /check-in phrase/);
 assert.match(mainPrompt, /unless that is your explicit character人设/);
 assert.match(mainPrompt, /ordinary greeting or short message/);
 assert.match(mainPrompt, /Never simulate a user reply/);

@@ -30,6 +30,8 @@ const shouldExtract = [
 for (const text of shouldExtract) {
   assert.equal(decision([user(text)]).decision, "extract", `important short content must extract: ${text}`);
 }
+assert.equal(decision([user("我们的打卡格式是亲亲老婆，么么哒")]).decision, "extract", "explicit check-in rules must always reach the memory extractor");
+assert.equal(decision([user("暗号是蓝色雨伞")]).decision, "extract", "explicit passphrases must always reach the memory extractor");
 
 assert.equal(decision([user("哈哈"), character("我明天要辞职")]).decision, "extract", "mixed low-value + important extracts");
 assert.equal(decision([user("好的"), user("我不吃香菜")]).decision, "extract", "mixed acknowledgement + preference extracts");

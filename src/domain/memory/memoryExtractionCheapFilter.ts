@@ -33,7 +33,7 @@ const GREETINGS = new Set([
  * These are deliberately broad safety guards rather than a memory classifier.
  * A match means “do not skip”; an unknown sentence always extracts.
  */
-const POSSIBLE_MEMORY_VALUE = /(?:怀孕|生孩子|孩子|分手|离婚|结婚|告白|表白|喜欢你|爱你|失恋|去世|过世|死亡|死了|住院|受伤|骨折|手术|搬家|搬到|旅行|出国|辞职|换工作|上学|毕业|转学|明天|今晚|下个月|周末|预约|约会|见面|答应|承诺|生日|爸爸|妈妈|父母|女儿|儿子|猫|狗|宠物|我喜欢|我不喜欢|我不吃|过敏|来自|住在|职业|名字|叫|可能|也许|或许|觉得|心情|烦|累|难过|焦虑|害怕|吵架)/u;
+const POSSIBLE_MEMORY_VALUE = /(?:怀孕|生孩子|孩子|分手|离婚|结婚|告白|表白|喜欢你|爱你|失恋|去世|过世|死亡|死了|住院|受伤|骨折|手术|搬家|搬到|旅行|出国|辞职|换工作|上学|毕业|转学|明天|今晚|下个月|周末|预约|约会|见面|答应|承诺|生日|爸爸|妈妈|父母|女儿|儿子|猫|狗|宠物|我喜欢|我不喜欢|我不吃|过敏|来自|住在|职业|名字|叫|可能|也许|或许|觉得|心情|烦|累|难过|焦虑|害怕|吵架|打卡格式|暗号|口令)/u;
 
 const EMOJI_ONLY = /^(?:[\p{Extended_Pictographic}\uFE0F\u200D\u{1F3FB}-\u{1F3FF}]|[!！?？。.,，、~～])+$/u;
 const stripCourtesyPunctuation = (value: string): string => value
