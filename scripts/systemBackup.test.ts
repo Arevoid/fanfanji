@@ -4,6 +4,7 @@ import {
   buildSystemBackup,
   checksumPayload,
   filterSystemBackupLocalStorageForRestore,
+  normalizeSystemBackupIndexedDb,
   parseSystemBackup,
   restoreSystemBackupIndexedDb,
   snapshotSystemBackupIndexedDb,
@@ -139,6 +140,14 @@ assert.deepEqual(
   [],
   "restoring migrated voice records must not duplicate them in localStorage",
 );
+
+const migratedModuleNames = normalizeSystemBackupIndexedDb({
+  "inner-voice-records-v1": innerVoices,
+  "user-settings-durable-overlay-v1": { version: 1, wallpaper: "" },
+});
+assert.deepEqual(migratedModuleNames["inner-voice-v1"], innerVoices, "durable inner-voice module aliases migrate to the release key");
+assert.equal(migratedModuleNames["inner-voice-records-v1"], undefined, "migrated inner-voice aliases are not reported as unknown modules");
+assert.deepEqual(migratedModuleNames["user-settings-durable-overlay-v1"], { version: 1, wallpaper: "" });
 const restoreError = new SystemBackupRestoreError("restore failed", ["messages-v4: write failed"]);
 assert.deepEqual(restoreError.rollbackErrors, ["messages-v4: write failed"]);
 const serializedBackup = "备份内容".repeat(20);
@@ -168,6 +177,13 @@ await restoreSystemBackupIndexedDb({ "character-archive-v4": [{ id: "restored-ch
 assert.deepEqual(await readingAssetDb.loadMetadataValue("character-archive-v4"), [{ id: "restored-character" }]);
 await restoreSystemBackupIndexedDb({ "character-phone-v1": [backupPhone] });
 assert.deepEqual(await characterPhoneDb.loadAll(), [backupPhone]);
+const migratedModuleRestore = await restoreSystemBackupIndexedDb({
+  "inner-voice-records-v1": innerVoices,
+  "user-settings-durable-overlay-v1": { version: 1, wallpaper: "" },
+});
+assert.deepEqual(migratedModuleRestore.skippedKeys, [], "known durable migration module names are restored instead of skipped");
+assert.ok(migratedModuleRestore.restoredKeys.includes("inner-voice-v1"));
+assert.deepEqual(await readingAssetDb.loadMetadataValue("user-settings-durable-overlay-v1"), { version: 1, wallpaper: "" });
 
 const indexedDbSnapshot = await snapshotSystemBackupIndexedDb();
 assert.equal(indexedDbSnapshot["messages-v4"], null);

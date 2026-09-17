@@ -38,6 +38,18 @@ export const SYSTEM_BACKUP_INDEXED_DB_KEYS = [
 ] as const;
 export const SYSTEM_BACKUP_CONTENT_ENTRY_KEYS = ["message-entry-v1", "offline-story-entry-v1"] as const;
 
+/**
+ * IndexedDB module names used by the short-lived durable-storage migration.
+ * They are accepted on import, but are deliberately not exported again.  The
+ * current release keeps the original backup names for the inner-voice and
+ * asset stores, so importing a backup produced by the migration must map the
+ * newer names back to those canonical release keys instead of reporting them
+ * as unrelated modules.
+ */
+const SYSTEM_BACKUP_INDEXED_DB_ALIASES: Readonly<Record<string, string>> = {
+  "inner-voice-records-v1": "inner-voice-v1",
+};
+
 export interface IndexedDbRestoreReport {
   restoredKeys: string[];
   skippedKeys: string[];
@@ -65,9 +77,10 @@ export function filterSystemBackupLocalStorageForRestore(
   entries: readonly [string, string | null][],
   indexedDb: SystemBackupIndexedDb,
 ): [string, string | null][] {
-  const hasMessageEntryBackup = Array.isArray(indexedDb["message-entry-v1"]);
-  const hasInnerVoiceBackup = Array.isArray(indexedDb["inner-voice-v1"]);
-  const hasMomentBackup = Array.isArray(indexedDb["moments-v4"]);
+  const normalizedIndexedDb = normalizeSystemBackupIndexedDb(indexedDb);
+  const hasMessageEntryBackup = Array.isArray(normalizedIndexedDb["message-entry-v1"]);
+  const hasInnerVoiceBackup = Array.isArray(normalizedIndexedDb["inner-voice-v1"]);
+  const hasMomentBackup = Array.isArray(normalizedIndexedDb["moments-v4"]);
   return entries.filter(([key]) => {
     if (key === "phone_offline_stories") return false;
     if (hasMessageEntryBackup && LEGACY_MESSAGE_STORAGE_KEYS.has(key)) return false;
@@ -121,6 +134,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/**
+ * Normalizes known module-name aliases without changing the caller's object.
+ * An alias is removed only when its payload has the shape expected by the
+ * target module; malformed data remains visible to the restore report rather
+ * than being silently discarded.
+ */
+export function normalizeSystemBackupIndexedDb(indexedDb: SystemBackupIndexedDb): SystemBackupIndexedDb {
+  const normalized = cloneJson(indexedDb);
+  for (const [alias, target] of Object.entries(SYSTEM_BACKUP_INDEXED_DB_ALIASES)) {
+    if (!Object.hasOwn(normalized, alias)) continue;
+    const value = normalized[alias];
+    const valid = target === "inner-voice-v1" ? Array.isArray(value) : value !== undefined;
+    if (!valid) continue;
+    if (!Object.hasOwn(normalized, target)) {
+      normalized[target] = value;
+    } else if (target === "inner-voice-v1" && Array.isArray(normalized[target])) {
+      // A transitional backup can contain both copies. Keep both here; the
+      // inner-voice repository deduplicates by scope and retains the newest
+      // record during restore.
+      normalized[target] = [
+        ...(normalized[target] as unknown[]),
+        ...(value as unknown[]),
+      ];
+    }
+    delete normalized[alias];
+  }
+  return normalized;
 }
 
 export function checksumPayload(value: Pick<SystemBackupEnvelope, "format" | "version" | "exportedAt" | "localStorage" | "indexedDb">): string {
@@ -330,7 +372,7 @@ export function parseSystemBackup(value: unknown): {
         integrityWarning = "备份校验值不一致，文件可能来自旧版导出或曾被修改。";
       }
     }
-    const indexedDb = cloneJson(value.indexedDb);
+    const indexedDb = normalizeSystemBackupIndexedDb(value.indexedDb);
     mergeMomentBackupCopies(localStorage, indexedDb);
     if (!Array.isArray(indexedDb["inner-voice-v1"])) {
       const legacyVoice = localStorage.phone_inner_voice_records;
@@ -410,11 +452,12 @@ export function inspectSystemBackup(value: unknown): SystemBackupInspectionRepor
 }
 
 export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexedDb): Promise<IndexedDbRestoreReport> {
+  const normalizedIndexedDb = normalizeSystemBackupIndexedDb(indexedDb);
   const previousValues = new Map<string, unknown | null>();
-  const keysToRestore = SYSTEM_BACKUP_INDEXED_DB_KEYS.filter((key) => Object.hasOwn(indexedDb, key));
-  const contentKeysToRestore = SYSTEM_BACKUP_CONTENT_ENTRY_KEYS.filter((key) => Object.hasOwn(indexedDb, key));
+  const keysToRestore = SYSTEM_BACKUP_INDEXED_DB_KEYS.filter((key) => Object.hasOwn(normalizedIndexedDb, key));
+  const contentKeysToRestore = SYSTEM_BACKUP_CONTENT_ENTRY_KEYS.filter((key) => Object.hasOwn(normalizedIndexedDb, key));
   const knownKeys = new Set<string>([...SYSTEM_BACKUP_INDEXED_DB_KEYS, ...SYSTEM_BACKUP_CONTENT_ENTRY_KEYS]);
-  const skippedKeys = Object.keys(indexedDb).filter((key) => !knownKeys.has(key));
+  const skippedKeys = Object.keys(normalizedIndexedDb).filter((key) => !knownKeys.has(key));
   let legacyMessageEntryRestored = false;
   for (const key of keysToRestore) {
     previousValues.set(key, await loadSystemBackupIndexedDbValue(key));
@@ -422,7 +465,7 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
 
   try {
     for (const key of keysToRestore) {
-      const value = indexedDb[key];
+      const value = normalizedIndexedDb[key];
       if (value === null || value === undefined) {
         await deleteSystemBackupIndexedDbValue(key);
       } else {
@@ -434,14 +477,14 @@ export async function restoreSystemBackupIndexedDb(indexedDb: SystemBackupIndexe
     // path, import that legacy snapshot into it so importing an old backup
     // cannot silently leave the current chat data in place.
     if (!contentKeysToRestore.includes("message-entry-v1")
-      && Array.isArray(indexedDb["messages-v4"])
+      && Array.isArray(normalizedIndexedDb["messages-v4"])
       && isMessageEntryStoreEnabled()) {
       previousValues.set("message-entry-v1", await messageEntryDb.loadAll());
-      await messageEntryDb.replaceAll(indexedDb["messages-v4"] as never[]);
+      await messageEntryDb.replaceAll(normalizedIndexedDb["messages-v4"] as never[]);
       legacyMessageEntryRestored = true;
     }
     for (const key of contentKeysToRestore) {
-      const value = indexedDb[key];
+      const value = normalizedIndexedDb[key];
       if (value !== null && !Array.isArray(value)) throw new Error(`备份中的 ${key} 数据格式无效`);
       if (key === "message-entry-v1") {
         previousValues.set(key, isMessageEntryStoreEnabled() ? await messageEntryDb.loadAll() : null);
