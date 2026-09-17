@@ -5,6 +5,7 @@ import { parseQuoteReply, QuotedMessagePreview } from "../src/features/chat/comp
 import { RedPacketCard } from "../src/features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../src/features/chat/components/SpecialMessage/TransferCard";
 import { hasWechatRedPacketSemanticCss } from "../src/features/chat/styles/redPacketSemanticCss";
+import { COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE } from "../src/features/chat/styles/chatThemeTemplate";
 import type { Message } from "../src/types";
 
 const message = (content: string): Message => ({ id: "m", characterId: "a", sender: "character", content, timestamp: 1 });
@@ -38,6 +39,8 @@ const checks: Array<[string, boolean]> = [
   ["wechat CSS can select semantic layout", packet("unclaimed", true).includes('data-redpacket-layout="wechat"')],
   ["generic custom CSS keeps default packet layout", !hasWechatRedPacketSemanticCss([".chat-message--text { color: red; }"])],
   ["wechat packet hooks opt into semantic layout", hasWechatRedPacketSemanticCss([".chat-message--red-packet .wechat-redpacket__main { display: flex; }"])],
+  ["empty semantic hook interfaces keep default layout", !hasWechatRedPacketSemanticCss([".wechat-redpacket__main, .wechat-redpacket__footer { }"])],
+  ["built-in theme template keeps default packet layout", !hasWechatRedPacketSemanticCss([COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE])],
   ["comments do not opt into semantic layout", !hasWechatRedPacketSemanticCss(["/* .wechat-redpacket__main */ .chat-message--text { color: red; }"])],
   ["packet semantic hooks", [
     "wechat-redpacket__main",
