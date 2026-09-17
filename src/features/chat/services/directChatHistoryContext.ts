@@ -174,14 +174,16 @@ export function buildDirectChatHistoryContext(input: {
   const recentMessages = budgetedRecentMessages;
   const historyMessageIds = new Set([...recentMessages, ...trailingUserTurnMessages, ...referencedUserMessages].map((message) => message.id));
   const historyMessages = messagesForHistory.filter((message) => historyMessageIds.has(message.id));
-  const historicalMessages = topicBoundary.mode === "shift"
-    ? []
-    : selectRecentMessagesWithinBudget(
-      historyPartition.historicalMessages.filter((message) => !pinnedMessageIds.has(message.id)),
-      Math.max(1, input.historicalReferenceCharacterLimit ?? DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT),
-      input.characterName,
-      input.userName,
-    );
+  // A topic shift closes the previous live scene; it must not erase the
+  // historical record. Keep the older messages in the low-priority reference
+  // block so a natural follow-up (especially across days) can still recover
+  // the relevant facts without replaying the old scene as current dialogue.
+  const historicalMessages = selectRecentMessagesWithinBudget(
+    historyPartition.historicalMessages.filter((message) => !pinnedMessageIds.has(message.id)),
+    Math.max(1, input.historicalReferenceCharacterLimit ?? DEFAULT_HISTORICAL_REFERENCE_CHARACTER_LIMIT),
+    input.characterName,
+    input.userName,
+  );
   const historicalReferenceLines = historicalMessages.map((message) => {
     const speaker = message.sender === "user" ? "用户" : input.characterName;
     const content = serializeMessageContentForPrompt(message, {

@@ -53,7 +53,7 @@ const longGap = buildDirectChatHistoryContext({
   requestTime: new Date(longGapCurrentAt),
 });
 assert.deepEqual(longGap.recentMessages.map((message) => message.id), []);
-assert.equal(longGap.crossDayHistoricalReference, "", "a fresh image after a long pause must not carry stale topic prose");
+assert.match(longGap.crossDayHistoricalReference, /old topic/, "a fresh image after a long pause keeps old prose only as dated reference");
 assert.equal(longGap.hasCrossDayHistory, true, "same-day long gaps should close the old live scene");
 assert.equal(longGap.topicBoundary.mode, "shift");
 
@@ -75,6 +75,33 @@ const mediaBoundary = buildDirectChatHistoryContext({
 assert.deepEqual(mediaBoundary.recentMessages.map((message) => message.id), ["recent-image"], "a follow-up text immediately after an image remains in the live scene");
 assert.ok(mediaBoundary.crossDayHistoricalReference.length > 0, "an immediately-following image turn keeps older context as low-priority reference");
 assert.equal(mediaBoundary.topicBoundary.mode, "uncertain", "a follow-up text immediately after an image remains eligible for continuity");
+
+const multiDayMessages = Array.from({ length: 10 }, (_, index) => ({
+  id: `multi-day-${index}`,
+  sender: index % 2 === 0 ? "user" : "character",
+  content: `五天连续记录第${index + 1}条：约定事项${index + 1}`,
+  timestamp: day(`2026-09-${String(10 + Math.floor(index / 2)).padStart(2, "0")}T12:00:00+08:00`),
+}));
+const multiDayCurrent = {
+  id: "multi-day-current",
+  sender: "user",
+  content: "继续之前的约定，我们接着聊",
+  timestamp: day("2026-09-15T12:00:00+08:00"),
+};
+const multiDayContext = buildDirectChatHistoryContext({
+  messages: [...multiDayMessages, multiDayCurrent] as any,
+  userMessageId: multiDayCurrent.id,
+  userMessageAt: multiDayCurrent.timestamp,
+  enableTimeAwareness: true,
+  contextLimit: 10,
+  historicalReferenceCharacterLimit: 8_000,
+  characterName: "角色",
+  userName: "用户",
+  requestTime: new Date(multiDayCurrent.timestamp),
+});
+assert.equal(multiDayContext.topicBoundary.mode, "continue");
+assert.match(multiDayContext.crossDayHistoricalReference, /连续记录第1条/);
+assert.match(multiDayContext.crossDayHistoricalReference, /连续记录第10条/);
 
 const agreementCurrentAt = new Date("2026-09-15T20:35:00+08:00").getTime();
 const agreementMessages = [
