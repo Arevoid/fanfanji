@@ -167,7 +167,6 @@ import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations 
 import { removeCharacterTruthForRelations } from "../features/characterKnowledge/services/characterTruthCleanupService";
 import { listByRelation as listCharacterEventsByRelation } from "../core/storage/repositories/characterEventRepository";
 import { append as appendKnowledgeClaim, appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
-import { saveRelationships } from "../core/storage/repositories/relationshipRepository";
 import { loadKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, saveConversationSummaries } from "../core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections } from "../core/storage/repositories/behaviorCorrectionRepository";
@@ -175,6 +174,7 @@ import { behaviorCorrectionRepository } from "../core/storage/repositories/behav
 import { contributeDirectReplyTruthContext } from "../features/characterKnowledge/services/directReplyTruthContextContributor";
 import { formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../features/characterKnowledge/services/truthRetrievalService";
 import { persistTruthVectorIndex } from "../features/characterKnowledge/services/truthVectorIndexService";
+import { persistDirectChatArchiveProgress } from "../features/chat/services/directChatArchiveProgress";
 import { createConversationSummaryRecord } from "../features/characterKnowledge/services/conversationSummaryService";
 import { createDeterministicArtifactClaim } from "../features/characterKnowledge/services/deterministicKnowledgeCapture";
 import { createAcceptedRelationshipPlanClaim } from "../features/characterKnowledge/services/relationshipCommitmentCapture";
@@ -3069,15 +3069,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     updateCharacter: onUpdateCharacter,
     persistArchiveProgress: ({ activeRelationship, lastMessage }) => {
       if (!activeRelationship) return false;
-      const nextRelationships = relationships.map((relation) => relation.id === activeRelationship.id
-        ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: Date.now() }
-        : relation);
-      const persisted = saveRelationships(nextRelationships);
+      const persisted = persistDirectChatArchiveProgress({
+        relationships,
+        relationshipId: activeRelationship.id,
+        lastMessageId: lastMessage.id,
+      });
       if (!persisted.success) {
         console.error("Failed to persist direct-chat archive cursor:", persisted.error);
         return false;
       }
-      onSaveRelationships(nextRelationships);
+      onSaveRelationships(persisted.relationships);
       return true;
     },
   });
