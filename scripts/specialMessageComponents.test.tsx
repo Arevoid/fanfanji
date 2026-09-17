@@ -5,6 +5,7 @@ import { parseQuoteReply, QuotedMessagePreview } from "../src/features/chat/comp
 import { RedPacketCard } from "../src/features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../src/features/chat/components/SpecialMessage/TransferCard";
 import { hasWechatRedPacketSemanticCss } from "../src/features/chat/styles/redPacketSemanticCss";
+import { COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE } from "../src/features/chat/styles/chatThemeTemplate";
 import type { Message } from "../src/types";
 
 const message = (content: string): Message => ({ id: "m", characterId: "a", sender: "character", content, timestamp: 1 });
@@ -38,7 +39,16 @@ const checks: Array<[string, boolean]> = [
   ["wechat CSS can select semantic layout", packet("unclaimed", true).includes('data-redpacket-layout="wechat"')],
   ["generic custom CSS keeps default packet layout", !hasWechatRedPacketSemanticCss([".chat-message--text { color: red; }"])],
   ["wechat packet hooks opt into semantic layout", hasWechatRedPacketSemanticCss([".chat-message--red-packet .wechat-redpacket__main { display: flex; }"])],
+  ["no custom CSS keeps default packet layout", !hasWechatRedPacketSemanticCss([])],
+  ["empty semantic hook block keeps default packet layout", !hasWechatRedPacketSemanticCss([".wechat-redpacket__main, .wechat-redpacket__footer { }"])],
+  ["multiline empty semantic hook block keeps default packet layout", !hasWechatRedPacketSemanticCss([".wechat-redpacket__main,\n.wechat-redpacket__footer {\n\n}"])],
+  ["built-in semantic hook template stays opt-in", !hasWechatRedPacketSemanticCss([COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE])],
+  ["media-wrapped semantic declaration opts in", hasWechatRedPacketSemanticCss(["@media (min-width: 600px) {\n  .chat-message--red-packet .wechat-redpacket__main {\n    display: flex;\n  }\n}"])],
   ["comments do not opt into semantic layout", !hasWechatRedPacketSemanticCss(["/* .wechat-redpacket__main */ .chat-message--text { color: red; }"])],
+  ["comment-only semantic block keeps default packet layout", !hasWechatRedPacketSemanticCss([".wechat-redpacket__main { /* display: flex; */ }"])],
+  ["hook text inside a string does not opt in", !hasWechatRedPacketSemanticCss([".chat-message--text { content: '.wechat-redpacket__main'; }"])],
+  ["hook text inside an attribute selector does not opt in", !hasWechatRedPacketSemanticCss(['[data-hook=".wechat-redpacket__main"] { color: red; }'])],
+  ["empty declaration value does not opt in", !hasWechatRedPacketSemanticCss([".wechat-redpacket__main { --custom-color:; }"])],
   ["packet semantic hooks", [
     "wechat-redpacket__main",
     "wechat-redpacket__icon",
