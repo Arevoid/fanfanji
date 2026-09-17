@@ -763,7 +763,7 @@ export default function AppChat({
       && summary.characterId === activeDirectScope.characterId
       && summary.userIdentityId === activeDirectScope.userIdentityId
       && summary.conversationId === activeDirectScope.conversationId);
-    void persistTruthVectorIndex(scopeClaims, scopeSummaries);
+    void persistTruthVectorIndex(scopeClaims, scopeSummaries, activeDirectScope);
   }, [activeDirectScope?.relationId, activeDirectScope?.characterId, activeDirectScope?.userIdentityId, activeDirectScope?.conversationId, messages.length]);
   const isActiveChatScopeValid = Boolean(activeCharacter && (activeCharacter.isGroupChat
     ? !activeChatRelationId

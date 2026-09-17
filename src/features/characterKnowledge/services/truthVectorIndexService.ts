@@ -2,6 +2,7 @@ import type { CharacterTruthScope, ConversationSummaryRecord, KnowledgeClaim } f
 import { buildSemanticVector, cosineSimilarity } from "../../../domain/memory/semanticVector";
 import {
   loadTruthVectorIndexRecords,
+  removeTruthVectorIndexRecords,
   saveTruthVectorIndexRecords,
   type TruthVectorIndexRecord,
 } from "../../../core/storage/truthVectorIndexDb";
@@ -67,19 +68,48 @@ export const rankTruthVectorCandidates = (
   })).sort((left, right) => right.score - left.score || left.id.localeCompare(right.id)).slice(0, Math.max(1, limit));
 };
 
-/** Persist an exact-scope index opportunistically; retrieval remains fail-open. */
+let vectorIndexWriteQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Rebuild exact-scope vector projections and remove records that no longer
+ * have an active canonical claim/summary. Writes are serialized because the
+ * chat screen can trigger a rebuild while a claim or summary is still being
+ * committed; an older async write must not resurrect stale vectors.
+ */
 export async function persistTruthVectorIndex(
   claims: readonly KnowledgeClaim[],
   summaries: readonly ConversationSummaryRecord[],
+  scope?: CharacterTruthScope,
 ): Promise<{ success: boolean; count: number }> {
   const records = buildTruthVectorRecords(claims, summaries);
-  if (records.length === 0) return { success: true, count: 0 };
-  try {
-    await saveTruthVectorIndexRecords(records);
-    return { success: true, count: records.length };
-  } catch {
-    return { success: false, count: records.length };
-  }
+  const targetScopeKeys = new Set<string>(scope ? [truthVectorScopeKey(scope)] : []);
+  records.forEach((record) => targetScopeKeys.add(record.scopeKey));
+  if (targetScopeKeys.size === 0) return { success: true, count: 0 };
+
+  const currentByScope = new Map<string, TruthVectorIndexRecord[]>();
+  records.forEach((record) => {
+    const current = currentByScope.get(record.scopeKey) || [];
+    current.push(record);
+    currentByScope.set(record.scopeKey, current);
+  });
+  const operation = async (): Promise<{ success: boolean; count: number }> => {
+    try {
+      for (const scopeKey of targetScopeKeys) {
+        const desired = currentByScope.get(scopeKey) || [];
+        const existing = await loadTruthVectorIndexRecords(scopeKey);
+        const desiredIds = new Set(desired.map((record) => record.id));
+        const staleIds = existing.filter((record) => !desiredIds.has(record.id)).map((record) => record.id);
+        if (staleIds.length > 0) await removeTruthVectorIndexRecords(staleIds);
+        if (desired.length > 0) await saveTruthVectorIndexRecords(desired);
+      }
+      return { success: true, count: records.length };
+    } catch {
+      return { success: false, count: records.length };
+    }
+  };
+  const resultPromise = vectorIndexWriteQueue.then(operation, operation);
+  vectorIndexWriteQueue = resultPromise.then(() => undefined, () => undefined);
+  return resultPromise;
 }
 
 export async function loadTruthVectorIndex(scope: CharacterTruthScope): Promise<TruthVectorIndexRecord[]> {

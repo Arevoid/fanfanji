@@ -62,4 +62,11 @@ assert.equal(write.count, 2);
 const loaded = await loadTruthVectorIndex(scope);
 assert.deepEqual(loaded.map((record) => record.id).sort(), ["claim:claim-vector", "episode:summary-vector"]);
 
+const otherScope = { ...scope, relationId: "relation-other" };
+await persistTruthVectorIndex([claim], [], scope);
+await persistTruthVectorIndex([], [], scope);
+assert.deepEqual(await loadTruthVectorIndex(scope), [], "rebuilding an empty exact scope removes stale vectors");
+await persistTruthVectorIndex([{ ...claim, ...otherScope, id: "claim-other" }], [], otherScope);
+assert.deepEqual((await loadTruthVectorIndex(otherScope)).map((record) => record.id), ["claim:claim-other"], "vector scopes remain isolated");
+
 console.log("PASS deterministic semantic vectors and IndexedDB Truth/Episode index persistence");
