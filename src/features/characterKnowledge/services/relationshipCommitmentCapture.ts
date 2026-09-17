@@ -3,10 +3,12 @@ import type { CharacterTruthScope, KnowledgeClaim } from "../../../domain/charac
 import { evaluateKnowledgeWrite } from "../../../domain/characterKnowledge/knowledgeWritePolicy";
 
 /** Explicit user-authored plan language that is safe to promote immediately. */
-const EXPLICIT_PLAN_PATTERN = /(?:约定|说好了|说定了|每天.{0,16}(?:打卡|发|给|做|报到)|每次.{0,12}(?:都|要)|以后(?:都|要)|下次(?:要|就)|连续\d+天|答应|承诺|暗号|打卡格式)/u;
-const QUESTION_OR_PROPOSAL_PATTERN = /[?？]|(?:要不要|是不是|能不能|可以吗|行不行)/u;
+const EXPLICIT_PLAN_PATTERN = /(?:约定|说好了|说定了|每天.{0,16}(?:打卡|发|给|做|报到)|每次.{0,12}(?:都|要)|以后(?:都|要)|下次(?:要|就)|连续(?:打卡)?\d+天|答应|承诺|暗号|打卡格式)/u;
+/** A direct rule such as “打卡格式是……” is durable even before a reply explicitly acknowledges it. */
+const EXPLICIT_RULE_PATTERN = /(?:打卡格式|暗号|口令)\s*(?:是|为|叫|就(?:是|叫))\s*[^，,。！？!?]{1,40}/u;
+const QUESTION_OR_PROPOSAL_PATTERN = /[?？]|(?:要不要|是不是|能不能|可以吗|行不行|是什么|怎么(?:样|办|做)?|如何|哪个|哪些|能否|是否)/u;
 /** Acceptance must be explicit; ordinary warmth such as “我会陪着你” is not enough. */
-const EXPLICIT_ACCEPTANCE_PATTERN = /(?:答应你|说定了|说好了|就这么办|没问题|记住了|收到|成交|那就这样|好的?[，,。！!\s]*(?:那就|每天|以后|说定)|可以[，,。！!\s]|行[，,。！!\s])/u;
+const EXPLICIT_ACCEPTANCE_PATTERN = /(?:答应你|说定了|说好了|就这么办|没问题|记住了|收到|明白了|知道了|成交|那就这样|这样才行|才算(?:完成|打卡)?|按(?:这个|对的)?格式(?:就)?(?:行|对)|完成(?:了)?(?:打卡)?|好的?[，,。！!\s]*(?:那就|每天|以后|说定)|可以[，,。！!\s]|行[，,。！!\s])/u;
 
 const cleanSourceText = (value: string): string => value
   .replace(/\s+/gu, " ")
@@ -28,7 +30,7 @@ export function createAcceptedRelationshipPlanClaim(input: {
     || !input.characterMessages.every((message) => message.sender === "character")
     || !EXPLICIT_PLAN_PATTERN.test(userText)
     || QUESTION_OR_PROPOSAL_PATTERN.test(userText)
-    || !EXPLICIT_ACCEPTANCE_PATTERN.test(characterText)) return undefined;
+    || (!EXPLICIT_RULE_PATTERN.test(userText) && !EXPLICIT_ACCEPTANCE_PATTERN.test(characterText))) return undefined;
 
   const now = input.now ?? Date.now();
   const sourceMessageIds = [input.userMessage.id, ...input.characterMessages.map((message) => message.id)];

@@ -19,6 +19,12 @@ export interface AutomaticMemoryExtractionOptions {
   retryHighValue?: boolean;
 }
 
+export interface ArchiveProgressInput {
+  activeCharacter: Character;
+  activeRelationship?: CharacterRelationship;
+  lastMessage: Message;
+}
+
 export interface ChatSideEffectControllerDependencies {
   offlineStories: OfflineStory[];
   onSaveOfflineStory?: (story: OfflineStory) => void;
@@ -28,6 +34,8 @@ export interface ChatSideEffectControllerDependencies {
   onSaveCharacter: (character: Character) => void;
   /** Prefer a field patch for delayed side effects so stale full snapshots cannot overwrite settings. */
   updateCharacter?: (characterId: string, patch: Partial<Character>) => void | Promise<boolean>;
+  /** Persist an archive cursor before the in-memory relationship snapshot is updated. */
+  persistArchiveProgress?: (input: ArchiveProgressInput) => boolean | void | Promise<boolean | void>;
   schedule?: (task: () => void | Promise<void>, delayMs: number) => void;
   now?: () => number;
 }
@@ -117,9 +125,20 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
               const lastMessage = eligibleMessages[eligibleMessages.length - 1];
               autoSummaryCooldownUntil.delete(summaryScopeKey);
               if (lastMessage) {
-                saveRelationships(input.relationships, (previous) => previous.map((relation) => relation.id === input.activeRelationship?.id
-                  ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: now() }
-                  : relation));
+                const persistResult = dependencies.persistArchiveProgress?.({
+                  activeCharacter: input.activeCharacter,
+                  activeRelationship: input.activeRelationship,
+                  lastMessage,
+                });
+                if (persistResult && typeof (persistResult as Promise<unknown>).then === "function") {
+                  void (persistResult as Promise<unknown>).catch((error) => {
+                    console.warn("Automatic memory archive cursor persistence failed:", error);
+                  });
+                } else if (persistResult !== false && !dependencies.persistArchiveProgress) {
+                  saveRelationships(input.relationships, (previous) => previous.map((relation) => relation.id === input.activeRelationship?.id
+                    ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: now() }
+                    : relation));
+                }
               }
               return;
             }
@@ -149,16 +168,12 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
                     retryHighValue: true,
                   });
                 }
-                // A successful extraction with no durable facts is still a
-                // completed archive pass. Advance the marker so the same
-                // range is not sent to the model again after every reply.
+                // The extraction entry point owns the cursor because it can
+                // verify canonical/summary persistence. Do not advance it a
+                // second time here: doing so could hide a failed cursor write
+                // behind a successful React state update.
                 if (count >= 0) {
                   autoSummaryCooldownUntil.delete(summaryScopeKey);
-                  if (lastMessage && input.activeRelationship) {
-                    saveRelationships(input.relationships, (previous) => previous.map((relation) => relation.id === input.activeRelationship?.id
-                      ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: now() }
-                      : relation));
-                  }
                 } else {
                   // A failed background request must not be replayed on every
                   // following chat turn. Manual extraction is unaffected.

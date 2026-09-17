@@ -69,6 +69,8 @@ export interface MemoryExtractionRunOptions {
   enableV2Metadata?: boolean;
   /** Internal marker for the normal automatic Direct Chat completion path. */
   automatic?: boolean;
+  /** Retry a high-value empty extraction without changing the archive range. */
+  retryHighValue?: boolean;
 }
 
 export interface MemoryExtractionRunDiagnostics {
@@ -121,6 +123,12 @@ export interface ChatMemoryExtractionOptions {
   onSaveMemories: (memories: any[]) => void;
   onSaveRelationships?: (updater: (previous: CharacterRelationship[]) => CharacterRelationship[]) => void;
   onUpdateCharacter?: (characterId: string, patch: Partial<Character>) => void | Promise<boolean>;
+  /** Persist the archive cursor before publishing the updated relationship state. */
+  persistArchiveProgress?: (input: {
+    activeCharacter: Character;
+    activeRelationship?: CharacterRelationship;
+    lastMessage: Message;
+  }) => boolean | void | Promise<boolean | void>;
   groupMembers?: readonly Character[];
   characters?: readonly Character[];
   relationships?: readonly CharacterRelationship[];
@@ -139,6 +147,7 @@ export function useChatMemoryExtraction({
   onSaveMemories,
   onSaveRelationships,
   onUpdateCharacter,
+  persistArchiveProgress,
   groupMembers = [],
   characters = [],
   relationships = [],
@@ -263,12 +272,18 @@ export function useChatMemoryExtraction({
       const markArchiveProgress = async (lastMessage: Message): Promise<boolean> => {
         if (activeCharacter.isGroupChat) {
           if (onUpdateCharacter) {
-            await onUpdateCharacter(activeCharacter.id, { lastImmediateSummaryMsgId: lastMessage.id });
-            return true;
+            const result = await onUpdateCharacter(activeCharacter.id, { lastImmediateSummaryMsgId: lastMessage.id });
+            return result !== false;
           }
           return false;
         }
         if (activeDirectScope && onSaveRelationships) {
+          const persistResult = await persistArchiveProgress?.({
+            activeCharacter,
+            activeRelationship,
+            lastMessage,
+          });
+          if (persistResult === false) return false;
           onSaveRelationships((previous) => previous.map((relation) => relation.id === activeDirectScope.relationId
             ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: Date.now() }
             : relation));
@@ -359,7 +374,11 @@ export function useChatMemoryExtraction({
             }
           }
           totalExtracted += claims.length;
-          await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
+          const cursorAdvanced = await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
+          if (!cursorAdvanced) {
+            console.error("Group chat archive cursor could not be persisted.");
+            return -1;
+          }
         }
         lastArchiveFeedbackRef.current = { ...archiveStats };
         return totalExtracted;
@@ -418,7 +437,7 @@ export function useChatMemoryExtraction({
           scenario: "chat",
           // The controller supplies an explicit eligible batch for automatic
           // Direct Chat extraction; manual archive actions leave this off.
-          ...(manualMessagesOverride !== undefined || runOptions.enableV2Metadata || canaryEnabled
+          ...(manualMessagesOverride !== undefined || runOptions.enableV2Metadata || runOptions.retryHighValue || canaryEnabled
             ? { enableMemoryExtractionV2Shadow: true }
             : {}),
           // Stage 4D-2 observation derives a V2 candidate from this same
@@ -629,6 +648,10 @@ export function useChatMemoryExtraction({
         archiveStats.rejectedCandidateCount += result.rejectedCandidateCount + canarySuppressedCount;
         totalExtracted += canaryFilteredAcceptedClaims.length;
         const cursorAdvanced = await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
+        if (!cursorAdvanced) {
+          console.error("Direct chat archive cursor could not be persisted.");
+          return -1;
+        }
         const observerGateReason = !longEvidenceEnabled
           ? "long_evidence_disabled" as const
           : !logicalActionId

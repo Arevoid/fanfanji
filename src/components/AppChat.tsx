@@ -167,6 +167,7 @@ import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations 
 import { removeCharacterTruthForRelations } from "../features/characterKnowledge/services/characterTruthCleanupService";
 import { listByRelation as listCharacterEventsByRelation } from "../core/storage/repositories/characterEventRepository";
 import { append as appendKnowledgeClaim, appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
+import { saveRelationships } from "../core/storage/repositories/relationshipRepository";
 import { loadKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, saveConversationSummaries } from "../core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections } from "../core/storage/repositories/behaviorCorrectionRepository";
@@ -3058,11 +3059,27 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const chatSideEffectController = createChatSideEffectController({
     offlineStories,
     onSaveOfflineStory,
-    extractMemories: (messagesToCompress) => handleExtractMemories(messagesToCompress, { automatic: true }),
+    extractMemories: (messagesToCompress, options) => handleExtractMemories(messagesToCompress, {
+      automatic: true,
+      retryHighValue: options?.retryHighValue,
+    }),
     onSaveRelationships,
     updateRelationships: onSaveRelationships,
     onSaveCharacter,
     updateCharacter: onUpdateCharacter,
+    persistArchiveProgress: ({ activeRelationship, lastMessage }) => {
+      if (!activeRelationship) return false;
+      const nextRelationships = relationships.map((relation) => relation.id === activeRelationship.id
+        ? { ...relation, lastImmediateSummaryMsgId: lastMessage.id, updatedAt: Date.now() }
+        : relation);
+      const persisted = saveRelationships(nextRelationships);
+      if (!persisted.success) {
+        console.error("Failed to persist direct-chat archive cursor:", persisted.error);
+        return false;
+      }
+      onSaveRelationships(nextRelationships);
+      return true;
+    },
   });
 
   const postReplyCoordinator = createPostReplyCoordinator({

@@ -25,11 +25,31 @@ assert.equal(accepted?.truthStatus, "asserted");
 assert.equal(accepted?.temporalStatus, "future");
 assert.deepEqual(accepted?.source.messageIds, ["user-1", "character-2"]);
 
+const explicitRule = createAcceptedRelationshipPlanClaim({
+  userMessage: message("user-2", "user", "打卡格式是亲亲老婆，么么哒"),
+  characterMessages: [message("character-3", "character", "好，我知道了")],
+  scope,
+});
+assert.equal(explicitRule?.kind, "plan", "an explicit check-in format is durable relationship guidance");
+
 assert.equal(createAcceptedRelationshipPlanClaim({
   userMessage: message("user-3", "user", "要不要每天打卡？"),
   characterMessages: [message("character-4", "character", "可以吗？")],
   scope,
 }), undefined, "questions and tentative proposals must not become plans");
+
+assert.equal(createAcceptedRelationshipPlanClaim({
+  userMessage: message("user-7", "user", "打卡格式是什么"),
+  characterMessages: [message("character-8", "character", "我来想想")],
+  scope,
+}), undefined, "questions about a rule must not become plans");
+
+const naturalAcceptance = createAcceptedRelationshipPlanClaim({
+  userMessage: message("user-9", "user", "按这个格式连续打卡10天"),
+  characterMessages: [message("character-10", "character", "这样才行，才算完成")],
+  scope,
+});
+assert.equal(naturalAcceptance?.kind, "plan", "natural acceptance wording should capture the plan");
 
 assert.equal(createAcceptedRelationshipPlanClaim({
   userMessage: message("user-5", "user", "我明天要辞职"),

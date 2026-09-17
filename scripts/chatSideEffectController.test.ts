@@ -96,7 +96,7 @@ await scheduled[0]();
 assert.equal(extractedMessages.length, 20);
 assert.deepEqual(extractedMessages.slice(-2).map((message) => message.id), ["user-1", "assistant-1"]);
 assert.equal(extractionOptions?.automatic, true, "automatic archive must preserve its invocation kind");
-assert.equal(savedRelationships[0]?.lastImmediateSummaryMsgId, "assistant-1");
+assert.equal(savedRelationships[0]?.lastImmediateSummaryMsgId, undefined, "archive cursor belongs to the extraction writer");
 
 const retryScheduled: Array<() => void | Promise<void>> = [];
 let retryCalls = 0;
