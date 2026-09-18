@@ -104,7 +104,16 @@ const generated = await generateForumThreads({
   publicWorldSettings: [{ title: "Integrated world", content: "Public world fact", visibility: "public" }],
   aiCall: async (request) => {
     capturedRequests.push(request);
-    return { text: JSON.stringify({ title: "A public post", body: "A public forum body with enough detail.", anonymous: true }) };
+    return { text: JSON.stringify({
+      title: "公开生活讨论",
+      body: "这是一个公开生活讨论，想听听大家的看法。",
+      anonymous: true,
+      replies: [
+        { body: "公开生活讨论可以先说说你最在意的细节。", replyToFloor: null },
+        { body: "我也遇到过类似的公开生活讨论，建议先把情况列清楚。", replyToFloor: null },
+        { body: "公开生活讨论里补充一点个人经验，希望能帮到你。", replyToFloor: null },
+      ],
+    }) };
   },
 });
 assert.equal(generated.threads.length, 1);

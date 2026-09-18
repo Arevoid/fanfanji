@@ -157,6 +157,10 @@ const FORUM_TOPIC_POOL_GUIDANCE = `这些只是发散灵感，不是固定题材
  * replies and activity, but do not enter the author-update story lane. */
 export const FORUM_STORY_POST_RATIO = 0.5;
 
+/** Each newly generated post must start with this many effective replies. */
+export const FORUM_INITIAL_REPLY_MIN = 3;
+export const FORUM_INITIAL_REPLY_MAX = 8;
+
 const FORUM_DIVERSITY_LENSES = [
   "普通人的当下见闻、邻里、租房、消费或公共服务",
   "影视、综艺、电视剧、作品安利或观众推荐",
@@ -361,7 +365,7 @@ ${FORUM_PUBLIC_TEXT_RULES}
 ${FORUM_REALISM_RULES}
 严格只输出一个 JSON 对象，不要 Markdown：
 {"title":"1-80字","body":"30-800字","anonymous":false,"replies":[{"body":"5-120字的相关回复","replyToFloor":null}]}
-replies 为 0-5 条，由普通论坛路人发表；回复可以很短，也可以暂时没有回复。replyToFloor 只能引用本次候选中此前已出现的真实回复楼层；直接回复主楼必须为 null。
+replies 必须为 3-8 条，由普通论坛路人发表；每条都要直接回应主楼或此前已出现的真实回复。replyToFloor 只能引用本次候选中此前已出现的真实回复楼层；直接回复主楼必须为 null。
 禁止输出 relationId、characterId、threadId、replyId、作者姓名或真实网络账号。`,
   message: `${FORUM_TOPIC_POOL_GUIDANCE}
 可参考的发散方向：${FORUM_TOPIC_POOL}。
@@ -608,7 +612,7 @@ export async function generateForumThreads(input: {
   const fingerprints = new Set<string>();
   const aiCall = input.aiCall || defaultAiCall;
   // Invalid or duplicate candidates must not silently reduce a requested
-  // 3–6-post refresh. Allow a bounded second pass while keeping the hard
+  // 4–8-post refresh. Allow a bounded second pass while keeping the hard
   // upper bound at the requested count.
   for (let attempt = 0; attempt < planned * 2 && threads.length < planned; attempt += 1) {
     const index = threads.length;
@@ -681,6 +685,10 @@ export async function generateForumThreads(input: {
       occurredAt,
       now: input.now,
     });
+    if (generated.replies.length < FORUM_INITIAL_REPLY_MIN
+      || generated.replies.length > FORUM_INITIAL_REPLY_MAX) {
+      continue;
+    }
     const fingerprint = forumThreadFingerprint({
       ownerIdentityId: input.ownerIdentityId,
       title: generated.thread.title,

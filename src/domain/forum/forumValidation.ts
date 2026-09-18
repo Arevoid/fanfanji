@@ -114,7 +114,7 @@ export const parseForumThreadCandidate = (text: string): ForumGeneratedThreadCan
   const body = cleanGeneratedText(record.body, 5000, "帖子正文");
   if (!title || !body) throw new Error("生成内容无效：帖子标题或正文为空。");
   const replies = Array.isArray(record.replies)
-    ? record.replies.slice(0, 5).flatMap((item): ForumGeneratedReplyCandidate[] => {
+    ? record.replies.slice(0, 8).flatMap((item): ForumGeneratedReplyCandidate[] => {
         if (!item || typeof item !== "object") return [];
         const reply = item as Record<string, unknown>;
         const replyBody = cleanGeneratedText(reply.body, 2000, "帖子附带回复");

@@ -334,7 +334,16 @@ const generatedThreads = await generateForumThreads({
     assert.doesNotMatch(params.message, /小念|萨摩耶|这只是私人聊天/);
     return threadGenerationCalls === 1
       ? { text: '{"title":"宠物画画","body":"顾青禾画萨摩耶很可爱。","anonymous":true}' }
-      : { text: '{"title":"厨房水管维修","body":"水管漏水时先关总阀是否稳妥？","anonymous":true}' };
+      : { text: JSON.stringify({
+          title: "厨房水管维修",
+          body: "水管漏水时先关总阀是否稳妥？",
+          anonymous: true,
+          replies: [
+            { body: "水管漏水先关总阀，再联系物业确认维修安排。", replyToFloor: null },
+            { body: "水管漏水时可以拍下漏水位置和水表读数，方便后续报修。", replyToFloor: null },
+            { body: "水管漏水如果是公共管道，记得留好报修单号和沟通记录。", replyToFloor: null },
+          ],
+        }) };
   },
 });
 assert.equal(threadGenerationCalls, 2);

@@ -12,6 +12,8 @@ import type {
 import type { CharacterRelationship } from "../src/domain/relationship/characterRelationship";
 import {
   buildForumRelationGenerationContext,
+  FORUM_INITIAL_REPLY_MIN,
+  FORUM_INITIAL_REPLY_MAX,
   FORUM_STORY_POST_RATIO,
   generateForumThreads,
   generateInitialRepliesForUserThread,
@@ -151,19 +153,42 @@ const generated = await generateForumThreads({
         anonymous: callIndex === 1,
         relationId: "forged-relation",
         characterId: "forged-character",
-        replies: [{
-          body: `水管漏水最好先关闭总阀，再联系维修人员 ${callIndex}。`,
-          displayName: "虚拟回帖人",
-          replyToFloor: 999,
-        }],
+        replies: [
+          {
+            body: `水管漏水最好先关闭总阀，再联系维修人员 ${callIndex}。`,
+            displayName: "虚拟回帖人",
+            replyToFloor: null,
+          },
+          {
+            body: `水管漏水时可以先拍照记录漏点和水表读数，再和物业确认维修责任 ${callIndex}。`,
+            displayName: "邻居用户",
+            replyToFloor: null,
+          },
+          {
+            body: `水管漏水如果涉及公共管道，建议同时留好报修单号，后续沟通会更方便 ${callIndex}。`,
+            displayName: "经验用户",
+            replyToFloor: null,
+          },
+          {
+            body: "水管漏水这条无效楼层引用不应进入有效回复数量。",
+            displayName: "错误示例",
+            replyToFloor: 999,
+          },
+        ],
       }),
     };
   },
 });
 assert.equal(generated.threads.length, 5);
+assert.equal(FORUM_INITIAL_REPLY_MIN, 3);
+assert.equal(FORUM_INITIAL_REPLY_MAX, 8);
 assert.equal(FORUM_STORY_POST_RATIO, 0.5);
 assert.equal(generated.threads.filter((thread) => thread.storyArc).length, 2, "five-post batches alternate story and ordinary posts at the 5:5 rate");
-assert.equal(generated.replies.length, 0, "invalid replyToFloor values are rejected");
+assert.equal(generated.replies.length, 15, "each generated post starts with three effective replies and rejects invalid floor references");
+assert.ok(generated.threads.every((thread) => {
+  const threadReplies = generated.replies.filter((reply) => reply.threadId === thread.id);
+  return threadReplies.length >= FORUM_INITIAL_REPLY_MIN && threadReplies.length <= FORUM_INITIAL_REPLY_MAX;
+}));
 assert.equal(new Set(generated.threads.map((thread) => thread.occurredAt)).size, 5);
 assert.ok(generated.threads.every((thread) => thread.occurredAt <= now));
 assert.equal(generated.threads[0].privateAuthorRelationId, relationA.id);

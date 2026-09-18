@@ -13,4 +13,8 @@ assert.doesNotMatch(appForum, /setNotice\(`已生成 \$\{generated\.threads\.len
 assert.doesNotMatch(appForum, /setNotice\(["']发现了新的回复["']\)/);
 assert.doesNotMatch(appForum, /\? "楼主发布了新动态" : "发现了新的回复"/);
 
+const generationService = await readFile(new URL("../src/features/forum/services/forumGenerationService.ts", import.meta.url), "utf8");
+assert.match(generationService, /replies 必须为 3-8 条/);
+assert.match(generationService, /generated\.replies\.length < FORUM_INITIAL_REPLY_MIN/);
+
 console.log("forum manual refresh policy tests passed");
