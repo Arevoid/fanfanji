@@ -13,6 +13,8 @@ export interface BottomSheetProps {
   onClose: () => void;
   footer?: ReactNode;
   closeOnOverlayClick?: boolean;
+  /** Render as a centered dialog instead of a bottom-aligned sheet. */
+  centered?: boolean;
   showCloseButton?: boolean;
   ariaLabel?: string;
   className?: string;
@@ -28,6 +30,7 @@ export function BottomSheet({
   onClose,
   footer,
   closeOnOverlayClick = true,
+  centered = false,
   showCloseButton = false,
   ariaLabel,
   className = "",
@@ -43,7 +46,7 @@ export function BottomSheet({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="app-viewport-overlay fixed inset-x-0 top-0 z-[var(--z-sheet)] flex items-end justify-center bg-[var(--color-overlay)] px-[var(--space-4)] pb-[env(safe-area-inset-bottom)]"
+          className={`app-viewport-overlay fixed inset-x-0 top-0 z-[var(--z-sheet)] flex ${centered ? "items-center" : "items-end"} justify-center bg-[var(--color-overlay)] px-[var(--space-4)] ${centered ? "py-[var(--space-4)]" : "pb-[env(safe-area-inset-bottom)]"}`}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -58,12 +61,12 @@ export function BottomSheet({
             aria-label={ariaLabel}
             aria-labelledby={title ? titleId : undefined}
             aria-describedby={description ? descriptionId : undefined}
-            className={`flex w-[90vw] max-w-[400px] flex-col overflow-hidden rounded-[var(--radius-sheet)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-[var(--shadow-modal)] ${className}`}
-            style={{ maxHeight: "min(55vh, calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom)))" }}
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            className={`flex w-[90vw] max-w-[400px] flex-col overflow-hidden ${centered ? "rounded-[28px]" : "rounded-[var(--radius-sheet)]"} border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-[var(--shadow-modal)] ${className}`}
+            style={{ maxHeight: centered ? "min(86vh, calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2rem))" : "min(55vh, calc(var(--app-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom)))" }}
+            initial={centered ? { scale: 0.96, opacity: 0 } : { y: "100%" }}
+            animate={centered ? { scale: 1, opacity: 1 } : { y: 0 }}
+            exit={centered ? { scale: 0.96, opacity: 0 } : { y: "100%" }}
+            transition={{ duration: centered ? 0.2 : 0.28, ease: [0.22, 1, 0.36, 1] }}
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="mx-auto mt-[var(--space-2)] h-1 w-9 shrink-0 rounded-[var(--radius-full)] bg-[var(--color-border)]" aria-hidden="true" />

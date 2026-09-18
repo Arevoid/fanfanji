@@ -17,6 +17,8 @@ export const storageKeys = {
   forumVisitHistory: "phone_forum_visit_history",
   forumLikeHistory: "phone_forum_like_history",
   forumNotifications: "phone_forum_notifications",
+  forumCategories: "phone_forum_categories_v1",
+  forumCategoryDefinitions: "phone_forum_category_definitions_v1",
   forumTranslations: "phone_forum_translations",
   forumStories: "phone_forum_stories",
   forumStoryCharacters: "phone_forum_story_characters",

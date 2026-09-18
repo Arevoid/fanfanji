@@ -1,7 +1,12 @@
-import { MessageCircle, ThumbsUp } from "lucide-react";
-import type { ForumPublicAuthor } from "../../../types";
-import { ForumAvatar } from "../../forum/components/ForumAvatar";
+import { Eye, MessageCircle } from "lucide-react";
 import type { ForumStoryUiListItem } from "../forumStoryUiData";
+
+const formatStoryCount = (value: number): string => {
+  const normalized = Math.max(0, Math.floor(value));
+  if (normalized < 1000) return String(normalized);
+  if (normalized < 10000) return `${(normalized / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return `${Math.round(normalized / 1000)}k`;
+};
 
 const formatStoryTime = (timestamp: number): string => {
   const date = new Date(timestamp);
@@ -26,28 +31,32 @@ export function ForumStoryList({
   return (
     <section data-testid="forum-story-list" className="border-b border-[var(--divider)]">
       {items.map((item) => (
-        <article key={item.storyId} data-testid={`forum-story-${item.storyId}`} className="border-b border-[var(--divider)] bg-[var(--surface)] px-4 py-4 last:border-b-0">
-          <button type="button" onClick={() => onOpen(item.storyId)} className="block w-full text-left active:opacity-70" aria-label={`查看帖子：${item.title}`}>
-            <div className="flex items-center gap-2.5">
-              <ForumAvatar
-                author={{ displayName: item.authorName, ...(item.authorAvatar ? { avatar: item.authorAvatar } : {}), kind: "virtual", isAnonymous: false } satisfies ForumPublicAuthor}
-                className="h-9 w-9"
-              />
-              <div className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">{item.authorName}</span>
-                <time className="text-[10px] text-[var(--text-tertiary)]">{formatStoryTime(item.updatedAt)}</time>
-              </div>
+        <article key={item.storyId} data-testid={`forum-story-${item.storyId}`} className="border-b border-[var(--divider)] bg-[var(--surface)] px-4 py-2.5 last:border-b-0">
+          <button
+            type="button"
+            onClick={() => onOpen(item.storyId)}
+            className="block w-full text-left active:opacity-70"
+            aria-label={`查看帖子：${item.title}`}
+          >
+            <div className="flex items-start">
+              <h2 className="min-w-0 flex-1 line-clamp-2 text-[14px] font-semibold leading-5 text-[var(--text-primary)]">{item.title}</h2>
             </div>
-            <h2 className="mt-3 line-clamp-2 text-[16px] font-bold leading-6 text-[var(--text-primary)]">{item.title}</h2>
-            <p className="mt-1.5 line-clamp-3 whitespace-pre-wrap break-words text-[13px] leading-5 text-[var(--text-secondary)]">{item.body}</p>
+            <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-[11px] leading-4 text-[var(--text-secondary)]">{item.body}</p>
           </button>
-          <div className="mt-3 flex items-center gap-5 text-[11px] text-[var(--text-tertiary)]">
-            <span className="inline-flex items-center gap-1"><ThumbsUp className="h-3.5 w-3.5" />{item.likeCount}</span>
-            <span className="inline-flex items-center gap-1"><MessageCircle className="h-3.5 w-3.5" />{item.replyCount}</span>
+          <div className="mt-1.5 flex min-w-0 items-center gap-2.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
+            <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-blue-400">#推荐</span>
+            <time className="shrink-0">{formatStoryTime(item.updatedAt)}</time>
+            <span className="ml-auto inline-flex shrink-0 items-center gap-1">
+              <Eye className="h-3 w-3" aria-hidden="true" />
+              {formatStoryCount(item.likeCount)}
+            </span>
+            <span className="inline-flex shrink-0 items-center gap-1">
+              <MessageCircle className="h-3 w-3" aria-hidden="true" />
+              {formatStoryCount(item.replyCount)}
+            </span>
           </div>
         </article>
       ))}
     </section>
   );
 }
-

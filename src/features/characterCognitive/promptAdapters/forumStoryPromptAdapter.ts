@@ -1,4 +1,4 @@
-import { validateForumGeneratedText } from "../../../domain/forum/forumContentSafety";
+import { validateForumGeneratedText, validateForumPostStyle } from "../../../domain/forum/forumContentSafety";
 import { validateForumStoryRawOutput } from "../../forumStory/validators/forumStoryOutputValidator";
 
 export interface ForumStoryPromptCharacter {
@@ -117,6 +117,11 @@ export const parseForumStoryInitialCandidate = (text: string): ForumStoryInitial
   const characters = deduplicateCharacters([author, ...suppliedCharacters]);
   if (characters.length === 0) throw new Error("论坛故事初始内容缺少角色");
   const normalizedAuthor = characters.find((character) => character.name === author.name) || author;
+  const style = validateForumPostStyle({
+    title: cleanPublicText(record.title, 80, "story title"),
+    body: cleanPublicText(record.body, 5000, "initial post body"),
+  });
+  if (!style.valid) throw new Error(`ForumStory initial output rejected: ${style.reason}`);
   return {
     title: cleanPublicText(record.title, 80, "故事标题"),
     body: cleanPublicText(record.body, 5000, "初始帖子正文"),

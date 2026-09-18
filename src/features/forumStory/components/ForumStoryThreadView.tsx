@@ -65,8 +65,8 @@ export function ForumStoryThreadView({
   };
 
   return <>
-    <main data-testid="forum-story-thread" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-5 pt-3">
-      <article className="rounded-2xl bg-white p-4 shadow-sm">
+    <main data-testid="forum-story-thread" className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white pb-5 pt-0">
+      <article className="border-b border-slate-100 bg-white px-4 py-4">
         <div className="flex items-start gap-2.5">
           <ForumAvatar author={threadAuthor} className="h-10 w-10" />
           <div className="min-w-0 flex-1">
@@ -88,7 +88,7 @@ export function ForumStoryThreadView({
         </div>
       </article>
 
-      <section className="mt-3 overflow-hidden rounded-2xl bg-white shadow-sm">
+      <section className="overflow-hidden bg-white">
         <div className="border-b border-slate-100 px-4 py-3"><h2 className="text-[13px] font-bold text-slate-800">全部回复</h2></div>
         {entries.length === 0 ? <p className="px-4 py-10 text-center text-xs text-slate-400">还没有回复，来说点什么吧</p> : entries.map((entry) => {
           const isUpdate = entry.kind === "update";

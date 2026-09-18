@@ -406,6 +406,8 @@ export interface ForumThread {
   privateAuthorCharacterId?: string;
   title: string;
   body: string;
+  /** Optional user-selected forum category; legacy threads default to 推荐. */
+  category?: string;
   source: "user" | "user-anonymous" | "ai-character" | "ai-character-anonymous" | "ai-virtual" | "virtual";
   occurredAt: number;
   baseLikeCount: number;
@@ -417,6 +419,17 @@ export interface ForumThread {
   lastActivityAt?: number;
   /** Public-only continuity metadata for eligible AI/NPC story threads. */
   storyArc?: import("./domain/forum/forumStoryArc").ForumStoryArc;
+}
+
+/** User-created Forum categories keep their generation worldview separate from the display label. */
+export interface ForumCategoryDefinition {
+  id: string;
+  name: string;
+  worldview: string;
+  mode: "manual" | "character";
+  sourceCharacterId?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface ForumReply {

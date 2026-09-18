@@ -22,8 +22,8 @@ import type {
 import { createForumVirtualAuthor, getForumVirtualProfile, FORUM_VIRTUAL_PROFILES } from "../../../domain/forum/forumVirtualProfiles";
 import { canScheduleStoryContinuation } from "../../../domain/forum/forumStoryArc";
 import { parseForumGeneratedEventBatch, type ForumGeneratedEventBatch } from "../../../domain/forum/forumValidation";
-import { buildForumProtectedNames, findForumPrivateNameViolation, isForumGeneratedReplyRelevant, validateForumGeneratedText } from "../../../domain/forum/forumContentSafety";
-import { buildForumRelationGenerationContext } from "./forumGenerationService";
+import { buildForumProtectedNames, findForumPrivateNameViolation, isForumGeneratedReplyRelevant, validateForumGeneratedText, validateForumReplyStyle } from "../../../domain/forum/forumContentSafety";
+import { buildForumRelationGenerationContext, FORUM_REPLY_REALISM_RULES } from "./forumGenerationService";
 import { listForumCommunityNpcsForIdentity } from "../../../core/storage/repositories/forumCommunityNpcRepository";
 import { toForumCommunityNpcAuthor, toForumCommunityNpcProfile } from "../forumCommunityNpcData";
 import { apiChat } from "../../../utils/apiHelper";
@@ -79,7 +79,10 @@ const publicThreadText = (thread: ForumThread, replies: readonly ForumReply[]): 
     .slice(-10)
     .map((reply) => `${reply.floor}楼 ${reply.publicAuthor.displayName}：${reply.body.slice(0, 240)}`)
     .join("\n");
-  return `标题：${thread.title}\n主楼：${thread.body}\n公开楼层：\n${visible || "暂无"}`;
+  const continuation = thread.storyArc?.status === "open" && thread.storyArc.publicRecap
+    ? `\n当前公开连载摘要：${thread.storyArc.publicRecap.slice(0, 300)}（只可依据公开事实，不要扩写幕后设定）`
+    : "";
+  return `标题：${thread.title}\n主楼：${thread.body}${continuation}\n公开楼层：\n${visible || "暂无"}`;
 };
 
 export const buildForumActivityActorSlots = (input: Omit<ForumActivityPlanInput, "actorStates" | "now" | "aiCall">): ForumActivityActorSlot[] => {
@@ -119,6 +122,18 @@ export const buildForumActivityActorSlots = (input: Omit<ForumActivityPlanInput,
   });
   const enabledCommunityNpcs = listForumCommunityNpcsForIdentity(input.ownerIdentityId)
     .filter((npc) => npc.enabled);
+  const communityAuthor = input.thread.source === "ai-virtual"
+    ? enabledCommunityNpcs.find((npc) => npc.displayName === input.thread.publicAuthor.displayName)
+    : undefined;
+  const communityAuthorSlot = communityAuthor ? (() => {
+    const profile = toForumCommunityNpcProfile(communityAuthor);
+    return [{
+      slotId: `thread-community-author-${communityAuthor.id}`,
+      publicAuthor: toForumCommunityNpcAuthor(communityAuthor),
+      actor: { kind: "virtual" as const, virtualProfileId: profile.id },
+      safePublicStyle: profile.publicStyle,
+    }];
+  })() : [];
   const communitySlots = enabledCommunityNpcs.length > 0 && random() < 0.2
     ? (() => {
       const npc = enabledCommunityNpcs[Math.floor(random() * enabledCommunityNpcs.length)];
@@ -131,14 +146,34 @@ export const buildForumActivityActorSlots = (input: Omit<ForumActivityPlanInput,
       }];
     })()
     : [];
-  const relationshipAuthor = input.thread.privateAuthorRelationId
-    ? relationshipSlots.find((slot) => slot.actor.kind === "relationship" && slot.actor.relationId === input.thread.privateAuthorRelationId)
+  // A thread's original relationship author must remain eligible even when
+  // the random relationship-reply pool is omitted for this activity batch.
+  // Otherwise an open thread can be scheduled for an author update but have
+  // no valid author slot to produce it.
+  const relationshipAuthorContext = input.thread.privateAuthorRelationId
+    ? input.relationships
+      .filter((relation) => relation.id === input.thread.privateAuthorRelationId && relation.userIdentityId === input.ownerIdentityId)
+      .map((relationship) => buildForumRelationGenerationContext({
+        ownerIdentityId: input.ownerIdentityId,
+        relationship,
+        characters: input.characters,
+        messages: input.messages,
+        memories: input.memories,
+        worldBookEntries: input.worldBookEntries,
+        identities: input.settings.identities,
+      }))
+      .find((context): context is NonNullable<typeof context> => Boolean(context))
     : undefined;
-  const relationAuthorSlot = relationshipAuthor ? [{
-    ...relationshipAuthor,
+  const relationAuthorSlot = relationshipAuthorContext ? [{
     slotId: "thread-relationship-author",
     publicAuthor: { ...input.thread.publicAuthor },
+    actor: { kind: "relationship" as const, relationId: relationshipAuthorContext.relationship.id, characterId: relationshipAuthorContext.character.id },
+    safePublicStyle: relationshipAuthorContext.publicReplyPersona,
   }] : [];
+  const relationshipReplySlots = relationshipSlots.filter((slot) =>
+    !input.thread.privateAuthorRelationId
+    || slot.actor.kind !== "relationship"
+    || slot.actor.relationId !== input.thread.privateAuthorRelationId);
   const virtualAuthor = input.thread.source === "ai-virtual"
     ? FORUM_VIRTUAL_PROFILES.find((profile) => profile.displayName === input.thread.publicAuthor.displayName)
     : undefined;
@@ -148,7 +183,7 @@ export const buildForumActivityActorSlots = (input: Omit<ForumActivityPlanInput,
     actor: { kind: "virtual" as const, virtualProfileId: virtualAuthor.id },
     safePublicStyle: virtualAuthor.publicStyle,
   }] : [];
-  return [...relationshipSlots, ...relationAuthorSlot, ...authorSlot, ...communitySlots, ...virtualSlots];
+  return [...relationshipReplySlots, ...relationAuthorSlot, ...authorSlot, ...communityAuthorSlot, ...communitySlots, ...virtualSlots];
 };
 
 const actorIsThreadAuthor = (slot: ForumActivityActorSlot, thread: ForumThread): boolean =>
@@ -166,10 +201,18 @@ const validateBatch = (input: {
   slots: readonly ForumActivityActorSlot[];
   protectedNames: readonly string[];
   requiredReplyFloor?: number;
+  storyContinuation?: boolean;
 }): ForumGeneratedEventBatch => {
   const slotMap = new Map(input.slots.map((slot) => [slot.slotId, slot]));
   const earlier = new Set<string>();
   const usedActors: string[] = [];
+  if (input.storyContinuation) {
+    const first = input.batch.events[0];
+    const firstSlot = first ? slotMap.get(first.actorSlot) : undefined;
+    if (!first || first.kind !== "author-update" || !firstSlot || !actorIsThreadAuthor(firstSlot, input.thread)) {
+      return { events: [] };
+    }
+  }
   const valid = input.batch.events.flatMap((event) => {
     const replyTo = event.replyTo;
     const slot = slotMap.get(event.actorSlot);
@@ -182,7 +225,7 @@ const validateBatch = (input: {
     if (replyTo.type === "batch" && !earlier.has(replyTo.localId)) return [];
     if (usedActors.at(-1) === slot.slotId && replyTo.type !== "batch") return [];
     const safety = validateForumGeneratedText(event.body);
-    if (!safety.valid || findForumPrivateNameViolation({
+    if (!safety.valid || !validateForumReplyStyle(safety.text).valid || findForumPrivateNameViolation({
       text: safety.text,
       protectedNames: input.protectedNames,
       publicTexts: [input.thread.title, input.thread.body, ...input.replies.filter((reply) => !reply.isDeleted).map((reply) => reply.body)],
@@ -253,8 +296,8 @@ export const planForumActivity = async (input: ForumActivityPlanInput): Promise<
       : 1 + Math.floor(random() * 4);
   const publicCognitiveSupplements = buildPublicActivityPromptSupplements(input, eligible);
   const prompt = {
-    systemInstruction: `你只生成一批公开论坛活动候选，不执行任何写操作。严格输出 JSON：{"events":[{"localId":"e1","actorSlot":"slot","kind":"reply","body":"回复","replyTo":{"type":"thread"},"delaySeconds":30}]}。本批必须生成 ${requestedEventCount} 条事件；actorSlot 只能来自白名单；可使用 thread、floor 或先前 batch 楼层形成自然的引用回复，但不得重复同一种观点或让同一作者连续刷楼。不得输出任意 ID、私人聊天、Memory、关系、点赞、转发、删除、图片或动作描写。author-update 只可由真实 AI 楼主发出。${storyContinuation ? "当前是开放连载帖的合理后续窗口：第一条必须是楼主的 author-update，延续公开前文，不得改名或编造私密背景。" : ""}`,
-    message: `${publicThreadText(input.thread, input.replies)}\n可用 actorSlots：${eligible.map((slot) => `${slot.slotId}｜${slot.publicAuthor.displayName}｜${slot.safePublicStyle}`).join("\n")}${publicCognitiveSupplements.length > 0 ? `\n${publicCognitiveSupplements.join("\n\n")}` : ""}`,
+    systemInstruction: `你只生成一批公开论坛活动候选，不执行任何写操作。严格输出 JSON：{"events":[{"localId":"e1","actorSlot":"slot","kind":"reply","body":"回复","replyTo":{"type":"thread"},"delaySeconds":30}]}。本批必须生成 ${requestedEventCount} 条事件；actorSlot 只能来自白名单；可使用 thread、floor 或先前 batch 楼层形成自然的引用回复，但不得重复同一种观点或让同一作者连续刷楼。不得输出任意 ID、私人聊天、Memory、关系、点赞、转发、删除、图片或动作描写。${FORUM_REPLY_REALISM_RULES}author-update 只可由真实 AI 楼主发出。${storyContinuation ? "当前是开放连载帖的合理后续窗口：第一条必须是楼主的 author-update，内容只补充一个新事实、纠正、结果或改变后的打算；不得改名、补写完整剧情或编造私密背景。" : ""}`,
+    message: `${publicThreadText(input.thread, input.replies)}\n可用 actorSlots：${eligible.map((slot) => `${slot.slotId}｜${slot.publicAuthor.displayName}｜${slot.safePublicStyle}`).join("\n")}${publicCognitiveSupplements.length > 0 ? `\n${publicCognitiveSupplements.join("\n\n")}` : ""}\n评论区应像真实网友接话：有人追问细节，有人给建议，有人不认同或开玩笑；楼主可以根据这些反应补充事实或改变计划。`,
   };
   const result = await (input.aiCall || defaultAiCall)({
     ...prompt,
@@ -281,6 +324,7 @@ export const planForumActivity = async (input: ForumActivityPlanInput): Promise<
     slots: eligible,
     protectedNames,
     requiredReplyFloor: input.requiredReplyFloor,
+    storyContinuation,
   });
   const batchId = id("forum-activity-batch");
   return batch.events.map((event, index) => {

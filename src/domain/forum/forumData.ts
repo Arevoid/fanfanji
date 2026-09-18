@@ -147,6 +147,7 @@ export const createForumThread = (input: {
   identity: UserIdentity;
   title: string;
   body: string;
+  category?: string;
   anonymous: boolean;
   now: number;
 }): ForumThread => ({
@@ -156,6 +157,7 @@ export const createForumThread = (input: {
   publicAuthor: createForumPublicAuthor(input.identity, input.anonymous),
   title: input.title.trim(),
   body: input.body.trim(),
+  ...(input.category?.trim() ? { category: input.category.trim() } : {}),
   source: input.anonymous ? "user-anonymous" : "user",
   occurredAt: input.now,
   baseLikeCount: 0,

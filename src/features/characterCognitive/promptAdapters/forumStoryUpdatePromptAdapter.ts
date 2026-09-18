@@ -1,4 +1,4 @@
-import { validateForumGeneratedText } from "../../../domain/forum/forumContentSafety";
+import { validateForumGeneratedText, validateForumPostStyle } from "../../../domain/forum/forumContentSafety";
 import type { ForumStoryStatus } from "../../../domain/forumStory/forumStoryTypes";
 import { validateForumStoryRawOutput } from "../../forumStory/validators/forumStoryOutputValidator";
 
@@ -124,9 +124,13 @@ export const buildForumStoryUpdatePrompt = (
   return {
     systemInstruction: [
       "You generate one public continuation update for a fictional ForumStory scope only.",
+      "Write it as one forum floor/update from the poster's current perspective, not as a chapter, screenplay, narrator summary, or completed short story.",
+      "Usually keep the public update within 30-450 Chinese characters (or an equivalent concise length), focused on one new fact, correction, reaction, or changed plan. Leave room for readers to respond.",
+      "Use natural first-person forum language. You may quote or answer a recent public comment, but do not recap the whole thread or invent private backstory.",
       "Use only the supplied current story state, public StoryThread, story-scoped characters, immutable public StoryEvents, and public comment summaries.",
       "Do not read, infer, mention, or recreate Memory, Relationship, real Character entities, private user data, chat history, InnerVoice, CharacterEvent, userIdentityId, or relationId.",
       "Do not rewrite or contradict historical events. Advance only from the supplied facts and do not invent an unauthorized real-world fact.",
+      "Even when concluding, use a concise first-person forum floor rather than a chapter heading, omniscient epilogue, or full recap.",
       context.conclude
         ? "Write the final public楼主更新: resolve the central conflict only from established facts and give readers a satisfying concise ending."
         : "The update must move the fictional story one episode forward without revealing a final ending.",
@@ -146,6 +150,7 @@ export const buildForumStoryUpdatePrompt = (
       events.map((event) => `- #${event.sequence} ${event.type}: ${event.summary}`).join("\n"),
       "Recent public comments:",
       comments.length > 0 ? comments.map((comment) => `- ${comment.authorName}: ${comment.content}`).join("\n") : "none",
+      "Write one concise floor now: respond to a concrete public detail and add one new fact, correction, reaction, or changed plan. Leave room for readers to answer.",
       context.conclude
         ? "Write the final public楼主更新. Keep it grounded in the timeline and comments; resolve the whole story now."
         : "Write the next public楼主更新. Keep it grounded in the timeline and comments; do not conclude the entire story.",
@@ -161,9 +166,12 @@ export const parseForumStoryUpdateCandidate = (text: string): ForumStoryUpdateCa
   const record = raw as Record<string, unknown>;
   const title = clip(record.title, 120);
   if (title) cleanPublicText(title, 120, "update title");
+  const content = cleanPublicText(record.content ?? record.body, 5000, "update content");
+  const style = validateForumPostStyle({ title, body: content });
+  if (!style.valid) throw new Error(`ForumStory update output rejected: ${style.reason}`);
   return {
     ...(title ? { title: cleanPublicText(title, 120, "update title") } : {}),
-    content: cleanPublicText(record.content ?? record.body, 5000, "update content"),
+    content,
     eventProgression: cleanPublicText(record.eventProgression ?? record.eventSummary, 1200, "event progression"),
   };
 };

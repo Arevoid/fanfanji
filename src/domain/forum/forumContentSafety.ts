@@ -100,6 +100,38 @@ export const validateForumGeneratedText = (
   value: string,
 ): ForumGeneratedTextValidation => sanitizeForumGeneratedText(value);
 
+/**
+ * AI forum posts should read like a real person's current post, not a
+ * completed short story.  This is intentionally conservative: it only
+ * rejects obvious chapter/novel formatting and very long multi-stage
+ * narratives.  Natural posts can still contain a small amount of chronology.
+ */
+export const validateForumPostStyle = (input: {
+  title: string;
+  body: string;
+}): { valid: boolean; reason?: "too-long" | "chapter-format" | "novel-narration" } => {
+  const title = input.title.trim();
+  const body = input.body.trim();
+  if (body.length > 900) return { valid: false, reason: "too-long" };
+  if (/^(?:第[零一二三四五六七八九十百千万\d]+[章节集回部]|序章|序幕|尾声|番外)/u.test(title)
+    || /(?:第[零一二三四五六七八九十百千万\d]+[章节集回部]|故事开始|镜头(?:一转|切到)|旁白[：:])/u.test(body)) {
+    return { valid: false, reason: "chapter-format" };
+  }
+  const chronologyMatches = body.match(/(?:后来|最终|与此同时|几年后|多年后|第二天|第三天|一个月后|从那以后)/gu) || [];
+  if (chronologyMatches.length >= 3) return { valid: false, reason: "novel-narration" };
+  return { valid: true };
+};
+
+/** Keep generated floors conversational; long explanations belong in a post update. */
+export const validateForumReplyStyle = (value: string): { valid: boolean; reason?: "too-long" | "chapter-format" } => {
+  const body = value.trim();
+  if (body.length > 360) return { valid: false, reason: "too-long" };
+  if (/(?:第[零一二三四五六七八九十百千万\d]+[章节集回部]|故事开始|镜头(?:一转|切到)|旁白[：:])/u.test(body)) {
+    return { valid: false, reason: "chapter-format" };
+  }
+  return { valid: true };
+};
+
 const compactName = (value: string): string =>
   value.normalize("NFKC").replace(/\s+/g, "").trim();
 
@@ -236,6 +268,14 @@ export const isForumGeneratedReplyRelevant = (input: {
   const replyTokens = extractTopicTokens(input.replyBody);
   if ([...replyTokens].some((token) => publicTokens.has(token))) return true;
   if (input.targetBody && /^(?:同意|赞同|确实|不一定|说得对|我也|反对|补充)/u.test(input.replyBody.trim())) {
+    return true;
+  }
+  // Short floor reactions such as "？？？" or "笑死" are common in real
+  // forums.  They have little topic overlap by design, but are relevant when
+  // they are clearly a reaction rather than an unrelated sentence.
+  const compactReply = input.replyBody.trim().replace(/\s+/g, "");
+  if (compactReply.length > 0 && compactReply.length <= 14
+    && /^(?:[？?！!。.…~～]+|哈{2,}|笑死|救命|绝了|离谱|好家伙|天哪|啊这|蹲(?:一个)?|同问|太真实|懂了|支持|顶|哇|嗯嗯)(?:[？?！!。.…~～]|[\p{Extended_Pictographic}])*$/u.test(compactReply)) {
     return true;
   }
   return publicTokens.size === 0 && replyBodyHasSubstance(input.replyBody);

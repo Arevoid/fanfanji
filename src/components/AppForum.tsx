@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type {
   Character,
+  ForumCategoryDefinition,
   ForumCommunityNpc,
   ForumGenerationTask,
   ForumReply,
@@ -31,6 +32,7 @@ import type {
   WorldBookEntry,
 } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
+import { isWorldBookEntryVisible } from "../domain/worldbook/worldBookVisibility";
 import {
   appendForumReply,
   createForumReply,
@@ -55,6 +57,10 @@ import {
   getForumSnapshotForIdentity,
   subscribeForumState,
   subscribeForumMutation,
+  loadForumCategories,
+  loadForumCategoryDefinitions,
+  saveForumCategories,
+  saveForumCategoryDefinitions,
 } from "../core/storage/repositories/forumRepository";
 import {
   createForumTranslationHash,
@@ -97,10 +103,6 @@ import {
 import { listForumStoryUiItems } from "../features/forumStory/forumStoryUiData";
 import { ForumStoryList } from "../features/forumStory/components/ForumStoryList";
 import { ForumStoryThreadView } from "../features/forumStory/components/ForumStoryThreadView";
-import {
-  advanceForumStoryOnManualRefresh,
-  generateForumStoryOnManualRefresh,
-} from "../features/forumStory/services/forumStoryRefreshService";
 import { ForumStoryEngagementService } from "../features/forumStory/services/forumStoryEngagementService";
 import { getForumStoryUiThread } from "../features/forumStory/forumStoryUiData";
 import type { ForumStoryUiReply } from "../features/forumStory/forumStoryUiData";
@@ -131,6 +133,10 @@ type DeleteTarget =
   | { kind: "thread"; threadId: string }
   | { kind: "reply"; replyId: string }
   | null;
+
+type CategoryCreationMode = "manual" | "character";
+
+const DEFAULT_FORUM_CATEGORIES = ["推荐", "情感", "八卦", "吐槽", "求助"] as const;
 
 const createId = (prefix: string): string => {
   return createApplicationId(prefix);
@@ -194,6 +200,15 @@ export default function AppForum({
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [activeStoryId, setActiveStoryId] = useState<string | null>(null);
   const [readonlySnapshot, setReadonlySnapshot] = useState<ForumThreadPublicSnapshot | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string>(DEFAULT_FORUM_CATEGORIES[0]);
+  const [customForumCategories, setCustomForumCategories] = useState<string[]>(loadForumCategories);
+  const [forumCategoryDefinitions, setForumCategoryDefinitions] = useState<ForumCategoryDefinition[]>(loadForumCategoryDefinitions);
+  const [showCategoryComposer, setShowCategoryComposer] = useState(false);
+  const [categoryCreationMode, setCategoryCreationMode] = useState<CategoryCreationMode>("manual");
+  const [categoryDraftName, setCategoryDraftName] = useState("");
+  const [categoryDraftWorldview, setCategoryDraftWorldview] = useState("");
+  const [categorySourceCharacterId, setCategorySourceCharacterId] = useState("");
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [showComposer, setShowComposer] = useState(false);
   const [showHomeActions, setShowHomeActions] = useState(false);
   const [showShareSheet, setShowShareSheet] = useState(false);
@@ -201,6 +216,7 @@ export default function AppForum({
   const [isSharing, setIsSharing] = useState(false);
   const [postTitle, setPostTitle] = useState("");
   const [postBody, setPostBody] = useState("");
+  const [postCategory, setPostCategory] = useState<string>(DEFAULT_FORUM_CATEGORIES[0]);
   const [postAnonymously, setPostAnonymously] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [replyingTo, setReplyingTo] = useState<ForumReply | null>(null);
@@ -250,7 +266,36 @@ export default function AppForum({
     () => listForumThreadsForIdentity(threads, activeIdentity.id, replies),
     [threads, replies, activeIdentity.id],
   );
+  const forumCategories = useMemo(
+    () => [...DEFAULT_FORUM_CATEGORIES, ...customForumCategories.filter((category) => !DEFAULT_FORUM_CATEGORIES.includes(category as (typeof DEFAULT_FORUM_CATEGORIES)[number]))],
+    [customForumCategories],
+  );
+  const activeCategoryDefinition = useMemo(
+    () => forumCategoryDefinitions.find((definition) => definition.name === activeCategory),
+    [activeCategory, forumCategoryDefinitions],
+  );
+  const generationCategoryTargets = useMemo(
+    () => (activeCategory === DEFAULT_FORUM_CATEGORIES[0]
+      ? forumCategories
+        .filter((category) => category !== DEFAULT_FORUM_CATEGORIES[0])
+        .map((category) => {
+          const definition = forumCategoryDefinitions.find((item) => item.name === category);
+          return { name: category, ...(definition?.worldview ? { worldview: definition.worldview } : {}) };
+        })
+      : [{
+        name: activeCategory,
+        ...(activeCategoryDefinition?.worldview ? { worldview: activeCategoryDefinition.worldview } : {}),
+      }]),
+    [activeCategory, activeCategoryDefinition, forumCategories, forumCategoryDefinitions],
+  );
+  const categoryThreads = useMemo(
+    () => activeCategory === DEFAULT_FORUM_CATEGORIES[0]
+      ? identityThreads
+      : identityThreads.filter((thread) => (thread.category || DEFAULT_FORUM_CATEGORIES[0]) === activeCategory),
+    [activeCategory, identityThreads],
+  );
   const forumStoryItems = useMemo(() => listForumStoryUiItems(), [forumStoryRevision]);
+  const visibleForumStoryItems = activeCategory === DEFAULT_FORUM_CATEGORIES[0] ? forumStoryItems : [];
   const activeThread = identityThreads.find((thread) => thread.id === activeThreadId);
   const activeProfile = profiles.find((profile) => profile.ownerIdentityId === activeIdentity.id) || createForumProfile(activeIdentity, 0);
   const forumProfileAvatarOverrides = useMemo(
@@ -263,7 +308,7 @@ export default function AppForum({
     () => activeThread ? listForumRepliesForThread(replies, activeThread) : [],
     [replies, activeThread],
   );
-  const visibleThreads = identityThreads.slice(0, visibleThreadCount);
+  const visibleThreads = categoryThreads.slice(0, visibleThreadCount);
   const visibleReplies = activeReplies.slice(0, visibleReplyCount);
   const shareTargets = useMemo(
     () => listForumShareTargets(relationships || [], characters || [], activeIdentity.id),
@@ -306,6 +351,14 @@ export default function AppForum({
     setRootTab("home"); setSecondaryPage(null); setActiveThreadId(null); setActiveStoryId(null); setReadonlySnapshot(null);
     setProfileName(activeProfile.displayName); setProfileBio(activeProfile.bio || "");
   }, [activeIdentity.id]);
+
+  useEffect(() => {
+    saveForumCategories(customForumCategories);
+  }, [customForumCategories]);
+
+  useEffect(() => {
+    saveForumCategoryDefinitions(forumCategoryDefinitions);
+  }, [forumCategoryDefinitions]);
 
   useEffect(() => { setVisibleThreadCount(FORUM_HOME_PAGE_SIZE); }, [activeIdentity.id]);
   useEffect(() => { setVisibleReplyCount(FORUM_REPLY_PAGE_SIZE); }, [activeThreadId]);
@@ -430,16 +483,19 @@ export default function AppForum({
       return;
     }
     try {
-      const plannedCount = 1 + Math.floor(Math.random() * 5);
-      // Root content is generated only by this explicit refresh action. A
-      // refresh may reserve one of its 1–5 slots for a forum-story thread.
-      const shouldGenerateStory = plannedCount >= 2 && Math.random() < 0.45;
-      const normalThreadCount = plannedCount - (shouldGenerateStory ? 1 : 0);
+      const plannedCount = 3 + Math.floor(Math.random() * 4);
+      const generationCount = Math.max(
+        plannedCount,
+        Math.min(6, generationCategoryTargets.length),
+      );
       const currentThreads = loadForumThreads().value;
       const currentReplies = loadForumReplies().value;
-      const generated = normalThreadCount > 0 ? await generateForumThreads({
+      // Homepage refresh uses one unified normal-thread schema. Serial
+      // continuation is handled by the regular forum activity engine, so it
+      // does not create a separate ForumStory record or a second prompt shape.
+      const generated = await generateForumThreads({
         ownerIdentityId: activeIdentity.id,
-        count: normalThreadCount,
+        count: generationCount,
         trigger: "refresh",
         relationships,
         characters,
@@ -450,36 +506,15 @@ export default function AppForum({
         settings,
         now,
         communityNpcs,
-      }) : { threads: [], replies: [] };
-      let storyCreated = false;
-      if (shouldGenerateStory) {
-        try {
-          await generateForumStoryOnManualRefresh({ settings, now });
-          storyCreated = true;
-          setForumStoryRevision((revision) => revision + 1);
-        } catch (storyError) {
-          // A story uses a separate AI request; normal refresh remains usable
-          // if that optional story request cannot produce valid content.
-          console.warn("Forum story refresh skipped", storyError);
-        }
-      }
-      let storyAdvanced = false;
-      if (!shouldGenerateStory && Math.random() < 0.35) {
-        try {
-          storyAdvanced = Boolean(await advanceForumStoryOnManualRefresh({ settings, now }));
-          if (storyAdvanced) setForumStoryRevision((revision) => revision + 1);
-        } catch (storyError) {
-          console.warn("Forum story continuation skipped", storyError);
-        }
-      }
-      if (generated.threads.length === 0 && !storyCreated && !storyAdvanced) {
-        throw new Error("生成内容无效：没有可写入的新帖子。");
+        categoryTargets: generationCategoryTargets,
+      });
+      if (generated.threads.length < 3 || generated.threads.length > 6) {
+        throw new Error("生成内容无效：本次未能完整生成 3-6 条帖子，未写入不完整结果。");
       }
       const nextThreads = [...generated.threads, ...currentThreads];
       const nextReplies = [...currentReplies, ...generated.replies];
       if (generated.threads.length > 0 && !commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
-      if (storyCreated) setNotice("已加入一条可继续阅读的论坛体故事。");
-      else if (storyAdvanced) setNotice("一条论坛体故事有了新的楼主更新和讨论。");
+      setNotice(`已生成 ${generated.threads.length} 条${activeCategory === DEFAULT_FORUM_CATEGORIES[0] ? "推荐" : activeCategory}分类帖子，后续会由论坛活动继续推进。`);
       persistTasks(finishForumGenerationTask(
         loadForumGenerationTasks(new Set(relationships.map((relationship) => relationship.id))).value,
         begun.task.id,
@@ -837,8 +872,74 @@ export default function AppForum({
   const resetComposer = () => {
     setPostTitle("");
     setPostBody("");
+    setPostCategory(activeCategory);
     setPostAnonymously(false);
     setShowComposer(false);
+  };
+
+  const addForumCategory = () => {
+    setShowCategoryComposer(true);
+  };
+
+  const resetCategoryComposer = () => {
+    setShowCategoryComposer(false);
+    setCategoryCreationMode("manual");
+    setCategoryDraftName("");
+    setCategoryDraftWorldview("");
+    setCategorySourceCharacterId("");
+    setIsCreatingCategory(false);
+  };
+
+  const createForumCategory = () => {
+    if (isCreatingCategory) return;
+    const sourceCharacter = characters.find((character) => character.id === categorySourceCharacterId);
+    const name = (categoryCreationMode === "character"
+      ? `${sourceCharacter?.remark || sourceCharacter?.name || "角色"}世界`
+      : categoryDraftName).trim().slice(0, 16);
+    const visibleWorldBook = sourceCharacter
+      ? worldBookEntries
+        .filter((entry) => isWorldBookEntryVisible(entry, { scenario: "public", characterId: sourceCharacter.id }))
+        .slice(0, 8)
+        .map((entry) => `${entry.title}: ${entry.content}`)
+      : [];
+    const worldview = (categoryCreationMode === "character"
+      ? [
+        `${sourceCharacter?.name || "角色"}的人设：${sourceCharacter?.personality || ""}`,
+        `角色背景：${sourceCharacter?.backstory || ""}`,
+        ...visibleWorldBook,
+      ].filter(Boolean).join("\n")
+      : categoryDraftWorldview).trim().slice(0, 4000);
+    if (!name || !worldview || (categoryCreationMode === "character" && !sourceCharacter)) {
+      setError(categoryCreationMode === "character" ? "请选择一个档案馆角色" : "请填写分类名称和世界观设定");
+      return;
+    }
+    if (forumCategories.includes(name)) {
+      setError("该分类已经存在，请换一个名称");
+      return;
+    }
+    setIsCreatingCategory(true);
+    const now = Date.now();
+    const definition: ForumCategoryDefinition = {
+      id: createId("forum-category"),
+      name,
+      worldview,
+      mode: categoryCreationMode,
+      ...(sourceCharacter ? { sourceCharacterId: sourceCharacter.id } : {}),
+      createdAt: now,
+      updatedAt: now,
+    };
+    const nextDefinitions = [...forumCategoryDefinitions, definition].slice(-20);
+    if (!saveForumCategoryDefinitions(nextDefinitions)) {
+      setError("分类保存失败，请检查浏览器存储空间后重试");
+      setIsCreatingCategory(false);
+      return;
+    }
+    setForumCategoryDefinitions(nextDefinitions);
+    setCustomForumCategories((current) => [...current, name].slice(-20));
+    setActiveCategory(name);
+    setPostCategory(name);
+    setNotice(`已创建分类「${name}」，后续生成内容会遵循该世界观`);
+    resetCategoryComposer();
   };
 
   const {
@@ -878,6 +979,7 @@ export default function AppForum({
       identity: forumIdentity,
       title,
       body,
+      category: postCategory,
       anonymous: postAnonymously,
       now: Date.now(),
     });
@@ -1055,7 +1157,7 @@ export default function AppForum({
 
   return (
     <div data-theme-page="forum" className="flex h-full min-h-0 flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
-      <header className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4">
+      <header className="relative z-10 flex h-[72px] shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 pt-1">
         <button
           type="button"
           onClick={handleBack}
@@ -1064,21 +1166,23 @@ export default function AppForum({
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <h1 className="absolute left-1/2 -translate-x-1/2 text-[17px] font-bold">
-          {activeStoryId ? "帖子详情" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "community-npcs" ? "NPC角色" : rootTab === "mine" ? "我的" : "论坛"}
-        </h1>
+        {rootTab === "home" && !activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage ? (
+          <h1 className="absolute left-1/2 -translate-x-1/2 text-[20px] font-bold tracking-[0.08em] text-slate-900">论坛</h1>
+        ) : (
+          <h1 className="absolute left-1/2 -translate-x-1/2 text-[17px] font-bold">
+            {activeStoryId ? "帖子详情" : activeThread || readonlySnapshot ? "帖子详情" : secondaryPage === "profile" ? "编辑资料" : secondaryPage === "history" ? "浏览历史" : secondaryPage === "likes" ? "我的点赞" : secondaryPage === "community-npcs" ? "NPC角色" : rootTab === "mine" ? "我的" : "论坛"}
+          </h1>
+        )}
         {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && rootTab === "home" ? (
           <button
-            ref={homeMenuAnchorRef}
-            type="button"
-            onClick={() => setShowHomeActions(true)}
+          ref={homeMenuAnchorRef}
+          type="button"
+            onClick={() => void runRefreshGeneration()}
             disabled={isRefreshing}
             className="app-nav-icon-button flex h-9 w-9 items-center justify-center text-slate-800 active:scale-95"
-            aria-label="论坛操作"
+            aria-label="刷新论坛"
           >
-            {isRefreshing
-              ? <LoaderCircle className="h-4 w-4 animate-spin" />
-              : <Plus className="h-4 w-4" />}
+            {isRefreshing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           </button>
         ) : secondaryPage === "community-npcs" ? (
           <button
@@ -1114,6 +1218,34 @@ export default function AppForum({
           <span className="h-9 w-9" aria-hidden="true" />
         )}
       </header>
+
+      {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && rootTab === "home" && (
+        <div className="flex shrink-0 items-center gap-4 overflow-x-auto bg-white px-4 pt-1 [scrollbar-width:none]">
+          {forumCategories.map((category) => (
+            <button
+              key={category}
+              type="button"
+              onClick={() => {
+                setActiveCategory(category);
+                setPostCategory(category);
+                setVisibleThreadCount(FORUM_HOME_PAGE_SIZE);
+              }}
+              className={`relative shrink-0 px-1.5 py-3 text-xs font-semibold transition-colors ${activeCategory === category ? "text-slate-900 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-slate-900" : "text-slate-400 hover:text-slate-700"}`}
+              aria-pressed={activeCategory === category}
+            >
+              {category}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={addForumCategory}
+            className="relative flex shrink-0 items-center justify-center px-1.5 py-3 text-xs font-semibold text-slate-400 transition-colors hover:text-slate-700"
+            aria-label="新建分类"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       <PopoverMenu
         open={showHomeActions}
@@ -1248,7 +1380,7 @@ export default function AppForum({
         </main>
       ) : !activeThread ? (
         <main ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-24">
-          {identityThreads.length === 0 && forumStoryItems.length === 0 ? (
+          {categoryThreads.length === 0 && visibleForumStoryItems.length === 0 ? (
             <div className="flex min-h-full flex-col items-center justify-center px-8 py-16 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-sm">
                 <MessageCircle className="h-7 w-7 text-slate-300" />
@@ -1259,10 +1391,10 @@ export default function AppForum({
                 发布帖子
               </Button>
             </div>
-          ) : identityThreads.length > 0 || forumStoryItems.length > 0 ? (
-            <div className="forum-thread-feed mt-3 overflow-hidden border-y border-slate-100 bg-white">
+          ) : categoryThreads.length > 0 || visibleForumStoryItems.length > 0 ? (
+            <div className="forum-thread-feed overflow-hidden bg-white" data-forum-layout="comfortable">
               <ForumStoryList
-                items={forumStoryItems}
+                items={visibleForumStoryItems}
                 onOpen={(storyId) => { setActiveStoryId(storyId); setError(""); setNotice(""); }}
               />
               {visibleThreads.map((thread) => {
@@ -1291,14 +1423,14 @@ export default function AppForum({
                   </div>
                 );
               })}
-              {identityThreads.length > visibleThreads.length && <button type="button" onClick={() => setVisibleThreadCount((count) => count + FORUM_HOME_PAGE_SIZE)} className="w-full border-t border-slate-100 py-4 text-xs font-medium text-slate-500">加载更多</button>}
+              {categoryThreads.length > visibleThreads.length && <button type="button" onClick={() => setVisibleThreadCount((count) => count + FORUM_HOME_PAGE_SIZE)} className="w-full border-t border-slate-100 py-4 text-xs font-medium text-slate-500">加载更多</button>}
             </div>
           ) : null}
         </main>
       ) : (
         <>
-          <main ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-5 pt-3">
-            <article className="rounded-2xl bg-white p-4 shadow-sm">
+          <main ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white pb-5 pt-0">
+            <article className="border-b border-slate-100 bg-white px-4 py-4">
               <div className="flex items-start gap-2.5">
                 <ForumAvatar author={activeThreadAuthor || activeThread.publicAuthor} className="h-10 w-10" />
                 <div className="min-w-0 flex-1">
@@ -1371,7 +1503,7 @@ export default function AppForum({
               </div>
             </article>
 
-            <section className="mt-3 overflow-hidden rounded-2xl bg-white shadow-sm">
+            <section className="overflow-hidden bg-white">
               <div className="border-b border-slate-100 px-4 py-3">
                 <h3 className="text-[13px] font-bold text-slate-800">全部回复</h3>
                 {waitingReplyThreadIds.includes(activeThread.id) && (
@@ -1557,9 +1689,92 @@ export default function AppForum({
 
       {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && (
         <nav className="flex shrink-0 border-t border-slate-100 bg-white pb-[max(8px,env(safe-area-inset-bottom))] pt-2" aria-label="论坛导航">
-          <button type="button" onClick={() => setRootTab("home")} className={`flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "home" ? "text-neutral-950" : "text-slate-400"}`}><MessageCircle className="h-5 w-5" />论坛</button>
+          <button type="button" onClick={() => setRootTab("home")} className={`flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "home" ? "text-neutral-950" : "text-slate-400"}`}><MessageCircle className="h-5 w-5" />首页</button>
+          <button type="button" onClick={() => { setRootTab("home"); setShowComposer(true); }} className="flex flex-1 flex-col items-center gap-1 text-[10px] text-slate-400" aria-label="发布"><span className="-mt-5 flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg"><Plus className="h-5 w-5" /></span><span>发布</span></button>
           <button type="button" onClick={() => setRootTab("mine")} className={`flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "mine" ? "text-neutral-950" : "text-slate-400"}`}><User className="h-5 w-5" />我的</button>
         </nav>
+      )}
+
+      {showCategoryComposer && (
+        <div
+          className="fixed inset-0 z-[var(--z-sheet)] flex items-center justify-center bg-black/35 px-4"
+          role="presentation"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) resetCategoryComposer(); }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="forum-category-dialog-title"
+            className="flex max-h-[86vh] w-full max-w-[400px] flex-col overflow-hidden rounded-[28px] bg-white text-slate-900 shadow-2xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="flex shrink-0 items-start gap-3 px-6 pb-2 pt-6">
+              <div className="min-w-0 flex-1">
+                <h2 id="forum-category-dialog-title" className="text-[22px] font-bold">新建论坛分类</h2>
+                <p className="mt-1 text-[13px] leading-5 text-slate-400">设定分类世界观，之后生成的帖子会遵循它</p>
+              </div>
+              <button type="button" onClick={resetCategoryComposer} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-50 text-slate-500" aria-label="关闭">
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1" role="tablist" aria-label="分类创建方式">
+                <button type="button" role="tab" aria-selected={categoryCreationMode === "manual"} onClick={() => setCategoryCreationMode("manual")} className={`rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${categoryCreationMode === "manual" ? "bg-white text-slate-900 shadow-sm" : "text-slate-400"}`}>手动创建</button>
+                <button type="button" role="tab" aria-selected={categoryCreationMode === "character"} onClick={() => setCategoryCreationMode("character")} className={`rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${categoryCreationMode === "character" ? "bg-white text-slate-900 shadow-sm" : "text-slate-400"}`}>自动生成</button>
+              </div>
+              {categoryCreationMode === "manual" ? (
+                <div className="mt-5 space-y-4">
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-semibold text-slate-600">分类名称</span>
+                    <input value={categoryDraftName} onChange={(event) => setCategoryDraftName(event.target.value)} maxLength={16} placeholder="例如：星际生活" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-slate-400" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-semibold text-slate-600">世界观设定</span>
+                    <textarea value={categoryDraftWorldview} onChange={(event) => setCategoryDraftWorldview(event.target.value)} maxLength={4000} rows={7} placeholder="描述时代背景、世界规则和整体氛围；生成内容会遵循这些设定，但不会只围绕某一个角色。" className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-5 outline-none focus:border-slate-400" />
+                  </label>
+                </div>
+              ) : (
+                <div className="mt-5 space-y-3">
+                  <p className="text-xs font-semibold text-slate-600">选择档案馆角色</p>
+                  {characters.filter((character) => !character.isGroupChat && !character.isContactInstance).length === 0 ? (
+                    <p className="rounded-xl bg-slate-50 px-3 py-5 text-center text-xs text-slate-400">档案馆中暂无可用角色</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {characters.filter((character) => !character.isGroupChat && !character.isContactInstance).map((character) => {
+                        const selected = categorySourceCharacterId === character.id;
+                        return <button key={character.id} type="button" onClick={() => setCategorySourceCharacterId(character.id)} className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left ${selected ? "border-slate-900 bg-slate-50" : "border-slate-100 bg-white"}`} aria-pressed={selected}>
+                          <img src={character.avatar} alt="" className="h-10 w-10 shrink-0 rounded-full bg-slate-100 object-cover" />
+                          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-800">{character.remark || character.name}</span><span className="mt-0.5 block truncate text-[11px] text-slate-400">{character.personality || character.backstory || "角色档案"}</span></span>
+                          <span className={`h-4 w-4 shrink-0 rounded-full border-2 ${selected ? "border-slate-900 bg-slate-900 shadow-[inset_0_0_0_3px_white]" : "border-slate-200"}`} />
+                        </button>;
+                      })}
+                    </div>
+                  )}
+                  <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] leading-5 text-slate-400">会读取所选角色的人设、背景及公开世界书，生成一个独立分类；帖子只遵循世界观，不会局限于该角色。</p>
+                </div>
+              )}
+            </div>
+            <footer className="flex shrink-0 items-center gap-3 border-t border-slate-100 bg-white px-6 py-4">
+              <button
+                type="button"
+                onClick={resetCategoryComposer}
+                disabled={isCreatingCategory}
+                className="h-11 flex-1 rounded-2xl bg-neutral-100 text-sm font-semibold text-neutral-600 hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={createForumCategory}
+                disabled={isCreatingCategory || (categoryCreationMode === "manual" ? !categoryDraftName.trim() || !categoryDraftWorldview.trim() : !categorySourceCharacterId)}
+                className="h-11 flex-[1.35] rounded-2xl bg-neutral-900 text-sm font-semibold text-white shadow-sm hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isCreatingCategory && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />}
+                {isCreatingCategory ? "创建中" : "创建分类"}
+              </button>
+            </footer>
+          </section>
+        </div>
       )}
 
       <BottomSheet
@@ -1592,6 +1807,16 @@ export default function AppForum({
               className="forum-composer-input h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-slate-400"
             />
             <span className="mt-1 block text-right text-[10px] text-slate-300">{postTitle.length}/80</span>
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">分类</span>
+            <select
+              value={postCategory}
+              onChange={(event) => setPostCategory(event.target.value)}
+              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-slate-400"
+            >
+              {forumCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+            </select>
           </label>
           <label className="block">
             <span className="mb-1.5 block text-xs font-semibold text-slate-600">正文</span>
@@ -1671,6 +1896,7 @@ export default function AppForum({
         title="转发给好友"
         description="只显示当前身份下的单聊好友。"
         onClose={resetShareSheet}
+        centered
         showCloseButton
         footer={(
           <>

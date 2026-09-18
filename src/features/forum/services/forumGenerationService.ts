@@ -22,6 +22,8 @@ import {
   buildForumPublicSafeContext,
   findForumPrivateNameViolation,
   isForumGeneratedReplyRelevant,
+  validateForumPostStyle,
+  validateForumReplyStyle,
 } from "../../../domain/forum/forumContentSafety";
 import {
   createForumVirtualAuthor,
@@ -129,7 +131,26 @@ const FORUM_PUBLIC_TEXT_RULES = `论坛内容只能是普通纯文本。
 不得公开输入中未在帖子或公开楼层出现的私人姓名、昵称、身份或可识别细节。
 回复必须直接回应主楼主题或指定楼层，不得拼接无关私人故事。`;
 
-const FORUM_TOPIC_POOL = "情感、恋爱求助、友情与家庭、校园/宿舍/社团、职场、日常求助、分享安利、捞人偶遇、吐槽、奇怪经历、都市怪谈、微恐悬疑、规则怪谈、幻想种族、宠物邻里、网络社交、树洞、连载故事、事情后续与吃瓜讨论";
+export const FORUM_REALISM_RULES = `论坛帖必须像手机端真实用户当下发出的帖子，不是小说、剧本、旁白或完整故事梗概：
+- 主楼从一个具体的当下困惑、见闻、吐槽或求助切入，使用第一人称口语；只写目前已知的事实和感受，留一个能让别人接话的问题或判断点。
+- 正文通常 30-450 字，分成 1-4 个自然短段；可以省略背景、使用口头禅、重复词、问号、省略号或少量 emoji，但不要堆砌文学修辞。
+- 不要按时间线从起因写到结局，不要替评论区把真相和后续全部说完；“连载故事”也只发当前这一段，后续通过楼层和楼主更新推进。
+- 禁止“第一章/第X集/故事开始/镜头切到/旁白/后来最终”等章节化、剧本化表达；不要用全知视角描述所有人的心理。
+- 不要求每条都反转或悬疑，优先让细节、语气和未解决的问题像真实用户发帖。`;
+
+export const FORUM_REPLY_REALISM_RULES = `每条回复都要像一个真实网友在楼层里顺手留下的话：
+- 通常 5-120 字，1-2 句，直接抓住主楼或被引用楼层的一个细节；可以给建议、追问、质疑、补充经验、吐槽或开玩笑，观点要有差异。
+- 不要复述整篇主楼，不要写总结、长篇分析、小说段落或替其他用户发言；不要凭空补全未公开的剧情。
+- 只有确实在接某一楼时才引用楼层，引用后马上说自己的话；楼主回复应像临时补充一条新事实、纠正前文或改变打算，而不是发布“下一章”。`;
+
+const FORUM_TOPIC_POOL = "情感、恋爱求助、友情与家庭、校园/宿舍/社团、职场、日常求助、分享安利、捞人偶遇、吐槽、都市怪谈、树洞、连载故事、事情后续与吃瓜讨论";
+
+const FORUM_CATEGORY_GUIDANCE: Record<string, string> = {
+  情感: "恋爱、友情、家庭和亲密关系中的真实困惑或进展",
+  八卦: "公开可讨论的见闻、后续、吃瓜线索和人物关系变化",
+  吐槽: "生活、职场、校园或社交中让发帖人不爽但值得讨论的事情",
+  求助: "发帖人正在面对、希望获得建议或经验的具体问题",
+};
 
 const correctionInstruction = `上一次候选不符合论坛公开内容规则。请重新生成一次：
 只保留与公开帖子直接相关的自然论坛文字；移除动作旁白、情绪标签、伪媒体、私人姓名和无关故事。`;
@@ -292,15 +313,27 @@ const buildThreadPrompt = (input: {
   relationContext?: ForumRelationContext;
   virtualProfile: ForumVirtualProfile;
   communityNpc?: ForumCommunityNpc;
+  categoryContext?: { name: string; worldview?: string };
 }): { systemInstruction: string; message: string } => ({
   systemInstruction: `你只负责提出一个虚拟本地论坛帖候选，不执行任何写操作。
 ${FORUM_PUBLIC_TEXT_RULES}
+${FORUM_REALISM_RULES}
 严格只输出一个 JSON 对象，不要 Markdown：
-{"title":"1-80字","body":"1-5000字","anonymous":false,"replies":[{"body":"相关回复","replyToFloor":null}]}
-replies 为 0-5 条，由普通论坛路人发表。replyToFloor 只能引用本次候选中此前已出现的真实回复楼层；直接回复主楼必须为 null。
+{"title":"1-80字","body":"30-800字","anonymous":false,"replies":[{"body":"5-120字的相关回复","replyToFloor":null}]}
+replies 为 0-5 条，由普通论坛路人发表；回复可以很短，也可以暂时没有回复。replyToFloor 只能引用本次候选中此前已出现的真实回复楼层；直接回复主楼必须为 null。
 禁止输出 relationId、characterId、threadId、replyId、作者姓名或真实网络账号。`,
   message: `从以下话题池自然选一个，不要把类别名机械写进标题：${FORUM_TOPIC_POOL}。
 标题和正文要像不同真实论坛用户：长短、语气、标点和信息完整度可以不同，不要套用“求助：”模板。
+${FORUM_REALISM_RULES}
+${input.categoryContext
+    ? `当前帖子必须归入论坛分类“${input.categoryContext.name}”。${input.categoryContext.worldview
+      ? `必须遵循以下分类世界观设定：
+${input.categoryContext.worldview}
+只借用这套世界观的背景、规则和氛围，不要把内容局限为某一个角色的经历，也不要强行提及分类名称。`
+      : `主题、语气和事件应自然符合这个分类，不要把分类名机械写进标题。${FORUM_CATEGORY_GUIDANCE[input.categoryContext.name]
+        ? `优先从这些方向取材：${FORUM_CATEGORY_GUIDANCE[input.categoryContext.name]}。`
+        : "内容应围绕该自定义分类的日常主题展开。"}`}`
+    : ""}
 ${input.relationContext
     ? `以该角色的公开论坛表达方式生成一条帖子，可选择实名或匿名。
 ${input.relationContext.publicCognitiveContext
@@ -320,6 +353,10 @@ const isThreadCandidatePublicSafe = (input: {
   communityNpc?: ForumCommunityNpc;
   protectedNames: readonly string[];
 }): ForumGeneratedThreadCandidate | undefined => {
+  if (!validateForumPostStyle({
+    title: input.candidate.title,
+    body: input.candidate.body,
+  }).valid) return undefined;
   const anonymous = Boolean(input.relationContext && input.candidate.anonymous);
   const allowedAuthorNames = input.relationContext && !anonymous
     ? [
@@ -336,6 +373,7 @@ const isThreadCandidatePublicSafe = (input: {
   });
   if (violation) return undefined;
   const replies = (input.candidate.replies || []).filter((reply) => {
+    if (!validateForumReplyStyle(reply.body).valid) return false;
     if (findForumPrivateNameViolation({
       text: reply.body,
       protectedNames: input.protectedNames,
@@ -376,6 +414,7 @@ const createGeneratedThread = (input: {
   relationContext?: ForumRelationContext;
   virtualProfile: ForumVirtualProfile;
   communityNpc?: ForumCommunityNpc;
+  category?: string;
   candidate: ForumGeneratedThreadCandidate;
   occurredAt: number;
   now: number;
@@ -387,6 +426,14 @@ const createGeneratedThread = (input: {
     : input.communityNpc
       ? toForumCommunityNpcAuthor(input.communityNpc)
       : createForumVirtualAuthor(input.virtualProfile);
+  const source = character
+    ? anonymous ? "ai-character-anonymous" : "ai-character"
+    : "ai-virtual";
+  const inferredStoryArc = inferForumStoryArc({
+    source,
+    title: input.candidate.title,
+    body: input.candidate.body,
+  });
   const threadId = id("forum-ai-thread");
   const thread: ForumThread = {
     id: threadId,
@@ -398,25 +445,24 @@ const createGeneratedThread = (input: {
     } : {}),
     title: input.candidate.title,
     body: input.candidate.body,
-    source: character
-      ? anonymous ? "ai-character-anonymous" : "ai-character"
-      : "ai-virtual",
+    ...(input.category ? { category: input.category } : {}),
+    source,
     occurredAt: Math.min(input.now, input.occurredAt),
-    baseLikeCount: getForumBaselineLikeCount(threadId, character
-      ? anonymous ? "ai-character-anonymous" : "ai-character"
-      : "ai-virtual"),
+    baseLikeCount: getForumBaselineLikeCount(threadId, source),
     likedByIdentityIds: [],
     replyCount: 0,
     createdAt: input.now,
     updatedAt: input.now,
     lastActivityAt: input.now,
-    ...(inferForumStoryArc({ source: character
-      ? anonymous ? "ai-character-anonymous" : "ai-character"
-      : "ai-virtual", title: input.candidate.title, body: input.candidate.body })
-      ? { storyArc: inferForumStoryArc({ source: character
-        ? anonymous ? "ai-character-anonymous" : "ai-character"
-        : "ai-virtual", title: input.candidate.title, body: input.candidate.body }) }
-      : {}),
+    // All AI-created forum posts use the same normal-thread shape, while an
+    // open arc keeps room for a later author update or public progression.
+    storyArc: inferredStoryArc || {
+      category: "other",
+      status: "open",
+      episode: 1,
+      continuationProbability: 0.55,
+      publicRecap: input.candidate.body.slice(0, 300),
+    },
   };
   const replies: ForumReply[] = [];
   for (const [candidateIndex, candidate] of (input.candidate.replies || []).entries()) {
@@ -476,6 +522,10 @@ export async function generateForumThreads(input: {
   publicEventCandidates?: readonly PublicCharacterEventCandidate[];
   /** Explicitly classified public world knowledge only; omitted records remain denied. */
   publicWorldSettings?: readonly PublicWorldSettingCandidate[];
+  /** Optional user-created category worldview used to constrain generated public posts. */
+  categoryContext?: { name: string; worldview?: string };
+  /** Optional category rotation used by the recommendation feed. */
+  categoryTargets?: readonly { name: string; worldview?: string }[];
 }): Promise<ForumGenerationBundle> {
   requireTextAiConfig(input.settings);
   const random = input.random || Math.random;
@@ -504,12 +554,19 @@ export async function generateForumThreads(input: {
     input.characters,
     input.ownerIdentityId,
   );
-  const planned = Math.max(1, Math.min(5, Math.floor(input.count)));
+  const planned = Math.max(1, Math.min(6, Math.floor(input.count)));
   const threads: ForumThread[] = [];
   const replies: ForumReply[] = [];
   const fingerprints = new Set<string>();
   const aiCall = input.aiCall || defaultAiCall;
-  for (let index = 0; index < planned; index += 1) {
+  // Invalid or duplicate candidates must not silently reduce a requested
+  // 3–6-post refresh. Allow a bounded second pass while keeping the hard
+  // upper bound at the requested count.
+  for (let attempt = 0; attempt < planned * 2 && threads.length < planned; attempt += 1) {
+    const index = threads.length;
+    const categoryContext = input.categoryTargets?.length
+      ? input.categoryTargets[index % input.categoryTargets.length]
+      : input.categoryContext;
     const relationCandidates = relationContexts.filter((context) => canUseRelationshipThreadAuthor({
       relationId: context.relationship.id,
       threads: [...input.existingThreads, ...threads],
@@ -535,7 +592,7 @@ export async function generateForumThreads(input: {
       `${input.ownerIdentityId}:${input.trigger}:${input.now}`,
       index,
     );
-    const prompt = buildThreadPrompt({ relationContext, virtualProfile, communityNpc });
+    const prompt = buildThreadPrompt({ relationContext, virtualProfile, communityNpc, categoryContext });
     const rawCandidate = await generateValidatedCandidate({
       aiCall,
       request: toAiRequest(input.settings, prompt),
@@ -559,6 +616,7 @@ export async function generateForumThreads(input: {
       relationContext,
       virtualProfile,
       communityNpc,
+      category: categoryContext?.name,
       candidate,
       occurredAt,
       now: input.now,
@@ -596,9 +654,13 @@ const publicThreadContext = (
     .filter((reply) => reply.threadId === thread.id && !reply.isDeleted)
     .map((reply) => reply.floor)
     .sort((left, right) => left - right);
+  const continuation = thread.storyArc?.status === "open" && thread.storyArc.publicRecap
+    ? `\n当前公开连载摘要（只可作为已发生事实，不能扩写成新背景）：${trimContext(thread.storyArc.publicRecap, 300)}`
+    : "";
   return `公开作者：${thread.publicAuthor.displayName}
 标题：${thread.title}
 正文：${thread.body}
+${continuation}
 已有公开楼层：
 ${publicReplies || "无"}
 可引用楼层：${validFloors.length > 0 ? validFloors.join("、") : "无"}。直接回复主楼时 replyToFloor 必须为 null。`;
@@ -611,6 +673,7 @@ const validateReplyCandidate = (input: {
   protectedNames: readonly string[];
   author: ForumReplyAuthor | { kind: "thread-author"; publicAuthor: ForumPublicAuthor };
 }): ForumGeneratedReplyCandidate | undefined => {
+  if (!validateForumReplyStyle(input.candidate.body).valid) return undefined;
   const targetResult = resolveReplyTarget(
     input.candidate.replyToFloor,
     input.thread.id,
@@ -701,10 +764,14 @@ const buildReplyPrompt = (input: {
 }): { systemInstruction: string; message: string } => ({
   systemInstruction: `你只生成一条与当前论坛帖直接相关的公开回复。
 ${FORUM_PUBLIC_TEXT_RULES}
+${FORUM_REPLY_REALISM_RULES}
 严格输出 JSON：{"body":"回复正文","anonymous":false,"replyToFloor":null}。
 replyToFloor 只能取提示中列出的真实楼层；直接回复主楼必须为 null。
 不输出任何 ID、作者名、引用正文或内部身份。`,
   message: `${publicThreadContext(input.thread, input.availableReplies)}
+${input.promptKind === "activity"
+    ? "当前是动态楼层：优先回应最近一条公开楼层，允许追问、质疑、补充或开玩笑；不要把它写成完整剧情。\n"
+    : "这是帖子刚发布后的首批回复：先对主楼的具体细节作出自然反应，不要轮流复述主楼。\n"}
 ${input.author.kind === "relation"
     ? `按该角色经过公开脱敏的说话风格回复：
 ${input.author.context.publicCognitiveContext
@@ -910,10 +977,12 @@ export async function generateThreadActivity(input: {
     const prompt = {
       systemInstruction: `你只生成一条论坛楼主后续更新。
 ${FORUM_PUBLIC_TEXT_RULES}
+${FORUM_REPLY_REALISM_RULES}
 严格输出 JSON：{"body":"更新正文","replyToFloor":null}。
-不修改原主楼，不输出任何 ID；仅在确实针对某楼补充时选择提示中的真实楼层。`,
+不修改原主楼，不输出任何 ID；仅在确实针对某楼补充时选择提示中的真实楼层。
+这是一条楼主动态，不是新章节：必须提供一个此前没有的公开事实、结果、纠正或改变后的打算；可以回应某一楼的建议，但不要重述全文或凭空补全幕后剧情。`,
       message: `${publicThreadContext(input.thread, threadReplies)}
-请以原楼主的公开身份追加自然后续更新。
+请以原楼主的公开身份追加自然后续更新。只从当前公开内容和楼层中推进，允许因评论改变原来的判断或计划。
 ${originalAuthorContext
     ? `${originalAuthorContext.promptContext}\n${formatPublicForumActivityPromptContext(
       buildPublicForumActivityPromptContext(originalAuthorContext.publicCognitiveContext!),

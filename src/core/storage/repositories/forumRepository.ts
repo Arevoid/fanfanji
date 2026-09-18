@@ -2,6 +2,7 @@ import type {
   ForumActivityTask,
   ForumActorRef,
   ForumActorState,
+  ForumCategoryDefinition,
   ForumGenerationTask,
   ForumLikeHistoryRecord,
   ForumMutationEvent,
@@ -19,7 +20,7 @@ import { normalizeForumThreadEngagement } from "../../../domain/forum/forumData"
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readArray, writeArray } from "./repositoryUtils";
-import { readString } from "../storageAdapter";
+import { readJson, readString, writeJson } from "../storageAdapter";
 
 export interface ForumStateSnapshot {
   revision: number;
@@ -743,3 +744,53 @@ export const loadForumDataSafely = (input: {
     sanitized: safe.changed,
   };
 };
+
+const MAX_FORUM_CATEGORIES = 20;
+
+const normalizeForumCategoryDefinitions = (value: unknown): ForumCategoryDefinition[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((item): ForumCategoryDefinition[] => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === "string" && record.id.trim() ? record.id.trim() : "";
+    const name = typeof record.name === "string" ? record.name.trim().slice(0, 16) : "";
+    const worldview = typeof record.worldview === "string" ? record.worldview.trim().slice(0, 4000) : "";
+    const mode = record.mode === "character" ? "character" : "manual";
+    const createdAt = typeof record.createdAt === "number" && Number.isFinite(record.createdAt) ? record.createdAt : Date.now();
+    const updatedAt = typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt) ? record.updatedAt : createdAt;
+    if (!id || !name || seen.has(name)) return [];
+    seen.add(name);
+    const sourceCharacterId = typeof record.sourceCharacterId === "string" && record.sourceCharacterId.trim()
+      ? record.sourceCharacterId.trim()
+      : undefined;
+    return [{ id, name, worldview, mode, ...(sourceCharacterId ? { sourceCharacterId } : {}), createdAt, updatedAt }];
+  }).slice(-MAX_FORUM_CATEGORIES);
+};
+
+export const loadForumCategoryDefinitions = (): ForumCategoryDefinition[] => normalizeForumCategoryDefinitions(
+  readJson<unknown>(storageKeys.forumCategoryDefinitions, []).value,
+);
+
+export const saveForumCategoryDefinitions = (definitions: readonly ForumCategoryDefinition[]): boolean => writeJson(
+  storageKeys.forumCategoryDefinitions,
+  normalizeForumCategoryDefinitions(definitions),
+).success;
+
+const normalizeForumCategories = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean))]
+    .slice(-MAX_FORUM_CATEGORIES);
+};
+
+export const loadForumCategories = (): string[] => normalizeForumCategories(
+  readJson<unknown>(storageKeys.forumCategories, []).value,
+);
+
+export const saveForumCategories = (categories: readonly string[]): boolean => writeJson(
+  storageKeys.forumCategories,
+  normalizeForumCategories(categories),
+).success;
