@@ -494,10 +494,10 @@ export default function AppForum({
       return;
     }
     try {
-      const plannedCount = 3 + Math.floor(Math.random() * 4);
+      const plannedCount = 4 + Math.floor(Math.random() * 5);
       const generationCount = Math.max(
         plannedCount,
-        Math.min(6, generationCategoryTargets.length),
+        Math.min(8, generationCategoryTargets.length),
       );
       const currentThreads = loadForumThreads().value;
       const currentReplies = loadForumReplies().value;
@@ -519,8 +519,8 @@ export default function AppForum({
         communityNpcs,
         categoryTargets: generationCategoryTargets,
       });
-      if (generated.threads.length < 3 || generated.threads.length > 6) {
-        throw new Error("生成内容无效：本次未能完整生成 3-6 条帖子，未写入不完整结果。");
+      if (generated.threads.length < 4 || generated.threads.length > 8) {
+        throw new Error("生成内容无效：本次未能完整生成 4-8 条帖子，未写入不完整结果。");
       }
       const nextThreads = [...generated.threads, ...currentThreads];
       const nextReplies = [...currentReplies, ...generated.replies];
@@ -724,7 +724,6 @@ export default function AppForum({
         if (result.outcome === "no-update" || result.released.length === 0) {
           setNotice("暂时没有新的回复");
         } else {
-          setNotice("发现了新的回复");
           requestAnimationFrame(() => {
             document.getElementById(`forum-reply-${result.released[0].id}`)
               ?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -797,7 +796,7 @@ export default function AppForum({
               }
             : item);
         if (!commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
-        setNotice(result.outcome === "author-update" ? "楼主发布了新动态" : "发现了新的回复");
+        if (result.outcome === "author-update") setNotice("楼主发布了新动态");
         requestAnimationFrame(() => {
           document.getElementById(`forum-reply-${result.replies[0].id}`)
             ?.scrollIntoView({ behavior: "smooth", block: "center" });

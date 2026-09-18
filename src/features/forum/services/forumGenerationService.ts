@@ -152,6 +152,11 @@ const FORUM_TOPIC_POOL = "情感、恋爱求助、友情与家庭、校园/宿�
 
 const FORUM_TOPIC_POOL_GUIDANCE = `这些只是发散灵感，不是固定题材池，也不是每条都要覆盖的清单。除非世界观明确禁止，帖子可以从任意合理的公共生活切面展开：普通人的小事、观众/粉丝讨论、行业与城市见闻、求助和经验、安利与避坑、八卦与情感都可以。不要因为分类来自某个角色，就只写这个角色、某个道具或世界书里出现过的同一件事。`;
 
+/** Generated public posts alternate their lightweight continuation arc at a
+ * 5:5 rate across refresh batches; ordinary posts still receive normal
+ * replies and activity, but do not enter the author-update story lane. */
+export const FORUM_STORY_POST_RATIO = 0.5;
+
 const FORUM_DIVERSITY_LENSES = [
   "普通人的当下见闻、邻里、租房、消费或公共服务",
   "影视、综艺、电视剧、作品安利或观众推荐",
@@ -454,6 +459,7 @@ const createGeneratedThread = (input: {
   virtualProfile: ForumVirtualProfile;
   communityNpc?: ForumCommunityNpc;
   category?: string;
+  isStoryPost: boolean;
   candidate: ForumGeneratedThreadCandidate;
   occurredAt: number;
   now: number;
@@ -474,6 +480,15 @@ const createGeneratedThread = (input: {
     body: input.candidate.body,
   });
   const threadId = id("forum-ai-thread");
+  const storyArc = input.isStoryPost
+    ? inferredStoryArc || {
+        category: "other" as const,
+        status: "open" as const,
+        episode: 1,
+        continuationProbability: 0.55,
+        publicRecap: input.candidate.body.slice(0, 300),
+      }
+    : undefined;
   const thread: ForumThread = {
     id: threadId,
     ownerIdentityId: input.ownerIdentityId,
@@ -493,15 +508,7 @@ const createGeneratedThread = (input: {
     createdAt: input.now,
     updatedAt: input.now,
     lastActivityAt: input.now,
-    // All AI-created forum posts use the same normal-thread shape, while an
-    // open arc keeps room for a later author update or public progression.
-    storyArc: inferredStoryArc || {
-      category: "other",
-      status: "open",
-      episode: 1,
-      continuationProbability: 0.55,
-      publicRecap: input.candidate.body.slice(0, 300),
-    },
+    ...(storyArc ? { storyArc } : {}),
   };
   const replies: ForumReply[] = [];
   for (const [candidateIndex, candidate] of (input.candidate.replies || []).entries()) {
@@ -594,7 +601,8 @@ export async function generateForumThreads(input: {
     input.characters,
     input.ownerIdentityId,
   );
-  const planned = Math.max(1, Math.min(6, Math.floor(input.count)));
+  const planned = Math.max(1, Math.min(8, Math.floor(input.count)));
+  const storySlotOffset = random() < FORUM_STORY_POST_RATIO ? 0 : 1;
   const threads: ForumThread[] = [];
   const replies: ForumReply[] = [];
   const fingerprints = new Set<string>();
@@ -668,6 +676,7 @@ export async function generateForumThreads(input: {
       virtualProfile,
       communityNpc,
       category: categoryContext?.name,
+      isStoryPost: (index + storySlotOffset) % 2 === 0,
       candidate,
       occurredAt,
       now: input.now,

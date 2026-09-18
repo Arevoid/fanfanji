@@ -12,6 +12,7 @@ import type {
 import type { CharacterRelationship } from "../src/domain/relationship/characterRelationship";
 import {
   buildForumRelationGenerationContext,
+  FORUM_STORY_POST_RATIO,
   generateForumThreads,
   generateInitialRepliesForUserThread,
 } from "../src/features/forum/services/forumGenerationService";
@@ -160,6 +161,8 @@ const generated = await generateForumThreads({
   },
 });
 assert.equal(generated.threads.length, 5);
+assert.equal(FORUM_STORY_POST_RATIO, 0.5);
+assert.equal(generated.threads.filter((thread) => thread.storyArc).length, 2, "five-post batches alternate story and ordinary posts at the 5:5 rate");
 assert.equal(generated.replies.length, 0, "invalid replyToFloor values are rejected");
 assert.equal(new Set(generated.threads.map((thread) => thread.occurredAt)).size, 5);
 assert.ok(generated.threads.every((thread) => thread.occurredAt <= now));
