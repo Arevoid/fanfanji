@@ -38,9 +38,13 @@ import {
   createForumReply,
   createForumThread,
   deleteForumThread,
+  FORUM_DEFAULT_POST_CATEGORIES,
+  FORUM_RECOMMENDATION_CATEGORY,
   getForumLikeCount,
   listForumRepliesForThread,
   listForumThreadsForIdentity,
+  resolveForumPostCategory,
+  resolveForumThreadCategory,
   selectForumThreadMetrics,
   toggleForumReplyLike,
   toggleForumThreadLike,
@@ -136,7 +140,14 @@ type DeleteTarget =
 
 type CategoryCreationMode = "manual" | "character";
 
-const DEFAULT_FORUM_CATEGORIES = ["推荐", "情感", "八卦", "吐槽", "求助"] as const;
+const DEFAULT_FORUM_CATEGORIES = [FORUM_RECOMMENDATION_CATEGORY, ...FORUM_DEFAULT_POST_CATEGORIES] as const;
+
+const resolveForumComposerCategory = (
+  category: string,
+  categories: readonly string[],
+): string => category === FORUM_RECOMMENDATION_CATEGORY
+  ? categories.find((candidate) => candidate !== FORUM_RECOMMENDATION_CATEGORY) || FORUM_DEFAULT_POST_CATEGORIES[0]
+  : category;
 
 const createId = (prefix: string): string => {
   return createApplicationId(prefix);
@@ -216,7 +227,7 @@ export default function AppForum({
   const [isSharing, setIsSharing] = useState(false);
   const [postTitle, setPostTitle] = useState("");
   const [postBody, setPostBody] = useState("");
-  const [postCategory, setPostCategory] = useState<string>(DEFAULT_FORUM_CATEGORIES[0]);
+  const [postCategory, setPostCategory] = useState<string>(FORUM_DEFAULT_POST_CATEGORIES[0]);
   const [postAnonymously, setPostAnonymously] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [replyingTo, setReplyingTo] = useState<ForumReply | null>(null);
@@ -291,7 +302,7 @@ export default function AppForum({
   const categoryThreads = useMemo(
     () => activeCategory === DEFAULT_FORUM_CATEGORIES[0]
       ? identityThreads
-      : identityThreads.filter((thread) => (thread.category || DEFAULT_FORUM_CATEGORIES[0]) === activeCategory),
+      : identityThreads.filter((thread) => resolveForumThreadCategory(thread) === activeCategory),
     [activeCategory, identityThreads],
   );
   const forumStoryItems = useMemo(() => listForumStoryUiItems(), [forumStoryRevision]);
@@ -872,7 +883,7 @@ export default function AppForum({
   const resetComposer = () => {
     setPostTitle("");
     setPostBody("");
-    setPostCategory(activeCategory);
+    setPostCategory(resolveForumComposerCategory(activeCategory, forumCategories));
     setPostAnonymously(false);
     setShowComposer(false);
   };
@@ -904,8 +915,10 @@ export default function AppForum({
       : [];
     const worldview = (categoryCreationMode === "character"
       ? [
-        `${sourceCharacter?.name || "角色"}的人设：${sourceCharacter?.personality || ""}`,
-        `角色背景：${sourceCharacter?.backstory || ""}`,
+        "【世界观使用规则】下面的内容用于确定时代、社会形态、职业身份、技术/超自然边界和不可违背的禁忌；它是生成边界，不是固定话题池。只要不违背明确规则，帖子可以自然覆盖多个公共生活领域。",
+        `【角色人设参考】${sourceCharacter?.name || "角色"}：${sourceCharacter?.personality || ""}`,
+        `【角色背景参考】${sourceCharacter?.backstory || ""}`,
+        visibleWorldBook.length > 0 ? "【公开世界书参考】" : "",
         ...visibleWorldBook,
       ].filter(Boolean).join("\n")
       : categoryDraftWorldview).trim().slice(0, 4000);
@@ -974,12 +987,17 @@ export default function AppForum({
     postLockRef.current = true;
     setIsPosting(true);
     setError("");
+    const category = resolveForumPostCategory({
+      requestedCategory: postCategory,
+      title,
+      body,
+    });
     const thread = createForumThread({
       id: createId("forum-thread"),
       identity: forumIdentity,
       title,
       body,
-      category: postCategory,
+      category,
       anonymous: postAnonymously,
       now: Date.now(),
     });
@@ -1227,7 +1245,7 @@ export default function AppForum({
               type="button"
               onClick={() => {
                 setActiveCategory(category);
-                setPostCategory(category);
+                setPostCategory(resolveForumComposerCategory(category, forumCategories));
                 setVisibleThreadCount(FORUM_HOME_PAGE_SIZE);
               }}
               className={`relative shrink-0 px-1.5 py-3 text-xs font-semibold transition-colors ${activeCategory === category ? "text-slate-900 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-slate-900" : "text-slate-400 hover:text-slate-700"}`}
@@ -1815,7 +1833,9 @@ export default function AppForum({
               onChange={(event) => setPostCategory(event.target.value)}
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-slate-400"
             >
-              {forumCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+              {forumCategories
+                .filter((category) => category !== FORUM_RECOMMENDATION_CATEGORY)
+                .map((category) => <option key={category} value={category}>{category}</option>)}
             </select>
           </label>
           <label className="block">

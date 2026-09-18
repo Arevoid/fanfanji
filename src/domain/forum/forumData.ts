@@ -16,6 +16,60 @@ export interface ForumThreadMetrics {
   lastReplyExcerpt?: string;
 }
 
+export const FORUM_RECOMMENDATION_CATEGORY = "推荐";
+export const FORUM_DEFAULT_POST_CATEGORIES = ["情感", "八卦", "吐槽", "求助"] as const;
+
+const FORUM_CATEGORY_KEYWORDS: readonly [string, readonly RegExp[]][] = [
+  ["求助", [/求助|怎么办|请问|求推荐|有没有办法|处理办法|能不能|如何|帮忙|求一个|求个/u]],
+  ["八卦", [/八卦|爆料|狗仔|热搜|吃瓜|瓜|绯闻|塌房|私生|路透|录音|偷拍视频|明星|艺人/u]],
+  ["情感", [/恋爱|感情|分手|对象|男朋友|女朋友|暧昧|喜欢|心动|失恋|家庭|亲戚|友情|朋友/u]],
+  ["吐槽", [/吐槽|气死|烦死|离谱|无语|避雷|坑|垃圾|糟心|吵|噪音|邻居|物业|迟到|排队/u]],
+];
+
+/**
+ * Recommendation is an aggregate entry, not a publishable post category.
+ * Older records may have no category (or the old "推荐" value); infer a
+ * stable concrete label for display and filtering without rewriting history.
+ */
+export const inferForumThreadCategory = (input: Pick<ForumThread, "title" | "body">): string => {
+  const text = `${input.title}\n${input.body}`.trim();
+  const ranked = FORUM_CATEGORY_KEYWORDS
+    .map(([category, patterns], index) => ({
+      category,
+      index,
+      score: patterns.reduce((score, pattern) => score + (pattern.test(text) ? 1 : 0), 0),
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+  if (ranked[0]) return ranked[0].category;
+  let hash = 2166136261;
+  for (const character of text || "未分类帖子") {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return FORUM_DEFAULT_POST_CATEGORIES[(hash >>> 0) % FORUM_DEFAULT_POST_CATEGORIES.length];
+};
+
+export const resolveForumThreadCategory = (
+  thread: Pick<ForumThread, "category" | "title" | "body">,
+): string => {
+  const explicit = thread.category?.trim();
+  return explicit && explicit !== FORUM_RECOMMENDATION_CATEGORY
+    ? explicit
+    : inferForumThreadCategory(thread);
+};
+
+export const resolveForumPostCategory = (input: {
+  requestedCategory?: string;
+  title: string;
+  body: string;
+}): string => {
+  const explicit = input.requestedCategory?.trim();
+  return explicit && explicit !== FORUM_RECOMMENDATION_CATEGORY
+    ? explicit
+    : inferForumThreadCategory({ title: input.title, body: input.body });
+};
+
 const AUTOMATIC_THREAD_SOURCES = new Set<ForumThread["source"]>([
   "ai-character",
   "ai-character-anonymous",
@@ -157,7 +211,11 @@ export const createForumThread = (input: {
   publicAuthor: createForumPublicAuthor(input.identity, input.anonymous),
   title: input.title.trim(),
   body: input.body.trim(),
-  ...(input.category?.trim() ? { category: input.category.trim() } : {}),
+  category: resolveForumPostCategory({
+    requestedCategory: input.category,
+    title: input.title,
+    body: input.body,
+  }),
   source: input.anonymous ? "user-anonymous" : "user",
   occurredAt: input.now,
   baseLikeCount: 0,

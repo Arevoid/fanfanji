@@ -109,7 +109,7 @@ const contextA = buildForumRelationGenerationContext({
   worldBookEntries,
 });
 assert.ok(contextA);
-assert.match(contextA.promptContext, /仅可参考的话题类别/);
+assert.match(contextA.promptContext, /可能涉及的公开生活领域（仅作线索，不是限制）/);
 assert.match(contextA.promptContext, /不得复述私人聊天/);
 assert.doesNotMatch(contextA.promptContext, /A 私密聊天|A 私密记忆|B 私密聊天|B 私密记忆|身份 B/);
 assert.equal(buildForumRelationGenerationContext({
@@ -136,6 +136,10 @@ const generated = await generateForumThreads({
   settings,
   now,
   random: () => 0.9,
+  categoryTargets: [{
+    name: "现代社区",
+    worldview: "现代城市生活，手机论坛是常见公共讨论场所；不得跳到古风、异世界或修仙设定。",
+  }],
   aiCall: async (params) => {
     callIndex += 1;
     prompts.push(params.message);
@@ -167,6 +171,12 @@ assert.ok(prompts.every((prompt) =>
   && !prompt.includes("A 私密记忆")
   && !prompt.includes("B 私密聊天")
   && !prompt.includes("B 私密记忆")));
+assert.ok(prompts.every((prompt) => prompt.includes("这些只是发散灵感，不是固定题材池")));
+assert.ok(prompts.every((prompt) => prompt.includes("这段世界观是边界，不是话题池")));
+assert.ok(new Set(prompts.map((prompt) => {
+  const match = prompt.match(/优先尝试“([^”]+)”这个角度/);
+  return match?.[1] || "";
+})).size >= 5, "a refresh batch should receive different topic lenses");
 generated.threads.forEach((thread) => {
   const threadReplies = generated.replies.filter((reply) => reply.threadId === thread.id);
   assert.equal(validateForumReplyTimeline(thread, threadReplies), true);

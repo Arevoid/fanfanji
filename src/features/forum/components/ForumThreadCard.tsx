@@ -1,6 +1,6 @@
 import { Eye, MessageCircle } from "lucide-react";
 import type { ForumPublicAuthor, ForumThread } from "../../../types";
-import { getForumLikeCount, type ForumThreadMetrics } from "../../../domain/forum/forumData";
+import { getForumLikeCount, resolveForumThreadCategory, type ForumThreadMetrics } from "../../../domain/forum/forumData";
 
 const formatForumCount = (value: number): string => {
   const normalized = Math.max(0, Math.floor(value));
@@ -35,7 +35,7 @@ export function ForumThreadCard({
   onToggleLike: () => void;
   compact?: boolean;
 }) {
-  const category = thread.category?.trim() || "推荐";
+  const category = resolveForumThreadCategory(thread);
 
   return (
     <article

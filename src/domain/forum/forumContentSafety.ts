@@ -233,7 +233,8 @@ export const buildForumPublicSafeContext = (input: {
     ...input.worldBookEntries.map((entry) => `${entry.title} ${entry.content}`),
   ]);
   return `公开说话风格：${buildForumPublicPersona(input.character, input.protectedNames)}
-仅可参考的话题类别：${topicSeeds.join("、")}
+可能涉及的公开生活领域（仅作线索，不是限制）：${topicSeeds.join("、")}
+除非世界观明确禁止，可以自然发散到其他相容的公共生活话题，不要重复同一个细节。
 不得复述私人聊天、Memory 或 WorldBook 原句；不得公开私人姓名、昵称、身份信息或可识别细节。`;
 };
 

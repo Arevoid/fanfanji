@@ -143,7 +143,42 @@ export const FORUM_REPLY_REALISM_RULES = `每条回复都要像一个真实网�
 - 不要复述整篇主楼，不要写总结、长篇分析、小说段落或替其他用户发言；不要凭空补全未公开的剧情。
 - 只有确实在接某一楼时才引用楼层，引用后马上说自己的话；楼主回复应像临时补充一条新事实、纠正前文或改变打算，而不是发布“下一章”。`;
 
-const FORUM_TOPIC_POOL = "情感、恋爱求助、友情与家庭、校园/宿舍/社团、职场、日常求助、分享安利、捞人偶遇、吐槽、都市怪谈、树洞、连载故事、事情后续与吃瓜讨论";
+/**
+ * These are prompts for exploration, not an allow-list.  A custom category is
+ * intentionally allowed to discover new public-life angles as long as its
+ * worldview boundary remains intact.
+ */
+const FORUM_TOPIC_POOL = "情感、恋爱求助、友情与家庭、校园/宿舍/社团、职场、城市生活、租房邻里、消费避坑、影视综艺、作品安利、粉丝社区、打榜应援、公开爆料、狗仔线索、捞人偶遇、同城活动、日常求助、健康经验、数码工具、旅行见闻、吐槽、都市怪谈、树洞、连载故事、事情后续与吃瓜讨论";
+
+const FORUM_TOPIC_POOL_GUIDANCE = `这些只是发散灵感，不是固定题材池，也不是每条都要覆盖的清单。除非世界观明确禁止，帖子可以从任意合理的公共生活切面展开：普通人的小事、观众/粉丝讨论、行业与城市见闻、求助和经验、安利与避坑、八卦与情感都可以。不要因为分类来自某个角色，就只写这个角色、某个道具或世界书里出现过的同一件事。`;
+
+const FORUM_DIVERSITY_LENSES = [
+  "普通人的当下见闻、邻里、租房、消费或公共服务",
+  "影视、综艺、电视剧、作品安利或观众推荐",
+  "粉丝社区、打榜、应援、线下活动或追星讨论（世界观允许时）",
+  "公开行业消息、采访、爆料线索或狗仔观察（不把未证实传闻写成事实）",
+  "校园、职场、同城活动、交通、饮食或旅行经历",
+  "求助、经验、设备、健康、维权或生活避坑",
+  "捞人、偶遇、社交八卦、情感树洞或关系观察",
+  "事情后续、澄清、观点争论或一个尚未解决的新问题",
+] as const;
+
+const buildForumDiversityHint = (input: {
+  batchIndex: number;
+  attempt: number;
+  batchOffset: number;
+  recentThreads: readonly ForumThread[];
+}): string => {
+  const lens = FORUM_DIVERSITY_LENSES[(input.batchOffset + input.batchIndex * 2 + input.attempt) % FORUM_DIVERSITY_LENSES.length];
+  const recent = input.recentThreads
+    .slice(-4)
+    .map((thread, index) => `${index + 1}. ${thread.title}：${trimContext(thread.body, 120)}`)
+    .join("\n");
+  return `本次刷新是一个多帖子批次。这一条优先尝试“${lens}”这个角度，但只在符合世界观时采用；也可以自行发明同样合理的新角度。
+同一批次要主动发散：不要复用前面帖子相同的地点、人物关系、道具、冲突、开头句式或结论，不要只把同一件事换个标题。前面已生成的帖子如下：
+${recent || "（还没有前置帖子）"}
+世界书中的具体细节只是可选素材；除非它明确规定了时代、身份、技术/超自然规则或不可违反的禁忌，不要把它当作唯一话题。`;
+};
 
 const FORUM_CATEGORY_GUIDANCE: Record<string, string> = {
   情感: "恋爱、友情、家庭和亲密关系中的真实困惑或进展",
@@ -314,6 +349,7 @@ const buildThreadPrompt = (input: {
   virtualProfile: ForumVirtualProfile;
   communityNpc?: ForumCommunityNpc;
   categoryContext?: { name: string; worldview?: string };
+  diversityHint?: string;
 }): { systemInstruction: string; message: string } => ({
   systemInstruction: `你只负责提出一个虚拟本地论坛帖候选，不执行任何写操作。
 ${FORUM_PUBLIC_TEXT_RULES}
@@ -322,17 +358,20 @@ ${FORUM_REALISM_RULES}
 {"title":"1-80字","body":"30-800字","anonymous":false,"replies":[{"body":"5-120字的相关回复","replyToFloor":null}]}
 replies 为 0-5 条，由普通论坛路人发表；回复可以很短，也可以暂时没有回复。replyToFloor 只能引用本次候选中此前已出现的真实回复楼层；直接回复主楼必须为 null。
 禁止输出 relationId、characterId、threadId、replyId、作者姓名或真实网络账号。`,
-  message: `从以下话题池自然选一个，不要把类别名机械写进标题：${FORUM_TOPIC_POOL}。
+  message: `${FORUM_TOPIC_POOL_GUIDANCE}
+可参考的发散方向：${FORUM_TOPIC_POOL}。
+不要把类别名机械写进标题：
 标题和正文要像不同真实论坛用户：长短、语气、标点和信息完整度可以不同，不要套用“求助：”模板。
 ${FORUM_REALISM_RULES}
+${input.diversityHint || ""}
 ${input.categoryContext
     ? `当前帖子必须归入论坛分类“${input.categoryContext.name}”。${input.categoryContext.worldview
       ? `必须遵循以下分类世界观设定：
 ${input.categoryContext.worldview}
-只借用这套世界观的背景、规则和氛围，不要把内容局限为某一个角色的经历，也不要强行提及分类名称。`
+这段世界观是边界，不是话题池。把其中明确写出的时代、社会形态、人物身份、职业、技术/超自然上限与禁忌当作硬约束；没有明确规定的生活细节可以自然补全，但不能跳到古风、异世界、修仙等不相容设定。不要把内容局限为某一个角色的经历，不要反复复用世界书中的同一地点或道具，也不要强行提及分类名称。`
       : `主题、语气和事件应自然符合这个分类，不要把分类名机械写进标题。${FORUM_CATEGORY_GUIDANCE[input.categoryContext.name]
         ? `优先从这些方向取材：${FORUM_CATEGORY_GUIDANCE[input.categoryContext.name]}。`
-        : "内容应围绕该自定义分类的日常主题展开。"}`}`
+        : "这是一个开放分类：只要不违背分类设定，就可以从多个公共生活领域发散，不要收缩成单一话题。"}`}`
     : ""}
 ${input.relationContext
     ? `以该角色的公开论坛表达方式生成一条帖子，可选择实名或匿名。
@@ -529,6 +568,7 @@ export async function generateForumThreads(input: {
 }): Promise<ForumGenerationBundle> {
   requireTextAiConfig(input.settings);
   const random = input.random || Math.random;
+  const diversityBatchOffset = Math.floor(random() * FORUM_DIVERSITY_LENSES.length);
   const relationContexts = input.relationships
     .filter((relation) =>
       relation.userIdentityId === input.ownerIdentityId
@@ -592,7 +632,18 @@ export async function generateForumThreads(input: {
       `${input.ownerIdentityId}:${input.trigger}:${input.now}`,
       index,
     );
-    const prompt = buildThreadPrompt({ relationContext, virtualProfile, communityNpc, categoryContext });
+    const prompt = buildThreadPrompt({
+      relationContext,
+      virtualProfile,
+      communityNpc,
+      categoryContext,
+      diversityHint: buildForumDiversityHint({
+        batchIndex: index,
+        attempt,
+        batchOffset: diversityBatchOffset,
+        recentThreads: threads,
+      }),
+    });
     const rawCandidate = await generateValidatedCandidate({
       aiCall,
       request: toAiRequest(input.settings, prompt),
