@@ -9,5 +9,6 @@ assert.match(appForum, /generated\.threads\.length < 3/);
 assert.match(appForum, /FORUM_RECOMMENDATION_CATEGORY/);
 assert.match(appForum, /FORUM_DEFAULT_POST_CATEGORIES/);
 assert.match(appForum, /trigger:\s*["']refresh["']/);
+assert.doesNotMatch(appForum, /setNotice\(`已生成 \$\{generated\.threads\.length\}/);
 
 console.log("forum manual refresh policy tests passed");

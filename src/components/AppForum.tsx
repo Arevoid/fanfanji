@@ -525,7 +525,6 @@ export default function AppForum({
       const nextThreads = [...generated.threads, ...currentThreads];
       const nextReplies = [...currentReplies, ...generated.replies];
       if (generated.threads.length > 0 && !commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
-      setNotice(`已生成 ${generated.threads.length} 条${activeCategory === DEFAULT_FORUM_CATEGORIES[0] ? "推荐" : activeCategory}分类帖子，后续会由论坛活动继续推进。`);
       persistTasks(finishForumGenerationTask(
         loadForumGenerationTasks(new Set(relationships.map((relationship) => relationship.id))).value,
         begun.task.id,
