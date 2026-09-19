@@ -197,9 +197,10 @@
 .offline-guidance-content textarea { min-height: 94px; font-size: calc(13px * var(--app-font-scale, 1)); }
 .offline-guidance-note { margin: 2px 0 14px; color: #98989d; font-size: calc(11px * var(--app-font-scale, 1)); line-height: 1.6; }
 .offline-create-overlay { overflow-y: auto; overscroll-behavior: contain; align-items: center; }
-.offline-create-card { max-height: calc(100% - 32px); border: 1px solid #f0f0f0; border-radius: 28px; background: #fff; box-shadow: 0 20px 60px rgba(15, 23, 42, .16); }
-.offline-create-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #f0f0f0; }
-.offline-create-cancel { border: 0; background: transparent; color: #8e8e93; font-size: 13px; font-weight: 600; }
+.offline-create-card { display: flex; max-height: calc(100% - 32px); flex-direction: column; border: 1px solid #f0f0f0; border-radius: 28px; background: #fff; box-shadow: 0 20px 60px rgba(15, 23, 42, .16); }
+.offline-create-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; margin: 0; border-bottom: 1px solid #f0f0f0; padding: 16px 16px 12px; }
+.offline-create-cancel { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border: 0; background: transparent; color: #8e8e93; font-size: 26px; font-weight: 400; line-height: 1; }
+.offline-create-scroll { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
 .offline-create-form { display: flex; flex-direction: column; gap: 12px; }
 .offline-create-field, .offline-create-title-field { display: flex; flex-direction: column; gap: 6px; }
 .offline-create-label { display: block; color: #999; font-size: 12px; font-weight: 600; line-height: 16px; }
@@ -223,7 +224,7 @@
 .offline-create-if-input { min-height: 82px; line-height: 1.6; }
 .offline-create-toggle-card { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #f0f0f0; border-radius: 16px; background: #fff; padding: 0 14px; }
 .offline-create-toggle-card input { width: 20px; height: 20px; accent-color: #111; }
-.offline-create-actions { margin-top: 12px; }
+.offline-create-actions { display: flex; flex: 0 0 auto; margin-top: 0; border-top: 1px solid #f0f0f0; background: #fff; padding: 12px 16px 16px; }
 .offline-create-actions .settings-wide-action { min-height: 44px; border-radius: 12px; }
 .offline-editor-modal {
   /* The default modal is intentionally compact. Story editing needs enough

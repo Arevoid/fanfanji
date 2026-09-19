@@ -1172,7 +1172,7 @@ export default function AppOffline({
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="settings-panel-card offline-create-card w-full max-w-md overflow-y-auto p-4 text-slate-800"
+              className="settings-panel-card offline-create-card w-full max-w-md overflow-hidden text-slate-800"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="offline-create-header">
@@ -1184,11 +1184,13 @@ export default function AppOffline({
                   onClick={() => setShowCreateModal(false)}
                   className="offline-create-cancel"
                 >
-                  取消
+                  <span aria-hidden="true">×</span>
+                  <span className="sr-only">关闭</span>
                 </button>
               </div>
 
-              <div className="offline-create-form text-xs">
+              <div className="offline-create-scroll">
+                <div className="offline-create-form text-xs">
                 <div className="offline-create-title-field">
                   <label className="offline-create-label">故事名称</label>
                   <div className="offline-create-title-row">
@@ -1353,6 +1355,7 @@ export default function AppOffline({
                     className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 bg-slate-50 cursor-pointer disabled:opacity-50"
                   />
                 </label>
+                </div>
               </div>
 
               <div className="offline-create-actions">
