@@ -907,6 +907,19 @@ export default function AppChat({
     settings.identities || [],
   ).filter((relation) => availableCharacterIds.has(resolveCanonicalCharacterId(relation.characterId, characters)));
   const workspaceIdentities = listIdentitiesForRoot(settings.identities || [], currentIdentityRootId);
+  // Backups created before alias ownership was persisted can still contain
+  // valid alias records, but without a parentIdentityId they resolve to their
+  // own root and would disappear from the current主人设's alias directory.
+  // Keep their data isolated while making the records recoverable and visible.
+  const visibleAliasDirectoryIdentities = sortIdentitiesForDisplay(settings.identities || []).filter((identity) =>
+    identity.kind === "alias"
+    && !identity.archived
+    && identity.name.trim()
+    && (
+      getRootIdentityId(identity.id, settings.identities || []) === activeIdentityRootId
+      || !identity.parentIdentityId
+    ),
+  );
   const allIdentityRoots = listIdentityRoots(settings.identities || []);
   const archivedIdentities = sortIdentitiesForDisplay(settings.identities || []).filter((identity) => identity.archived);
   const relationForCharacter = (characterId: string) => findRelationshipForCanonicalCharacter(
@@ -9322,12 +9335,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   </div>
                 )}
                 <div className="space-y-3 bg-[var(--surface)] p-4">
-                  {(settings.identities || []).filter((identity) =>
-                    identity.kind === "alias"
-                    && !identity.archived
-                    && identity.name.trim()
-                    && getRootIdentityId(identity.id, settings.identities || []) === activeIdentityRootId,
-                  ).map((identity) => {
+                  {visibleAliasDirectoryIdentities.map((identity) => {
                     const isActive = identity.id === activeIdentityId;
                     const primaryIdentity = findPrimaryIdentityForIdentity(identity.id, settings.identities || []);
                     const selectAlias = () => {
@@ -9383,12 +9391,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       </div>
                     );
                   })}
-                  {(settings.identities || []).filter((identity) =>
-                    identity.kind === "alias"
-                    && !identity.archived
-                    && identity.name.trim()
-                    && getRootIdentityId(identity.id, settings.identities || []) === activeIdentityRootId,
-                  ).length === 0 && (
+                  {visibleAliasDirectoryIdentities.length === 0 && (
                     <div className="px-4 py-16 text-center text-xs text-[var(--text-tertiary)]">还没有马甲，点击右上角 + 创建</div>
                   )}
                 </div>
