@@ -5284,6 +5284,7 @@ export default function App() {
                     <AppMemory
                     characters={characters}
                     relationships={relationships}
+                    identities={settings.identities}
                     memories={memories}
                     onSaveMemories={setMemories}
                     recallSettings={recallSettings}

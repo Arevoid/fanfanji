@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Character, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask } from "../types";
+import { Character, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, UserIdentity } from "../types";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { append as appendKnowledgeClaim, appendMany as appendKnowledgeClaims, loadKnowledgeClaims, remove as removeKnowledgeClaim, retract as retractKnowledgeClaim, saveKnowledgeClaims, supersede as supersedeKnowledgeClaim } from "../core/storage/repositories/characterKnowledgeRepository";
@@ -39,6 +39,7 @@ import {
 interface AppMemoryProps {
   characters: Character[];
   relationships: CharacterRelationship[];
+  identities?: UserIdentity[];
   memories: MemoryItem[];
   onSaveMemories: (updated: MemoryItem[]) => void;
   recallSettings: MemoryVaultSettings;
@@ -71,6 +72,7 @@ type MemoryCenterDeleteMode = "retract" | "permanent";
 export default function AppMemory({
   characters,
   relationships,
+  identities = [],
   memories,
   onSaveMemories,
   recallSettings,
@@ -219,6 +221,10 @@ export default function AppMemory({
     const relation = relationships.find((item) => item.id === relationId);
     const character = relation ? displayCharacters.find((item) => item.id === normalizeCharacterId(relation.characterId)) : undefined;
     return character ? `${character.name} · ${relation?.relationship || "关系"}` : relationId;
+  };
+  const getIdentityLabel = (identityId: string): string => {
+    const identity = identities.find((item) => item.id === identityId);
+    return identity?.name?.trim() || identityId;
   };
   const getSourceAppLabel = (item: MemoryItem, claim?: KnowledgeClaim): string => {
     const app = claim?.source.app
@@ -1029,8 +1035,8 @@ export default function AppMemory({
             <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
               <button onClick={() => setSelectedRelationId("all")} className={`px-3 py-1 rounded-full text-[10px] font-bold shrink-0 ${selectedRelationId === "all" ? "bg-slate-700 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>全部关系</button>
               {selectedCharacterRelations.map((relation) => (
-                <button key={relation.id} onClick={() => setSelectedRelationId(relation.id)} className={`px-3 py-1 rounded-full text-[10px] font-bold shrink-0 ${selectedRelationId === relation.id ? "bg-slate-700 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
-                  {relation.userIdentityId}
+                <button key={relation.id} onClick={() => setSelectedRelationId(relation.id)} title={relation.userIdentityId} className={`px-3 py-1 rounded-full text-[10px] font-bold shrink-0 ${selectedRelationId === relation.id ? "bg-slate-700 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+                  {getIdentityLabel(relation.userIdentityId)}
                 </button>
               ))}
             </div>
@@ -1106,7 +1112,7 @@ export default function AppMemory({
                   <select value={newRelationId} onChange={(e) => setNewRelationId(e.target.value)} disabled={!newCharId} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs">
                     <option value="">选择关系身份</option>
                     {relationships.filter((relation) => relation.characterId === normalizeCharacterId(newCharId)).map((relation) => (
-                      <option key={relation.id} value={relation.id}>{relation.userIdentityId}</option>
+                      <option key={relation.id} value={relation.id}>{getIdentityLabel(relation.userIdentityId)}</option>
                     ))}
                   </select>
                 </div>
@@ -1747,7 +1753,7 @@ export default function AppMemory({
                         >
                           <option value="">选择关系（旧数据兼容）</option>
                           {relationships.filter((relation) => relation.characterId === normalizeCharacterId(immediateCharId)).map((relation) => (
-                            <option key={relation.id} value={relation.id}>{relation.userIdentityId}</option>
+                            <option key={relation.id} value={relation.id}>{getIdentityLabel(relation.userIdentityId)}</option>
                           ))}
                         </select>
                       </div>
