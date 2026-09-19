@@ -294,6 +294,12 @@ export interface CharacterPhoneRecord {
   lockedUntil?: number;
   createdAt: number;
   updatedAt: number;
+  /** Last successful unlock/hidden-gallery password change. Optional for legacy records. */
+  passwordChangedAt?: number;
+  /** Number of successful password changes, kept only as a small audit counter. */
+  passwordChangeCount?: number;
+  /** Machine-readable reason for the last change; never stores chat text. */
+  lastPasswordChangeReason?: string;
   lastOpenedAt?: number;
   lastGeneratedAt?: number;
   contentSeededAt?: number;

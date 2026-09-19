@@ -5,6 +5,7 @@ import { characterPhoneDb } from "../characterPhoneDb";
 import { storageKeys } from "../storageKeys";
 import type { Character } from "../../../types";
 import type { CharacterPhoneRecord } from "../../../domain/characterPhone/types";
+import type { CharacterPhonePasswordPurpose } from "../../../domain/characterPhone/passwordPolicy";
 import {
   readString,
   writeJson,
@@ -732,6 +733,46 @@ export function saveCharacterPhone(phone: CharacterPhoneRecord): StorageWriteRes
     removeStoredValue(storageKeys.characterPhones);
   }
   return { success: true };
+}
+
+export interface CharacterPhonePasswordChangeInput {
+  ownerIdentityId: string;
+  characterId: string;
+  purpose: CharacterPhonePasswordPurpose;
+  passcode: string;
+  reason?: string;
+  now?: number;
+}
+
+export interface CharacterPhonePasswordChangeResult {
+  success: boolean;
+  changed: boolean;
+  phone?: CharacterPhoneRecord;
+  error?: string;
+}
+
+/** Atomically update one persisted secret; all other phone data remains intact. */
+export function changeCharacterPhonePasscode(input: CharacterPhonePasswordChangeInput): CharacterPhonePasswordChangeResult {
+  if (!/^\d{4}$/u.test(input.passcode)) return { success: false, changed: false, error: "invalid_passcode" };
+  const phone = getCharacterPhone(input.ownerIdentityId, input.characterId);
+  if (!phone) return { success: false, changed: false, error: "phone_not_found" };
+  const currentPasscode = input.purpose === "hidden-gallery" ? phone.hiddenGalleryPasscode : phone.passcode;
+  if (currentPasscode === input.passcode) return { success: true, changed: false, phone };
+  const now = input.now ?? Date.now();
+  const nextPhone: CharacterPhoneRecord = {
+    ...phone,
+    ...(input.purpose === "hidden-gallery"
+      ? { hiddenGalleryPasscode: input.passcode }
+      : { passcode: input.passcode }),
+    passwordChangedAt: now,
+    passwordChangeCount: (phone.passwordChangeCount ?? 0) + 1,
+    ...(input.reason ? { lastPasswordChangeReason: input.reason } : {}),
+    updatedAt: now,
+  };
+  const write = saveCharacterPhone(nextPhone);
+  return write.success
+    ? { success: true, changed: true, phone: nextPhone }
+    : { success: false, changed: false, error: write.error ?? "write_failed" };
 }
 
 export interface CharacterPhoneStorageUsage {

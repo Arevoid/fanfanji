@@ -20,11 +20,17 @@ import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, getCallT
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import {
   createCharacterPhone,
+  changeCharacterPhonePasscode,
   deriveCharacterPhonePasscode,
   getCharacterPhone,
   normalizeCharacterPhonePasscode,
   saveCharacterPhone,
 } from "../core/storage/repositories/characterPhoneRepository";
+import {
+  evaluateCharacterPhonePasswordChange,
+  parseCharacterPhonePasswordActionMarker,
+  parseCharacterPhonePasswordChangeRequest,
+} from "../domain/characterPhone/passwordPolicy";
 import { resolveCharacterPhoneHiddenGalleryPasscode } from "../features/characterPhone/characterPhoneGallerySecurity";
 import type { CharacterPhoneImageSaveInput } from "../domain/characterPhone/types";
 import { runGroupChatReplyPipeline } from "../features/chat/services/groupChatReplyPipeline";
@@ -2103,7 +2109,61 @@ export default function AppChat({
         contextSeed,
       );
     };
-    const characterPhone = ensureCharacterPhonePassword(turnCharacter);
+    let characterPhone = ensureCharacterPhonePassword(turnCharacter);
+    const phonePasswordRequest = userMsg?.sender === "user"
+      ? parseCharacterPhonePasswordChangeRequest(userMsg.content)
+      : undefined;
+
+    const applyCharacterPhonePasswordAction = (text: string): string => {
+      const parsed = parseCharacterPhonePasswordActionMarker(text);
+      if (!parsed.action) return parsed.visibleText;
+      if (!characterPhone || !resolvedCharacterPhoneOwnerIdentityId) {
+        return parsed.visibleText || "这部手机还没有完成初始化，我现在不能修改密码。";
+      }
+      const policy = evaluateCharacterPhonePasswordChange({
+        request: phonePasswordRequest,
+        action: parsed.action,
+        relationship: turnRelationship?.relationship,
+        lastChangedAt: characterPhone.passwordChangedAt,
+        now: Date.now(),
+      });
+      if (parsed.action.decision !== "accept") {
+        if (parsed.visibleText) return parsed.visibleText;
+        return "我想了想，这次先不改。";
+      }
+      if (!policy.allowed || !parsed.action.passcode) {
+        if (policy.reason === "relationship_not_trusted") return "我们现在的关系还没到改这种密码的程度。";
+        if (policy.reason === "cooldown") return "密码才刚改过，我暂时不想频繁更换。";
+        if (policy.reason === "request_mismatch") return "你说的密码和我准备修改的不是同一个，我先不改。";
+        if (policy.reason === "invalid_passcode") return "这个密码格式不对，我不会保存它。";
+        return "我想了想，这次先不改。";
+      }
+      const write = changeCharacterPhonePasscode({
+        ownerIdentityId: resolvedCharacterPhoneOwnerIdentityId,
+        characterId: turnCharacter.id,
+        purpose: parsed.action.purpose,
+        passcode: parsed.action.passcode,
+        reason: parsed.action.reason || (phonePasswordRequest ? "user_request" : "major_event"),
+        now: Date.now(),
+      });
+      if (!write.success || !write.phone) {
+        return "刚才的密码修改没有生效，我不会把没保存的数字当成新密码。";
+      }
+      characterPhone = write.phone;
+      const label = parsed.action.purpose === "hidden-gallery" ? "隐藏相册密码" : "手机解锁密码";
+      const visibleText = parsed.visibleText || `好了，${label}已经改好了。`;
+      // The marker is the source of truth. Correct a stray number near a
+      // password claim so the character can never say one value while the
+      // phone stores another.
+      const correctedPasswordClaim = visibleText.replace(
+        new RegExp(`((?:手机|解锁|锁屏|隐藏相册|相册)?密码[^\\d]{0,10})\\d{4}`, "gu"),
+        `$1${parsed.action.passcode}`,
+      );
+      return correctedPasswordClaim.replace(
+        new RegExp(`((?:改|换|设(?:为|成)?)[^。！？!?\\n]{0,8})\\d{4}`, "gu"),
+        `$1${parsed.action.passcode}`,
+      );
+    };
     const pendingProactiveOfflineAppointment = turnRelationship && userMsg?.sender === "user"
       ? appointments.find((appointment) => appointment.relationId === turnRelationship.id
         && appointment.characterId === turnRelationship.characterId
@@ -2526,10 +2586,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           ...(characterPhone
             ? [(() => {
               const hiddenGalleryPasscode = resolveCharacterPhoneHiddenGalleryPasscode(turnCharacter, characterPhone);
-              return "【角色手机密码事实】\n本轮回复前，系统已经先为这个角色的虚拟手机固定并保存了两组密码：解锁密码“"
+              const pendingRequestText = phonePasswordRequest
+                ? "\n用户本轮明确提出了密码变更请求：将"
+                  + (phonePasswordRequest.purpose === "hidden-gallery" ? "隐藏相册密码" : "手机解锁密码")
+                  + "改为“" + phonePasswordRequest.passcode + "”。你必须先按当前关系和人设判断接受还是拒绝；只有接受时，才输出下面的 accept 标记，且 passcode 必须逐字等于用户请求的四位数字。普通朋友/陌生关系通常应拒绝，亲密朋友或伴侣才考虑接受。"
+                : "\n如果你因为丢失手机、密码泄露、重大冲突、分手、信任变化或关系修复等重大事件，确实决定主动换密码，才允许使用下面的协议；日常情绪波动或普通聊天不要换。";
+              return "【角色手机密码事实与变更协议】\n本轮回复前，系统已经先为这个角色的虚拟手机固定并保存了两组密码：解锁密码“"
                 + characterPhone.passcode + "”、隐藏相册密码“" + hiddenGalleryPasscode + "”。这两组密码已经写入角色手机，是本轮对话开始前就存在的事实，不是让你临时生成的新密码。\n"
                 + "如果用户问的是解锁密码，回答解锁密码“" + characterPhone.passcode + "”；如果用户问的是隐藏相册密码，回答隐藏相册密码“" + hiddenGalleryPasscode + "”。不要把两组密码混用，也不要把隐藏相册密码说成用户生日、纪念日或其他未被明确提供的日期。\n"
-                + "只有当对话自然涉及手机密码、隐藏相册或解锁时，才可以按照角色语气透露对应的真实密码；不要把其他日期、金额、编号、用户猜测的数字或你临时编造的“生日”当成密码，也不要修改这两组密码。如果聊天历史中曾经说过其他数字，且没有明确的用户事实支持，那些只能视为猜测或说错了，不能覆盖这两条固定密码事实。";
+                + "只有当对话自然涉及手机密码、隐藏相册或解锁时，才可以按照角色语气透露对应的真实密码；不要把其他日期、金额、编号、用户猜测的数字或你临时编造的“生日”当成密码。如果聊天历史中曾经说过其他数字，且没有明确的用户事实支持，那些只能视为猜测或说错了，不能覆盖这两条固定密码事实。"
+                + pendingRequestText
+                + "\n如果你决定接受变更，必须在回复末尾额外输出一行内部标记（系统会在消息送达前验证、先写入手机，再删除这行，不要向用户解释标记）："
+                + "[[CHARACTER_PHONE_PASSWORD_CHANGE]]{\"decision\":\"accept\",\"purpose\":\"unlock\",\"passcode\":\"1234\",\"reason\":\"user_request\"}。purpose 只能是 unlock 或 hidden-gallery；主动变更时 reason 只能是 security_breach、phone_lost、major_conflict、breakup、trust_change、reconciliation 之一。不能接受时不要输出 accept 标记，直接按人设自然拒绝。绝不能在没有成功落库的情况下声称密码已经改好。";
             })()]
             : []),
         ],
@@ -2618,12 +2686,23 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         let proactiveOfflineResponseParse: PreparedDirectReplyResponse["proactiveOfflineResponseParse"];
         let proactiveOfflineParse: PreparedDirectReplyResponse["proactiveOfflineParse"];
         if (data.text) {
+          const hadPhonePasswordActionMarker = /\[\[\s*CHARACTER_PHONE_PASSWORD_CHANGE\s*\]\]/u.test(data.text);
+          data.text = applyCharacterPhonePasswordAction(data.text);
+          // A model must not claim that an explicit user-requested change
+          // happened unless it emitted the validated action marker first.
+          if (phonePasswordRequest && !hadPhonePasswordActionMarker
+            && /(?:密码|口令|解锁码)[^。！？!?\n]{0,14}(?:改|换|设)[^。！？!?\n]{0,14}\d{4}/u.test(data.text)) {
+            data.text = "刚才的密码修改没有完成，我不会把没保存的数字当成新密码。";
+          }
           const userImageSaveDecision = imageDataUrl
             ? parseCharacterSaveUserImageDirective(data.text)
             : { shouldSave: false, visibleText: data.text };
+          const cleanTranslation = data.translation
+            ? parseCharacterPhonePasswordActionMarker(data.translation).visibleText
+            : data.translation;
           const translationImageSaveDecision = imageDataUrl && data.translation
-            ? parseCharacterSaveUserImageDirective(data.translation)
-            : { shouldSave: false, visibleText: data.translation };
+            ? parseCharacterSaveUserImageDirective(cleanTranslation || "")
+            : { shouldSave: false, visibleText: cleanTranslation };
           data.text = userImageSaveDecision.visibleText;
           if (data.translation) data.translation = translationImageSaveDecision.visibleText;
           data.text = repairImmediateCharacterPhoneProxyReply(data.text, immediateCharacterPhoneProxyMessage);
