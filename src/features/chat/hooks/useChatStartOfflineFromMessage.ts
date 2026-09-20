@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Character, MemoryItem, Message, OfflineStory, WorldBookEntry } from "../../../types";
+import type { Character, MemoryItem, Message, OfflineStory } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { Appointment } from "../../../domain/schedule/scheduleTypes";
 import { loadKnowledgeClaims } from "../../../core/storage/repositories/characterKnowledgeRepository";
@@ -10,8 +10,6 @@ import { getCurrentAppointmentProposal } from "../../../domain/schedule/appointm
 import { startAppointmentOfflineSession } from "../../../domain/schedule/appointmentOfflineHandoff";
 import { buildOfflineMemberKnowledgeSnapshots } from "../../offline/services/offlineMemberMemorySnapshot";
 import { buildOfflineHandoffFacts, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../../../domain/offlineStory/offlineHandoffContext";
-import { getLatestWorldBookEntries } from "../../../utils/worldBook";
-import { isWorldBookEntryForAnyCharacter } from "../../../domain/worldbook/worldBookVisibility";
 import { createHandoffCapsule } from "../../../domain/continuity/handoffCapsule";
 import { loadContinuityRuntimeStore, upsertHandoffCapsule } from "../../../core/storage/repositories/continuityRuntimeRepository";
 import { loadCharacterEvents } from "../../../core/storage/repositories/characterEventRepository";
@@ -35,7 +33,6 @@ interface UseChatStartOfflineFromMessageOptions {
   relationships: readonly CharacterRelationship[];
   activeIdentityId: string;
   memories: readonly MemoryItem[];
-  worldBookEntries: WorldBookEntry[];
   onSaveAppointment?: (appointment: Appointment) => boolean;
   onSaveOfflineStory?: (story: OfflineStory) => boolean | void | Promise<boolean>;
   onOpenOfflineStory?: (storyId: string) => void;
@@ -54,7 +51,6 @@ export function useChatStartOfflineFromMessage({
   relationships,
   activeIdentityId,
   memories,
-  worldBookEntries,
   onSaveAppointment,
   onSaveOfflineStory,
   onOpenOfflineStory,
@@ -139,9 +135,6 @@ export function useChatStartOfflineFromMessage({
         : [],
       ...(handoffFacts.length > 0 ? { handoffFacts } : {}),
       ...(memberMemories ? { memberMemories } : {}),
-      worldBook: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, new Set([activeChatCharId, ...offlineParticipantSet])))
-        .map((entry) => `${entry.title}: ${entry.content}`),
       importedAt: snapshotTimestamp,
     };
 
@@ -170,8 +163,6 @@ export function useChatStartOfflineFromMessage({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: "continue",
-      worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
-        .filter((entry) => isWorldBookEntryForAnyCharacter(entry, new Set([activeChatCharId, ...offlineParticipantSet]))),
       knowledgeSnapshot: activeRelationship ? Array.from(new Set([
         ...loadKnowledgeClaims().value
           .filter((claim) => claim.relationId === activeRelationship.id

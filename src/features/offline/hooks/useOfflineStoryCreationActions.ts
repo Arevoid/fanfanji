@@ -1,13 +1,11 @@
 import { useCallback, type Dispatch, type SetStateAction } from "react";
-import type { Character, MemoryItem, Message, OfflineStory, WorldBookEntry } from "../../../types";
+import type { Character, MemoryItem, Message, OfflineStory } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { createId } from "../../../core/id/createId";
 import { loadMessages } from "../../../core/storage/repositories/messageRepository";
 import { loadKnowledgeClaims } from "../../../core/storage/repositories/characterKnowledgeRepository";
 import { getConversationId, getOfflineGroupModeStorageKey, getOfflineGroupStoryStorageKey, getOfflineModeStorageKey, getOfflineStoryStorageKey } from "../../../domain/relationship/characterRelationship";
 import { writeString } from "../../../core/storage/storageAdapter";
-import { getLatestWorldBookEntries } from "../../../utils/worldBook";
-import { isWorldBookEntryForAnyCharacter, isWorldBookEntryForCharacter } from "../../../domain/worldbook/worldBookVisibility";
 import { buildOfflineHandoffFacts, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../../../domain/offlineStory/offlineHandoffContext";
 import { buildOfflineMemberKnowledgeSnapshots } from "../services/offlineMemberMemorySnapshot";
 
@@ -18,7 +16,6 @@ interface UseOfflineStoryCreationActionsOptions {
   relationships: readonly CharacterRelationship[];
   messages: readonly Message[];
   memories: readonly MemoryItem[];
-  worldBookEntries: readonly WorldBookEntry[];
   activeIdentityId: string;
   selectedCharId: string;
   selectedCharIds: readonly string[];
@@ -46,7 +43,6 @@ export function useOfflineStoryCreationActions({
   relationships,
   messages,
   memories,
-  worldBookEntries,
   activeIdentityId,
   selectedCharId,
   selectedCharIds,
@@ -111,16 +107,12 @@ export function useOfflineStoryCreationActions({
               : memories.filter((memory) => memory.relationId === selectedRelationId).map((memory) => memory.content),
             ...(memberMemories ? { memberMemories } : {}),
             handoffFacts: buildOfflineHandoffFacts(relationMessages),
-            worldBook: getLatestWorldBookEntries([...worldBookEntries])
-              .filter((entry) => isGroupStory ? isWorldBookEntryForAnyCharacter(entry, new Set(participantIds)) : isWorldBookEntryForCharacter(entry, selectedCharId))
-              .map((entry) => `${entry.title}: ${entry.content}`),
             importedAt: Date.now(),
           };
         } catch (error) { console.error("Failed to copy chat history:", error); }
       }
     }
 
-    const participantSet = new Set(participantIds);
     const newStory: OfflineStory = {
       id: createId("story"),
       characterId: selectedCharId,
@@ -132,7 +124,6 @@ export function useOfflineStoryCreationActions({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: newMode,
-      worldBookSnapshot: getLatestWorldBookEntries([...worldBookEntries]).filter((entry) => isWorldBookEntryForAnyCharacter(entry, participantSet)),
       knowledgeSnapshot: Array.from(new Set([
         ...loadKnowledgeClaims().value
           .filter((claim) => !isGroupStory && claim.relationId === relationship!.id && claim.characterId === relationship.characterId && claim.userIdentityId === relationship.userIdentityId && claim.status === "active" && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
@@ -166,7 +157,7 @@ export function useOfflineStoryCreationActions({
     setNewIfPrompt("");
     setNewStartFromChat(false);
     setNewTimeAwareness(false);
-  }, [activeIdentityId, characters, isMultiMode, memories, messages, newIfPrompt, newMode, newStartFromChat, newTimeAwareness, newTitle, onSaveStorySnapshot, relationChoices, relationships, selectedCharId, selectedCharIds, selectedRelationId, setNewIfPrompt, setNewMode, setNewStartFromChat, setNewTimeAwareness, setNewTitle, setShowCreateModal, showToast, worldBookEntries]);
+  }, [activeIdentityId, characters, isMultiMode, memories, messages, newIfPrompt, newMode, newStartFromChat, newTimeAwareness, newTitle, onSaveStorySnapshot, relationChoices, relationships, selectedCharId, selectedCharIds, selectedRelationId, setNewIfPrompt, setNewMode, setNewStartFromChat, setNewTimeAwareness, setNewTitle, setShowCreateModal, showToast]);
 
   return { handleCreateStory };
 }

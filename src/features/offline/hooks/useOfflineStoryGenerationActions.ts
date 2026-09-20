@@ -14,7 +14,6 @@ import { PromptComposer } from "../../../domain/prompt/PromptComposer";
 import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../../../domain/prompt/offlineIdentityBinding";
 import { buildOfflineHandoffFacts, formatOfflineHandoffFactsForPrompt } from "../../../domain/offlineStory/offlineHandoffContext";
 import { createId } from "../../../core/id/createId";
-import { isWorldBookEntryForAnyCharacter } from "../../../domain/worldbook/worldBookVisibility";
 import { boundOfflinePrompt, truncatePromptTextToEstimatedTokens } from "../../../domain/offlineStory/offlinePromptBudget";
 
 // Offline scripts are generated in bounded segments. The full story remains
@@ -81,17 +80,7 @@ export function useOfflineStoryGenerationActions({
     const text = textToSend !== undefined ? textToSend : inputText.trim();
     if (!text && !forceAIOnly) return;
 
-    const storyParticipantIds = new Set(resolveOfflineStoryCharacterIds(storyAtSend, characters));
-    let updatedStory = storyAtSend.worldBookSnapshot
-      ? { ...storyAtSend, messages: generationMessages }
-      : {
-        ...storyAtSend,
-        messages: generationMessages,
-        // One-time compatibility migration for stories created before
-        // structured snapshots existed. The captured data is then frozen.
-        worldBookSnapshot: getLatestWorldBookEntries(worldBookEntries || [])
-          .filter((entry) => isWorldBookEntryForAnyCharacter(entry, storyParticipantIds)),
-      };
+    let updatedStory = { ...storyAtSend, messages: generationMessages };
     if (!updatedStory.knowledgeSnapshot && updatedStory.relationId) {
       const relation = relationships.find((item) => item.id === updatedStory.relationId);
       updatedStory.knowledgeSnapshot = relation ? Array.from(new Set([
@@ -169,29 +158,12 @@ export function useOfflineStoryGenerationActions({
       const scopedRelationship = updatedStory.relationId
         ? relationships.find((relation) => relation.id === updatedStory.relationId)
         : undefined;
-      const snapshotEntries = updatedStory.worldBookSnapshot || [];
-      const { triggeredEntries: triggeredWorldBook, depthInjections: atDepthWorldBook } = collectOfflineWorldBookContext({ entries: snapshotEntries, characters: storyCharsList, scanText: worldBookScanText, relationship: scopedRelationship });
-      // Legacy stories stored flattened strings without trigger metadata. Use
-      // only entries whose title/content overlaps this turn instead of loading
-      // the entire frozen book on every request.
-      if (triggeredWorldBook.size === 0 && snapshotEntries.length === 0) {
-        const normalizedScan = worldBookScanText.toLocaleLowerCase();
-        (updatedStory.importedContext?.worldBook || []).forEach((item, index) => {
-          const title = item.split(":", 1)[0]?.trim() || "";
-          if (title && normalizedScan.includes(title.toLocaleLowerCase())) {
-            triggeredWorldBook.set(`legacy-${index}`, {
-              id: `legacy-${updatedStory.id}-${index}`,
-              title,
-              content: item.slice(title.length + 1).trim(),
-              category: "legacy-snapshot",
-              characterId: "global",
-              triggerType: "keys",
-              isActive: true,
-              timestamp: updatedStory.importedContext?.importedAt || updatedStory.createdAt,
-            });
-          }
-        });
-      }
+      const { triggeredEntries: triggeredWorldBook, depthInjections: atDepthWorldBook } = collectOfflineWorldBookContext({
+        entries: getLatestWorldBookEntries(worldBookEntries || []),
+        characters: storyCharsList,
+        scanText: worldBookScanText,
+        relationship: scopedRelationship,
+      });
       const wbPrompts = formatOfflineWorldBookEntries(triggeredWorldBook.values());
 
       // Base Persona

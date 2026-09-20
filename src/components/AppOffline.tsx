@@ -11,7 +11,6 @@ import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims } from "../cor
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
 import { shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
-import { getLatestWorldBookEntries } from "../utils/worldBook";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 import "./offline/offlineStory.css";
 import { OfflineGuidancePanel } from "./offline/OfflineGuidancePanel";
@@ -185,7 +184,6 @@ export default function AppOffline({
     relationships,
     messages,
     memories,
-    worldBookEntries: worldBookEntries || [],
     activeIdentityId,
     selectedCharId,
     selectedCharIds,
@@ -228,8 +226,6 @@ export default function AppOffline({
   } = useOfflineReadingState(activeStory);
   const offlineStorySettings = useOfflineStorySettings({
     activeStory,
-    characters,
-    worldBookEntries: worldBookEntries || [],
     saveStory: saveActiveStorySnapshot,
     showToast,
   });
@@ -239,7 +235,7 @@ export default function AppOffline({
     settingsUserP, setSettingsUserP, settingsAllowCharacterToSpeakForUser, setSettingsAllowCharacterToSpeakForUser,
     settingsStylePresetId, setSettingsStylePresetId, settingsStylePromptName, setSettingsStylePromptName,
     settingsStylePromptContent, setSettingsStylePromptContent, settingsCustomCss, setSettingsCustomCss,
-    hasSelectedCustomPreset, handleSaveSettings, handleRefreshWorldBookSnapshot, handleCreateCustomPreset, handleDeleteCustomPreset,
+    hasSelectedCustomPreset, handleSaveSettings, handleCreateCustomPreset, handleDeleteCustomPreset,
   } = offlineStorySettings;
   const [offlineCssTemplateCopied, setOfflineCssTemplateCopied] = useState(false);
 
@@ -734,24 +730,6 @@ export default function AppOffline({
                     >
                       同步当前进展记忆至角色大脑
                     </Button>
-                    </div>
-                  </section>
-
-                  <section className="space-y-2">
-                    <h4 className="text-sm font-medium text-[#999999]">世界书快照</h4>
-                    <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-2 text-left">
-                      <span className="text-[15px] font-medium text-[#111111]">当前快照 {activeStory.worldBookSnapshot?.length || 0} 条</span>
-                      <p className="text-xs leading-5 text-[#8E8E93]">
-                        剧情每轮只会从快照中按常驻词条或最近约 10 条剧情关键词激活。刷新后，后续剧情才会使用当前项目中的最新世界书。
-                      </p>
-                      <button
-                        type="button"
-                        onClick={handleRefreshWorldBookSnapshot}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#F0F0F0] bg-[#F7F7F9] py-3 text-xs font-semibold text-[#111111] transition-colors hover:bg-[#EFEFF4]"
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                        刷新世界书快照
-                      </button>
                     </div>
                   </section>
 

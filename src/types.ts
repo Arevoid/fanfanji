@@ -1059,8 +1059,6 @@ export interface OfflineStory {
   customCss?: string;
   /** Continue-mode stories inherit this from the source chat; other modes choose it at creation. */
   enableTimeAwareness?: boolean;
-  /** Structured WorldBook snapshot captured at story creation and activated per turn. */
-  worldBookSnapshot?: WorldBookEntry[];
   /** Confirmed Truth/manual-memory snapshot captured for this isolated story. */
   knowledgeSnapshot?: string[];
   /** Per-participant memory snapshot for multi-character stories. */
@@ -1073,7 +1071,8 @@ export interface OfflineStory {
     handoffFacts?: OfflineHandoffFact[];
     /** Group imports keep each member's relationship-private memory separate. */
     memberMemories?: Record<string, string[]>;
-    worldBook: string[];
+    /** Legacy imported world-book copy; new stories use the current world book directly. */
+    worldBook?: string[];
     importedAt: number;
   };
   archivedAt?: number;

@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
-import type { Character, OfflineStory, WorldBookEntry } from "../../../types";
-import { getLatestWorldBookEntries } from "../../../utils/worldBook";
+import type { OfflineStory } from "../../../types";
 import { readString, writeJson } from "../../../core/storage/storageAdapter";
-import { isWorldBookEntryForAnyCharacter } from "../../../domain/worldbook/worldBookVisibility";
-import { resolveOfflineStoryCharacterIds } from "../../../domain/character/characterIdentity";
 
 export interface OfflineStylePreset {
   id: string;
@@ -39,13 +36,11 @@ function loadCustomPresets(): OfflineStylePreset[] {
 
 interface UseOfflineStorySettingsOptions {
   activeStory: OfflineStory | null;
-  characters: Character[];
-  worldBookEntries: WorldBookEntry[];
   saveStory: (story: OfflineStory) => void;
   showToast: (message: string) => void;
 }
 
-export function useOfflineStorySettings({ activeStory, characters, worldBookEntries, saveStory, showToast }: UseOfflineStorySettingsOptions) {
+export function useOfflineStorySettings({ activeStory, saveStory, showToast }: UseOfflineStorySettingsOptions) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [customPresets, setCustomPresets] = useState<OfflineStylePreset[]>(loadCustomPresets);
   const [settingsWordLimit, setSettingsWordLimit] = useState("");
@@ -90,15 +85,6 @@ export function useOfflineStorySettings({ activeStory, characters, worldBookEntr
     showToast("剧本配置已保存！");
   };
 
-  const handleRefreshWorldBookSnapshot = () => {
-    if (!activeStory) return;
-    const participantIds = new Set(resolveOfflineStoryCharacterIds(activeStory, characters));
-    const worldBookSnapshot = getLatestWorldBookEntries(worldBookEntries)
-      .filter((entry) => isWorldBookEntryForAnyCharacter(entry, participantIds));
-    saveStory({ ...activeStory, worldBookSnapshot, updatedAt: Date.now() });
-    showToast(`世界书快照已刷新（${worldBookSnapshot.length} 条）`);
-  };
-
   const handleCreateCustomPreset = () => {
     if (!settingsStylePromptName.trim() || !settingsStylePromptContent.trim()) {
       showToast("文风名称和描述不能为空！");
@@ -131,6 +117,6 @@ export function useOfflineStorySettings({ activeStory, characters, worldBookEntr
     settingsUserP, setSettingsUserP, settingsAllowCharacterToSpeakForUser, setSettingsAllowCharacterToSpeakForUser,
     settingsStylePresetId, setSettingsStylePresetId, settingsStylePromptName, setSettingsStylePromptName,
     settingsStylePromptContent, setSettingsStylePromptContent, settingsCustomCss, setSettingsCustomCss,
-    hasSelectedCustomPreset, handleSaveSettings, handleRefreshWorldBookSnapshot, handleCreateCustomPreset, handleDeleteCustomPreset,
+    hasSelectedCustomPreset, handleSaveSettings, handleCreateCustomPreset, handleDeleteCustomPreset,
   };
 }

@@ -1174,7 +1174,6 @@ export default function AppChat({
     relationships,
     activeIdentityId,
     memories,
-    worldBookEntries: worldBookEntries || [],
     onSaveAppointment,
     onSaveOfflineStory,
     onOpenOfflineStory,
