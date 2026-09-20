@@ -105,7 +105,7 @@ export function useOfflineStoryCreationActions({
             : parsed.filter((message) => message.relationId === selectedRelationId);
           const relevantMsgs = relationMessages.slice(-OFFLINE_HANDOFF_MESSAGE_LIMIT);
           importedContext = {
-            messages: relevantMsgs.map((message) => ({ ...message, id: createId("offline"), isOffline: true })),
+            messages: relevantMsgs.map((message) => ({ ...message, id: createId("offline"), sourceMessageId: message.id, isOffline: true, isImportedContext: true })),
             memories: isGroupStory
               ? memories.filter((memory) => participantIds.some((participantId) => relationships.some((relation) => relation.id === memory.relationId && relation.characterId === participantId && relation.userIdentityId === activeIdentityId))).map((memory) => memory.content)
               : memories.filter((memory) => memory.relationId === selectedRelationId).map((memory) => memory.content),
@@ -144,7 +144,7 @@ export function useOfflineStoryCreationActions({
       ...(memberMemories && Object.keys(memberMemories).length > 0 ? { memberKnowledgeSnapshots: memberMemories } : {}),
       ifPrompt: newMode === "if" ? newIfPrompt : undefined,
       sourceChatId: newStartFromChat ? selectedCharId : undefined,
-      sourceChatMsgCount: newStartFromChat ? importedContext?.messages.length : undefined,
+      sourceChatMsgCount: newStartFromChat ? (importedContext?.messages.length || 0) : undefined,
       importedContext,
       enableTimeAwareness: newStartFromChat
         ? (isGroupStory ? participantIds.some((participantId) => Boolean(characters.find((character) => character.id === participantId)?.enableTimeAwareness)) : Boolean(selectedCharacter.enableTimeAwareness))

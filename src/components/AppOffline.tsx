@@ -983,7 +983,9 @@ export default function AppOffline({
               <section className="offline-chat-link-card" aria-label="线上聊天关联状态">
                 <div className="offline-chat-link-copy">
                   <Link2 size={16} />
-                  <span>已关联线上聊天记录（导入了 {activeStory.sourceChatMsgCount || 0} 条历史对话）</span>
+                  <span>{(activeStory.sourceChatMsgCount || 0) > 0
+                    ? `已关联线上聊天记录（导入了 ${activeStory.sourceChatMsgCount} 条历史对话）`
+                    : "已尝试引用线上聊天，但当前没有可导入的消息，本故事将从空白开始"}</span>
                 </div>
                 {onNavigateToChat && linkedChatTarget && (
                   <button type="button" className="offline-chat-link-action" onClick={handleReturnToOnlineChat}>

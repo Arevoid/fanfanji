@@ -16,7 +16,7 @@ import { createHandoffCapsule } from "../../../domain/continuity/handoffCapsule"
 import { loadContinuityRuntimeStore, upsertHandoffCapsule } from "../../../core/storage/repositories/continuityRuntimeRepository";
 import { loadCharacterEvents } from "../../../core/storage/repositories/characterEventRepository";
 import { listCharacterScheduleByScope } from "../../../core/storage/repositories/characterScheduleRepository";
-import { listResumableOfflineStories } from "../../../domain/offlineStory/offlineStoryResumePolicy";
+import { listResumableOfflineStories, mergeOnlineMessagesIntoOfflineStory } from "../../../domain/offlineStory/offlineStoryResumePolicy";
 
 export interface OfflineStoryChoiceRequest {
   sourceMessage: Message;
@@ -118,6 +118,7 @@ export function useChatStartOfflineFromMessage({
     const importedMessages = sourceMessages.map((item, index) => ({
       ...item,
       id: `offline-import-${snapshotTimestamp}-${index}-${item.id}`,
+      sourceMessageId: item.id,
       isOffline: true,
       isImportedContext: true,
     }));
@@ -267,7 +268,7 @@ export function useChatStartOfflineFromMessage({
         },
       });
       if (stories.length > 0) {
-        const request = { sourceMessage: msg, handoffMessages, stories };
+        const request = { sourceMessage: msg, handoffMessages: handoffMessages || messages, stories };
         setPendingOfflineStoryChoice(request);
         onRequestOfflineStoryChoice?.(request);
         return;
@@ -276,9 +277,23 @@ export function useChatStartOfflineFromMessage({
     return createOfflineStoryFromMessage(msg, appointment, handoffMessages);
   };
 
-  const chooseOfflineStory = (storyId: string) => {
+  const chooseOfflineStory = async (storyId: string) => {
     const request = pendingOfflineStoryChoice;
     if (!request) return;
+    const story = request.stories.find((item) => item.id === storyId);
+    if (!story) return;
+    const resumedStory = mergeOnlineMessagesIntoOfflineStory(
+      story,
+      request.handoffMessages || messages,
+    );
+    if (resumedStory !== story && onSaveOfflineStory) {
+      const saveResult = onSaveOfflineStory(resumedStory);
+      const saved = saveResult instanceof Promise ? await saveResult : saveResult !== false;
+      if (!saved) {
+        showToast("线下故事暂时无法保存线上新增上下文，请稍后重试");
+        return;
+      }
+    }
     setPendingOfflineStoryChoice(null);
     onOpenOfflineStory?.(storyId);
     onNavigateToApp?.("offline");

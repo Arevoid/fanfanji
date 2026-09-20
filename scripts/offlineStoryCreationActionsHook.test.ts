@@ -15,5 +15,7 @@ assert.match(creationHook, /loadKnowledgeClaims\(\)\.value/);
 assert.match(creationHook, /buildOfflineMemberKnowledgeSnapshots/);
 assert.match(creationHook, /memberKnowledgeSnapshots/);
 assert.match(creationHook, /onSaveStorySnapshot\(newStory\)/);
+assert.match(creationHook, /sourceChatMsgCount: newStartFromChat \? \(importedContext\?\.messages\.length \|\| 0\)/);
+assert.match(appOffline, /已尝试引用线上聊天，但当前没有可导入的消息，本故事将从空白开始/);
 
 console.log("PASS offline story creation is isolated behind a relation/group-scoped action hook");

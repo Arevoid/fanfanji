@@ -395,7 +395,13 @@ export function sanitizeOfflineMemoryForOnlineUse(content: string): string {
 }
 
 export function hasUnsyncedOfflineMemoryProgress(story: OfflineStory): boolean {
-  const syncStart = story.lastSyncedMessageCount ?? (story.archivedAt ? story.messages.length : 0);
+  // `archivedAt` only marks that the scene was left. It does not mean that
+  // the memory projection finished. Exit finalization persists that marker
+  // before starting the asynchronous extraction, so treating an archived
+  // story as implicitly synced drops the first automatic sync on the floor.
+  // The durable cursor is the only authoritative boundary; legacy stories
+  // without one must therefore start at zero and remain retryable.
+  const syncStart = story.lastSyncedMessageCount ?? 0;
   return story.messages.length > syncStart;
 }
 

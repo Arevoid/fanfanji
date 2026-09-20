@@ -44,6 +44,10 @@ const tests: Array<[string, () => void]> = [
   ["E collector preserves the character as the dinner inviter", () => assert.ok(collectOfflineHandoffContent(currentStory).includes("当前角色邀请用户吃饭。"))],
   ["F collector does not preserve screenplay dialogue", () => assert.equal(collectOfflineHandoffContent(currentStory).includes(userEvent), false)],
   ["G pending story is eligible for a handoff", () => assert.equal(hasUnsyncedOfflineMemoryProgress(currentStory), true)],
+  ["G2 archived pending story still needs its first memory projection", () => assert.equal(
+    hasUnsyncedOfflineMemoryProgress({ ...currentStory, archivedAt: 6, memorySyncStatus: "pending" }),
+    true,
+  )],
   ["H handoff records the correct character", () => assert.equal(handoff.characterId, characterId)],
   ["I handoff contains this story's marker", () => assert.ok(handoff.content.includes(marker))],
   ["J handoff contains current story facts without raw dialogue", () => assert.ok(handoff.content.includes("用户向当前角色赠送过糖果。") && handoff.content.includes("当前角色邀请用户吃饭。"))],

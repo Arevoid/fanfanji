@@ -1,4 +1,4 @@
-import type { Character, OfflineStory } from "../../types";
+import type { Character, Message, OfflineStory } from "../../types";
 import type { CharacterRelationship } from "../relationship/characterRelationship";
 import { resolveCanonicalCharacterId, resolveOfflineStoryCharacterIds } from "../character/characterIdentity";
 import { resolveOfflineStoryRelationId } from "../relationship/offlineStoryScope";
@@ -50,4 +50,69 @@ export function listResumableOfflineStories(input: {
     })
     .slice()
     .sort((left, right) => right.updatedAt - left.updatedAt || right.createdAt - left.createdAt);
+}
+
+const isMergeableOnlineMessage = (message: Message): boolean => Boolean(
+  !message.isOffline
+  && !message.isImportedContext
+  && !message.isNarration
+  && message.content?.trim(),
+);
+
+const getImportedSourceKey = (message: Message): string => message.sourceMessageId || message.id;
+
+/**
+ * Adds the online segment that happened after a completed offline handoff to
+ * an existing continue story. Imported messages remain context-only so the
+ * offline memory extractor never treats them as new offline events.
+ */
+export function mergeOnlineMessagesIntoOfflineStory(
+  story: OfflineStory,
+  onlineMessages: readonly Message[],
+  now = Date.now(),
+): OfflineStory {
+  if (story.mode !== "continue" || !story.onlineHandoff) return story;
+
+  const cutoff = story.onlineHandoff.endedAt;
+  const importedMessages = story.importedContext?.messages || [];
+  const importedSourceKeys = new Set(importedMessages.map(getImportedSourceKey));
+  const importedFingerprints = new Set(importedMessages.map((message) =>
+    `${message.timestamp}|${message.sender}|${message.content.trim()}`,
+  ));
+  const additions: Message[] = [];
+  for (const message of onlineMessages) {
+    if (!isMergeableOnlineMessage(message) || message.timestamp <= cutoff) continue;
+    const sourceKey = getImportedSourceKey(message);
+    const fingerprint = `${message.timestamp}|${message.sender}|${message.content.trim()}`;
+    if (importedSourceKeys.has(sourceKey) || importedFingerprints.has(fingerprint)) continue;
+    importedSourceKeys.add(sourceKey);
+    importedFingerprints.add(fingerprint);
+    additions.push(message);
+  }
+  if (additions.length === 0) return story;
+
+  const copiedMessages = additions.map((message) => ({
+    ...message,
+    id: `offline-online-${story.id}-${message.id}`,
+    sourceMessageId: message.id,
+    isOffline: true,
+    isImportedContext: true,
+  }));
+  const previousContext = story.importedContext;
+  const nextImportedMessages = [...importedMessages, ...copiedMessages];
+
+  return {
+    ...story,
+    sourceChatId: story.sourceChatId || story.characterId,
+    sourceChatMsgCount: (story.sourceChatMsgCount || importedMessages.length) + copiedMessages.length,
+    importedContext: {
+      messages: nextImportedMessages,
+      memories: previousContext?.memories || [],
+      ...(previousContext?.handoffFacts ? { handoffFacts: previousContext.handoffFacts } : {}),
+      ...(previousContext?.memberMemories ? { memberMemories: previousContext.memberMemories } : {}),
+      worldBook: previousContext?.worldBook || [],
+      importedAt: now,
+    },
+    updatedAt: now,
+  };
 }

@@ -119,6 +119,8 @@ export interface Message {
   recalledAt?: number;
   content: string;
   timestamp: number;
+  /** Original online message ID when this message is copied into an offline context snapshot. */
+  sourceMessageId?: string;
   /** Optional structured metadata for red packets; legacy markup remains supported. */
   redPacket?: RedPacketPayload;
   /** Group-turn decision, persisted only as harmless metadata on generated replies. */
