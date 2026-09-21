@@ -90,7 +90,15 @@ import {
 import { ensureCharacterPhoneContent, hasMissingCharacterPhoneContactThreads } from "../features/characterPhone/characterPhoneContent";
 import { selectCharacterPhoneWorldBookEntries } from "../features/characterPhone/characterPhoneLifeContext";
 import { buildCharacterPhoneAwarenessMessage } from "../features/characterPhone/characterPhoneReaction";
-import { discoverCharacterPhoneActions } from "../features/characterPhone/characterPhoneDetection";
+import {
+  discoverCharacterPhoneActions,
+  findCharacterPhoneDiscoveryCandidate,
+} from "../features/characterPhone/characterPhoneDetection";
+import {
+  generateCharacterPhoneAwarenessMessage,
+  generateCharacterPhoneBrowserReflection,
+  generateCharacterPhoneDiscoveryMessage,
+} from "../features/characterPhone/characterPhoneAiReaction";
 import {
   appendCharacterPhoneThreadMessage,
   listCharacterPhoneThreadMessages,
@@ -1158,14 +1166,50 @@ export default function AppCharacterPhone({
         : null,
     [phone, selectedCharacter, userIdentityId],
   );
-  const discoverPhoneActions = (
+  const discoverPhoneActions = async (
     candidatePhone: CharacterPhoneRecord,
     now: number,
-  ): CharacterPhoneRecord => {
+  ): Promise<CharacterPhoneRecord> => {
     if (!selectedCharacter) return candidatePhone;
     // Discovery is delayed by the action policy. It is stored in the role
     // phone first; callers may forward it only after that delay has elapsed.
-    return discoverCharacterPhoneActions(candidatePhone, selectedCharacter, now);
+    const candidate = findCharacterPhoneDiscoveryCandidate(candidatePhone, selectedCharacter, now);
+    if (!candidate) return candidatePhone;
+    const relation = relationships.find(
+      (item) => item.userIdentityId === userIdentityId && item.characterId === selectedCharacter.id,
+    );
+    const recentConversation = messages
+      .filter((message) => message.characterId === selectedCharacter.id)
+      .slice(-8)
+      .map((message) => `${message.sender}：${message.content}`);
+    const scopedWorldBook = worldBookEntries
+      .filter((entry) => isWorldBookEntryVisible(entry, {
+        scenario: "chat",
+        characterId: selectedCharacter.id,
+        userIdentityId: activeIdentity?.id || userIdentityId,
+        relationId: relation?.id,
+      }))
+      .slice(-8)
+      .map((entry) => `${entry.title}：${entry.content}`);
+    const recentDiscoveries = candidatePhone.messages
+      .filter((message) => message.id.startsWith("phone-discovery-") || message.id.startsWith("phone-awareness-"))
+      .slice(-8)
+      .map((message) => message.body);
+    const generatedMessage = candidate.shouldAsk
+      ? await generateCharacterPhoneDiscoveryMessage({
+          character: selectedCharacter,
+          action: candidate.action,
+          relationshipContext: relation?.relationship,
+          worldBookContext: scopedWorldBook,
+          recentConversation,
+          recentDiscoveries,
+          settings,
+          now,
+        })
+      : null;
+    return discoverCharacterPhoneActions(candidatePhone, selectedCharacter, now, {
+      discoveryMessage: generatedMessage || undefined,
+    });
   };
   const forwardDelayedPhoneDiscoveries = (before: CharacterPhoneRecord, after: CharacterPhoneRecord) => {
     if (!selectedCharacter || !onSendMessage) return;
@@ -1686,11 +1730,12 @@ export default function AppCharacterPhone({
     } else {
       setPhoneNotice(`${selectedContact.remark || selectedContact.name}正在查看消息…`);
     }
-    const discoveredNext = discoverPhoneActions(loggedNext, now);
-    if (discoveredNext !== loggedNext) {
-      persistPhone(discoveredNext);
-      setPhone(discoveredNext);
-    }
+    void discoverPhoneActions(loggedNext, now).then((discoveredNext) => {
+      if (discoveredNext !== loggedNext) {
+        persistPhone(discoveredNext);
+        setPhone(discoveredNext);
+      }
+    });
     if (!sourceMessageId) {
       const outgoingMessageId = loggedNext.threadMessages.at(-1)?.id;
       if (outgoingMessageId) {
@@ -1870,7 +1915,7 @@ export default function AppCharacterPhone({
         now,
       });
       const advancedPhone = mirroredChat?.phone || advancedResult.phone;
-      const discoveredPhone = discoverPhoneActions(advancedPhone, now);
+      const discoveredPhone = await discoverPhoneActions(advancedPhone, now);
       forwardDelayedPhoneDiscoveries(advancedPhone, discoveredPhone);
       const phoneToSave = isInitialGeneration && advancedResult.status === "generated"
         ? { ...discoveredPhone, initialContentGeneratedAt: now, initialContentPending: false }
@@ -1920,7 +1965,7 @@ export default function AppCharacterPhone({
       return;
     }
     if (passcode === normalizeCharacterPhonePasscode(currentPhone.passcode)) {
-      const openedPhone = discoverPhoneActions(withPhoneAction({
+      const openedPhone = await discoverPhoneActions(withPhoneAction({
         ...currentPhone,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -1985,14 +2030,31 @@ export default function AppCharacterPhone({
       && /^刚才解锁界面闪了一下/u.test(message.body));
     const shouldRefreshAwarenessMessage = awarenessLevel > (currentPhone.awarenessLevel ?? 0)
       || Boolean(legacyAwarenessMessage);
+    const recentAwarenessMessages = currentPhone.messages
+      .filter((message) => message.id.startsWith("phone-awareness-") || message.id.startsWith("phone-discovery-"))
+      .slice(-8)
+      .map((message) => message.body);
+    const generatedAwarenessMessage = shouldRefreshAwarenessMessage
+      ? await generateCharacterPhoneAwarenessMessage({
+          character: selectedCharacter,
+          level: Math.max(1, Math.min(2, awarenessLevel)) as 1 | 2,
+          attemptCount: failedAttempts,
+          relationshipContext: relation?.relationship,
+          worldBookContext: roleWorldBookContext,
+          recentConversation: recentRoleContext,
+          recentAwarenessMessages,
+          settings,
+          now,
+        })
+      : null;
     const awarenessMessage =
       shouldRefreshAwarenessMessage
         ? {
             id: legacyAwarenessMessage?.id || `phone-awareness-${now}`,
             sender: selectedCharacter.name,
-            body: buildCharacterPhoneAwarenessMessage(
+            body: generatedAwarenessMessage || buildCharacterPhoneAwarenessMessage(
               selectedCharacter,
-              awarenessLevel,
+              Math.max(1, Math.min(2, awarenessLevel)) as 1 | 2,
               {
                 attemptCount: failedAttempts,
                 previousDiscoveryCount: currentPhone.messages.filter((message) => message.id.startsWith("phone-awareness-")).length,
@@ -2388,36 +2450,76 @@ export default function AppCharacterPhone({
   };
   const runPhoneBrowserSearch = () => {
     const query = browserAddress.trim();
-    if (!query || !currentPhone) return;
+    if (!query || !currentPhone || !selectedCharacter) return;
+    const searchCharacterId = selectedCharacter.id;
     const now = Date.now();
-    const entryBase = {
-      id: `phone-search-user-${now}`,
-      query,
-      title: `关于“${query}”的搜索结果`,
-      timestamp: now,
-    };
-    const detail = buildCharacterPhoneBrowserDetail(
-      entryBase,
-      selectedCharacter?.name,
-      `${selectedCharacter?.personality || ""}\n${selectedCharacter?.backstory || ""}`,
+    const relation = relationships.find(
+      (item) => item.userIdentityId === userIdentityId && item.characterId === selectedCharacter.id,
     );
-    persistPhone(withPhoneAction({
-      ...currentPhone,
-      browserHistory: [
-        {
-          ...entryBase,
-          ...detail,
-        },
-        ...currentPhone.browserHistory,
-      ],
-    }, {
-      kind: "browser_searched",
-      app: "browser",
-      detail: `搜索：${query}`,
-      ...getCharacterPhoneMutationPolicy("browser", selectedCharacter!),
-    }, now));
-    setBrowserAddress("");
-  };
+    const recentConversation = messages
+      .filter((message) => message.characterId === selectedCharacter.id)
+      .slice(-8)
+      .map((message) => `${message.sender}：${message.content}`);
+    const scopedWorldBook = worldBookEntries
+      .filter((entry) => isWorldBookEntryVisible(entry, {
+        scenario: "chat",
+        characterId: selectedCharacter.id,
+        userIdentityId: activeIdentity?.id || userIdentityId,
+        relationId: relation?.id,
+      }))
+      .slice(-8)
+      .map((entry) => `${entry.title}：${entry.content}`);
+    const recentReflections = currentPhone.browserHistory
+      .map((entry) => entry.reflection?.trim() || "")
+      .filter(Boolean)
+      .slice(0, 8);
+    const generateReflection = async () => {
+      const reflection = await generateCharacterPhoneBrowserReflection({
+        character: selectedCharacter,
+        query,
+        title: `关于“${query}”的搜索结果`,
+        relationshipContext: relation?.relationship,
+        worldBookContext: scopedWorldBook,
+        recentConversation,
+        recentReflections,
+        settings,
+        now,
+      });
+      if (!mountedRef.current
+        || phoneScopeRef.current.ownerIdentityId !== userIdentityId
+        || phoneScopeRef.current.characterId !== searchCharacterId) return;
+      const latestPhone = getCharacterPhone(userIdentityId, searchCharacterId) || currentPhone;
+      const entryBase = {
+        id: `phone-search-user-${now}`,
+        query,
+        title: `关于“${query}”的搜索结果`,
+        timestamp: now,
+        ...(reflection ? { reflection } : {}),
+      };
+      const detail = buildCharacterPhoneBrowserDetail(
+        entryBase,
+        selectedCharacter.name,
+        `${selectedCharacter.personality || ""}\n${selectedCharacter.backstory || ""}\n${entryBase.id}`,
+      );
+      persistPhone(withPhoneAction({
+        ...latestPhone,
+        browserHistory: [
+          {
+            ...entryBase,
+            ...detail,
+          },
+          ...latestPhone.browserHistory,
+        ],
+      }, {
+        kind: "browser_searched",
+        app: "browser",
+        detail: `搜索：${query}`,
+        ...getCharacterPhoneMutationPolicy("browser", selectedCharacter),
+      }, now));
+      setBrowserAddress("");
+    };
+    void generateReflection();
+};
 
   if (!selectedCharacter || !currentPhone)
     return (

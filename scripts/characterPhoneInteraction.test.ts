@@ -111,6 +111,26 @@ const repeatedDiscovery = discoverCharacterPhoneActions({
 }, character, 301);
 assert.equal(repeatedDiscovery.messages.length, discovered.messages.length, "does not append an identical discovery alert twice");
 
+const aiDiscoveryText = "你先别急着解释，我想知道刚才为什么要用我的账号发这句话。";
+const aiDiscovery = discoverCharacterPhoneActions({
+  ...phone,
+  messages: [],
+  phoneOpenCount: 3,
+  actionLog: [{
+    id: "action-ai-discovery",
+    kind: "chat_sent_as_character",
+    app: "chat",
+    detail: "向周叔发送消息",
+    timestamp: 100,
+    actor: "user",
+    detectability: "likely",
+    discoveryAfterMs: 0,
+    discoveryAfterOpens: 0,
+    phoneOpenCountAtAction: 0,
+  }],
+}, character, 1000, { discoveryMessage: aiDiscoveryText });
+assert.equal(aiDiscovery.messages.at(-1)?.body, aiDiscoveryText, "AI-generated discovery text replaces the local fallback");
+
 const notYetReopened = discoverCharacterPhoneActions({
   ...phone,
   phoneOpenCount: 8,

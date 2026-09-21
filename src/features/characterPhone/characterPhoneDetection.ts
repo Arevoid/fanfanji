@@ -3,17 +3,22 @@ import type { CharacterPhoneRecord } from "../../domain/characterPhone/types";
 import { buildCharacterPhoneActionDiscoveryMessage } from "./characterPhoneReaction";
 import { normalizeCharacterPhoneMessages } from "./characterPhoneContent";
 
+export interface CharacterPhoneDiscoveryCandidate {
+  action: CharacterPhoneRecord["actionLog"][number];
+  shouldAsk: boolean;
+  previousDiscoveryCount: number;
+}
+
 /**
- * Turns selected hidden operations into an in-world discovery message. The
- * action log itself is never rendered; discovery is delayed until a later
- * opening or until enough time has passed, so every action is not instantly
- * noticed by the character.
+ * Selects the oldest eligible operation without mutating the phone. The UI
+ * can use this candidate to ask the model for a character-specific reaction
+ * before committing the discovery message.
  */
-export function discoverCharacterPhoneActions(
+export function findCharacterPhoneDiscoveryCandidate(
   phone: CharacterPhoneRecord,
   character: Character,
   now = Date.now(),
-): CharacterPhoneRecord {
+): CharacterPhoneDiscoveryCandidate | null {
   const openCount = phone.phoneOpenCount ?? 0;
   const candidate = (phone.actionLog ?? [])
     .filter((action) => !action.discovered && action.detectability !== "none")
@@ -32,19 +37,39 @@ export function discoverCharacterPhoneActions(
         || openCount - (action.phoneOpenCountAtAction ?? 0) >= opens;
     })
     .sort((left, right) => left.timestamp - right.timestamp)[0];
+  if (!candidate) return null;
+  return {
+    action: candidate,
+    shouldAsk: candidate.kind === "chat_sent_as_character"
+      || candidate.kind === "contact_removed"
+      || candidate.kind === "contact_remark_changed"
+      || isAttentivePerson(character),
+    previousDiscoveryCount: phone.messages.filter((message) =>
+      message.id.startsWith("phone-discovery-") || message.id.startsWith("phone-awareness-"),
+    ).length,
+  };
+}
+
+/**
+ * Turns selected hidden operations into an in-world discovery message. The
+ * action log itself is never rendered; discovery is delayed until a later
+ * opening or until enough time has passed, so every action is not instantly
+ * noticed by the character.
+ */
+export function discoverCharacterPhoneActions(
+  phone: CharacterPhoneRecord,
+  character: Character,
+  now = Date.now(),
+  options: { discoveryMessage?: string } = {},
+): CharacterPhoneRecord {
+  const candidate = findCharacterPhoneDiscoveryCandidate(phone, character, now);
   if (!candidate) return phone;
-  const shouldAsk = candidate.kind === "chat_sent_as_character"
-    || candidate.kind === "contact_removed"
-    || candidate.kind === "contact_remark_changed"
-    || isAttentivePerson(character);
-  const previousDiscoveryCount = phone.messages.filter((message) =>
-    message.id.startsWith("phone-discovery-") || message.id.startsWith("phone-awareness-"),
-  ).length;
-  const discovery = shouldAsk
+  const discovery = candidate.shouldAsk
     ? {
-        id: `phone-discovery-${candidate.id}`,
+        id: `phone-discovery-${candidate.action.id}`,
         sender: character.name,
-        body: buildCharacterPhoneActionDiscoveryMessage(character, candidate, { previousDiscoveryCount }),
+        body: options.discoveryMessage?.trim()
+          || buildCharacterPhoneActionDiscoveryMessage(character, candidate.action, { previousDiscoveryCount: candidate.previousDiscoveryCount }),
         timestamp: now,
         unread: true,
       }
@@ -56,8 +81,8 @@ export function discoverCharacterPhoneActions(
   );
   return {
     ...phone,
-    actionLog: (phone.actionLog ?? []).map((action) => action.id === candidate.id
-      ? { ...action, discovered: true, discoveredAt: now, discoveryResponse: shouldAsk ? "ask" : "silent" }
+    actionLog: (phone.actionLog ?? []).map((action) => action.id === candidate.action.id
+      ? { ...action, discovered: true, discoveredAt: now, discoveryResponse: candidate.shouldAsk ? "ask" : "silent" }
       : action),
     messages: normalizeCharacterPhoneMessages(alreadyReported || !discovery ? phone.messages : [...phone.messages, discovery]),
     awarenessLevel: discovery ? Math.max(phone.awarenessLevel ?? 0, 1) as 0 | 1 | 2 : phone.awarenessLevel,
