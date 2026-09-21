@@ -66,7 +66,7 @@ import {
   upsertIdentityMusicTrack,
 } from "./core/storage/repositories/musicWidgetRepository";
 import { imageAssetDb } from "./utils/imageAssetDb";
-import { createCharacterPhone, getCharacterPhone, initializeCharacterPhoneRepository, removeCharacterPhonesByCharacterIds, saveCharacterPhone } from "./core/storage/repositories/characterPhoneRepository";
+import { createCharacterPhone, getCharacterPhone, initializeCharacterPhoneRepository, listCharacterPhonesForOneTimeCleanup, removeCharacterPhonesByCharacterIds, saveCharacterPhone } from "./core/storage/repositories/characterPhoneRepository";
 import { runCharacterPhoneIsolationRepair, runCharacterPhoneOneTimeCleanup } from "./core/storage/characterPhoneOneTimeCleanup";
 import { normalizeCharacterPhoneProactiveMessages } from "./features/characterPhone/characterPhoneContent";
 import { isTransparencyPreservedImage } from "./utils/pngParser";
@@ -87,6 +87,7 @@ import type { RelationshipNetworkNpcMomentAutomationTrigger } from "./features/m
 import { captureRelationshipCreatedEvent } from "./features/characterLife/services/characterEventCaptureService";
 import { messageMatchesMutationScope, type MessageMutationScope } from "./features/chat/context/directInteractionScope";
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, removePaymentStatusesForMessages, type RedPacketStatusMap } from "./features/chat/services/paymentScope";
+import { repairLegacyCharacterPhoneOwnership } from "./features/characterPhone/characterPhoneOwnership";
 import { Character, Message, Moment, UserIdentity, UserSettings, StylePreset, MusicTrack, MusicPlaylist, WorldBookEntry, MomentComment, HomeScreenItem, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, OfflineStory, InnerVoiceRecord, type DualMusicWidgetConfig, type HomeScreenPosition, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "./types";
 import type { CharacterPhoneImageSaveInput } from "./domain/characterPhone/types";
 import type { CharacterPhonePost, CharacterPhonePostComment } from "./domain/characterPhone/types";
@@ -879,6 +880,30 @@ export default function App() {
   relationshipsRef.current = relationships;
 
   useEffect(() => {
+    if (!charactersRepositoryHydrated.current || characterPhoneOwnershipRepairRunRef.current) return;
+    characterPhoneOwnershipRepairRunRef.current = true;
+    let active = true;
+    void initializeCharacterPhoneRepository().then((result) => {
+      if (!active || !result.valid) return;
+      const repair = repairLegacyCharacterPhoneOwnership({
+        characters,
+        relationships,
+        phones: listCharacterPhonesForOneTimeCleanup(),
+        identities: settings.identities || [],
+      });
+      if (!repair.changed) return;
+      const saved = saveCharacters(repair.characters);
+      if (!saved.success || !active) return;
+      setCharacters(repair.characters);
+      charactersRef.current = repair.characters;
+    }).catch((error) => {
+      characterPhoneOwnershipRepairRunRef.current = false;
+      console.warn("[character-phone] Legacy character ownership repair failed:", error);
+    });
+    return () => { active = false; };
+  }, [characters, relationships, settings.identities]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     let active = true;
     let drainSchedule: number | undefined;
@@ -928,6 +953,7 @@ export default function App() {
   const offlineStoriesHydratedRef = useRef(false);
   const deletedOfflineStoryIdsRef = useRef(new Set<string>());
   const charactersRepositoryHydrated = useRef(false);
+  const characterPhoneOwnershipRepairRunRef = useRef(false);
   const messagesPersistenceLifecycleRef = useRef(createMessagePersistenceLifecycle());
   const momentsPersistenceReady = useRef(false);
   const skipNextCharactersPersistenceRef = useRef(false);

@@ -126,6 +126,8 @@ import { StorageCachePanel } from "../features/settings/components/StorageCacheP
 import { clearRebuildableCache } from "../core/storage/rebuildableCache";
 import { isWorldBookEntryVisible } from "../domain/worldbook/worldBookVisibility";
 import type { MessageMutationScope } from "../features/chat/context/directInteractionScope";
+import { getRootIdentityId } from "../domain/relationship/characterRelationship";
+import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
 import { listCharacterPhoneSelectableCharacters } from "../features/characterPhone/characterPhoneSelection";
 import { mirrorGeneratedCharacterPhoneChat } from "../features/characterPhone/characterPhoneChatMirror";
 import {
@@ -836,9 +838,34 @@ export default function AppCharacterPhone({
   onOpenChat,
   onClose,
 }: AppCharacterPhoneProps) {
+  const [phoneStorageRevision, setPhoneStorageRevision] = useState(0);
+  useEffect(() => {
+    const refreshLegacyPhoneScopes = () => setPhoneStorageRevision((revision) => revision + 1);
+    window.addEventListener("character-phone-storage-ready", refreshLegacyPhoneScopes);
+    window.addEventListener("character-phone-storage-reset", refreshLegacyPhoneScopes);
+    return () => {
+      window.removeEventListener("character-phone-storage-ready", refreshLegacyPhoneScopes);
+      window.removeEventListener("character-phone-storage-reset", refreshLegacyPhoneScopes);
+    };
+  }, []);
+  const legacyCharacterIds = useMemo(() => {
+    const ids = new Set<string>();
+    characters.forEach((character) => {
+      if (character.isContactInstance || character.isGroupChat) return;
+      if (getCharacterPhone(userIdentityId, character.id)) ids.add(character.id);
+    });
+    const ownerRootId = getRootIdentityId(userIdentityId, identities);
+    relationships.forEach((relationship) => {
+      if (getRootIdentityId(relationship.userIdentityId, identities) !== ownerRootId) return;
+      const canonicalId = resolveCanonicalCharacterId(relationship.characterId, characters);
+      const character = characters.find((candidate) => candidate.id === canonicalId);
+      if (character && !character.isContactInstance && !character.isGroupChat) ids.add(character.id);
+    });
+    return [...ids];
+  }, [characters, identities, relationships, userIdentityId, phoneStorageRevision]);
   const selectableCharacters = useMemo(
-    () => listCharacterPhoneSelectableCharacters(characters, userIdentityId, identities),
-    [characters, userIdentityId, identities],
+    () => listCharacterPhoneSelectableCharacters(characters, userIdentityId, identities, legacyCharacterIds),
+    [characters, userIdentityId, identities, legacyCharacterIds],
   );
   const [selectedCharacterId, setSelectedCharacterId] = useState(
     selectableCharacters[0]?.id || "",
@@ -1091,7 +1118,7 @@ export default function AppCharacterPhone({
     initialGenerationPhoneIdRef.current = null;
     setIsAdvancing(false);
     previousIdentityIdRef.current = userIdentityId;
-    const nextCharacter = characters[0];
+    const nextCharacter = selectableCharacters[0];
     setSelectedCharacterId(nextCharacter?.id || "");
     setPhone(nextCharacter ? openCharacterPhone(userIdentityId, nextCharacter, phoneContext) : null);
     setUnlocked(false);
@@ -1123,7 +1150,7 @@ export default function AppCharacterPhone({
     setPhoneNotice("");
     setPhoneDataNotice("");
     setDraftsByContact({});
-  }, [characters, userIdentityId]);
+  }, [selectableCharacters, userIdentityId, phoneContext]);
   const currentPhone = useMemo(
     () =>
       selectedCharacter

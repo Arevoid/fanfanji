@@ -56,9 +56,15 @@ export function getRootIdentityId(identityId: string, identities: readonly UserI
     seen.add(candidateId);
     const identity = identityById.get(candidateId);
     if (!identity || identity.kind !== "alias") return candidateId;
+    // Some exported legacy settings retained rootIdentityId but lost the
+    // explicit parentIdentityId. Prefer the explicit parent when available,
+    // then honor a valid persisted root. Never infer a relationship from
+    // names, avatars, or profile text.
     const parentId = identity.parentIdentityId && identityById.has(identity.parentIdentityId)
       ? identity.parentIdentityId
-      : candidateId;
+      : identity.rootIdentityId && identity.rootIdentityId !== candidateId && identityById.has(identity.rootIdentityId)
+        ? identity.rootIdentityId
+        : candidateId;
     return parentId === candidateId ? candidateId : resolve(parentId, seen);
   };
   return resolve(identityId, new Set<string>());

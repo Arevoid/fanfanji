@@ -12,13 +12,16 @@ export function listCharacterPhoneSelectableCharacters(
   characters: readonly Character[],
   ownerIdentityId: string,
   identities: readonly UserIdentity[] = [],
+  legacyCharacterIds: readonly string[] = [],
 ): Character[] {
   const ownerRootId = getRootIdentityId(ownerIdentityId, identities);
+  const legacyIds = new Set(legacyCharacterIds);
   const byId = new Map<string, Character>();
   characters.forEach((character) => {
     if (character.isContactInstance || character.isGroupChat) return;
     const characterOwnerRootId = getRootIdentityId(character.ownerIdentityId || DEFAULT_IDENTITY_ID, identities);
-    if (characterOwnerRootId !== ownerRootId || byId.has(character.id)) return;
+    if (characterOwnerRootId !== ownerRootId && !legacyIds.has(character.id)) return;
+    if (byId.has(character.id)) return;
     byId.set(character.id, character);
   });
   return [...byId.values()];

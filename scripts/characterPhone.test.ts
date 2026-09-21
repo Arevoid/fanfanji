@@ -128,6 +128,15 @@ assert.deepEqual(
   ["owned-role-a", "owned-role-b", "alias-owned-role"],
   "password picker excludes contact copies/groups/other identity roots but preserves distinct same-name roles and same-workspace aliases",
 );
+assert.deepEqual(
+  listCharacterPhoneSelectableCharacters([
+    pickerCharacter("legacy-role", "旧角色", pickerOtherPrimary.id),
+    pickerCharacter("legacy-group", "旧群聊", pickerOtherPrimary.id, { isGroupChat: true }),
+  ], pickerPrimary.id, [pickerPrimary, pickerAlias, pickerOtherPrimary], ["legacy-role", "legacy-group"])
+    .map((character) => character.id),
+  ["legacy-role"],
+  "a legacy role with an existing phone scope may be shown without admitting group chats",
+);
 assert.match(component, /overflow-hidden overscroll-none bg-black/);
 assert.match(component, /activeApp === "gallery"/);
 assert.match(component, /const isGalleryDetail = activeApp === "gallery" && Boolean\(selectedGallery\)/);
