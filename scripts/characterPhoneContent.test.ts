@@ -169,6 +169,62 @@ assert.equal(aliasUserContact?.userIdentityId, aliasIdentity.id);
 assert.ok(aliasPhone.threadMessages.some((message) => message.sourceMessageId === "message-a" && message.contactId === primaryUserContact?.id));
 assert.ok(aliasPhone.threadMessages.some((message) => message.sourceMessageId === "alias-message-user" && message.contactId === aliasUserContact?.id));
 assert.ok(aliasPhone.threadMessages.some((message) => message.sourceMessageId === "alias-message-character" && message.contactId === aliasUserContact?.id));
+
+// A migrated chat can retain a relation pointing at a hidden contact-copy ID
+// while the visible chat and new messages use the canonical archive profile.
+// The main chat is relation-scoped and still renders this history; the role
+// phone must resolve the same canonical character instead of dropping it.
+const legacyCharacterCopy: Character = {
+  ...characterA,
+  id: "legacy-character-copy",
+  isContactInstance: true,
+  profileSourceId: characterA.id,
+};
+const legacyRelation = {
+  ...relation,
+  id: "relation-legacy-character-copy",
+  characterId: legacyCharacterCopy.id,
+  conversationId: "conversation-legacy-character-copy",
+};
+const legacyCopyPhone = ensureCharacterPhoneContent({
+  phone: emptyPhone("phone-legacy-character-copy", characterA.id),
+  character: characterA,
+  characters: [characterA, legacyCharacterCopy],
+  activeIdentity: identity,
+  relationships: [legacyRelation],
+  messages: [
+    {
+      id: "legacy-copy-user-message",
+      characterId: characterA.id,
+      relationId: legacyRelation.id,
+      conversationId: legacyRelation.conversationId,
+      sender: "user",
+      content: "切换身份后仍然应该出现在角色手机里。",
+      timestamp: 40,
+    },
+    {
+      id: "legacy-copy-character-message",
+      characterId: legacyCharacterCopy.id,
+      relationId: legacyRelation.id,
+      conversationId: legacyRelation.conversationId,
+      sender: "character",
+      content: "我会记得这段聊天。",
+      timestamp: 41,
+    },
+  ],
+  moments: [],
+  worldBookEntries: [],
+  now: 100,
+});
+const legacyUserContact = legacyCopyPhone.contacts.find((contact) => contact.relationId === legacyRelation.id);
+assert.ok(legacyUserContact, "keeps the migrated relation as a role-phone user contact");
+assert.deepEqual(
+  legacyCopyPhone.threadMessages
+    .filter((message) => message.contactId === legacyUserContact?.id)
+    .map((message) => message.sourceMessageId),
+  ["legacy-copy-user-message", "legacy-copy-character-message"],
+  "mirrors messages when the relation still references a legacy character-copy ID",
+);
 const legacyAliasPhone = emptyPhone("phone-legacy-alias-threads", characterA.id);
 legacyAliasPhone.contacts = [{
   id: "character-phone:phone-legacy-alias-threads:contact:user",

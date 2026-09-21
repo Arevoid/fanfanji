@@ -3,6 +3,7 @@ import type { CharacterPhoneRecord, CharacterPhoneThreadMessage } from "../../do
 import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
 import { getConversationId } from "../../domain/relationship/characterRelationship";
 import { createCharacterTextMessage } from "../chat/services/messageFactory";
+import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 
 export interface CharacterPhoneChatMirrorResult {
   phone: CharacterPhoneRecord;
@@ -19,6 +20,7 @@ export function mirrorGeneratedCharacterPhoneChat(input: {
   phone: CharacterPhoneRecord;
   previousPhone: CharacterPhoneRecord;
   character: Character;
+  characters?: readonly Character[];
   relationships: readonly CharacterRelationship[];
   mainMessages: readonly Message[];
   now: number;
@@ -46,7 +48,8 @@ export function mirrorGeneratedCharacterPhoneChat(input: {
   if (generatedByContact.size === 0) return undefined;
 
   const relationships = input.relationships.filter((relation) =>
-    relation.characterId === input.character.id
+    resolveCanonicalCharacterId(relation.characterId, input.characters || [input.character])
+      === resolveCanonicalCharacterId(input.character.id, input.characters || [input.character])
     && relation.userIdentityId === input.phone.ownerIdentityId);
   const promotedMessages: Message[] = [];
   const sourceIdsByThreadId = new Map<string, string>();

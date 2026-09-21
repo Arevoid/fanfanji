@@ -1910,6 +1910,7 @@ export default function AppCharacterPhone({
         phone: advancedResult.phone,
         previousPhone: basePhone,
         character: selectedCharacter,
+        characters,
         relationships,
         mainMessages: messages,
         now,

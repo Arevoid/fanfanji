@@ -16,6 +16,7 @@ import { loadCharacterLifeRuntimeStore } from "../../core/storage/repositories/c
 import { loadCharacterEvents } from "../../core/storage/repositories/characterEventRepository";
 import { listCharacterScheduleByScope } from "../../core/storage/repositories/characterScheduleRepository";
 import { loadContinuityRuntimeStore } from "../../core/storage/repositories/continuityRuntimeRepository";
+import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 
 export type CharacterPhoneContextSourceKind = "character" | "worldbook" | "chat" | "moment" | "phone" | "relationship-network";
 
@@ -65,8 +66,11 @@ function isScopedPhoneMessage(
   characterId: string,
   relationIds: Set<string>,
   conversationIds: Set<string>,
+  characters: readonly Character[] = [],
 ): boolean {
-  if (message.characterId !== characterId || message.id.startsWith("phone-proactive-")) return false;
+  const canonicalCharacterId = resolveCanonicalCharacterId(characterId, characters);
+  if (resolveCanonicalCharacterId(message.characterId, characters) !== canonicalCharacterId
+    || message.id.startsWith("phone-proactive-")) return false;
   if (message.relationId) return relationIds.has(message.relationId);
   return Boolean(message.conversationId && conversationIds.has(message.conversationId));
 }
@@ -78,6 +82,7 @@ function isOwnedMoment(moment: Moment, ownerIdentityId: string): boolean {
 export function buildCharacterPhoneLifeContext(input: {
   phone: CharacterPhoneRecord;
   character: Character;
+  characters?: readonly Character[];
   activeIdentity?: UserIdentity;
   relationships: CharacterRelationship[];
   messages: Message[];
@@ -87,18 +92,20 @@ export function buildCharacterPhoneLifeContext(input: {
   identities?: UserIdentity[];
 }): CharacterPhoneLifeContext {
   const identities = input.identities ?? [];
+  const characters = input.characters ?? [input.character];
+  const canonicalCharacterId = resolveCanonicalCharacterId(input.character.id, characters);
   // The phone is still owned by the primary identity, but direct chats made
   // through one of its aliases are part of the same identity workspace. This
   // lets the role phone show evidence-backed alias conversations without
   // importing another user's data.
   const relationships = listRelationshipsForIdentityWorkspace(
-    input.relationships.filter((relation) => relation.characterId === input.character.id),
+    input.relationships.filter((relation) => resolveCanonicalCharacterId(relation.characterId, characters) === canonicalCharacterId),
     input.phone.ownerIdentityId,
     identities,
   );
   const ownerRelationships = input.relationships.filter((relation) =>
     relation.userIdentityId === input.phone.ownerIdentityId
-      && relation.characterId === input.character.id,
+      && resolveCanonicalCharacterId(relation.characterId, characters) === canonicalCharacterId,
   );
   const relationIds = relationships.map((relation) => relation.id);
   const conversationIds = relationships.map((relation) => relation.conversationId).filter(Boolean);
@@ -114,7 +121,7 @@ export function buildCharacterPhoneLifeContext(input: {
     relationIds: ownerRelationships.map((relation) => relation.id),
   });
   const messages = input.messages
-    .filter((message) => isScopedPhoneMessage(message, input.character.id, relationIdSet, conversationIdSet))
+    .filter((message) => isScopedPhoneMessage(message, input.character.id, relationIdSet, conversationIdSet, characters))
     .sort((left, right) => left.timestamp - right.timestamp);
   const moments = input.moments
     .filter((moment) => isOwnedMoment(moment, input.phone.ownerIdentityId))

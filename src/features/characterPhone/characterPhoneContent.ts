@@ -150,8 +150,9 @@ function isCurrentUserMessage(
   message: Message,
   characterId: string,
   relations: CharacterRelationship[],
+  characters: readonly Character[] = [],
 ): boolean {
-  if (message.characterId !== characterId) return false;
+  if (resolveCanonicalCharacterId(message.characterId, characters) !== resolveCanonicalCharacterId(characterId, characters)) return false;
   const relationIds = new Set(relations.map((relation) => relation.id));
   if (message.relationId) return relationIds.has(message.relationId);
   const conversationIds = new Set(relations.map((relation) => relation.conversationId).filter(Boolean));
@@ -489,9 +490,10 @@ function syncUserChat(
   userContacts: CharacterPhoneContact[],
   messages: Message[],
   relations: CharacterRelationship[],
+  characters: readonly Character[] = [],
 ): { threadMessages: CharacterPhoneThreadMessage[]; lastMessageId?: string } {
   const sourceMessages = [...new Map(messages
-    .filter((message) => isCurrentUserMessage(message, character.id, relations))
+    .filter((message) => isCurrentUserMessage(message, character.id, relations, characters))
     // Phone-generated notifications are persisted in the main chat for
     // awareness reactions, but they are not part of the user's real thread
     // mirror and must not be copied back as ordinary chat history.
@@ -1016,6 +1018,7 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
   const lifeContext = buildCharacterPhoneLifeContext({
     phone: sourcePhone,
     character: input.character,
+    characters: input.characters,
     activeIdentity: input.activeIdentity,
     relationships: input.relationships,
     messages: input.messages,
@@ -1037,7 +1040,7 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
   const syncedContacts = syncContacts(scopedInput);
   const contacts = syncedContacts.contacts;
   const userContacts = contacts.filter((contact) => isUserPhoneContact(contact) && !contact.historyOnly);
-  const chat = syncUserChat({ ...sourcePhone, threadMessages: syncedContacts.threadMessages }, input.character, userContacts, lifeContext.messages, lifeContext.relationships);
+  const chat = syncUserChat({ ...sourcePhone, threadMessages: syncedContacts.threadMessages }, input.character, userContacts, lifeContext.messages, lifeContext.relationships, input.characters);
   // During first-life initialization the generator owns the conversation
   // history. Do not seed every contact with the same generic one-line opener;
   // that makes every chat look identical and leaves no character reply.

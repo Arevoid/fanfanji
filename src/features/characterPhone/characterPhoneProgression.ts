@@ -29,6 +29,7 @@ import { ensureCharacterPhoneContent, hasCompleteCharacterPhoneContactThread } f
 import { buildCharacterPhoneBrowserDetail } from "./characterPhoneBrowserDetails";
 import { buildCharacterPhoneLifeContext, type CharacterPhoneLifeContext } from "./characterPhoneLifeContext";
 import { listCharacterPhoneRelationshipNetworkContacts } from "./characterPhoneRelationshipNetwork";
+import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 import { createCharacterPhoneTextImageDataUrl } from "./characterPhoneTextImage";
 import { createCharacterPhoneInitialAvatar, normalizeCharacterPhoneContactName } from "./characterPhoneContactVisuals";
 import {
@@ -305,6 +306,7 @@ function collectTextImageEvidence(lifeContext: CharacterPhoneLifeContext): Chara
 function buildRecentContext(input: {
   character: Character;
   phone: CharacterPhoneRecord;
+  characters?: Character[];
   activeIdentity?: UserIdentity;
   identities?: UserIdentity[];
   relationships: CharacterRelationship[];
@@ -924,7 +926,10 @@ export async function advanceCharacterPhoneWithResult(
       ? [createGeneratedUserContact(
           contextualPhone,
           input.activeIdentity,
-          relationships.find((relation) => relation.characterId === input.character.id && relation.userIdentityId === input.phone.ownerIdentityId),
+          relationships.find((relation) =>
+            resolveCanonicalCharacterId(relation.characterId, characters)
+              === resolveCanonicalCharacterId(input.character.id, characters)
+            && relation.userIdentityId === input.phone.ownerIdentityId),
         ), ...(contextualPhone.contacts ?? [])]
       : contextualPhone.contacts ?? [],
     threadMessages: contextualPhone.threadMessages ?? [],
@@ -944,6 +949,7 @@ export async function advanceCharacterPhoneWithResult(
   const context = buildRecentContext({
     character: input.character,
     phone: base,
+    characters,
     activeIdentity: input.activeIdentity,
     identities: input.identities,
     relationships,
@@ -956,6 +962,7 @@ export async function advanceCharacterPhoneWithResult(
   const lifeContext = buildCharacterPhoneLifeContext({
     character: input.character,
     phone: base,
+    characters,
     activeIdentity: input.activeIdentity,
     identities: input.identities,
     relationships,
