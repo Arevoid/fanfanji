@@ -7,12 +7,14 @@ interface UseSettingsPresetActionsOptions {
   bubbleCss: string;
   globalCss: string;
   wallpaper: string;
+  themeTokens?: StylePreset["themeTokens"];
+  previewColors?: StylePreset["previewColors"];
   onSavePreset: (preset: StylePreset) => void;
 }
 
 /** Owns style preset creation while preserving the existing preset format. */
 export function useSettingsPresetActions({
-  newPresetName, setNewPresetName, bubbleCss, globalCss, wallpaper, onSavePreset,
+  newPresetName, setNewPresetName, bubbleCss, globalCss, wallpaper, themeTokens, previewColors, onSavePreset,
 }: UseSettingsPresetActionsOptions) {
   const handleSaveCurrentAsPreset = (event: FormEvent) => {
     event.preventDefault();
@@ -24,6 +26,8 @@ export function useSettingsPresetActions({
       globalCss,
       wallpaper,
       themeColor: "#3b82f6",
+      ...(themeTokens ? { themeTokens } : {}),
+      ...(previewColors?.length ? { previewColors } : {}),
     });
     setNewPresetName("");
   };

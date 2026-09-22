@@ -2,6 +2,7 @@
 @import "./styles/tokens.css";
 @import "./styles/theme-b1.css";
 @import "./styles/theme-b2.css";
+@import "./styles/theme-preset.css";
 
 .theme-memory-range {
   accent-color: var(--progress-value);

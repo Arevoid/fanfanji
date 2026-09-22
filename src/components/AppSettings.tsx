@@ -30,6 +30,7 @@ import { compressImagePreservingTransparency, isTransparencyPreservedImage } fro
 import { useTheme } from "../features/theme/ThemeProvider";
 import { type ThemeMode } from "../features/theme/theme";
 import { hasUserDesktopWallpaper } from "../features/theme/desktopBackground";
+import { resolveThemePreset, THIN_STRAWBERRY_PRESET } from "../features/theme/themePresetLibrary";
 import {
   DEFAULT_GLOBAL_FONT_SIZE,
   MAX_GLOBAL_FONT_SIZE,
@@ -115,7 +116,8 @@ const DEFAULT_PRESETS: StylePreset[] = [
 }`,
     wallpaper: "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)",
     themeColor: "#3b82f6"
-  }
+  },
+  THIN_STRAWBERRY_PRESET,
 ];
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
@@ -549,12 +551,16 @@ export default function AppSettings({
     onIconStatusChange: setIconUploadMessage,
   });
 
+  const activeThemePreset = resolveThemePreset(settings.activePreset, presets);
+
   const { handleSaveCurrentAsPreset } = useSettingsPresetActions({
     newPresetName,
     setNewPresetName,
     bubbleCss,
     globalCss,
     wallpaper,
+    themeTokens: activeThemePreset?.themeTokens,
+    previewColors: activeThemePreset?.previewColors,
     onSavePreset,
   });
   const { applyPreset } = useSettingsApplyPresetAction({
@@ -2283,7 +2289,7 @@ export default function AppSettings({
                   <div className="bg-[var(--surface)] p-5 rounded-[24px] border border-[var(--border)] shadow-sm space-y-3">
                     <div>
                       <span className="text-xs font-bold text-[var(--text-primary)]">显示主题</span>
-                      <p className="mt-1 text-[10px] text-[var(--text-secondary)]">主题为全局设置，不会覆盖壁纸、Dock、图标或聊天气泡的自定义颜色。</p>
+                      <p className="mt-1 text-[10px] text-[var(--text-secondary)]">主题预设会统一调整背景、卡片、边框、文字、重点色和按钮；壁纸、Dock、图标与聊天气泡等用户自定义样式仍保持优先。</p>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
                       {(["light", "dark", "system"] as ThemeMode[]).map((mode) => {
@@ -2299,8 +2305,11 @@ export default function AppSettings({
                     </div>
                   </div>
                   {/* 保存预设 */}
-                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
-                    <span className="text-xs font-bold text-slate-700">保存当前样式为新预设</span>
+                  <div className="bg-[var(--surface)] p-5 rounded-[24px] border border-[var(--border)] shadow-sm space-y-4">
+                    <div>
+                      <span className="text-xs font-bold text-[var(--text-primary)]">保存当前样式为新预设</span>
+                      <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">当前已选主题色板会一起保存，之后可在模板库中恢复。</p>
+                    </div>
                     <form onSubmit={handleSaveCurrentAsPreset} className="flex gap-2">
                       <input
                         type="text"
@@ -2308,11 +2317,11 @@ export default function AppSettings({
                         value={newPresetName}
                         onChange={(e) => setNewPresetName(e.target.value)}
                         placeholder="请输入预设名称..."
-                        className="flex-1 bg-slate-50 rounded-[8px] px-4 py-2 text-xs text-slate-800 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
+                        className="flex-1 bg-[var(--input-bg)] rounded-[8px] px-4 py-2 text-xs text-[var(--text-primary)] border border-[var(--border)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
                       />
                       <button
                         type="submit"
-                        className="px-4 py-2 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[24px] text-xs transition-colors flex items-center gap-1 shrink-0 shadow-sm"
+                        className="px-4 py-2 bg-[var(--button-primary-bg)] hover:bg-[var(--button-primary-hover-bg)] text-[var(--button-primary-text)] font-bold rounded-[24px] text-xs transition-colors flex items-center gap-1 shrink-0 shadow-sm"
                       >
                         <Save className="w-3.5 h-3.5" />
                         <span>保存</span>
@@ -2321,11 +2330,14 @@ export default function AppSettings({
                   </div>
 
                   {/* 切换视觉预设 */}
-                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <span className="text-xs font-bold text-slate-700 block">预设模板库</span>
+                  <div className="bg-[var(--surface)] p-5 rounded-[24px] border border-[var(--border)] shadow-sm space-y-3">
+                    <div>
+                      <span className="text-xs font-bold text-[var(--text-primary)] block">预设模板库</span>
+                      <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">选择模板后会立即应用整套界面配色；自定义模板会保留你保存时的色板。</p>
+                    </div>
                     <div className="space-y-2">
                       {activePresetsList.map((preset) => {
-                        const isActive = settings.activePreset === preset.name || 
+                        const isActive = settings.activePreset === preset.id || settings.activePreset === preset.name ||
                                          (preset.id === "p-classic" && !settings.activePreset);
                         return (
                           <div
@@ -2340,8 +2352,15 @@ export default function AppSettings({
                               onClick={() => applyPreset(preset)}
                               className="flex-1 text-left font-bold text-xs flex items-center gap-2"
                             >
-                              <div className="w-4 h-4 rounded-full border border-slate-200 shadow-sm shrink-0" style={{ background: preset.wallpaper }} />
-                              <span className="text-[11px] text-[#52525b]">{preset.name}</span>
+                              <div className="flex items-center gap-0.5 shrink-0" aria-label={`${preset.name} 配色预览`}>
+                                {(preset.previewColors?.length ? preset.previewColors : [preset.wallpaper]).slice(0, 4).map((color, index) => (
+                                  <span key={`${preset.id}-swatch-${index}`} className="w-3.5 h-3.5 rounded-full border border-black/5 shadow-sm" style={{ background: color }} />
+                                ))}
+                              </div>
+                              <span className="min-w-0">
+                                <span className="block text-[11px] text-[var(--text-primary)]">{preset.name}</span>
+                                {preset.id === THIN_STRAWBERRY_PRESET.id && <span className="mt-0.5 block text-[9px] font-normal text-[var(--text-secondary)]">薄荷绿 · 草莓粉 · 奶油白 · 可可棕</span>}
+                              </span>
                               {isActive && <Check className="w-3.5 h-3.5 text-neutral-950 ml-1" />}
                             </button>
 

@@ -877,6 +877,17 @@ export interface StylePreset {
   globalCss: string;
   wallpaper: string;
   themeColor: string;
+  /** Optional semantic palette applied by the global theme preset runtime. */
+  themeTokens?: ThemeTokenSet;
+  /** Optional swatches shown in the preset library preview. */
+  previewColors?: string[];
+}
+
+export type ThemeTokenMap = Record<string, string>;
+
+export interface ThemeTokenSet {
+  light: ThemeTokenMap;
+  dark?: ThemeTokenMap;
 }
 
 export interface HomeScreenItem {

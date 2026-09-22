@@ -132,6 +132,7 @@ import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./feature
 import { persistDirectChatMemoryLongEvidenceArtifact } from "./features/chat/services/directChatMemoryLongEvidencePersistenceClient";
 import { resolveDesktopBackground } from "./features/theme/desktopBackground";
 import { useTheme } from "./features/theme/ThemeProvider";
+import { applyThemePresetToRoot, resolveThemePreset } from "./features/theme/themePresetLibrary";
 import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
@@ -805,6 +806,10 @@ export default function App() {
   const [momentsStorageReady, setMomentsStorageReady] = useState(false);
 
   const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets([]).value);
+
+  useEffect(() => {
+    applyThemePresetToRoot(resolveThemePreset(settings.activePreset, presets), resolvedTheme);
+  }, [presets, resolvedTheme, settings.activePreset]);
 
   const [tracks, setTracks] = useState<MusicTrack[]>(() => readArray<MusicTrack>("phone_music_tracks", []).value.map(normalizeMusicTrack));
   const tracksRef = useRef<MusicTrack[]>(tracks);
