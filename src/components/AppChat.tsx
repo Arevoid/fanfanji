@@ -36,7 +36,7 @@ import type { CharacterPhoneImageSaveInput } from "../domain/characterPhone/type
 import { runGroupChatReplyPipeline } from "../features/chat/services/groupChatReplyPipeline";
 import { scheduleGroupReplyDelivery } from "../features/chat/services/groupReplyDelivery";
 import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
-import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
+import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope, type DirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
 import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallMessage";
 import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
 import { completeVoiceCall } from "../features/chat/services/voiceCallCompletion";
@@ -125,7 +125,7 @@ import { createPostReplyCoordinator } from "../features/chat/controllers/postRep
 import { classifyDirectReplyError, createDirectReplyLifecycleOutcome, type DirectReplyLifecycleInput, type DirectReplyLifecycleOutcome, type DirectReplyLifecyclePhase } from "../features/chat/contracts/directReplyLifecycle";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
-import { useChatAttachmentState } from "../features/chat/hooks/useChatAttachmentState";
+import { useChatAttachmentState, type ChatCallMode } from "../features/chat/hooks/useChatAttachmentState";
 import { useInnerVoice } from "../features/chat/hooks/useInnerVoice";
 import { useChatAppointment } from "../features/chat/hooks/useChatAppointment";
 import { useChatStickerState } from "../features/chat/hooks/useChatStickerState";
@@ -222,6 +222,8 @@ import { scrollContainerToBottom } from "../features/viewport/scrollContainer";
 import { RedPacketCard } from "../features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../features/chat/components/SpecialMessage/TransferCard";
 import { LocationCard } from "../features/chat/components/SpecialMessage/LocationCard";
+import { VideoCallView } from "../features/chat/components/VideoCallView";
+import { createVideoCallInputMarkup } from "../features/chat/services/videoCallProtocol";
 import { MomentsApp } from "../features/moments/MomentsApp";
 import { calculateCharacterMomentOccurredAt, requestCharacterMomentOnce } from "../features/moments/services/momentGenerator";
 import { requestAutomaticMomentComment } from "../features/moments/services/momentCommentService";
@@ -311,6 +313,7 @@ import {
   Camera,
   Music,
   Phone,
+  Video,
   FileText,
   MapPin,
   Gift,
@@ -1383,7 +1386,9 @@ export default function AppChat({
     showAttachPanel, setShowAttachPanel, activeAttachModal, setActiveAttachModal,
     voiceText, setVoiceText, callingStatus, setCallingStatus, callingDuration, setCallingDuration,
     isIncomingCall, setIsIncomingCall, setCallStartTime, callingInputText, setCallingInputText,
-    callTranscript, setCallTranscript, voiceCallRelationId, setVoiceCallRelationId, callTranscriptEndRef,
+    callMode, setCallMode, videoCallInputMode, setVideoCallInputMode,
+    callTranscript, setCallTranscript, videoCallScene, setVideoCallScene, videoCallSelfScene, setVideoCallSelfScene,
+    videoCallSceneHistory, setVideoCallSceneHistory, voiceCallRelationId, setVoiceCallRelationId, callTranscriptEndRef,
     callRecordDetail, setCallRecordDetail, redPacketAmount, setRedPacketAmount,
     redPacketGreeting, setRedPacketGreeting, redPacketMode, setRedPacketMode, redPacketCount, setRedPacketCount,
     redPacketRecipientId, setRedPacketRecipientId, showRedPacketOpenModal, setShowRedPacketOpenModal,
@@ -1416,8 +1421,11 @@ export default function AppChat({
     activeDirectScope,
     activeAttachModal,
     callingStatus,
+    callMode,
     onSendMessageRaw,
     setCallTranscript,
+    setCallScene: setVideoCallScene,
+    setCallSceneHistory: setVideoCallSceneHistory,
     enqueueCallSpeech,
   });
   const { handleRemoveGroupMember, handleAddGroupMembers } = useChatGroupMemberActions({
@@ -1488,6 +1496,8 @@ export default function AppChat({
   const displayedTokenEstimate = isShowingLastChatRequestEstimate ? lastChatRequestEstimate! : estimatedTokens;
   // Memory Compression and Proactive Chat states
   const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
+  const videoCallOpeningRelationRef = useRef<string | null>(null);
+  const videoCallOpeningScopeRef = useRef<DirectVoiceCallScope | null>(null);
   // Stop background generation after an authentication failure so a missing
   // or invalid provider key cannot create a repeated request/logging loop.
   const backgroundGenerationBlockedRef = useRef(false);
@@ -1650,7 +1660,7 @@ export default function AppChat({
     setVoiceCallRelationId(null);
   }, [activeAttachModal, activeTtsAudio, activeVoiceCallScope?.relationId, voiceCallRelationId]);
 
-  const beginVoiceCall = (incoming: boolean) => {
+  const beginCall = (mode: ChatCallMode, incoming: boolean) => {
     if (!activeCharacter || activeCharacter.isGroupChat || !activeVoiceCallScope) return;
     clearCallSpeechQueue();
     resetCallTtsPlayback();
@@ -1661,10 +1671,23 @@ export default function AppChat({
     setCallingDuration(0);
     setCallStartTime(0);
     setCallingInputText("");
+    setCallMode(mode);
+    setVideoCallInputMode("speech");
+    // Seed the connected view immediately; the context-aware opening request
+    // below replaces this with the character's actual first scene when it
+    // arrives, so the user never sees an empty/waiting canvas after connect.
+    setVideoCallScene(mode === "video" ? "镜头刚刚接通，对方正在看向你…" : "");
+    setVideoCallSelfScene("");
+    setVideoCallSceneHistory([]);
     setCallTranscript([]);
     setActiveAttachModal("calling");
     setShowAttachPanel(false);
+    videoCallOpeningRelationRef.current = null;
+    videoCallOpeningScopeRef.current = activeVoiceCallScope;
   };
+
+  const beginVoiceCall = (incoming: boolean) => beginCall("voice", incoming);
+  const beginVideoCall = () => beginCall("video", false);
 
   const finishVoiceCall = (requestedStatus: VoiceCallStatus, options: { userEndedCall?: boolean } = {}) => {
     if (!activeChatCharId || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
@@ -1685,6 +1708,7 @@ export default function AppChat({
       authorIdentityId: !isIncomingCall ? activeIdentityId : undefined,
       authorNameSnapshot: !isIncomingCall ? activeIdentityName : undefined,
       authorAvatarSnapshot: !isIncomingCall ? activeIdentityAvatar : undefined,
+      callType: callMode === "video" ? "视频通话" : "语音通话",
       timestamp: Date.now(),
       incoming: isIncomingCall,
       userEndedCall: options.userEndedCall,
@@ -1726,8 +1750,11 @@ export default function AppChat({
 
   const sendVoiceCallMessage = () => {
     if (isTyping) return;
+    const videoCallInputMarkup = callMode === "video"
+      ? createVideoCallInputMarkup(callingInputText, videoCallInputMode)
+      : callingInputText;
     const userMsg = createVoiceCallUserMessage({
-      text: callingInputText,
+      text: videoCallInputMarkup,
       characterId: activeChatCharId,
       sessionRelationId: voiceCallRelationId,
       scope: activeVoiceCallScope,
@@ -1738,6 +1765,21 @@ export default function AppChat({
       authorAvatarSnapshot: activeIdentityAvatar,
     });
     if (!userMsg) return;
+    // Determine the input kind from the actual wire markup rather than only
+    // the captured UI state. This keeps scene descriptions out of subtitles
+    // even when an older HMR-rendered handler is still mounted.
+    const isVideoSceneInput = videoCallInputMarkup.startsWith("[视频画面]|");
+    if (isVideoSceneInput) setVideoCallSelfScene(callingInputText.trim());
+    // Keep spoken user turns visible immediately in the video overlay. Scene
+    // inputs are rendered in the self-preview ticker instead of this dialogue.
+    if (!isVideoSceneInput) setCallTranscript((previous) => previous.some((item) => item.id === userMsg.id)
+      ? previous
+      : [...previous, {
+        id: userMsg.id,
+        sender: "user",
+        content: userMsg.content,
+        timestamp: userMsg.timestamp,
+      }]);
     onSendMessage(userMsg);
     generateResponseForUserMessage(userMsg);
     setCallingInputText("");
@@ -2333,6 +2375,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         userText: currentMessageContextText,
         callTranscript,
       });
+      const voiceCallPromptBlocks = callMode === "video"
+        ? buildVoiceCallPrompts(callTopicShiftDetected, callMode)
+        : buildVoiceCallPrompts(callTopicShiftDetected);
       const shouldLoadLongTermMemory = !isConnectedVoiceCall || callTopicShiftDetected;
       const truthQueryText = [
         currentMessageContextText,
@@ -2558,7 +2603,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         characterKnowledgeBoundary: formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }),
         onlineChatSpatialBoundary: formatOnlineChatSpatialBoundary(),
         voiceCallPrompts: activeAttachModal === "calling"
-          ? buildVoiceCallPrompts(callTopicShiftDetected)
+          ? voiceCallPromptBlocks
           : undefined,
         stickerPrompt,
         extraInstructions: [
@@ -3184,6 +3229,48 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     customHistoryOverride?: Message[],
     signal?: AbortSignal,
   ) => chatReplyController.generate({ userMsg, customHistoryOverride, signal });
+
+  // A video call should not open onto an empty canvas. Once the outgoing call
+  // is connected, ask the character for a first scene/line using the same
+  // context-aware reply pipeline as later turns. The synthetic turn is kept
+  // internal to the call and is not written as an ordinary chat bubble.
+  useEffect(() => {
+    if (
+      activeAttachModal !== "calling"
+      || callMode !== "video"
+      || callingStatus !== "connected"
+      || !activeChatCharId
+      || !voiceCallRelationId
+    ) return;
+    if (videoCallOpeningRelationRef.current === voiceCallRelationId) return;
+    const openingScope = activeVoiceCallScope ?? videoCallOpeningScopeRef.current;
+    if (!openingScope) return;
+    videoCallOpeningRelationRef.current = voiceCallRelationId;
+    setVideoCallScene("视频刚刚接通，对方正在调整镜头…");
+    const openingMessage = createVoiceCallUserMessage({
+      text: "[视频画面]|视频通话刚接通，请根据当前聊天上下文、地点和你的人设，先描述你此刻愿意让我看到的画面，再自然说一句开场台词。",
+      characterId: activeChatCharId,
+      sessionRelationId: voiceCallRelationId,
+      scope: openingScope,
+      id: `video-call-opening-${Date.now()}`,
+      timestamp: Date.now(),
+      authorIdentityId: activeIdentityId,
+      authorNameSnapshot: activeIdentityName,
+      authorAvatarSnapshot: activeIdentityAvatar,
+    });
+    if (openingMessage) void generateResponseForUserMessage(openingMessage);
+  }, [
+    activeAttachModal,
+    activeChatCharId,
+    activeIdentityAvatar,
+    activeIdentityId,
+    activeIdentityName,
+    activeVoiceCallScope?.relationId,
+    callMode,
+    callingStatus,
+    generateResponseForUserMessage,
+    voiceCallRelationId,
+  ]);
 
   const sharedImageScopeKey = (context: ChatRuntimeContext) =>
     `${context.userIdentityId}:${context.characterId}:${context.relationId || context.conversationId || "group"}`;
@@ -8257,6 +8344,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
                 </button>
 
+                {/* 6. 视频 (Video) */}
+                <button
+                  type="button"
+                  onClick={beginVideoCall}
+                  className="chat-attachment-item chat-attachment-item--video flex-1 flex flex-col items-center justify-center group min-w-10"
+                >
+                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                    <ChatIcon src={getChatIcon("call")} className="w-4 h-4"><Video className="w-4 h-4 text-slate-700" /></ChatIcon>
+                  </div>
+                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">视频</span>
+                </button>
+
                 {/* 7. 位置 (Location) */}
                 <button
                   type="button"
@@ -8966,8 +9065,31 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             </div>
           )}
 
+          {/* Video Calling Screen Modal Overlay */}
+          {activeAttachModal === "calling" && callMode === "video" && activeCharacter && (
+            <VideoCallView
+              character={activeCharacter}
+              userName={activeIdentityName}
+              userAvatar={activeIdentityAvatar}
+              status={callingStatus}
+              duration={callingDuration}
+              isIncoming={isIncomingCall}
+              isTyping={isTyping}
+              inputText={callingInputText}
+              inputMode={videoCallInputMode}
+              transcript={callTranscript}
+              scene={videoCallScene}
+              selfScene={videoCallSelfScene}
+              sceneHistory={videoCallSceneHistory}
+              onInputTextChange={setCallingInputText}
+              onInputModeChange={setVideoCallInputMode}
+              onSend={sendVoiceCallMessage}
+              onEnd={endVoiceCall}
+            />
+          )}
+
           {/* Calling Screen Modal Overlay */}
-          {activeAttachModal === "calling" && (
+          {activeAttachModal === "calling" && callMode !== "video" && (
             <div className="absolute inset-0 bg-[#171514] z-50 flex flex-col justify-between p-6 animate-fade-in text-white text-center overflow-hidden">
               <div
                 className="absolute -inset-10 bg-cover bg-center blur-3xl scale-125 opacity-25"

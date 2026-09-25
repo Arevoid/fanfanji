@@ -11,6 +11,15 @@
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+@keyframes video-call-self-scene-marquee {
+  0%, 15% { transform: translateX(0); }
+  85%, 100% { transform: translateX(calc(-100% + 74px)); }
+}
+
+.video-call-self-scene-marquee {
+  animation: video-call-self-scene-marquee 8s linear 1 forwards;
+}
+
 @font-face {
   font-family: "RedPacketPayFont";
   src: url("./assets/fonts/Aidian-SignatureTi-Marker-pen-Medium.ttf") format("truetype");

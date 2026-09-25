@@ -2,8 +2,11 @@ import { useRef, useState } from "react";
 import type { Message } from "../../../types";
 import type { RedPacketMode } from "../../../types";
 import { parseCallRecord, type CallTranscriptItem } from "../services/messageParser";
+import type { VideoCallSceneEntry } from "../services/videoCallProtocol";
 
 export type ChatAttachmentModal = "redpacket" | "music" | "location" | "file" | "calling" | "voice" | null;
+export type ChatCallMode = "voice" | "video";
+export type VideoCallInputMode = "speech" | "scene";
 
 export function useChatAttachmentState() {
   const [showImageGenerator, setShowImageGenerator] = useState(false);
@@ -17,7 +20,12 @@ export function useChatAttachmentState() {
   const [isIncomingCall, setIsIncomingCall] = useState(false);
   const [, setCallStartTime] = useState(0);
   const [callingInputText, setCallingInputText] = useState("");
+  const [callMode, setCallMode] = useState<ChatCallMode>("voice");
+  const [videoCallInputMode, setVideoCallInputMode] = useState<VideoCallInputMode>("speech");
   const [callTranscript, setCallTranscript] = useState<CallTranscriptItem[]>([]);
+  const [videoCallScene, setVideoCallScene] = useState("");
+  const [videoCallSelfScene, setVideoCallSelfScene] = useState("");
+  const [videoCallSceneHistory, setVideoCallSceneHistory] = useState<VideoCallSceneEntry[]>([]);
   const [voiceCallRelationId, setVoiceCallRelationId] = useState<string | null>(null);
   const callTranscriptEndRef = useRef<HTMLDivElement | null>(null);
   const [callRecordDetail, setCallRecordDetail] = useState<ReturnType<typeof parseCallRecord> | null>(null);
@@ -44,7 +52,9 @@ export function useChatAttachmentState() {
     showAttachPanel, setShowAttachPanel, activeAttachModal, setActiveAttachModal,
     voiceText, setVoiceText, callingStatus, setCallingStatus, callingDuration, setCallingDuration,
     isIncomingCall, setIsIncomingCall, setCallStartTime, callingInputText, setCallingInputText,
-    callTranscript, setCallTranscript, voiceCallRelationId, setVoiceCallRelationId, callTranscriptEndRef,
+    callMode, setCallMode, videoCallInputMode, setVideoCallInputMode,
+    callTranscript, setCallTranscript, videoCallScene, setVideoCallScene, videoCallSelfScene, setVideoCallSelfScene,
+    videoCallSceneHistory, setVideoCallSceneHistory, voiceCallRelationId, setVoiceCallRelationId, callTranscriptEndRef,
     callRecordDetail, setCallRecordDetail, redPacketAmount, setRedPacketAmount,
     redPacketGreeting, setRedPacketGreeting, redPacketMode, setRedPacketMode, redPacketCount, setRedPacketCount,
     redPacketRecipientId, setRedPacketRecipientId, showRedPacketOpenModal, setShowRedPacketOpenModal,

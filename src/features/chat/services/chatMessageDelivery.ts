@@ -1,5 +1,6 @@
 import type { Character, Message, UserSettings } from "../../../types";
 import { getCallTranscriptText } from "./messageParser";
+import { getVideoCallDisplayText, parseVideoCallResponse } from "./videoCallProtocol";
 import { attachDirectScope, type DirectInteractionScope } from "../context/directInteractionScope";
 import { shouldQueueCallSpeech } from "../../voice/ttsConfig";
 
@@ -16,8 +17,11 @@ export interface ChatMessageDeliveryOptions {
   activeDirectScope: DirectInteractionScope | null | undefined;
   activeAttachModal: string | null;
   callingStatus: string | null;
+  callMode?: "voice" | "video";
   onSendMessageRaw: (message: Message) => void;
   setCallTranscript: (update: (previous: CallTranscriptEntry[]) => CallTranscriptEntry[]) => void;
+  setCallScene?: (scene: string) => void;
+  setCallSceneHistory?: (update: (previous: Array<{ id: string; content: string; timestamp: number }>) => Array<{ id: string; content: string; timestamp: number }>) => void;
   enqueueCallSpeech: (message: Message, revealSubtitle: () => void) => Promise<void>;
 }
 
@@ -61,17 +65,33 @@ export function createChatMessageDeliveryHandler(options: ChatMessageDeliveryOpt
     ) return;
 
     if (isCallActive) {
-      const subtitleContent = getCallTranscriptText(normalizedMessage.content);
+      const rawSubtitleContent = getCallTranscriptText(normalizedMessage.content);
+      // A user-provided camera description belongs in the self-preview ticker,
+      // not in the spoken dialogue transcript.
+      if (normalizedMessage.sender === "user" && normalizedMessage.content.startsWith("[视频画面]|")) return;
+      const parsedVideo = options.callMode === "video" && normalizedMessage.sender === "character"
+        ? parseVideoCallResponse(rawSubtitleContent)
+        : undefined;
+      if (parsedVideo?.scene) {
+        options.setCallScene?.(parsedVideo.scene);
+        options.setCallSceneHistory?.((previous) => previous.some((item) => item.id === normalizedMessage.id)
+          ? previous
+          : [...previous, { id: normalizedMessage.id, content: parsedVideo.scene!, timestamp: normalizedMessage.timestamp }]);
+      }
+      const subtitleContent = parsedVideo ? parsedVideo.speech : getVideoCallDisplayText(rawSubtitleContent);
+      if (!subtitleContent.trim()) return;
       let subtitleCommitted = false;
       const commitSubtitleOnce = () => {
         if (subtitleCommitted) return;
         subtitleCommitted = true;
-        options.setCallTranscript((previous) => [...previous, {
-          id: normalizedMessage.id,
-          sender: normalizedMessage.sender,
-          content: subtitleContent,
-          timestamp: normalizedMessage.timestamp,
-        }]);
+        options.setCallTranscript((previous) => previous.some((item) => item.id === normalizedMessage.id)
+          ? previous
+          : [...previous, {
+            id: normalizedMessage.id,
+            sender: normalizedMessage.sender,
+            content: subtitleContent,
+            timestamp: normalizedMessage.timestamp,
+          }]);
       };
 
       if (options.settings.enableMiniMaxTts && shouldQueueCallSpeech(normalizedMessage.sender, subtitleContent)) {

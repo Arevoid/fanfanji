@@ -223,8 +223,12 @@ export function getChatMessageVisualType(content: string): ChatMessageVisualType
   return "text";
 }
 
-export const getCallTranscriptText = (content: string): string =>
-  content.startsWith("[语音]|") ? content.split("|").slice(2).join("|") : content;
+export const getCallTranscriptText = (content: string): string => {
+  if (content.startsWith("[语音]|")) return content.split("|").slice(2).join("|");
+  if (content.startsWith("[视频说话]|")) return content.slice("[视频说话]|".length).trim();
+  if (content.startsWith("[视频画面]|")) return `画面：${content.slice("[视频画面]|".length).trim()}`;
+  return content;
+};
 
 const CALL_STATUSES = new Set<VoiceCallStatus>(["completed", "rejected", "cancelled"]);
 const CALL_DIRECTIONS = new Set<VoiceCallDirection>(["incoming", "outgoing"]);
