@@ -1706,7 +1706,7 @@ export default function AppForum({
       {!activeThread && !activeStoryId && !readonlySnapshot && !secondaryPage && (
         <nav className="flex shrink-0 border-t border-slate-100 bg-white pb-[max(8px,env(safe-area-inset-bottom))] pt-2" aria-label="论坛导航">
           <button type="button" onClick={() => setRootTab("home")} className={`flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "home" ? "text-neutral-950" : "text-slate-400"}`}><MessageCircle className="h-5 w-5" />首页</button>
-          <button type="button" onClick={() => { setRootTab("home"); setShowComposer(true); }} className="flex flex-1 flex-col items-center gap-1 text-[10px] text-slate-400" aria-label="发布"><span className="-mt-5 flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg"><Plus className="h-5 w-5" /></span><span>发布</span></button>
+          <button type="button" onClick={() => { setRootTab("home"); setShowComposer(true); }} className="flex flex-1 flex-col items-center gap-1 text-[10px] text-slate-400" aria-label="发布"><span className="-mt-5 flex h-10 w-10 items-center justify-center rounded-full bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] shadow-lg"><Plus className="h-5 w-5" /></span><span>发布</span></button>
           <button type="button" onClick={() => setRootTab("mine")} className={`flex flex-1 flex-col items-center gap-1 text-[10px] ${rootTab === "mine" ? "text-neutral-950" : "text-slate-400"}`}><User className="h-5 w-5" />我的</button>
         </nav>
       )}

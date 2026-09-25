@@ -3,15 +3,23 @@ import { Wifi, Battery, Signal } from "lucide-react";
 import type { ResolvedTheme } from "../features/theme/theme";
 
 interface StatusBarProps {
-  wallpaper?: string;
-  hasUserWallpaper?: boolean;
-  fallbackTheme: ResolvedTheme;
   hideStatusBar?: boolean;
+  /** App pages use the themed navigation surface; the desktop overlays its wallpaper. */
+  mode?: "app" | "desktop";
+  wallpaper?: string | null;
+  hasUserWallpaper?: boolean;
+  fallbackTheme?: ResolvedTheme;
 }
 
-export default function StatusBar({ wallpaper, hasUserWallpaper = false, fallbackTheme, hideStatusBar = false }: StatusBarProps) {
+export default function StatusBar({
+  hideStatusBar = false,
+  mode = "app",
+  wallpaper,
+  hasUserWallpaper = false,
+  fallbackTheme = "light",
+}: StatusBarProps) {
   const [time, setTime] = useState("");
-  const [isDark, setIsDark] = useState(false);
+  const [isDarkWallpaper, setIsDarkWallpaper] = useState(fallbackTheme === "dark");
 
   useEffect(() => {
     const updateClock = () => {
@@ -26,74 +34,67 @@ export default function StatusBar({ wallpaper, hasUserWallpaper = false, fallbac
   }, []);
 
   useEffect(() => {
-    if (!wallpaper || !hasUserWallpaper) {
-      setIsDark(fallbackTheme === "dark");
+    if (mode !== "desktop" || !hasUserWallpaper || !wallpaper) {
+      setIsDarkWallpaper(fallbackTheme === "dark");
       return;
     }
 
-    // 1. Check for linear-gradient backgrounds
+    // Gradients are used by the built-in wallpapers and can be inspected without
+    // loading an image. Averaging all stops avoids choosing a text color from one
+    // unusually bright/dark corner of the desktop.
     if (wallpaper.startsWith("linear-gradient")) {
       const hexes = wallpaper.match(/#[0-9a-fA-F]{3,8}/g);
-      if (hexes && hexes.length > 0) {
-        let totalLuminance = 0;
-        hexes.forEach(hex => {
-          let h = hex.substring(1);
-          if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-          const r = parseInt(h.substring(0, 2), 16);
-          const g = parseInt(h.substring(2, 4), 16);
-          const b = parseInt(h.substring(4, 6), 16);
-          if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
-            totalLuminance += (r * 0.299 + g * 0.587 + b * 0.114);
-          }
-        });
-        setIsDark((totalLuminance / hexes.length) < 140);
+      if (hexes?.length) {
+        const luminance = hexes.reduce((total, hex) => {
+          let value = hex.slice(1);
+          if (value.length === 3) value = value.split("").map((part) => part + part).join("");
+          const r = Number.parseInt(value.slice(0, 2), 16);
+          const g = Number.parseInt(value.slice(2, 4), 16);
+          const b = Number.parseInt(value.slice(4, 6), 16);
+          return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)
+            ? total + r * 0.299 + g * 0.587 + b * 0.114
+            : total;
+        }, 0) / hexes.length;
+        setIsDarkWallpaper(luminance < 140);
         return;
       }
     }
 
-    // 2. Check for image URLs
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = wallpaper;
-    img.onload = () => {
+    // User image wallpapers may be cross-origin. Use the sampled pixel when
+    // available and fall back to the resolved theme if the browser blocks it.
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.src = wallpaper;
+    image.onload = () => {
       try {
         const canvas = document.createElement("canvas");
         canvas.width = 1;
         canvas.height = 1;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, 1, 1);
-          const data = ctx.getImageData(0, 0, 1, 1).data;
-          const r = data[0];
-          const g = data[1];
-          const b = data[2];
-          const brightness = r * 0.299 + g * 0.587 + b * 0.114;
-          // If average brightness is below 140, treat as a dark background
-          setIsDark(brightness < 140);
-        }
-      } catch (e) {
-        // Fallback for canvas error
-        const lower = wallpaper.toLowerCase();
-        setIsDark(lower.includes("dark") || lower.includes("night") || lower.includes("black") || lower.includes("charcoal"));
+        const context = canvas.getContext("2d");
+        if (!context) return;
+        context.drawImage(image, 0, 0, 1, 1);
+        const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+        setIsDarkWallpaper(r * 0.299 + g * 0.587 + b * 0.114 < 140);
+      } catch {
+        setIsDarkWallpaper(fallbackTheme === "dark");
       }
     };
-    img.onerror = () => {
-      // Fallback for image load/CORS error
-      const lower = wallpaper.toLowerCase();
-      setIsDark(lower.includes("dark") || lower.includes("night") || lower.includes("black") || lower.includes("charcoal"));
-    };
-  }, [fallbackTheme, hasUserWallpaper, wallpaper]);
+    image.onerror = () => setIsDarkWallpaper(fallbackTheme === "dark");
+  }, [fallbackTheme, hasUserWallpaper, mode, wallpaper]);
 
   if (hideStatusBar) return null;
 
   return (
     <div 
-      className={`absolute top-0 left-0 right-0 z-50 flex justify-between items-center px-6 pb-[7px] text-xs font-semibold select-none transition-all duration-300 bg-transparent border-none shadow-none pointer-events-none ${
-        isDark ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" : "text-gray-800"
+      className={`absolute top-0 left-0 right-0 z-50 flex justify-between items-center px-6 pb-[7px] text-xs font-semibold select-none transition-all duration-300 border-none shadow-none pointer-events-none ${
+        mode === "desktop" && isDarkWallpaper ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" : ""
       }`}
       style={{
         paddingTop: "calc(env(safe-area-inset-top, 0px) + 11px)",
-        backgroundColor: hasUserWallpaper ? "transparent" : "var(--status-bar-bg)",
+        backgroundColor: mode === "desktop" ? "transparent" : "var(--nav-bg)",
+        color: mode === "desktop"
+          ? (isDarkWallpaper ? "#fff" : "var(--desktop-default-text)")
+          : "var(--nav-text)",
       }}
     >
       <div className="flex items-center space-x-1.5 pointer-events-auto">

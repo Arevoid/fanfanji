@@ -758,14 +758,14 @@ export default function AppArchives({
                 <button
                   type="button"
                   onClick={() => setInitialChatMode("greeting")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border ${initialChatMode === "greeting" ? "bg-neutral-900 text-white border-neutral-900" : "bg-white text-slate-500 border-slate-200"}`}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border ${initialChatMode === "greeting" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] border-[var(--button-primary-bg)]" : "bg-[var(--surface)] text-[var(--text-secondary)] border-[var(--border)]"}`}
                 >
                   开场白语言
                 </button>
                 <button
                   type="button"
                   onClick={() => setInitialChatMode("context")}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border ${initialChatMode === "context" ? "bg-neutral-900 text-white border-neutral-900" : "bg-white text-slate-500 border-slate-200"}`}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border ${initialChatMode === "context" ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)] border-[var(--button-primary-bg)]" : "bg-[var(--surface)] text-[var(--text-secondary)] border-[var(--border)]"}`}
                 >
                   场景 / 关系
                 </button>

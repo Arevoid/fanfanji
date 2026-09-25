@@ -5390,21 +5390,19 @@ export default function App() {
 
           {/* Real-time Status Bar (Wi-Fi, Battery, Cellular) - Overlaid absolutely on top of everything */}
           {(() => {
-            const activeChar = characters.find(c => c.id === activeChatCharId);
+            if (activeApp === "character-phone") return null;
             const desktopBackground = resolveDesktopBackground({
               resolvedTheme,
               wallpaper: settings.wallpaper,
               wallpaperSource: settings.wallpaperSource,
             });
-            const activeWallpaper = (activeApp === "chat" && activeChar && activeChar.chatBg)
-              ? activeChar.chatBg
-              : (desktopBackground.hasUserWallpaper ? settings.wallpaper : undefined);
-            if (activeApp === "character-phone") return null;
+            const isDesktop = activeApp === null;
             return <StatusBar
-              wallpaper={activeWallpaper}
-              hasUserWallpaper={Boolean(activeWallpaper)}
-              fallbackTheme={resolvedTheme}
               hideStatusBar={settings.hideStatusBar}
+              mode={isDesktop ? "desktop" : "app"}
+              wallpaper={isDesktop ? settings.wallpaper : undefined}
+              hasUserWallpaper={isDesktop && desktopBackground.hasUserWallpaper}
+              fallbackTheme={resolvedTheme}
             />;
           })()}
         </div>

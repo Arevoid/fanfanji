@@ -26,10 +26,14 @@ applyThemePresetToRoot(THIN_STRAWBERRY_PRESET, "light", root);
 assert.equal(root.dataset.themePreset, THIN_STRAWBERRY_PRESET_ID);
 assert.equal(rootVars.get("--app-bg"), "#f8f4e8");
 assert.equal(rootVars.get("--accent"), "#c98288");
+assert.equal(rootVars.get("--nav-bg"), "#f8f4e8");
+assert.equal(rootVars.get("--nav-text"), "#775c56");
 
 applyThemePresetToRoot(THIN_STRAWBERRY_PRESET, "dark", root);
 assert.equal(rootVars.get("--app-bg"), "#2d2524");
 assert.equal(rootVars.get("--accent"), "#ffb7bb");
+assert.equal(rootVars.get("--nav-bg"), "#2d2524");
+assert.equal(rootVars.get("--nav-text"), "#fff3e8");
 
 applyThemePresetToRoot(undefined, "light", root);
 assert.equal(root.dataset.themePreset, undefined);

@@ -62,6 +62,8 @@
   --progress-track: #d6d6da;
   --progress-value: #3478f6;
   --status-bar-bg: #f7f7f5;
+  --nav-bg: var(--app-bg);
+  --nav-text: var(--text-primary);
   --desktop-default-bg: #f7f7f5;
   --desktop-default-text: #1d1d1f;
   --scrollbar-thumb: #c5c5c7;
@@ -184,6 +186,8 @@
   --progress-track: #4a4a50;
   --progress-value: #81adff;
   --status-bar-bg: #171719;
+  --nav-bg: var(--app-bg);
+  --nav-text: var(--text-primary);
   --desktop-default-bg: #171719;
   --desktop-default-text: #f3f3f5;
   --scrollbar-thumb: #55555d;
