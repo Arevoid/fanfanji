@@ -7,3 +7,5 @@ coverage/
 *.log
 .env*
 !.env.example
+# Local-only MCP service checkouts and virtual environments.
+work/

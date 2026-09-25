@@ -13,7 +13,7 @@ function scopedServers(scope?: McpRequestScope): McpServerConfig[] {
   // Scope is intentionally accepted now so future server policies can be
   // identity-bound without changing the chat controller contract.
   void scope;
-  return loadMcpServers().filter((server) => server.enabled && server.discoveredTools.some((tool) => tool.enabled && tool.readOnly));
+  return loadMcpServers().filter((server) => server.enabled && server.connectionStatus === "connected" && server.discoveredTools.some((tool) => tool.enabled && tool.readOnly));
 }
 
 function buildToolInstruction(servers: McpServerConfig[]): string {

@@ -3,6 +3,7 @@ import type { McpDiscoveredTool, McpServerConfig, McpToolRequest, McpToolResult 
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 const MAX_RESULT_CHARS = 12_000;
 const MAX_RESPONSE_BYTES = 1_500_000;
+const MCP_REQUEST_TIMEOUT_MS = 15_000;
 const sessionTokens = new Map<string, string>();
 
 /** Tokens are intentionally memory-only and are never written to localStorage. */
@@ -66,29 +67,64 @@ async function initialize(server: McpServerConfig, signal?: AbortSignal): Promis
   return { sessionId: result.sessionId };
 }
 
+function requestSignal(signal?: AbortSignal): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error("MCP 请求超时。")), MCP_REQUEST_TIMEOUT_MS);
+  const forwardAbort = () => controller.abort(signal?.reason);
+  if (signal) {
+    if (signal.aborted) forwardAbort();
+    else signal.addEventListener("abort", forwardAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", forwardAbort);
+    },
+  };
+}
+
 export async function discoverMcpTools(server: McpServerConfig, signal?: AbortSignal): Promise<McpDiscoveredTool[]> {
   if (!server.enabled) throw new Error("MCP 服务已停用。");
-  const session = await initialize(server, signal);
-  const result = await fetchResponse(assertUrl(server.url), { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, { directFetch: server.directFetch, serverId: server.id, sessionId: session.sessionId, signal });
-  const rawTools = (result.payload.result as Record<string, unknown> | undefined)?.tools;
-  if (!Array.isArray(rawTools)) return [];
-  return rawTools.slice(0, 100).flatMap((tool): McpDiscoveredTool[] => {
-    if (!tool || typeof tool !== "object" || Array.isArray(tool)) return [];
-    const item = tool as Record<string, unknown>;
-    if (typeof item.name !== "string" || !item.name.trim()) return [];
-    // MCP has no universal read-only flag. Servers may opt in using the
-    // conventional annotations.readOnlyHint; unknown tools stay disabled.
-    const annotations = item.annotations && typeof item.annotations === "object" ? item.annotations as Record<string, unknown> : {};
-    const readOnly = annotations.readOnlyHint === true || annotations.readOnly === true;
-    return [{ name: item.name.trim(), description: typeof item.description === "string" ? item.description.slice(0, 1000) : undefined, inputSchema: item.inputSchema && typeof item.inputSchema === "object" ? item.inputSchema as Record<string, unknown> : undefined, readOnly, enabled: readOnly }];
-  });
+  const timed = requestSignal(signal);
+  try {
+    const session = await initialize(server, timed.signal);
+    const result = await fetchResponse(assertUrl(server.url), { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, { directFetch: server.directFetch, serverId: server.id, sessionId: session.sessionId, signal: timed.signal });
+    const rawTools = (result.payload.result as Record<string, unknown> | undefined)?.tools;
+    if (!Array.isArray(rawTools)) return [];
+    return rawTools.slice(0, 100).flatMap((tool): McpDiscoveredTool[] => {
+      if (!tool || typeof tool !== "object" || Array.isArray(tool)) return [];
+      const item = tool as Record<string, unknown>;
+      if (typeof item.name !== "string" || !item.name.trim()) return [];
+      // MCP has no universal read-only flag. Servers may opt in using the
+      // conventional annotations.readOnlyHint; unknown tools stay disabled.
+      const annotations = item.annotations && typeof item.annotations === "object" ? item.annotations as Record<string, unknown> : {};
+      const readOnly = annotations.readOnlyHint === true || annotations.readOnly === true;
+      return [{ name: item.name.trim(), description: typeof item.description === "string" ? item.description.slice(0, 1000) : undefined, inputSchema: item.inputSchema && typeof item.inputSchema === "object" ? item.inputSchema as Record<string, unknown> : undefined, readOnly, enabled: readOnly }];
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw new Error("MCP 连接超时（15 秒）。");
+    throw error;
+  } finally {
+    timed.dispose();
+  }
 }
 
 export async function callMcpTool(server: McpServerConfig, request: McpToolRequest, signal?: AbortSignal): Promise<McpToolResult> {
+  if (server.connectionStatus !== "connected") throw new Error("该 MCP 尚未通过实时连接验证，请先重新发现只读工具。");
   const tool = server.discoveredTools.find((item) => item.name === request.toolName && item.enabled && item.readOnly);
   if (!tool) throw new Error("该 MCP 工具未被允许（仅支持已确认的只读工具）。");
-  const session = await initialize(server, signal);
-  const result = await fetchResponse(assertUrl(server.url), { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: request.toolName, arguments: request.arguments || {} } }, { directFetch: server.directFetch, serverId: server.id, sessionId: session.sessionId, signal });
+  const timed = requestSignal(signal);
+  let result: { payload: Record<string, unknown>; sessionId?: string };
+  try {
+    const session = await initialize(server, timed.signal);
+    result = await fetchResponse(assertUrl(server.url), { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: request.toolName, arguments: request.arguments || {} } }, { directFetch: server.directFetch, serverId: server.id, sessionId: session.sessionId, signal: timed.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw new Error("MCP 调用超时（15 秒）。");
+    throw error;
+  } finally {
+    timed.dispose();
+  }
   const raw = (result.payload.result || {}) as Record<string, unknown>;
   const content = Array.isArray(raw.content) ? raw.content.slice(0, 100).flatMap((entry): McpToolResult["content"] => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];

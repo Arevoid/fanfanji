@@ -5,7 +5,7 @@ import { createMcpAwareRequestAi } from "../src/features/mcp/mcpChatRuntime";
 class MemoryStorage { private readonly values = new Map<string, string>(); getItem(key: string) { return this.values.get(key) ?? null; } setItem(key: string, value: string) { this.values.set(key, value); } removeItem(key: string) { this.values.delete(key); } }
 const localStorage = new MemoryStorage();
 Object.defineProperty(globalThis, "window", { configurable: true, value: { localStorage } });
-const server = { id: "demo", name: "Demo", url: "https://mcp.example.test/mcp", enabled: true, directFetch: true, readOnlyOnly: true as const, discoveredTools: [{ name: "lookup", description: "read", inputSchema: { type: "object" }, readOnly: true, enabled: true }], updatedAt: Date.now() };
+const server = { id: "demo", name: "Demo", url: "https://mcp.example.test/mcp", enabled: true, directFetch: true, readOnlyOnly: true as const, discoveredTools: [{ name: "lookup", description: "read", inputSchema: { type: "object" }, readOnly: true, enabled: true }], connectionStatus: "connected" as const, updatedAt: Date.now() };
 saveMcpServers([server]);
 const previousFetch = globalThis.fetch;
 globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {

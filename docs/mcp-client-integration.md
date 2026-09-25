@@ -29,6 +29,14 @@
 
 ## 预置研究服务
 
-设置页首次进入 MCP 且本机尚无 MCP 配置时，会一次性预置「联网」，地址为 `https://mcp.exa.ai/mcp`，默认启用 `web_search_exa` 与 `web_fetch_exa` 两个只读工具。Exa 官方说明该 MCP URL 可直接连接且无需先填写 API Key；实际使用仍受其服务限流与条款约束。用户删除配置后不会自动恢复，除非同时清除 MCP 数据并再次进入设置。
+设置页首次进入 MCP 且本机尚无 MCP 配置时，会一次性预置「联网」，地址为 `https://mcp.exa.ai/mcp`。工具列表必须经过实时 `initialize` 与 `tools/list` 后才会显示为可用；旧版本留下的工具元数据会标为“待验证”，不会直接参与聊天调用。Exa 官方说明该 MCP URL 可直接连接且无需先填写 API Key；实际使用仍受其服务限流与条款约束。用户删除配置后不会自动恢复，除非同时清除 MCP 数据并再次进入设置。
 
-若本机已有「联网」配置，设置页会自动把旧显示名 `Research MCP · 联网研究 MCP` 迁移为「联网」。同时会一次性加入「热搜」，地址为 `https://mcp.pianam.cn/hot-mcp/mcp`，提供 `query_hot_trending` 和 `list_platforms` 只读工具，覆盖微博、知乎、B 站、百度、头条、抖音、贴吧和掘金热榜。该服务的公开说明称无需账号或 API Key；如果其公共端点临时不可用，可在设置中关闭或删除，不影响其他 MCP 服务。
+若本机已有「联网」配置，设置页会自动把旧显示名 `Research MCP · 联网研究 MCP` 迁移为「联网」。同时会一次性加入「热搜」，地址为 `https://mcp.pianam.cn/hot-mcp/mcp`，但不会预填虚假的已发现工具；必须实时发现成功后才能参与聊天调用。该服务的公开说明称无需账号或 API Key；如果公共端点不可达，设置页会保留失败原因和最近检查时间，用户可改为自己的自托管 `/mcp` 地址，不影响其他 MCP 服务。
+
+热搜服务建议自托管以避免公共端点的网络或证书波动。可按其项目说明使用 Docker 启动：
+
+```bash
+docker run --rm -p 8000:8000 ghcr.io/boy-373/hot-trending-mcp:latest
+```
+
+开发环境可填 `http://127.0.0.1:8000/mcp`；生产环境应通过 HTTPS 反向代理后再填入公网 `/mcp` 地址。自托管服务需要在 `tools/list` 中为只读工具返回 `annotations.readOnlyHint: true`，否则米饭机会出于安全原因禁用它们。

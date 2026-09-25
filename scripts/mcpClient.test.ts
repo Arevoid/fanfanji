@@ -36,7 +36,7 @@ try {
   assert.equal(tools[0].readOnly, true);
   assert.equal(tools[0].enabled, true);
   assert.equal(tools[1].enabled, false);
-  const ready = { ...server, discoveredTools: tools };
+  const ready = { ...server, discoveredTools: tools, connectionStatus: "connected" as const };
   setMcpSessionToken("demo", "session-token");
   const result = await callMcpTool(ready, { serverId: "demo", toolName: "lookup", arguments: { q: "x" } });
   assert.equal(result.content[0].text, "safe result");

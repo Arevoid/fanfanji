@@ -7,7 +7,7 @@ import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeou
 import { CONTENT_SECURITY_POLICY } from "../core/security/contentSecurityPolicy";
 import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "../server/neteaseMusicAdapter";
 import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "../server/neteaseMusicSession";
-import { proxyMcpRequest } from "../server/mcpProxy";
+import { McpProxyError, proxyMcpRequest } from "../server/mcpProxy";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -202,7 +202,7 @@ export default {
 
     if (isMcpRoute) {
       try { return await proxyMcpRequest({ url: body.url, body: body.body, headers: body.headers }); }
-      catch (error) { return json({ success: false, error: error instanceof Error ? error.message : "MCP 代理请求失败。" }, 400); }
+      catch (error) { return json({ success: false, error: error instanceof Error ? error.message : "MCP 代理请求失败。" }, error instanceof McpProxyError ? error.status : 400); }
     }
 
     if (isMinimaxRoute) return synthesizeMinimax(body);

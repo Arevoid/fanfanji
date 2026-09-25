@@ -1,6 +1,6 @@
 import { readJson, writeJson } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
-import type { McpDiscoveredTool, McpServerConfig } from "../../../domain/mcp/mcpTypes";
+import type { McpConnectionStatus, McpDiscoveredTool, McpServerConfig } from "../../../domain/mcp/mcpTypes";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
@@ -22,6 +22,9 @@ function normalizeServer(value: unknown): McpServerConfig | null {
   try { url = new URL(value.url); } catch { return null; }
   if (url.protocol !== "https:" && url.protocol !== "http:") return null;
   const tools = Array.isArray(value.discoveredTools) ? value.discoveredTools.map(normalizeTool).filter((tool): tool is McpDiscoveredTool => Boolean(tool)).slice(0, 100) : [];
+  const connectionStatus: McpConnectionStatus | undefined = ["unverified", "checking", "connected", "error"].includes(value.connectionStatus as string)
+    ? value.connectionStatus as McpConnectionStatus
+    : undefined;
   return {
     id: value.id.trim().slice(0, 120),
     name: (typeof value.name === "string" && value.name.trim() ? value.name : url.hostname).slice(0, 120),
@@ -30,6 +33,9 @@ function normalizeServer(value: unknown): McpServerConfig | null {
     directFetch: value.directFetch === true,
     readOnlyOnly: true,
     discoveredTools: tools,
+    ...(connectionStatus ? { connectionStatus } : {}),
+    ...(typeof value.lastError === "string" && value.lastError.trim() ? { lastError: value.lastError.slice(0, 500) } : {}),
+    ...(typeof value.lastCheckedAt === "number" ? { lastCheckedAt: value.lastCheckedAt } : {}),
     updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : Date.now(),
   };
 }

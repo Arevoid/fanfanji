@@ -10,8 +10,14 @@ export interface McpServerConfig {
   directFetch: boolean;
   readOnlyOnly: true;
   discoveredTools: McpDiscoveredTool[];
+  /** Live discovery state. Missing values are treated as unverified for legacy data. */
+  connectionStatus?: McpConnectionStatus;
+  lastError?: string;
+  lastCheckedAt?: number;
   updatedAt: number;
 }
+
+export type McpConnectionStatus = "unverified" | "checking" | "connected" | "error";
 
 export interface McpDiscoveredTool {
   name: string;

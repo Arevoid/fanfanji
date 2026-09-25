@@ -24,7 +24,7 @@ import { CONTENT_SECURITY_POLICY } from "./src/core/security/contentSecurityPoli
 import { assertImageGenerationTrigger } from "./src/features/chat/services/imageGenerationIntent";
 import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "./src/server/neteaseMusicAdapter";
 import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "./src/server/neteaseMusicSession";
-import { proxyMcpRequest } from "./src/server/mcpProxy";
+import { McpProxyError, proxyMcpRequest } from "./src/server/mcpProxy";
 
 dotenv.config();
 
@@ -55,7 +55,10 @@ async function startServer() {
       response.headers.forEach((value, key) => res.setHeader(key, value));
       res.status(response.status).send(await response.text());
     } catch (error) {
-      res.status(400).json({ error: error instanceof Error ? error.message : "MCP 代理请求失败。" });
+      // Distinguish invalid client input from an unavailable upstream. The
+      // latter must not be reported as a misleading 400 from the MCP client.
+      const status = error instanceof McpProxyError ? error.status : 400;
+      res.status(status).json({ error: error instanceof Error ? error.message : "MCP 代理请求失败。" });
     }
   });
 
