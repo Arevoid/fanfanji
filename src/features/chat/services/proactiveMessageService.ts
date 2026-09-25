@@ -10,6 +10,7 @@ import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { AiChatRequest } from "./chatServiceTypes";
 import type { AppointmentMode } from "../../../domain/schedule/scheduleTypes";
 import { parseProactiveOfflineInvitationDirective, type ProactiveOfflineInvitationDirective } from "./proactiveOfflineInvitationProtocol";
+import { parseProactiveActionDirective, type ProactiveActionDirective } from "./proactiveActionProtocol";
 
 export async function generateProactiveReplyCandidates(input: {
   requestAi: typeof apiChat;
@@ -24,7 +25,7 @@ export async function generateProactiveReplyCandidates(input: {
   directiveNow?: number;
   /** Relation-scoped snapshot; only its ProactivePromptAdapter projection reaches the request. */
   cognitiveContext?: CharacterCognitiveContext | ProactiveCognitiveContext;
-}): Promise<{ data: Awaited<ReturnType<typeof import("../../../utils/apiHelper").apiChat>>; messages: Message[]; proactiveOfflineDirective?: ProactiveOfflineInvitationDirective }> {
+}): Promise<{ data: Awaited<ReturnType<typeof import("../../../utils/apiHelper").apiChat>>; messages: Message[]; proactiveOfflineDirective?: ProactiveOfflineInvitationDirective; proactiveAction?: ProactiveActionDirective }> {
   const cognitivePromptBlock = input.cognitiveContext
     ? formatProactivePromptContext(buildProactivePromptContext(input.cognitiveContext))
     : "";
@@ -36,8 +37,9 @@ export async function generateProactiveReplyCandidates(input: {
     : input.request;
   const data = await requestAiReply(input.requestAi, request);
   if (!data?.text) return { data, messages: [] };
+  const actionParsed = parseProactiveActionDirective({ text: data.text });
   const parsed = parseProactiveOfflineInvitationDirective({
-    text: data.text,
+    text: actionParsed.visibleText,
     allowedModes: input.proactiveOfflineAllowedModes || [],
     now: input.directiveNow,
   });
@@ -54,6 +56,7 @@ export async function generateProactiveReplyCandidates(input: {
   return {
     data,
     ...(parsed.directive ? { proactiveOfflineDirective: parsed.directive } : {}),
+    ...(actionParsed.directive ? { proactiveAction: actionParsed.directive } : {}),
     messages: bubbles.map((bubbleText, index) => createCharacterTextMessage({
       id: input.createId(index), characterId: input.characterId,
       content: input.transformBubble ? input.transformBubble(bubbleText, index) : bubbleText,

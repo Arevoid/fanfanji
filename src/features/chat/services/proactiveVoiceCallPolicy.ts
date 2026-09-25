@@ -62,6 +62,31 @@ export function canTriggerProactiveVoiceCall(input: {
   return randomValue < PROACTIVE_CALL_CHANCE_PER_MINUTE;
 }
 
+/**
+ * Contextual actions are already selected by the proactive chat model from a
+ * concrete conversation cue, so they do not use the scheduler's random roll.
+ * They still share quiet hours, cooldown, rejection backoff, and daily caps.
+ */
+export function canAcceptContextualProactiveCall(input: {
+  now: number;
+  relation: CharacterRelationship;
+  latestMessageAt?: number;
+  startTime?: string;
+  endTime?: string;
+}): boolean {
+  const { now, relation, latestMessageAt, startTime, endTime } = input;
+  if (!isTimeWithinRange(now, startTime, endTime)) return false;
+  if (relation.proactiveCallBackoffUntil && now < relation.proactiveCallBackoffUntil) return false;
+  const today = getLocalDayKey(now);
+  const todayCount = relation.proactiveCallDayKey === today ? relation.proactiveCallCount || 0 : 0;
+  if (todayCount >= PROACTIVE_CALL_MAX_PER_DAY) return false;
+  if (relation.lastProactiveCallAt && now - relation.lastProactiveCallAt < PROACTIVE_CALL_MIN_COOLDOWN_MS) return false;
+  // Do not interrupt a live conversation; the proactive pass may have raced
+  // with a user message arriving after its snapshot was built.
+  if (latestMessageAt && now - latestMessageAt < 5 * 60 * 1000) return false;
+  return true;
+}
+
 export function createProactiveCallTriggerPatch(relation: CharacterRelationship, now: number): Partial<CharacterRelationship> {
   const today = getLocalDayKey(now);
   const todayCount = relation.proactiveCallDayKey === today ? relation.proactiveCallCount || 0 : 0;

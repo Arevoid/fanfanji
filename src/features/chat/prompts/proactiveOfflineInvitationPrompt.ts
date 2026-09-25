@@ -5,7 +5,7 @@ export const PROACTIVE_OFFLINE_DIRECTIVE_END = "[[/OFFLINE_INVITATION]]";
 
 const modeLabel = (mode: AppointmentMode) => mode === "immediate" ? "立即见面" : "未来约定";
 
-/** Optional capability prompt. It never orders the character to invite. */
+/** Context-gated capability prompt. It never orders the character to invite. */
 export function buildProactiveOfflineInvitationPrompt(input: {
   allowedModes: readonly AppointmentMode[];
   now: number;
@@ -14,7 +14,7 @@ export function buildProactiveOfflineInvitationPrompt(input: {
   const modes = input.allowedModes.map(modeLabel).join("、");
   const nowText = new Date(input.now).toISOString();
   return `[可选的线下邀请能力]
-本轮只是允许你在确实符合完整人设、关系、当前对话和现实条件时，自然提出线下见面；不是要求你必须邀请。不要为了使用功能而改变角色的口癖、主动程度、情绪或聊天节奏。如果不适合，正常回复且不要输出任何内部标记。
+本轮只是允许你在确实符合完整人设、关系、当前对话和现实条件时，自然提出线下见面；不是要求你必须邀请。优先依据最近对话里的具体时间、地点、空闲、同城、吃饭、电影或“过来/去找你”等线索判断，不能只因为想念、暧昧或本轮是主动消息就邀请。不要为了使用功能而改变角色的口癖、主动程度、情绪或聊天节奏。如果不适合，正常回复且不要输出任何内部标记。
 
 本轮通过事实校验的邀请类型仅有：${modes || "无"}。当前时间：${nowText}${input.timeZone ? `（${input.timeZone}）` : ""}。
 - “立即见面”仅表示当前地点条件已具备；仍必须先询问用户，不得声称用户已答应、你已经到用户家门口或线下剧情已经开始。

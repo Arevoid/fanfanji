@@ -63,6 +63,8 @@ export const storageKeys = {
   relationshipNetworkNpcAutomationStates: "phone_relationship_network_npc_automation_states_v1",
   momentTopicHistory: "phone_moment_topic_history",
   proactiveTopicHistory: "phone_proactive_topic_history",
+  /** Relation-scoped proactive call/video-call actions waiting for the user. */
+  proactiveActions: "phone_proactive_actions_v1",
   /** Additive continuity runtime state; bounded metadata, never transcripts. */
   continuityRuntime: "phone_continuity_runtime_v1",
   /** Character Life state and proactive intent metadata; bounded and relation scoped. */

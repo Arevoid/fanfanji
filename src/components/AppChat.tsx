@@ -37,6 +37,9 @@ import { runGroupChatReplyPipeline } from "../features/chat/services/groupChatRe
 import { scheduleGroupReplyDelivery } from "../features/chat/services/groupReplyDelivery";
 import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope, type DirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
+import { canAcceptContextualProactiveCall, createProactiveCallTriggerPatch } from "../features/chat/services/proactiveVoiceCallPolicy";
+import { enqueueProactiveAction, takePendingProactiveAction } from "../features/chat/services/proactiveActionRepository";
+import { evaluateProactiveAction } from "../features/chat/services/proactiveActionPolicy";
 import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallMessage";
 import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
 import { completeVoiceCall } from "../features/chat/services/voiceCallCompletion";
@@ -1689,7 +1692,38 @@ export default function AppChat({
   };
 
   const beginVoiceCall = (incoming: boolean) => beginCall("voice", incoming);
-  const beginVideoCall = () => beginCall("video", false);
+  const beginVideoCall = (incoming = false) => beginCall("video", incoming);
+
+  // A proactive action generated while another chat is open is kept in a
+  // relation-scoped queue. Consume it only after the exact relationship is
+  // visible, so aliases and characters can never receive one another's call.
+  useEffect(() => {
+    if (!activeRelationship || !activeCharacter || activeCharacter.isGroupChat
+      || activeAttachModal || !activeVoiceCallScope
+      || activeVoiceCallScope.relationId !== activeRelationship.id
+      || activeRelationship.userIdentityId !== activeIdentityId
+      || !activeCharacter.enableProactiveCall) return;
+    const pending = takePendingProactiveAction({
+      relationId: activeRelationship.id,
+      characterId: activeRelationship.characterId,
+      userIdentityId: activeRelationship.userIdentityId,
+    });
+    if (!pending) return;
+    const latestMessageAt = messagesRef.current
+      .filter((message) => message.relationId === activeRelationship.id && !message.isOffline)
+      .reduce((latest, message) => Math.max(latest, message.timestamp), 0) || undefined;
+    const now = Date.now();
+    if (!canAcceptContextualProactiveCall({
+      now,
+      relation: activeRelationship,
+      latestMessageAt,
+      startTime: activeCharacter.proactiveStartTime,
+      endTime: activeCharacter.proactiveEndTime,
+    })) return;
+    updateRelationshipSession(activeRelationship.id, createProactiveCallTriggerPatch(activeRelationship, now));
+    if (pending.type === "video_call") beginVideoCall(true);
+    else beginVoiceCall(true);
+  }, [activeAttachModal, activeCharacter?.enableProactiveCall, activeCharacter?.id, activeIdentityId, activeRelationship?.id, activeVoiceCallScope?.relationId]);
 
   const finishVoiceCall = (requestedStatus: VoiceCallStatus, options: { userEndedCall?: boolean } = {}) => {
     if (!activeChatCharId || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
@@ -4045,10 +4079,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 1. Follow the character's configured language and nationality according to the character language policy. Maintain character role-play thoroughly.
 2. Use a natural WeChat style. Reply length, warmth, initiative, and emotional intensity must follow the character profile and relationship.
 3. This is an initiator message. Let the character decide whether to share, ask, tease, express affection, stay restrained, or use another natural opening; do not default to caretaking or a generic check-in.
-4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.`;
+4. Do NOT say you are an AI or Gemini, unless that is your explicit character人设.
+5. 只有当最近对话明确形成了“想听声音/打电话/视频通话”的自然情境，且符合角色人设时，才可在回复末尾附加一次内部动作标记；否则不要添加。
+6. 内部动作标记必须严格使用以下格式，且只能出现一次：[[PROACTIVE_ACTION]]{"type":"call"或"video_call","reason":"简短说明"}[[/PROACTIVE_ACTION]]。标记不会显示给用户，不要把它写进普通聊天内容。
+7. 不要因为“主动联系”本身就擅自发起电话；没有明确通话语境时只发送文字。`;
 
       if (friend.disableBracketActions) {
-        instructionsPrompt += `\n5. [🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
+        instructionsPrompt += `\n[格式补充｜🚨 CRITICAL FORMAT RULE]: Do NOT use any bracketed/parenthesized action descriptions, physical gestures, facial expressions, or ambient narration (e.g., "(微笑)", "（叹气）", "(摸摸头)", "*笑*", etc.) in your messages. You must interact using pure conversational speech/dialogue ONLY, without any action descriptions, unless such expressions are an absolute, unique signature part of how this specific character literally types/speaks.`;
       }
 
       const proactiveIdentity = settings.identities?.find((identity) => identity.id === relationship.userIdentityId);
@@ -4245,6 +4282,50 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             now: scopedMessages[0].timestamp,
           });
           if (!saved) console.warn("Proactive offline invitation could not be persisted.");
+        }
+        if (proactiveResult.proactiveAction) {
+          const now = Date.now();
+          const actionDecision = evaluateProactiveAction({
+            action: proactiveResult.proactiveAction,
+            character: friend,
+            relationship,
+            messages: charMsgs,
+            now,
+          });
+          if (actionDecision.allowed) {
+            const action = enqueueProactiveAction({
+              id: `proactive-action-${relationId}-${scopedMessages[0]?.id || now}`,
+              relationId,
+              characterId: relationship.characterId,
+              userIdentityId: relationship.userIdentityId,
+              type: proactiveResult.proactiveAction.type,
+              reason: proactiveResult.proactiveAction.reason,
+              createdAt: now,
+              ...(scopedMessages[0]?.id ? { sourceMessageId: scopedMessages[0].id } : {}),
+            });
+            updateRelationshipSession(relationId, createProactiveCallTriggerPatch(relationship, now));
+            const isCurrentRelation = activeChatRelationId === relationId
+              && activeIdentityId === relationship.userIdentityId
+              && activeVoiceCallScope?.relationId === relationId;
+            if (isCurrentRelation && !activeAttachModal) {
+              // Remove the queue item immediately; the exact active scope is
+              // available and the call can be shown without navigation.
+              takePendingProactiveAction({
+                relationId: action.relationId,
+                characterId: action.characterId,
+                userIdentityId: action.userIdentityId,
+                now,
+              });
+              if (action.type === "video_call") beginVideoCall(true);
+              else beginVoiceCall(true);
+            }
+          } else {
+            console.info("Proactive call action suppressed by relation policy", {
+              relationId,
+              action: proactiveResult.proactiveAction.type,
+              reason: "reason" in actionDecision ? actionDecision.reason : "unknown",
+            });
+          }
         }
         const topic = compactTopicHint(proactiveResult.messages.map((message) => message.content));
         const topicRecord = topic

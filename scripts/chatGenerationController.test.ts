@@ -212,8 +212,10 @@ const regenAi = (async () => ({ text: "第一句\n\n第二句" })) as typeof api
 const regen = await generateRegeneratedChatTurn({ prompt: { ...prompt, scenario: "regenerate" }, settings, candidateContext: { disableBracketActions: false, keepPeriods: true, characterId: "a", allowEmoji: false, createId: (index) => `r${index}`, currentTime: (index) => index }, requestAi: regenAi });
 assert.equal(regen.candidates?.messages.length, 2);
 
-const proactiveAi = (async () => ({ text: "主动消息" })) as typeof apiChat;
+const proactiveAi = (async () => ({ text: "主动消息\n[[PROACTIVE_ACTION]]{\"type\":\"call\",\"reason\":\"明确想听声音\"}[[/PROACTIVE_ACTION]]" })) as typeof apiChat;
 const proactive = await generateProactiveChatTurn({ prompt: { ...prompt, scenario: "proactive-message" }, settings, characterId: "a", disableBracketActions: false, keepPeriods: true, createId: () => "p", currentTime: () => 1, requestAi: proactiveAi });
 assert.deepEqual(proactive.messages.map((message) => message.content), ["主动消息"]);
+assert.equal(proactive.proactiveAction?.type, "call");
+assert.equal(proactive.proactiveAction?.reason, "明确想听声音");
 
 console.log("Chat generation controller: 14 acceptance checks passed");
