@@ -78,6 +78,10 @@ export const storageKeys = {
   readingCoStoryStore: "phone_reading_co_story_store_v1",
   cinemaStore: "phone_cinema_store_v1",
   presets: "phone_presets",
+  /** Non-secret external MCP server configuration; tokens never use this key. */
+  mcpServers: "phone_mcp_servers_v1",
+  mcpResearchSeed: "phone_mcp_research_seed_v1",
+  mcpHotSearchSeed: "phone_mcp_hotsearch_seed_v1",
   dataSchemaVersion: "phone_data_schema_version",
   migrationState: "phone_storage_migration_state",
   migrationLock: "phone_storage_migration_lock",

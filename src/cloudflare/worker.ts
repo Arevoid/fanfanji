@@ -7,6 +7,7 @@ import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeou
 import { CONTENT_SECURITY_POLICY } from "../core/security/contentSecurityPolicy";
 import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "../server/neteaseMusicAdapter";
 import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "../server/neteaseMusicSession";
+import { proxyMcpRequest } from "../server/mcpProxy";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -113,7 +114,8 @@ export default {
     const isTextRoute = ["/api/chat", "/api/translate", "/api/test-key", "/api/models", "/api/extract-memories", "/api/summarize-personality"].includes(url.pathname);
     const isMinimaxRoute = url.pathname === "/api/minimax-tts";
     const isNeteaseRoute = url.pathname.startsWith("/api/music/netease/");
-    if (!isImageRoute && !isMosslandRoute && !isTextRoute && !isMinimaxRoute && !isNeteaseRoute) return withSecurityHeaders(await env.ASSETS.fetch(request));
+    const isMcpRoute = url.pathname === "/api/mcp-proxy";
+    if (!isImageRoute && !isMosslandRoute && !isTextRoute && !isMinimaxRoute && !isNeteaseRoute && !isMcpRoute) return withSecurityHeaders(await env.ASSETS.fetch(request));
     if (!isNeteaseRoute && request.method !== "POST") return json({ success: false, error: "代理接口只接受 POST 请求。" }, 405);
 
     if (isNeteaseRoute) {
@@ -197,6 +199,11 @@ export default {
 
     const body = await requestBody(request);
     if (!body) return json({ success: false, error: "代理请求格式无效。" }, 400);
+
+    if (isMcpRoute) {
+      try { return await proxyMcpRequest({ url: body.url, body: body.body, headers: body.headers }); }
+      catch (error) { return json({ success: false, error: error instanceof Error ? error.message : "MCP 代理请求失败。" }, 400); }
+    }
 
     if (isMinimaxRoute) return synthesizeMinimax(body);
 

@@ -24,6 +24,7 @@ import {
   Sun,
   Type as TypeIcon,
   Link,
+  Plug,
 } from "lucide-react";
 
 import { compressImagePreservingTransparency, isTransparencyPreservedImage } from "../utils/pngParser";
@@ -81,6 +82,7 @@ import { useSettingsScopedSave } from "../features/settings/hooks/useSettingsSco
 import { useSettingsChatIconActions } from "../features/settings/hooks/useSettingsChatIconActions";
 import { useSettingsCssTemplateCopy } from "../features/settings/hooks/useSettingsCssTemplateCopy";
 import { getSettingsPreviewBubbleBackground, getSettingsPreviewBubbleStyle } from "../features/settings/settingsPreviewStyle";
+import { McpSettingsPanel } from "../features/mcp/components/McpSettingsPanel";
 import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
 import { sortIdentitiesForDisplay } from "../domain/relationship/characterRelationship";
 import {
@@ -706,6 +708,20 @@ export default function AppSettings({
                     <Volume2 className="w-5 h-5" />
                   </div>
                   <span className="text-base font-medium text-slate-800">语音图片</span>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
+              </button>
+
+              {/* External MCP tools */}
+              <button
+                onClick={() => setActiveTab("mcp")}
+                className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-5 h-5 flex items-center justify-center text-slate-800 shrink-0">
+                    <Plug className="w-5 h-5" />
+                  </div>
+                  <span className="text-base font-medium text-slate-800">MCP 工具</span>
                 </div>
                 <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
@@ -2647,6 +2663,8 @@ export default function AppSettings({
               )}
             </div>
           )}
+
+          {activeTab === "mcp" && <McpSettingsPanel />}
 
           {/* SYSTEM SETTINGS & BACKUP TAB */}
           {activeTab === "system" && (

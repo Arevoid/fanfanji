@@ -24,6 +24,7 @@ import { CONTENT_SECURITY_POLICY } from "./src/core/security/contentSecurityPoli
 import { assertImageGenerationTrigger } from "./src/features/chat/services/imageGenerationIntent";
 import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "./src/server/neteaseMusicAdapter";
 import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "./src/server/neteaseMusicSession";
+import { proxyMcpRequest } from "./src/server/mcpProxy";
 
 dotenv.config();
 
@@ -45,6 +46,17 @@ async function startServer() {
   });
   app.get("/healthz", (_req, res) => {
     res.json({ status: "ok", service: "fanfanji", version: process.env.npm_package_version || "0.0.0" });
+  });
+
+  app.post("/api/mcp-proxy", async (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
+      const response = await proxyMcpRequest({ url: body.url, body: body.body, headers: body.headers });
+      response.headers.forEach((value, key) => res.setHeader(key, value));
+      res.status(response.status).send(await response.text());
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "MCP 代理请求失败。" });
+    }
   });
 
   // Dev-only evidence cutover. The route accepts only the collector's

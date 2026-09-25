@@ -8,6 +8,7 @@ export type SettingsTab =
   | "system_config"
   | "system"
   | "minimax"
+  | "mcp"
   | null;
 
 const SETTINGS_TAB_TITLES: Record<Exclude<SettingsTab, null>, string> = {
@@ -20,6 +21,7 @@ const SETTINGS_TAB_TITLES: Record<Exclude<SettingsTab, null>, string> = {
   system_config: "系统设置",
   system: "系统备份",
   minimax: "语音图片",
+  mcp: "MCP 工具",
 };
 
 export function getSettingsHeaderTitle(tab: SettingsTab): string {

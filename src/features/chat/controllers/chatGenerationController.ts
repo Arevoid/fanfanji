@@ -20,8 +20,10 @@ import {
 } from "../../../domain/prompt/aliasIdentityResponseGuard";
 import { createAiActionId } from "../../../core/monitoring/aiRequestLedger";
 import { recordDirectReplyRuntimeLifecycleStage } from "../services/directReplyRuntimeLifecycleObserver";
+import { createMcpAwareRequestAi } from "../../mcp/mcpChatRuntime";
+import type { McpRequestScope } from "../../../domain/mcp/mcpTypes";
 
-type PromptInput = Pick<PromptContext, "scenario" | "message" | "history" | "systemInstruction" | "imageDataUrl" | "historyInjections">;
+type PromptInput = Pick<PromptContext, "scenario" | "message" | "history" | "systemInstruction" | "imageDataUrl" | "historyInjections"> & Partial<McpRequestScope>;
 type RequestAi = typeof apiChat;
 
 const CONTEXT_LENGTH_ERROR_PATTERN = /context[_ -]?(?:length|window)|max[_ -]?tokens?|token[_ -]?limit|too[_ -]?long|prompt[_ -]?too[_ -]?large|输入过长|上下文(?:太长|过长|超出)|令牌数量/iu;
@@ -193,7 +195,11 @@ export async function requestDirectChatTurn(input: {
   /** Optional identity-boundary validation for alias conversations. */
   aliasIdentityGuard?: AliasIdentityResponseGuardContext;
 }): Promise<ParsedAiChatResponse> {
-  const requestAi = input.requestAi || apiChat;
+  const requestAi = createMcpAwareRequestAi(input.requestAi || apiChat, {
+    characterId: input.prompt.characterId,
+    relationId: input.prompt.relationId,
+    conversationId: input.prompt.conversationId,
+  });
   const request = {
     ...buildComposedAiChatRequest(input.prompt, input.settings),
     signal: input.signal,
