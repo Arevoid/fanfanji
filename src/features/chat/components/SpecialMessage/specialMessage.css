@@ -114,8 +114,20 @@
   gap: 8px;
 }
 
-/* The theme hooks add no default visual layer.  Flatten the semantic wrapper
- * and hide its decorative icon so existing card geometry remains unchanged. */
+/* The built-in card remains the default.  A semantic layer is mounted beside
+ * it so a user can opt into a custom red-packet layout without changing the
+ * familiar card for unrelated chat CSS. */
+.redpacket-card__default-layer { display: contents; }
+.redpacket-card__wechat-layer { display: none; }
+
+#conv-screen.user-custom-redpacket-css .redpacket-card__default-layer {
+  display: none !important;
+}
+#conv-screen.user-custom-redpacket-css .redpacket-card__wechat-layer {
+  display: contents !important;
+}
+
+/* Theme hooks are inert until the semantic layer is explicitly enabled. */
 .wechat-redpacket__icon,
 .wechat-transfer__icon { display: none; }
 .wechat-redpacket__content,
@@ -168,7 +180,7 @@
   text-align: left;
 }
 
-.redpacket-card .redpacket-card__brand {
+.redpacket-card__default-layer .redpacket-card__brand {
   top: 3px;
   right: 9px;
   bottom: auto;
@@ -181,6 +193,22 @@
   opacity: 0.72;
   transform: rotate(-8deg);
   transform-origin: right top;
+}
+
+/* A semantic layer gets a restrained fallback brand.  User CSS that targets
+ * the red-packet hooks can replace it, but it must never cover the greeting. */
+.redpacket-card__wechat-layer .redpacket-card__brand {
+  top: auto;
+  right: 9px;
+  bottom: 8px;
+  color: var(--redpacket-status-color, #d7dde0);
+  font-family: inherit !important;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  opacity: 0.52;
+  transform: none;
 }
 
 .redpacket-card[data-status="claimed"] {

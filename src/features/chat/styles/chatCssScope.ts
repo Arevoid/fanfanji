@@ -5,6 +5,18 @@ const NON_SELECTOR_AT_RULES = /^(?:@(?:-\w+-)?keyframes|@font-face|@page|@proper
 // from briefly falling back to the built-in theme.
 const SCOPE_SELECTOR = "#conv-screen.user-custom-chat-css #api-chat-screen > .chat-content-scope";
 const ROOT_CLASS_SELECTOR = /^(?:\.chat-page|\.chat-theme|\.style-liquid-glass|\.user-custom-chat-css)(?=[.#:\[\s]|$)/i;
+const RED_PACKET_CUSTOMIZATION_SELECTOR = /(?:\.(?:redpacket-card|chat-message--red-packet|wechat-redpacket|special-payment-card)(?:[-_][a-z0-9_-]+)?(?:[.#:\[\s>+~,(]|$)|--redpacket-[a-z0-9_-]+)/i;
+
+/**
+ * Returns true only when a user stylesheet explicitly references the red
+ * packet surface.  Generic chat CSS should leave the built-in red packet
+ * card untouched; semantic red-packet markup is enabled on this signal.
+ */
+export function hasExplicitRedPacketChatCss(css: string | undefined): boolean {
+  if (!css?.trim()) return false;
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  return RED_PACKET_CUSTOMIZATION_SELECTOR.test(withoutComments);
+}
 
 export function normalizeChatCssSyntax(css: string): string {
   return css.replace(/[\u2010-\u2015\u2212]/g, "-");

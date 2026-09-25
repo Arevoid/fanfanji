@@ -117,6 +117,7 @@ import { characterAvatarReplyRefusesChange, isExplicitCharacterAvatarChangeReque
 import { resolveRecentUserImageForTurn } from "../features/chat/services/recentUserImageContext";
 import { resolveChatMessageAvatar } from "../features/chat/services/messageAvatarResolver";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
+import { hasExplicitRedPacketChatCss } from "../features/chat/styles/chatCssScope";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
 import { ensureDirectReplyTranslation } from "../features/chat/services/directReplyTranslation";
 import { resolveChatRoutine, resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
@@ -726,6 +727,7 @@ export default function AppChat({
   // bubbleCss remains a scoped legacy compatibility source.
   const userCustomChatCssSources = [settings.bubbleCss, settings.chatGlobalCSS, characterCustomChatCss];
   const hasUserCustomChatCss = userCustomChatCssSources.some((css) => Boolean(css && css.trim()));
+  const hasUserRedPacketCss = userCustomChatCssSources.some((css) => hasExplicitRedPacketChatCss(css));
   useChatCustomCss(userCustomChatCssSources, activeCharacter?.chatBg);
 
   // Long-lived callbacks can outlive the render in which they were created.
@@ -5614,7 +5616,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       />
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter && isActiveChatScopeValid ? (
-        <div className={`absolute inset-0 z-40 bg-[var(--app-bg)] flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"} data-user-chat-css={hasUserCustomChatCss ? "active" : "inactive"} data-chat-settings-open={isShowingCardModal ? "true" : "false"}>
+        <div className={`absolute inset-0 z-40 bg-[var(--app-bg)] flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""} ${hasUserRedPacketCss ? "user-custom-redpacket-css" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"} data-user-chat-css={hasUserCustomChatCss ? "active" : "inactive"} data-chat-settings-open={isShowingCardModal ? "true" : "false"}>
             <div
               id="api-chat-screen"
               className={`flex flex-col h-full w-full relative app-content chat-page chat-theme chat-page__background ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`}
