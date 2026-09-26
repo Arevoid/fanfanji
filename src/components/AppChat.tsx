@@ -3655,7 +3655,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     },
     onExplicitVoiceCallRequest: (message, context) => {
       if (context.isGroup || activeCharacter?.isGroupChat || !activeVoiceCallScope) return false;
-      if (activeCharacter?.enableProactiveCall && isExplicitIncomingCallRequest(message.content)) {
+      // An explicit “call me back” request is user-authorized and must not be
+      // blocked by the optional unsolicited-proactive-call toggle. That
+      // toggle only governs calls the character decides to initiate alone.
+      if (isExplicitIncomingCallRequest(message.content)) {
         beginVoiceCall(true);
         return true;
       }

@@ -13,6 +13,7 @@ assert.match(appChat, /callMode === "video"/);
 assert.match(appChat, /<VideoCallView/);
 assert.match(appChat, /onClick=\{\(\) => beginVideoCall\(false\)\}/);
 assert.match(appChat, /sendVideoCameraFrame/);
+assert.match(appChat, /isExplicitIncomingCallRequest\(message\.content\)/);
 assert.match(view, /data-video-call-view/);
 assert.match(view, /data-video-call-self-preview/);
 assert.match(view, /onCameraFrame/);
