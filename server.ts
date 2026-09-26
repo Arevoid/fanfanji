@@ -25,6 +25,7 @@ import { assertImageGenerationTrigger } from "./src/features/chat/services/image
 import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "./src/server/neteaseMusicAdapter";
 import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "./src/server/neteaseMusicSession";
 import { McpProxyError, proxyMcpRequest } from "./src/server/mcpProxy";
+import { handleHotSearchMcp } from "./src/server/hotSearchMcp";
 
 dotenv.config();
 
@@ -60,6 +61,12 @@ async function startServer() {
       const status = error instanceof McpProxyError ? error.status : 400;
       res.status(status).json({ error: error instanceof Error ? error.message : "MCP 代理请求失败。" });
     }
+  });
+
+  app.post("/api/hotsearch-mcp", async (req, res) => {
+    const response = await handleHotSearchMcp(req.body && typeof req.body === "object" ? req.body : {});
+    response.headers.forEach((value, key) => res.setHeader(key, value));
+    res.status(response.status).send(await response.text());
   });
 
   // Dev-only evidence cutover. The route accepts only the collector's

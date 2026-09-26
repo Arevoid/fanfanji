@@ -8,6 +8,7 @@ import { CONTENT_SECURITY_POLICY } from "../core/security/contentSecurityPolicy"
 import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "../server/neteaseMusicAdapter";
 import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "../server/neteaseMusicSession";
 import { McpProxyError, proxyMcpRequest } from "../server/mcpProxy";
+import { handleHotSearchMcp } from "../server/hotSearchMcp";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -115,7 +116,8 @@ export default {
     const isMinimaxRoute = url.pathname === "/api/minimax-tts";
     const isNeteaseRoute = url.pathname.startsWith("/api/music/netease/");
     const isMcpRoute = url.pathname === "/api/mcp-proxy";
-    if (!isImageRoute && !isMosslandRoute && !isTextRoute && !isMinimaxRoute && !isNeteaseRoute && !isMcpRoute) return withSecurityHeaders(await env.ASSETS.fetch(request));
+    const isHotSearchMcpRoute = url.pathname === "/api/hotsearch-mcp";
+    if (!isImageRoute && !isMosslandRoute && !isTextRoute && !isMinimaxRoute && !isNeteaseRoute && !isMcpRoute && !isHotSearchMcpRoute) return withSecurityHeaders(await env.ASSETS.fetch(request));
     if (!isNeteaseRoute && request.method !== "POST") return json({ success: false, error: "代理接口只接受 POST 请求。" }, 405);
 
     if (isNeteaseRoute) {
@@ -204,6 +206,8 @@ export default {
       try { return await proxyMcpRequest({ url: body.url, body: body.body, headers: body.headers }); }
       catch (error) { return json({ success: false, error: error instanceof Error ? error.message : "MCP 代理请求失败。" }, error instanceof McpProxyError ? error.status : 400); }
     }
+
+    if (isHotSearchMcpRoute) return handleHotSearchMcp(body);
 
     if (isMinimaxRoute) return synthesizeMinimax(body);
 

@@ -24,7 +24,7 @@ const RESEARCH_MCP_SERVER: McpServerConfig = {
 const HOTSEARCH_MCP_SERVER: McpServerConfig = {
   id: "hotsearch-mcp",
   name: "热搜",
-  url: "https://mcp.pianam.cn/hot-mcp/mcp",
+  url: `${typeof window !== "undefined" ? window.location.origin : "https://fanfanji.ccwu.cc"}/api/hotsearch-mcp`,
   enabled: true,
   directFetch: false,
   readOnlyOnly: true,
@@ -73,8 +73,18 @@ export function McpSettingsPanel() {
       existing = existing.map((server) => server.id === renamed.id ? renamed : server);
     }
     const hotSearch = existing.find((server) => server.id === HOTSEARCH_MCP_SERVER.id);
-    if (hotSearch && hotSearch.name !== HOTSEARCH_MCP_SERVER.name) {
-      const renamed = { ...hotSearch, name: HOTSEARCH_MCP_SERVER.name, updatedAt: Date.now() };
+    if (hotSearch && (hotSearch.name !== HOTSEARCH_MCP_SERVER.name || hotSearch.url !== HOTSEARCH_MCP_SERVER.url || hotSearch.directFetch !== HOTSEARCH_MCP_SERVER.directFetch)) {
+      const renamed = {
+        ...hotSearch,
+        name: HOTSEARCH_MCP_SERVER.name,
+        url: HOTSEARCH_MCP_SERVER.url,
+        directFetch: HOTSEARCH_MCP_SERVER.directFetch,
+        discoveredTools: [],
+        connectionStatus: "unverified" as const,
+        lastError: undefined,
+        lastCheckedAt: undefined,
+        updatedAt: Date.now(),
+      };
       upsertMcpServer(renamed);
       existing = existing.map((server) => server.id === renamed.id ? renamed : server);
     }
