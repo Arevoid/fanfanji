@@ -116,6 +116,13 @@ export function useChatController({
     }
   };
 
+  // Explicit call requests are user-authorized actions, not ordinary text
+  // turns. Route them from every composer send mode: Enter and the
+  // "send-only" arrow are both valid ways to send a message, and neither
+  // should silently downgrade a callback request to model-generated text.
+  const routeExplicitVoiceCallRequest = (userMessage: Message): boolean =>
+    onExplicitVoiceCallRequest?.(userMessage, runtimeContext) === true;
+
   // Handle Send Message (User sends only, no immediate reply)
   const handleSendOnly = async (inputText: string, event?: FormEvent) => {
     if (event) event.preventDefault();
@@ -138,6 +145,18 @@ export function useChatController({
     });
     onSendMessage(userMessage);
     onUserMessageCreated?.(userMessage, runtimeContext);
+    const callStarted = routeExplicitVoiceCallRequest(userMessage);
+    if (callStarted) {
+      await confirmMessagePersistence();
+      appendChatUserMessageToOfflineStory({
+        userMessage,
+        isOfflineModeActive,
+        activeOfflineStoryId,
+        offlineStories,
+        onSaveOfflineStory,
+      });
+      return;
+    }
     await confirmMessagePersistence();
     appendChatUserMessageToOfflineStory({
       userMessage,
@@ -191,7 +210,7 @@ export function useChatController({
       // lifecycle instead of asking the text model to simulate a telephone
       // conversation. The user message is retained in chat history, while the
       // call UI owns the subsequent transcript and provider requests.
-      if (onExplicitVoiceCallRequest?.(userMessage, runtimeContext)) {
+      if (routeExplicitVoiceCallRequest(userMessage)) {
         await confirmMessagePersistence();
         return;
       }

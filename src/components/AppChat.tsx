@@ -1506,6 +1506,9 @@ export default function AppChat({
   const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
   const videoCallOpeningRelationRef = useRef<string | null>(null);
   const videoCallOpeningScopeRef = useRef<DirectVoiceCallScope | null>(null);
+  // Keep the scope that actually opened a call while identity/contact state
+  // is being restored between renders.
+  const voiceCallScopeRef = useRef<DirectVoiceCallScope | null>(null);
   // Stop background generation after an authentication failure so a missing
   // or invalid provider key cannot create a repeated request/logging loop.
   const backgroundGenerationBlockedRef = useRef(false);
@@ -1657,7 +1660,8 @@ export default function AppChat({
   // previous identity remain open after the active relationship changes.
   useEffect(() => {
     if (activeAttachModal !== "calling" || !voiceCallRelationId) return;
-    if (isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) return;
+    if (isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)
+      || (!activeVoiceCallScope && voiceCallScopeRef.current?.relationId === voiceCallRelationId)) return;
 
     clearCallSpeechQueue();
     if (activeTtsAudio) activeTtsAudio.pause();
@@ -1666,15 +1670,35 @@ export default function AppChat({
     setCallingInputText("");
     setActiveAttachModal(null);
     setVoiceCallRelationId(null);
+    voiceCallScopeRef.current = null;
   }, [activeAttachModal, activeTtsAudio, activeVoiceCallScope?.relationId, voiceCallRelationId]);
 
-  const beginCall = (mode: ChatCallMode, incoming: boolean) => {
-    if (!activeCharacter || activeCharacter.isGroupChat || !activeVoiceCallScope) return;
+  const resolveVoiceCallScopeForContext = (context: ChatRuntimeContext): DirectVoiceCallScope | undefined => {
+    if (context.isGroup || activeCharacter?.isGroupChat || !activeCharacter) return undefined;
+    if (activeVoiceCallScope && (!context.relationId || context.relationId === activeVoiceCallScope.relationId)) {
+      return activeVoiceCallScope;
+    }
+
+    const characterId = resolveCanonicalCharacterId(activeCharacter.id, characters);
+    const relation = relationships.find((candidate) =>
+      candidate.userIdentityId === context.userIdentityId
+      && (!context.relationId || candidate.id === context.relationId)
+      && resolveCanonicalCharacterId(candidate.characterId, characters) === characterId,
+    );
+    if (!relation) return undefined;
+    const conversationId = relation.conversationId || getConversationId(relation.id);
+    if (context.conversationId && context.conversationId !== conversationId) return undefined;
+    return { relationId: relation.id, conversationId };
+  };
+
+  const beginCall = (mode: ChatCallMode, incoming: boolean, scopeOverride?: DirectVoiceCallScope) => {
+    const callScope = scopeOverride || activeVoiceCallScope;
+    if (!activeCharacter || activeCharacter.isGroupChat || !callScope) return;
     clearCallSpeechQueue();
     resetCallTtsPlayback();
     if (!incoming) unlockCallTtsPlayback();
     setIsIncomingCall(incoming);
-    setVoiceCallRelationId(activeVoiceCallScope.relationId);
+    setVoiceCallRelationId(callScope.relationId);
     setCallingStatus("ringing");
     setCallingDuration(0);
     setCallStartTime(0);
@@ -1691,11 +1715,12 @@ export default function AppChat({
     setActiveAttachModal("calling");
     setShowAttachPanel(false);
     videoCallOpeningRelationRef.current = null;
-    videoCallOpeningScopeRef.current = activeVoiceCallScope;
+    voiceCallScopeRef.current = callScope;
+    videoCallOpeningScopeRef.current = callScope;
   };
 
-  const beginVoiceCall = (incoming: boolean) => beginCall("voice", incoming);
-  const beginVideoCall = (incoming = false) => beginCall("video", incoming);
+  const beginVoiceCall = (incoming: boolean, scope?: DirectVoiceCallScope) => beginCall("voice", incoming, scope);
+  const beginVideoCall = (incoming = false, scope?: DirectVoiceCallScope) => beginCall("video", incoming, scope);
 
   // A proactive action generated while another chat is open is kept in a
   // relation-scoped queue. Consume it only after the exact relationship is
@@ -1729,11 +1754,15 @@ export default function AppChat({
   }, [activeAttachModal, activeCharacter?.enableProactiveCall, activeCharacter?.id, activeIdentityId, activeRelationship?.id, activeVoiceCallScope?.relationId]);
 
   const finishVoiceCall = (requestedStatus: VoiceCallStatus, options: { userEndedCall?: boolean } = {}) => {
-    if (!activeChatCharId || !isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope)) {
+    const activeScopeMatches = isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope);
+    const sessionScope = activeScopeMatches ? activeVoiceCallScope : voiceCallScopeRef.current;
+    const activeScopeChanged = Boolean(activeVoiceCallScope && voiceCallRelationId && !activeScopeMatches);
+    if (!activeChatCharId || !voiceCallRelationId || !sessionScope || activeScopeChanged) {
       clearCallSpeechQueue();
       resetCallTtsPlayback();
       setActiveAttachModal(null);
       setVoiceCallRelationId(null);
+      voiceCallScopeRef.current = null;
       return;
     }
     const completion = completeVoiceCall({
@@ -1742,7 +1771,7 @@ export default function AppChat({
       durationSeconds: callingDuration,
       id: `call-record-${Date.now()}`,
       characterId: activeChatCharId,
-      scope: activeVoiceCallScope,
+      scope: sessionScope,
       sender: isIncomingCall ? "character" : "user",
       authorIdentityId: !isIncomingCall ? activeIdentityId : undefined,
       authorNameSnapshot: !isIncomingCall ? activeIdentityName : undefined,
@@ -1758,7 +1787,7 @@ export default function AppChat({
       const claim = createDeterministicArtifactClaim({ message: completion.callRecord, scope: activeDirectScope });
       if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture voice-call knowledge claim.");
     }
-    if (completion.rejectionPatch) updateRelationshipSession(activeVoiceCallScope.relationId, completion.rejectionPatch);
+    if (completion.rejectionPatch) updateRelationshipSession(sessionScope.relationId, completion.rejectionPatch);
     clearCallSpeechQueue();
     if (activeTtsAudio) activeTtsAudio.pause();
     resetCallTtsPlayback();
@@ -1766,6 +1795,7 @@ export default function AppChat({
     setCallingInputText("");
     setActiveAttachModal(null);
     setVoiceCallRelationId(null);
+    voiceCallScopeRef.current = null;
   };
 
   const endVoiceCall = () => finishVoiceCall(callingStatus === "connected" ? "completed" : "cancelled", { userEndedCall: true });
@@ -1789,6 +1819,7 @@ export default function AppChat({
 
   const sendVoiceCallMessage = () => {
     if (isTyping) return;
+    const currentCallScope = activeVoiceCallScope ?? voiceCallScopeRef.current;
     const videoCallInputMarkup = callMode === "video"
       ? createVideoCallInputMarkup(callingInputText, videoCallInputMode)
       : callingInputText;
@@ -1796,7 +1827,7 @@ export default function AppChat({
       text: videoCallInputMarkup,
       characterId: activeChatCharId,
       sessionRelationId: voiceCallRelationId,
-      scope: activeVoiceCallScope,
+      scope: currentCallScope,
       id: Date.now().toString(),
       timestamp: Date.now(),
       authorIdentityId: activeIdentityId,
@@ -1826,11 +1857,12 @@ export default function AppChat({
 
   const sendVideoCameraFrame = (imageDataUrl: string) => {
     if (isTyping || callMode !== "video" || callingStatus !== "connected") return;
+    const currentCallScope = activeVoiceCallScope ?? voiceCallScopeRef.current;
     const userMsg = createVoiceCallUserMessage({
       text: "[视频画面]|我打开了摄像头，请识别我当前的画面并结合上下文回应。",
       characterId: activeChatCharId,
       sessionRelationId: voiceCallRelationId,
-      scope: activeVoiceCallScope,
+      scope: currentCallScope,
       id: `video-call-camera-${Date.now()}`,
       timestamp: Date.now(),
       authorIdentityId: activeIdentityId,
@@ -3654,16 +3686,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
     },
     onExplicitVoiceCallRequest: (message, context) => {
-      if (context.isGroup || activeCharacter?.isGroupChat || !activeVoiceCallScope) return false;
+      const callScope = resolveVoiceCallScopeForContext(context);
+      if (!callScope) return false;
       // An explicit “call me back” request is user-authorized and must not be
       // blocked by the optional unsolicited-proactive-call toggle. That
       // toggle only governs calls the character decides to initiate alone.
       if (isExplicitIncomingCallRequest(message.content)) {
-        beginVoiceCall(true);
+        beginVoiceCall(true, callScope);
         return true;
       }
       if (!isExplicitVoiceCallRequest(message.content)) return false;
-      beginVoiceCall(false);
+      beginVoiceCall(false, callScope);
       return true;
     },
     onReplyStopped: () => {
