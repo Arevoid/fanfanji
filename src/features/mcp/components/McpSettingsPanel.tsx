@@ -26,7 +26,9 @@ const HOTSEARCH_MCP_SERVER: McpServerConfig = {
   name: "热搜",
   url: `${typeof window !== "undefined" ? window.location.origin : "https://fanfanji.ccwu.cc"}/api/hotsearch-mcp`,
   enabled: true,
-  directFetch: false,
+  // This endpoint is hosted by the same Worker. Browser direct fetch avoids
+  // a Cloudflare Worker -> itself subrequest, which can return 522.
+  directFetch: true,
   readOnlyOnly: true,
   discoveredTools: [],
   connectionStatus: "unverified",
