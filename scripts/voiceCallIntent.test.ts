@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { isExplicitIncomingCallRequest, isExplicitVoiceCallRequest } from "../src/features/chat/services/voiceCallIntent";
+import { isExplicitIncomingCallRequest, isExplicitIncomingVideoCallRequest, isExplicitVoiceCallRequest } from "../src/features/chat/services/voiceCallIntent";
 
 assert.equal(isExplicitVoiceCallRequest("打吧"), true);
 assert.equal(isExplicitVoiceCallRequest("给我打个电话"), true);
@@ -14,5 +14,8 @@ assert.equal(isExplicitIncomingCallRequest("你回拨过来吧"), true);
 assert.equal(isExplicitIncomingCallRequest("我给你打电话"), false);
 assert.equal(isExplicitIncomingCallRequest("你打字慢一点"), false);
 assert.equal(isExplicitIncomingCallRequest("晚点再给我打"), false);
+assert.equal(isExplicitIncomingVideoCallRequest("你给我打视频电话"), true);
+assert.equal(isExplicitIncomingVideoCallRequest("不小心挂了，你重新给我打一下"), false);
+assert.equal(isExplicitIncomingVideoCallRequest("让你视频通话 不是语音通话"), false);
 
 console.log("PASS explicit call requests route to the real voice-call lifecycle");

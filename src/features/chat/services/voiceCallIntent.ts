@@ -1,12 +1,13 @@
 /**
- * Explicit user requests for a real call should open the existing call UI.
- * This is intentionally narrow: ordinary mentions of a phone or a call, and
- * requests to avoid a call, must remain ordinary chat text.
+ * Legacy matcher retained for non-composer callers. The chat composer must
+ * never use this matcher to start an outgoing call: sending text is always a
+ * text action, and the user starts outgoing calls from the call controls.
  */
 const EXPLICIT_CALL_REQUEST_PATTERN = /(?:打吧|打电话(?:给我|过来|吧|啊|呀|呗)?|拨电话(?:给我|过来|吧|啊|呀|呗)?|给(?:我|你|您)(?:打|拨)(?:个|一下)?电话|跟我(?:打|聊|通)电话|和我(?:打|聊|通)电话|打过来|拨过来|来(?:个|一下)?电话|(?:语音|视频)通话(?:吧|啊|呀|呗)?)/u;
 const EXPLICIT_CALLBACK_REQUEST_PATTERN = /(?:你.{0,8}(?:给我(?:打|拨)(?:个|一下)?|打过来|拨过来|打回来|拨回来|回拨)|(?:重新|再|待会儿?|一会儿?).{0,8}(?:给我打|给我拨|打过来|拨过来|回拨|打回来|拨回来))/u;
 const CALL_NEGATION_PATTERN = /(?:不要|别(?:再)?|不用|不想|无需|拒绝|先别|暂时别|晚点|等会儿?|以后|明天)/u;
 const INDIRECT_CALL_CONTEXT_PATTERN = /^(?:我|他|她|朋友|同事|家人)[^。！？!?]{0,12}(?:打|拨)电话/u;
+const VIDEO_CALL_CONTEXT_PATTERN = /(?:视频(?:电话|通话)?|打视频|视频打)/u;
 
 export function isExplicitVoiceCallRequest(text: string): boolean {
   const normalized = text.replace(/\s+/gu, " ").trim();
@@ -29,4 +30,15 @@ export function isExplicitIncomingCallRequest(text: string): boolean {
   // incoming call merely because it contains the character's pronoun.
   if (/(?:我|他|她|朋友|同事|家人)给你(?:打|拨)/u.test(normalized)) return false;
   return EXPLICIT_CALLBACK_REQUEST_PATTERN.test(normalized);
+}
+
+/**
+ * Identifies the media type for an incoming callback request. This is only
+ * evaluated after isExplicitIncomingCallRequest has matched, so a casual
+ * mention of “视频通话” in ordinary chat cannot open a call surface.
+ */
+export function isExplicitIncomingVideoCallRequest(text: string): boolean {
+  const normalized = text.replace(/\s+/gu, " ").trim();
+  if (!normalized || normalized.length > 120) return false;
+  return isExplicitIncomingCallRequest(normalized) && VIDEO_CALL_CONTEXT_PATTERN.test(normalized);
 }

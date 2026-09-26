@@ -46,7 +46,7 @@ import { completeVoiceCall } from "../features/chat/services/voiceCallCompletion
 import { buildDirectChatContextSnapshot } from "../features/chat/services/directChatContextSnapshotBuilder";
 import { prepareDirectReplyContext, prepareDirectReplyTurn, type DirectReplyPromptPreparationInput } from "../features/chat/services/directReplyPreparation";
 import { useProactiveCallScheduler } from "../features/chat/hooks/useProactiveCallScheduler";
-import { isExplicitIncomingCallRequest, isExplicitVoiceCallRequest } from "../features/chat/services/voiceCallIntent";
+import { isExplicitIncomingCallRequest, isExplicitIncomingVideoCallRequest } from "../features/chat/services/voiceCallIntent";
 import { resolveCharacterCallIntent } from "../features/chat/services/characterCallIntent";
 import { useChatPaymentState } from "../features/chat/hooks/useChatPaymentState";
 import { useChatProfileState } from "../features/chat/hooks/useChatProfileState";
@@ -3700,7 +3700,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         handleExplicitCharacterAvatarChangeRequest(message.content, context);
       }
     },
-    onExplicitVoiceCallRequest: (message, context) => {
+    onExplicitIncomingCallRequest: (message, context) => {
       const callScope = resolveVoiceCallScopeForContext(context)
         || (activeDirectScope
           && activeDirectScope.userIdentityId === context.userIdentityId
@@ -3715,12 +3715,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       // An explicit “call me back” request is user-authorized and must not be
       // blocked by the optional unsolicited-proactive-call toggle. That
       // toggle only governs calls the character decides to initiate alone.
-      if (isExplicitIncomingCallRequest(message.content)) {
-        beginVoiceCall(true, callScope);
-        return true;
-      }
-      if (!isExplicitVoiceCallRequest(message.content)) return false;
-      beginVoiceCall(false, callScope);
+      if (!isExplicitIncomingCallRequest(message.content)) return false;
+      if (isExplicitIncomingVideoCallRequest(message.content)) beginVideoCall(true, callScope);
+      else beginVoiceCall(true, callScope);
       return true;
     },
     onReplyStopped: () => {

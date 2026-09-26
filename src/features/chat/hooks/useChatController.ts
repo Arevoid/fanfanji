@@ -32,8 +32,8 @@ export interface UseChatControllerOptions {
   /** Allows the host surface to observe a user-authored message without
    * moving feature-specific side effects into this controller. */
   onUserMessageCreated?: (message: Message, context: ChatRuntimeContext) => void;
-  /** Allows a host surface to route an explicit call request to its real call UI. */
-  onExplicitVoiceCallRequest?: (message: Message, context: ChatRuntimeContext) => boolean;
+  /** Allows a host surface to route an explicit incoming callback to its real call UI. */
+  onExplicitIncomingCallRequest?: (message: Message, context: ChatRuntimeContext) => boolean;
   onMessagePersistenceComplete?: () => boolean | Promise<boolean>;
   generateResponseForUserMessage: ChatResponseHandler;
   generateAndSendCharacterImage: CharacterImageHandler;
@@ -60,7 +60,7 @@ export function useChatController({
   currentChatMessages,
   onSendMessage,
   onUserMessageCreated,
-  onExplicitVoiceCallRequest,
+  onExplicitIncomingCallRequest,
   onMessagePersistenceComplete,
   generateResponseForUserMessage,
   generateAndSendCharacterImage,
@@ -116,12 +116,12 @@ export function useChatController({
     }
   };
 
-  // Explicit call requests are user-authorized actions, not ordinary text
-  // turns. Route them from every composer send mode: Enter and the
-  // "send-only" arrow are both valid ways to send a message, and neither
-  // should silently downgrade a callback request to model-generated text.
-  const routeExplicitVoiceCallRequest = (userMessage: Message): boolean =>
-    onExplicitVoiceCallRequest?.(userMessage, runtimeContext) === true;
+  // Sending text must never initiate an outgoing voice/video call. The only
+  // call action that remains text-addressable is an explicit request for the
+  // character to call the user back; outgoing calls are started from the call
+  // controls so a casual mention such as “视频通话” stays ordinary text.
+  const routeExplicitIncomingCallRequest = (userMessage: Message): boolean =>
+    onExplicitIncomingCallRequest?.(userMessage, runtimeContext) === true;
 
   // Handle Send Message (User sends only, no immediate reply)
   const handleSendOnly = async (inputText: string, event?: FormEvent) => {
@@ -145,7 +145,7 @@ export function useChatController({
     });
     onSendMessage(userMessage);
     onUserMessageCreated?.(userMessage, runtimeContext);
-    const callStarted = routeExplicitVoiceCallRequest(userMessage);
+    const callStarted = routeExplicitIncomingCallRequest(userMessage);
     if (callStarted) {
       await confirmMessagePersistence();
       appendChatUserMessageToOfflineStory({
@@ -206,11 +206,10 @@ export function useChatController({
       onSendMessage(userMessage);
       onUserMessageCreated?.(userMessage, runtimeContext);
 
-      // A direct, explicit call request must enter the existing voice-call
-      // lifecycle instead of asking the text model to simulate a telephone
-      // conversation. The user message is retained in chat history, while the
-      // call UI owns the subsequent transcript and provider requests.
-      if (routeExplicitVoiceCallRequest(userMessage)) {
+      // An explicit request for the character to call the user back enters the
+      // existing call lifecycle. Outgoing calls are intentionally not routed
+      // from text; the user starts those from the call controls.
+      if (routeExplicitIncomingCallRequest(userMessage)) {
         await confirmMessagePersistence();
         return;
       }
