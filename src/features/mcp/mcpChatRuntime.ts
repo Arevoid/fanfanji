@@ -8,6 +8,65 @@ type RequestAi = (params: ApiChatParams) => Promise<{ text: string }>;
 const OPEN_MARKER = "[[MCP_TOOL_REQUEST]]";
 const CLOSE_MARKER = "[[/MCP_TOOL_REQUEST]]";
 const MAX_TOOL_SCHEMA_CHARS = 8_000;
+const URL_PATTERN = /https?:\/\/[^\s<>"'“”‘’]+/giu;
+const WEB_READ_INTENT_PATTERN = /(看看|查看|打开|读一下|读取|阅读|浏览|网页|文章|新闻|链接|网址|总结|概括|内容|刷到|搜到|查一下|查查|what(?:'s| is) this|read|open|fetch|summari[sz]e|article|news)/iu;
+
+type UrlReadIntent = {
+  url: string;
+  source: "message" | "history";
+};
+
+function normalizeUrl(raw: string): string {
+  return raw.replace(/[，。！？；：、）》】\]}>'"”’]+$/u, "");
+}
+
+function extractUrls(text: unknown): string[] {
+  if (typeof text !== "string") return [];
+  return [...text.matchAll(URL_PATTERN)].map((match) => normalizeUrl(match[0])).filter(Boolean);
+}
+
+function resolveUrlReadIntent(request: ApiChatParams): UrlReadIntent | null {
+  const message = request.message || "";
+  const messageUrls = extractUrls(message);
+  if (messageUrls.length > 0 && (message.trim() === messageUrls[0] || WEB_READ_INTENT_PATTERN.test(message))) {
+    return { url: messageUrls[0], source: "message" };
+  }
+
+  // A common flow is: send a URL first, then ask "你看到了吗？" in the next
+  // turn. Keep the lookup request-local by considering only recent user turns.
+  if (WEB_READ_INTENT_PATTERN.test(message)) {
+    const history = Array.isArray(request.history) ? request.history : [];
+    for (let index = history.length - 1; index >= 0 && index >= history.length - 8; index -= 1) {
+      const entry = history[index];
+      if (!entry || typeof entry !== "object") continue;
+      if (String((entry as { role?: unknown }).role || "").toLowerCase() !== "user") continue;
+      const urls = extractUrls((entry as { text?: unknown }).text);
+      if (urls.length > 0) return { url: urls[0], source: "history" };
+    }
+  }
+  return null;
+}
+
+function findWebFetchTool(servers: McpServerConfig[]): { server: McpServerConfig; tool: McpServerConfig["discoveredTools"][number] } | null {
+  const tools = servers.flatMap((server) => server.discoveredTools.filter((tool) => tool.enabled && tool.readOnly).map((tool) => ({ server, tool })));
+  const preferred = tools.find(({ tool }) => tool.name.toLowerCase() === "web_fetch_exa");
+  return preferred || tools.find(({ tool }) => /(?:fetch|read|open)/iu.test(tool.name)) || null;
+}
+
+function buildUrlToolArguments(tool: McpServerConfig["discoveredTools"][number], url: string): Record<string, unknown> {
+  const properties = tool.inputSchema?.properties;
+  if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+    const urlProperty = Object.keys(properties).find((key) => /url|link|uri|page/i.test(key));
+    if (urlProperty) {
+      const descriptor = properties[urlProperty];
+      const type = descriptor && typeof descriptor === "object" && !Array.isArray(descriptor)
+        ? (descriptor as { type?: unknown }).type
+        : undefined;
+      return { [urlProperty]: type === "array" ? [url] : url };
+    }
+  }
+  return { url };
+}
 
 function scopedServers(scope?: McpRequestScope): McpServerConfig[] {
   // Scope is intentionally accepted now so future server policies can be
@@ -52,6 +111,26 @@ export function createMcpAwareRequestAi(base: RequestAi, scope?: McpRequestScope
     const servers = scopedServers(scope);
     const instruction = buildToolInstruction(servers);
     if (!instruction) return base(request);
+
+    const urlReadIntent = resolveUrlReadIntent(request);
+    if (urlReadIntent) {
+      const fetchTool = findWebFetchTool(servers);
+      if (fetchTool) {
+        try {
+          const result = await callMcpTool(fetchTool.server, {
+            serverId: fetchTool.server.id,
+            toolName: fetchTool.tool.name,
+            arguments: buildUrlToolArguments(fetchTool.tool, urlReadIntent.url),
+          }, request.signal);
+          const toolContext = `[网页读取结果，仅供当前回复使用，不写入记忆，也不要暴露工具协议]\n网址：${urlReadIntent.url}\n工具：${fetchTool.tool.name}\n结果：${formatMcpToolResult(result)}`;
+          return base(withInstruction(request, `${instruction}\n\n${toolContext}\n用户要求查看这个网页。请严格基于读取结果回答；如果结果为空或工具返回错误，明确说明无法读取，不要猜测网页内容，也不要输出 MCP 标记。`));
+        } catch (error) {
+          console.warn("[mcp] deterministic webpage fetch failed", error);
+          return base(withInstruction(request, `${instruction}\n\n本轮网页读取失败（网址：${urlReadIntent.url}）。请明确告诉用户暂时无法读取该网页，不要编造或假装看过网页内容。`));
+        }
+      }
+    }
+
     const first = await base(withInstruction(request, instruction));
     const toolRequest = parseToolRequest(first.text);
     if (!toolRequest) return first;

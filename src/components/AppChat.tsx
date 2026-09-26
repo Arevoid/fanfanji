@@ -214,6 +214,7 @@ import { InnerVoiceModal } from "../features/chat/components/InnerVoiceModal";
 import { ContactList } from "../features/chat/components/ContactList";
 import { ConversationList } from "../features/chat/components/ConversationList";
 import { MessageList } from "../features/chat/components/MessageList";
+import { ChatTextWithLinks } from "../features/chat/components/ChatTextWithLinks";
 import { parseQuoteReply, QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
 import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
 import { ChatComposer, ChatInputBar } from "../features/chat/components/ChatComposer";
@@ -8276,7 +8277,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                                   <span className="message-quote__content px-3 py-2">{quoteReply.content}</span>
                                 </div>
                               </>
-                            ) : <div className="text-left">{msg.content}</div>;
+                            ) : <div className="text-left" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}><ChatTextWithLinks text={msg.content} /></div>;
                           })()}
                           {activeCharacter.enableAutoTranslate && containsNonChineseText(msg.content) && msg.translation && !collapsedTranslations.has(msg.id) && (
                             <>
