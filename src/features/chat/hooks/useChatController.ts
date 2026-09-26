@@ -13,6 +13,8 @@ export type ChatResponseHandler = (
   userMessage: Message | null,
   history?: Message[],
   signal?: AbortSignal,
+  imageDataUrlOverride?: string,
+  ephemeralImage?: boolean,
 ) => Promise<void | DirectReplyLifecycleOutcome> | void;
 
 export type CharacterImageHandler = (

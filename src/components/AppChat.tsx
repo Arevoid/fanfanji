@@ -1824,6 +1824,25 @@ export default function AppChat({
     setCallingInputText("");
   };
 
+  const sendVideoCameraFrame = (imageDataUrl: string) => {
+    if (isTyping || callMode !== "video" || callingStatus !== "connected") return;
+    const userMsg = createVoiceCallUserMessage({
+      text: "[视频画面]|我打开了摄像头，请识别我当前的画面并结合上下文回应。",
+      characterId: activeChatCharId,
+      sessionRelationId: voiceCallRelationId,
+      scope: activeVoiceCallScope,
+      id: `video-call-camera-${Date.now()}`,
+      timestamp: Date.now(),
+      authorIdentityId: activeIdentityId,
+      authorNameSnapshot: activeIdentityName,
+      authorAvatarSnapshot: activeIdentityAvatar,
+    });
+    if (!userMsg) return;
+    setVideoCallSelfScene("摄像头画面已发送");
+    onSendMessage(userMsg);
+    void generateResponseForUserMessage(userMsg, undefined, undefined, imageDataUrl, true);
+  };
+
   const generateResponseForGroupChat = async (userMsg: Message | null, customHistoryOverride?: Message[], signal?: AbortSignal) => {
     if (!activeChatCharId || !activeCharacter) return;
     if (signal?.aborted) return;
@@ -2027,6 +2046,8 @@ export default function AppChat({
     cognitiveContext?: CharacterCognitiveContext,
     replyContext: ChatRuntimeContext = activeRuntimeContext,
     signal?: AbortSignal,
+    imageDataUrlOverride?: string,
+    ephemeralImage = false,
   ): Promise<DirectReplyLifecycleOutcome> => {
     const lifecycle: DirectReplyLifecycleInput = {
       mode: "send",
@@ -2725,14 +2746,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           : ""}`
         : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
       const imageScopeKey = `${replyContext.userIdentityId}:${replyContext.characterId}:${replyContext.relationId || replyContext.conversationId || "group"}`;
-      const imageDataUrl = resolveRecentUserImageForTurn({
+      const imageDataUrl = imageDataUrlOverride || resolveRecentUserImageForTurn({
         messages: sourceMsgs,
         userMessage: userMsg,
         scope: replyContext,
         recentImage: recentSharedImageByScopeRef.current[imageScopeKey],
       });
       const imageInstruction = imageDataUrl
-        ? `\n【本轮请求包含真实图片】请先直接观察并识别图片中的主体、物品和场景，再回答；图片可能是当前消息随附的，也可能是用户刚刚发送后正在追问的同一张图片。不要仅凭‘发送图片’这段文字猜测，也不要把包、袋子等物品擅自判断成衣服。
+        ? ephemeralImage
+          ? `\n【本轮请求包含临时摄像头画面】请直接观察并识别这帧实时摄像头画面中的主体、物品、动作和环境，再结合当前聊天上下文自然回应。不要仅凭“打开摄像头”这段文字猜测，也不要把无法确认的细节当成事实；这是一帧临时画面，不要请求或输出相册保存标记。`
+          : `\n【本轮请求包含真实图片】请先直接观察并识别图片中的主体、物品和场景，再回答；图片可能是当前消息随附的，也可能是用户刚刚发送后正在追问的同一张图片。不要仅凭‘发送图片’这段文字猜测，也不要把包、袋子等物品擅自判断成衣服。
 【用户图片留存判断】这张图片是否值得放进你的私人相册，由你根据当前关系、情绪、图片内容和这次对话自然判断。不要每张都保存，只有少数确实有纪念意义、对你重要或你明确想留着的图片才保存。若决定保存，请在整段回复末尾单独输出内部标记 ${"[[SAVE_USER_IMAGE]]"}，不要解释标记；若不保存，不要输出该标记。该标记不会展示给用户。`
         : "";
       const preparedDirectReply = prepareDirectReplyTurn({
@@ -2790,13 +2813,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             && /(?:密码|口令|解锁码)[^。！？!?\n]{0,14}(?:改|换|设)[^。！？!?\n]{0,14}\d{4}/u.test(data.text)) {
             data.text = "刚才的密码修改没有完成，我不会把没保存的数字当成新密码。";
           }
-          const userImageSaveDecision = imageDataUrl
+          const userImageSaveDecision = imageDataUrl && !ephemeralImage
             ? parseCharacterSaveUserImageDirective(data.text)
             : { shouldSave: false, visibleText: data.text };
           const cleanTranslation = data.translation
             ? parseCharacterPhonePasswordActionMarker(data.translation).visibleText
             : data.translation;
-          const translationImageSaveDecision = imageDataUrl && data.translation
+          const translationImageSaveDecision = imageDataUrl && !ephemeralImage && data.translation
             ? parseCharacterSaveUserImageDirective(cleanTranslation || "")
             : { shouldSave: false, visibleText: cleanTranslation };
           data.text = userImageSaveDecision.visibleText;
@@ -3227,8 +3250,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
     },
     generateGroupReply: generateResponseForGroupChat,
-    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext, context, signal }) =>
-      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext, context, signal),
+    generateDirectReply: ({ userMsg, customHistoryOverride, cognitiveContext, context, signal, imageDataUrlOverride, ephemeralImage }) =>
+      executeDirectReplyPipeline(userMsg, customHistoryOverride, cognitiveContext, context, signal, imageDataUrlOverride, ephemeralImage),
   });
 
   const chatSideEffectController = createChatSideEffectController({
@@ -3267,7 +3290,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     userMsg: Message | null,
     customHistoryOverride?: Message[],
     signal?: AbortSignal,
-  ) => chatReplyController.generate({ userMsg, customHistoryOverride, signal });
+    imageDataUrlOverride?: string,
+    ephemeralImage?: boolean,
+  ) => chatReplyController.generate({ userMsg, customHistoryOverride, signal, imageDataUrlOverride, ephemeralImage });
 
   // A video call should not open onto an empty canvas. Once the outgoing call
   // is connected, ask the character for a first scene/line using the same
@@ -8649,7 +8674,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 {/* 6. 视频 (Video) */}
                 <button
                   type="button"
-                  onClick={beginVideoCall}
+                  onClick={() => beginVideoCall(false)}
                   className="chat-attachment-item chat-attachment-item--video flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
                   <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
@@ -9387,6 +9412,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               onInputModeChange={setVideoCallInputMode}
               onSend={sendVoiceCallMessage}
               onEnd={endVoiceCall}
+              onCameraFrame={sendVideoCameraFrame}
             />
           )}
 

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeftRight, Camera, Clock3, Image as ImageIcon, LockKeyhole, Maximize2, Mic, Phone, Send, UserRound, Video, X } from "lucide-react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { ArrowLeftRight, Camera, Clock3, Image as ImageIcon, Maximize2, Mic, Phone, Send, UserRound, Video, X } from "lucide-react";
 import type { Character } from "../../../types";
 import type { CallTranscriptItem } from "../services/messageParser";
 import type { VideoCallInputMode } from "../hooks/useChatAttachmentState";
@@ -23,6 +23,7 @@ interface VideoCallViewProps {
   onInputModeChange: (mode: VideoCallInputMode) => void;
   onSend: () => void;
   onEnd: () => void;
+  onCameraFrame: (imageDataUrl: string) => void;
 }
 
 const formatDuration = (duration: number) => `${Math.floor(duration / 60).toString().padStart(2, "0")}:${(duration % 60).toString().padStart(2, "0")}`;
@@ -45,9 +46,19 @@ export function VideoCallView({
   onInputModeChange,
   onSend,
   onEnd,
+  onCameraFrame,
 }: VideoCallViewProps) {
   const [showSceneHistory, setShowSceneHistory] = useState(false);
   const [showSelfSceneTicker, setShowSelfSceneTicker] = useState(false);
+  const [selfPreviewPosition, setSelfPreviewPosition] = useState<{ left: number; top: number } | null>(null);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const callViewRef = useRef<HTMLDivElement | null>(null);
+  const selfPreviewRef = useRef<HTMLDivElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraAutoCapturePendingRef = useRef(false);
+  const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
   const stickTranscriptToBottomRef = useRef(true);
   const characterName = character.remark || character.name;
@@ -74,6 +85,117 @@ export function VideoCallView({
     return () => window.clearTimeout(timer);
   }, [selfScene]);
 
+  useEffect(() => {
+    const video = cameraVideoRef.current;
+    if (!video || !cameraStream) return;
+    video.srcObject = cameraStream;
+    void video.play().catch(() => undefined);
+    return () => {
+      if (video.srcObject === cameraStream) video.srcObject = null;
+    };
+  }, [cameraStream]);
+
+  useEffect(() => () => {
+    cameraStream?.getTracks().forEach((track) => track.stop());
+  }, [cameraStream]);
+
+  const captureCameraFrame = () => {
+    const video = cameraVideoRef.current;
+    if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+      setCameraError("摄像头画面还在准备中，请稍后再试");
+      return;
+    }
+    const maxSide = 960;
+    const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setCameraError("无法读取摄像头画面");
+      return;
+    }
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    setCameraError("");
+    onCameraFrame(canvas.toDataURL("image/jpeg", 0.78));
+  };
+
+  const handleCameraVideoReady = () => {
+    if (!cameraAutoCapturePendingRef.current) return;
+    cameraAutoCapturePendingRef.current = false;
+    window.requestAnimationFrame(captureCameraFrame);
+  };
+
+  const handleCameraClick = async () => {
+    if (cameraStarting) return;
+    if (cameraStream) {
+      captureCameraFrame();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("当前浏览器不支持摄像头调用");
+      return;
+    }
+    setCameraStarting(true);
+    setCameraError("");
+    cameraAutoCapturePendingRef.current = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      setCameraStream(stream);
+    } catch (error) {
+      cameraAutoCapturePendingRef.current = false;
+      setCameraError(error instanceof DOMException && error.name === "NotAllowedError" ? "摄像头权限被拒绝" : "无法打开摄像头");
+    } finally {
+      setCameraStarting(false);
+    }
+  };
+
+  const stopCamera = () => {
+    cameraStream?.getTracks().forEach((track) => track.stop());
+    setCameraStream(null);
+    cameraAutoCapturePendingRef.current = false;
+  };
+
+  const handleCallEnd = () => {
+    stopCamera();
+    onEnd();
+  };
+
+  const handleSelfPreviewPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const root = callViewRef.current;
+    const preview = selfPreviewRef.current;
+    if (!root || !preview) return;
+    const rootRect = root.getBoundingClientRect();
+    const previewRect = preview.getBoundingClientRect();
+    setSelfPreviewPosition({ left: previewRect.left - rootRect.left, top: previewRect.top - rootRect.top });
+    dragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - previewRect.left,
+      offsetY: event.clientY - previewRect.top,
+    };
+    preview.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const handleSelfPreviewPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const root = callViewRef.current;
+    const preview = selfPreviewRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !root || !preview) return;
+    const rootRect = root.getBoundingClientRect();
+    const previewRect = preview.getBoundingClientRect();
+    const left = Math.max(0, Math.min(rootRect.width - previewRect.width, event.clientX - rootRect.left - drag.offsetX));
+    const top = Math.max(0, Math.min(rootRect.height - previewRect.height, event.clientY - rootRect.top - drag.offsetY));
+    setSelfPreviewPosition({ left, top });
+  };
+
+  const handleSelfPreviewPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null;
+      selfPreviewRef.current?.releasePointerCapture(event.pointerId);
+    }
+  };
+
   const handleTranscriptScroll = () => {
     const viewport = transcriptViewportRef.current;
     if (!viewport) return;
@@ -81,29 +203,39 @@ export function VideoCallView({
   };
 
   return (
-    <div className="absolute inset-0 z-50 flex transform-gpu flex-col overflow-hidden bg-[#080910] text-white animate-fade-in" data-video-call-view>
+    <div ref={callViewRef} className="absolute inset-0 z-50 flex transform-gpu flex-col overflow-hidden bg-[#080910] text-white animate-fade-in" data-video-call-view>
       <div className="absolute -inset-5 scale-105 bg-cover bg-center blur-[6px]" style={{ backgroundImage: avatar ? `url(${avatar})` : undefined }} />
       <div className="absolute inset-0 bg-[#080910]/25" />
       <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/0 to-black/78" />
 
       <header className="relative z-10 flex shrink-0 items-center justify-between px-4 pb-2 pt-[calc(env(safe-area-inset-top,0px)+10px)] text-white/85">
         <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full bg-black/20" aria-label="展开视频画面"><Maximize2 className="h-4 w-4" /></button>
-        <div className="text-center"><p className="text-[13px] font-bold tracking-wide">{characterName}</p><p className="mt-0.5 text-[10px] text-white/65">{status === "connected" ? formatDuration(duration) : isIncoming ? "邀请你视频通话" : "正在接通..."}</p></div>
-        <div className="flex items-center gap-3"><button type="button" className="flex h-7 w-7 items-center justify-center rounded-full bg-black/20" aria-label="锁定视频通话"><LockKeyhole className="h-4 w-4" /></button><button type="button" className="flex h-7 w-7 items-center justify-center rounded-full bg-black/20" aria-label="视频通话设置"><UserRound className="h-4 w-4" /></button></div>
+        <div className="text-center"><p className="text-[13px] font-bold tracking-wide">{characterName}</p><p className="mt-0.5 text-[10px] text-white/65">{status === "connected" ? formatDuration(duration) : isIncoming ? "邀请你视频通话" : "正在呼叫..."}</p></div>
+        <div className="flex items-center gap-3"><button type="button" className="flex h-7 w-7 items-center justify-center rounded-full bg-black/20" aria-label="视频通话设置"><UserRound className="h-4 w-4" /></button></div>
       </header>
+
+      <div
+        ref={selfPreviewRef}
+        className={`absolute z-[70] w-[92px] touch-none select-none overflow-hidden rounded-2xl border border-white/35 bg-black/35 shadow-xl backdrop-blur-sm ${selfPreviewPosition ? "" : "right-1 top-[calc(env(safe-area-inset-top,0px)+58px)]"}`}
+        style={selfPreviewPosition ? { left: selfPreviewPosition.left, top: selfPreviewPosition.top } : undefined}
+        onPointerDown={handleSelfPreviewPointerDown}
+        onPointerMove={handleSelfPreviewPointerMove}
+        onPointerUp={handleSelfPreviewPointerUp}
+        onPointerCancel={handleSelfPreviewPointerUp}
+        data-video-call-self-preview
+        aria-label="拖动我的视频窗口"
+      >
+        <div className="aspect-[3/4] w-full bg-white/10">
+          {cameraStream ? <video ref={cameraVideoRef} autoPlay muted playsInline onLoadedMetadata={handleCameraVideoReady} className="h-full w-full object-cover" aria-label="我的摄像头画面" /> : userAvatar ? <img src={userAvatar} alt={userName} className="h-full w-full object-cover" /> : <ImageIcon className="mx-auto mt-8 h-6 w-6 text-white/60" />}
+        </div>
+        <div className="overflow-hidden px-2 py-1 text-center text-[9px] text-white/75">
+          {showSelfSceneTicker && selfScene ? <div key={selfScene} className="video-call-self-scene-strip" aria-label={`我的画面：${selfScene}`}><div className="video-call-self-scene-marquee inline-block whitespace-nowrap">画面：{selfScene}</div></div> : <p className="truncate">{userName || "我"}</p>}
+        </div>
+        {cameraError && <p className="border-t border-red-300/20 bg-red-950/70 px-1 py-1 text-center text-[8px] leading-tight text-red-100">{cameraError}</p>}
+      </div>
 
       <main className="relative z-10 flex min-h-0 flex-1 flex-col px-4 pb-1">
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden" data-video-call-scene>
-          <div className="absolute right-1 top-1 z-20 w-[92px] overflow-hidden rounded-2xl border border-white/35 bg-black/35 shadow-xl backdrop-blur-sm" data-video-call-self-preview>
-            <div className="aspect-[3/4] w-full bg-white/10">{userAvatar ? <img src={userAvatar} alt={userName} className="h-full w-full object-cover" /> : <ImageIcon className="mx-auto mt-8 h-6 w-6 text-white/60" />}</div>
-            <div className="overflow-hidden px-2 py-1 text-center text-[9px] text-white/75">
-              {showSelfSceneTicker && selfScene ? (
-                <div key={selfScene} className="video-call-self-scene-strip" aria-label={`我的画面：${selfScene}`}>
-                  <div className="video-call-self-scene-marquee inline-block whitespace-nowrap">画面：{selfScene}</div>
-                </div>
-              ) : <p className="truncate">{userName || "我"}</p>}
-            </div>
-          </div>
 
           <div className="absolute inset-x-5 top-1/2 -translate-y-1/2 text-center text-[12px] leading-relaxed text-white/90 drop-shadow-lg">
             <p>{status === "connected" ? (sceneText || "等待对方画面...") : "视频通话准备中"}</p>
@@ -136,8 +268,8 @@ export function VideoCallView({
 
       <footer className="relative z-10 flex shrink-0 items-center justify-between px-8 pb-[calc(env(safe-area-inset-bottom,0px)+14px)] pt-3">
           <button type="button" onClick={() => setShowSceneHistory(true)} className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/85" aria-label="查看对方历史画面"><Clock3 className="h-5 w-5" /></button>
-        <button type="button" onClick={onEnd} className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-white shadow-xl shadow-red-950/40 active:scale-95" aria-label="挂断视频通话"><Phone className="h-7 w-7 rotate-[135deg] fill-current" /></button>
-        <button type="button" className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/85" aria-label="切换摄像头"><Camera className="h-5 w-5" /></button>
+        <button type="button" onClick={handleCallEnd} className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-white shadow-xl shadow-red-950/40 active:scale-95" aria-label="挂断视频通话"><Phone className="h-7 w-7 rotate-[135deg] fill-current" /></button>
+        <button type="button" onClick={() => void handleCameraClick()} disabled={cameraStarting} className={`flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/85 ${cameraStream ? "ring-2 ring-red-300/80" : ""}`} aria-label={cameraStream ? "拍摄并发送我的摄像头画面" : "打开我的摄像头"} title={cameraStream ? "拍摄并发送画面" : "打开摄像头"}><Camera className="h-5 w-5" /></button>
       </footer>
 
       {showSceneHistory && <div className="absolute inset-0 z-40 flex items-end bg-black/55 p-4 backdrop-blur-sm" role="dialog" aria-label="对方历史画面">

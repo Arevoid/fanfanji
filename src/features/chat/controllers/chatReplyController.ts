@@ -7,6 +7,10 @@ export interface ChatReplyRequest {
   userMsg: Message | null;
   customHistoryOverride?: Message[];
   signal?: AbortSignal;
+  /** Ephemeral image input (for example a video-call camera frame). */
+  imageDataUrlOverride?: string;
+  /** Prevents ephemeral frames from entering the character's image gallery. */
+  ephemeralImage?: boolean;
 }
 
 export interface ChatReplyControllerDependencies {
