@@ -108,6 +108,8 @@ export interface Message {
   /** Stable direct-chat thread ID. Group records retain their existing container ID semantics. */
   conversationId?: string;
   sender: "user" | "character";
+  /** Groups character bubbles created by one model turn for turn-level actions. */
+  replyBatchId?: string;
   senderId?: string;
   /** Frozen identity metadata for user-authored messages. Legacy messages fall back to current settings. */
   authorIdentityId?: string;

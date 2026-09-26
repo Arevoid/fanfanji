@@ -310,7 +310,7 @@ export async function generateRegeneratedChatTurn(input: {
 export function generateProactiveChatTurn(input: {
   prompt: PromptInput; settings: UserSettings; characterId: string; disableBracketActions: boolean;
   keepPeriods: boolean; createId: (index: number) => string; currentTime: (index: number) => number;
-  transformBubble?: (bubbleText: string, index: number) => string; cognitiveContext?: CharacterCognitiveContext; requestAi?: RequestAi;
+  transformBubble?: (bubbleText: string, index: number) => string; replyBatchId?: string; cognitiveContext?: CharacterCognitiveContext; requestAi?: RequestAi;
   proactiveOfflineAllowedModes?: readonly AppointmentMode[]; directiveNow?: number;
 }) {
   return generateProactiveReplyCandidates({
@@ -326,6 +326,7 @@ export function generateProactiveChatTurn(input: {
     createId: input.createId,
     currentTime: input.currentTime,
     transformBubble: input.transformBubble,
+    replyBatchId: input.replyBatchId,
     proactiveOfflineAllowedModes: input.proactiveOfflineAllowedModes,
     directiveNow: input.directiveNow,
     cognitiveContext: input.cognitiveContext,

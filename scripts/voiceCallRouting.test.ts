@@ -12,5 +12,7 @@ assert.equal(
 );
 assert.match(appChat, /const resolveVoiceCallScopeForContext =/);
 assert.match(appChat, /beginVoiceCall\(true, callScope\)/);
+assert.match(appChat, /resolveCharacterCallIntent\(createdMessages\)/);
+assert.match(appChat, /explicitCallbackRequested/);
 
 console.log("PASS explicit callback requests share the send pipeline and recover call scope");

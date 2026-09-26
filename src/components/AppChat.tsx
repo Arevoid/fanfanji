@@ -47,6 +47,7 @@ import { buildDirectChatContextSnapshot } from "../features/chat/services/direct
 import { prepareDirectReplyContext, prepareDirectReplyTurn, type DirectReplyPromptPreparationInput } from "../features/chat/services/directReplyPreparation";
 import { useProactiveCallScheduler } from "../features/chat/hooks/useProactiveCallScheduler";
 import { isExplicitIncomingCallRequest, isExplicitVoiceCallRequest } from "../features/chat/services/voiceCallIntent";
+import { resolveCharacterCallIntent } from "../features/chat/services/characterCallIntent";
 import { useChatPaymentState } from "../features/chat/hooks/useChatPaymentState";
 import { useChatProfileState } from "../features/chat/hooks/useChatProfileState";
 import { useChatGroupState } from "../features/chat/hooks/useChatGroupState";
@@ -2081,6 +2082,9 @@ export default function AppChat({
     imageDataUrlOverride?: string,
     ephemeralImage = false,
   ): Promise<DirectReplyLifecycleOutcome> => {
+    // Every bubble split from one model response carries the same batch id so
+    // turn-level actions (such as “重回”) can operate on the complete reply.
+    const replyBatchId = createId("reply-batch");
     const lifecycle: DirectReplyLifecycleInput = {
       mode: "send",
       scope: {
@@ -2921,11 +2925,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         const newMsgs: Message[] = paragraphs.length > 0
           ? paragraphs.map((para, pIdx) => ({
             id: createId("offline-reply"), characterId: activeChatCharId, sender: "character", content: para,
-            timestamp: Date.now() + pIdx, isOffline: true, isNarration: false,
+            timestamp: Date.now() + pIdx, isOffline: true, isNarration: false, replyBatchId,
           }))
           : [{
             id: (Date.now() + 1).toString(), characterId: activeChatCharId, sender: "character", content: finalContent,
-            timestamp: Date.now(), isOffline: true, isNarration: false,
+            timestamp: Date.now(), isOffline: true, isNarration: false, replyBatchId,
           }];
         generatedCandidateIds = newMsgs.map((message) => message.id);
         const offlineInlineRelationship = turnRelationship
@@ -2996,6 +3000,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   .filter((message) => message.sender === "character" && message.characterId === activeChatCharId)
                   .map((message) => message.content),
               }),
+              replyBatchId,
               createId: () => createId("online"),
               currentTime: () => Date.now(),
               translationText: data.translation,
@@ -3040,6 +3045,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         durableCompletion: async () => confirmMessageDurability(),
         postReply: ({ response: prepared, deliveredMessages: createdMessages }) => {
           const data = prepared.data;
+          const generatedCallIntent = resolveCharacterCallIntent(createdMessages);
+          const explicitCallbackRequested = userMsg?.sender === "user"
+            && isExplicitIncomingCallRequest(userMsg.content);
+          if (!activeAttachModal && (explicitCallbackRequested || (generatedCallIntent && turnCharacter.enableProactiveCall))) {
+            const callScope = resolveVoiceCallScopeForContext(replyContext);
+            if (callScope) {
+              if (generatedCallIntent === "video") beginVideoCall(true, callScope);
+              else beginVoiceCall(true, callScope);
+            }
+          }
           const inlineRelationship = turnRelationship
             || (replyContext.relationId ? relationships.find((relation) => relation.id === replyContext.relationId) : undefined);
           if (data.innerVoice && inlineRelationship) {
@@ -3686,7 +3701,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
     },
     onExplicitVoiceCallRequest: (message, context) => {
-      const callScope = resolveVoiceCallScopeForContext(context);
+      const callScope = resolveVoiceCallScopeForContext(context)
+        || (activeDirectScope
+          && activeDirectScope.userIdentityId === context.userIdentityId
+          && activeDirectScope.characterId === context.characterId
+          && (!context.relationId || activeDirectScope.relationId === context.relationId)
+          ? {
+            relationId: activeDirectScope.relationId,
+            conversationId: activeDirectScope.conversationId,
+          }
+          : undefined);
       if (!callScope) return false;
       // An explicit “call me back” request is user-authorized and must not be
       // blocked by the optional unsolicited-proactive-call toggle. That
@@ -4321,6 +4345,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         keepPeriods,
         createId: () => createId("friend-proactive"),
         currentTime: (idx) => backdateTimestamp ? (backdateTimestamp + idx) : (Date.now() + idx),
+        replyBatchId: createId("proactive-batch"),
         cognitiveContext,
         proactiveOfflineAllowedModes,
         directiveNow: Date.now(),

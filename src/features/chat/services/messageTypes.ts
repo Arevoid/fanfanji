@@ -23,6 +23,7 @@ export interface CharacterMessageInput {
   content: string;
   translation?: string;
   timestamp: number;
+  replyBatchId?: string;
   senderId?: string;
   sentFromCharacterPhone?: boolean;
   isOffline?: boolean;

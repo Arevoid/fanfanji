@@ -52,6 +52,7 @@ export function createCharacterTextMessage(input: CharacterMessageInput): Messag
     ...(boundary.relationId ? { relationId: boundary.relationId } : {}),
     ...(boundary.conversationId ? { conversationId: boundary.conversationId } : {}),
     sender: "character",
+    ...(input.replyBatchId ? { replyBatchId: input.replyBatchId } : {}),
     ...(input.senderId ? { senderId: input.senderId } : {}),
     ...(input.sentFromCharacterPhone ? { sentFromCharacterPhone: true } : {}),
     content: input.content,

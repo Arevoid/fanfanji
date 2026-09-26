@@ -23,6 +23,7 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
     messages: bubbles.map((bubbleText, index) => createCharacterTextMessage({
       id: context.createId(index),
       characterId: context.characterId,
+      replyBatchId: context.replyBatchId,
       context: context.context,
       content: context.transformBubble ? context.transformBubble(bubbleText, index) : bubbleText,
       translation: containsNonChineseText(bubbleText) ? translatedBubbles[index] : undefined,

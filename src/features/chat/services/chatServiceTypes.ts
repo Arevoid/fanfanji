@@ -16,6 +16,8 @@ export interface ReplyCandidateContext {
   characterId?: string;
   characterName?: string;
   userName?: string;
+  /** Stable per-request grouping for all bubbles split from one AI response. */
+  replyBatchId?: string;
   context?: ChatRuntimeContext;
   createId: (index: number) => string;
   currentTime: (index: number) => number;

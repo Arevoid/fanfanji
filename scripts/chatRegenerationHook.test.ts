@@ -7,7 +7,8 @@ const hook = readFileSync(new URL("../src/features/chat/hooks/useChatRegeneratio
 assert.match(appChat, /useChatRegenerationAction\(/);
 assert.doesNotMatch(appChat, /const handleRegenerateResponse = async/);
 assert.match(hook, /diagnosticLabel: "regenerate prompt"/);
-assert.match(hook, /deleteMessageAndLinkedImage\(targetMsg\.id\)/);
+assert.match(hook, /regenerationTurn\.targetMessages\.forEach/);
+assert.match(hook, /deleteMessageAndLinkedImage\(message\.id\)/);
 assert.match(hook, /recordPendingOfflineHandoffDelivery/);
 assert.match(hook, /generateRegeneratedChatTurn/);
 

@@ -39,13 +39,12 @@ export function useChatRegenerationAction(context: Record<string, any>) {
   const handleRegenerateResponse = async (targetMsg: Message, oocComment = "") => {
     if (!activeChatCharId || !activeCharacter) return;
 
-    // 1. Delete target message
-    if (onDeleteMessage) deleteMessageAndLinkedImage(targetMsg.id);
-
-    // 2. Scope regeneration to the selected reply's own turn. Later user
-    // messages belong to a different turn and must not become the prompt for
-    // an older regenerated reply.
+    // Scope regeneration to the selected reply's complete model turn. Later
+    // user messages belong to a different turn and must not become the prompt
+    // for an older regenerated reply.
     const regenerationTurn = resolveRegenerationTurnScope(currentChatMessages, targetMsg);
+    if (onDeleteMessage) regenerationTurn.targetMessages.forEach((message) => deleteMessageAndLinkedImage(message.id));
+
     const previousMessages = regenerationTurn.messagesBeforeTarget;
     const lastUserMsg = regenerationTurn.userMessage;
       if (!lastUserMsg) return;
@@ -430,6 +429,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           characterName: activeCharacter?.name,
           userName: promptUserName,
           allowEmoji: false,
+          replyBatchId: createId("regen-batch"),
           createId: () => createId("regen"),
           currentTime: (idx) => Date.now() + idx,
         },

@@ -20,6 +20,7 @@ export function createRegeneratedReplyCandidates(context: ReplyCandidateContext)
     messages: bubbles.map((bubbleText, index) => createCharacterTextMessage({
       id: context.createId(index),
       characterId: context.characterId,
+      replyBatchId: context.replyBatchId,
       content: context.transformBubble ? context.transformBubble(bubbleText, index) : bubbleText,
       timestamp: context.currentTime(index),
     })),

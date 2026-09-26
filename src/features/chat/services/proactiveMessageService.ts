@@ -21,6 +21,7 @@ export async function generateProactiveReplyCandidates(input: {
   createId: (index: number) => string;
   currentTime: (index: number) => number;
   transformBubble?: (bubbleText: string, index: number) => string;
+  replyBatchId?: string;
   proactiveOfflineAllowedModes?: readonly AppointmentMode[];
   directiveNow?: number;
   /** Relation-scoped snapshot; only its ProactivePromptAdapter projection reaches the request. */
@@ -59,6 +60,7 @@ export async function generateProactiveReplyCandidates(input: {
     ...(actionParsed.directive ? { proactiveAction: actionParsed.directive } : {}),
     messages: bubbles.map((bubbleText, index) => createCharacterTextMessage({
       id: input.createId(index), characterId: input.characterId,
+      replyBatchId: input.replyBatchId,
       content: input.transformBubble ? input.transformBubble(bubbleText, index) : bubbleText,
       timestamp: input.currentTime(index),
     })),
