@@ -284,7 +284,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                       })}
                     </span>
                       <div className="flex items-center gap-3">
-                        {!moment.characterId && onTriggerRelationshipNetworkComments && (
+                        {onTriggerRelationshipNetworkComments && (
                           <button type="button" onClick={() => onTriggerRelationshipNetworkComments(moment)} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-indigo-500 font-semibold transition-colors" title="让关系网参与">
                             <Sparkles className="w-3.5 h-3.5" />
                             <span>关系网</span>

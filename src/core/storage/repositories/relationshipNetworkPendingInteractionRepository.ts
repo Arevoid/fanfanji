@@ -9,7 +9,7 @@ function isPendingInteraction(value: unknown): value is RelationshipNetworkPendi
   return typeof candidate.id === "string"
     && typeof candidate.ownerIdentityId === "string"
     && typeof candidate.socialLinkId === "string"
-    && typeof candidate.sourceNpcId === "string"
+    && (candidate.sourceNpcId === undefined || typeof candidate.sourceNpcId === "string")
     && typeof candidate.sourceCharacterId === "string"
     && (candidate.sourceRelationId === undefined || typeof candidate.sourceRelationId === "string")
     && (typeof candidate.targetCharacterId === "string") !== (typeof candidate.targetIdentityId === "string")
