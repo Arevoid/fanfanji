@@ -21,7 +21,6 @@ import {
   upsertRelationshipNetworkChatLink,
 } from "../core/storage/repositories/relationshipNetworkChatLinkRepository";
 import {
-  findRelationshipNetworkSocialLinkByEdge,
   listRelationshipNetworkSocialLinksForEdge,
   listRelationshipNetworkSocialLinksForIdentity,
   removeRelationshipNetworkSocialLink,
@@ -671,11 +670,11 @@ export default function AppRelationshipNetwork({
     if (!selectedEdge) return;
     if (!window.confirm("删除这条关系线？人物本身不会被删除。")) return;
     if (commitNetwork({ ...networkRef.current, edges: networkRef.current.edges.filter((edge) => edge.id !== selectedEdge.id) }, "关系线已删除。")) {
-      const socialLink = findRelationshipNetworkSocialLinkByEdge(activeIdentity.id, selectedEdge.id);
-      if (socialLink) {
-        const socialResult = removeRelationshipNetworkSocialLink(activeIdentity.id, socialLink.id);
-        const interactionResult = removeRelationshipNetworkInteractionRecordsForSocialLink(activeIdentity.id, socialLink.id);
-        if (!socialResult.success || !interactionResult.success) setError("关系线已删除，但朋友圈互动记录清理失败。");
+      const socialLinksForEdge = listRelationshipNetworkSocialLinksForEdge(activeIdentity.id, selectedEdge.id);
+      if (socialLinksForEdge.length > 0) {
+        const socialResults = socialLinksForEdge.map((socialLink) => removeRelationshipNetworkSocialLink(activeIdentity.id, socialLink.id));
+        const interactionResults = socialLinksForEdge.map((socialLink) => removeRelationshipNetworkInteractionRecordsForSocialLink(activeIdentity.id, socialLink.id));
+        if (socialResults.some((result) => !result.success) || interactionResults.some((result) => !result.success)) setError("关系线已删除，但朋友圈互动记录清理失败。");
         else {
           setSocialLinks(listRelationshipNetworkSocialLinksForIdentity(activeIdentity.id));
           setInteractionRecords(listRelationshipNetworkInteractionRecordsForIdentity(activeIdentity.id));
