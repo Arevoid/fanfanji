@@ -22,6 +22,8 @@ interface VideoCallViewProps {
   onInputTextChange: (value: string) => void;
   onInputModeChange: (mode: VideoCallInputMode) => void;
   onSend: () => void;
+  onAccept: () => void;
+  onReject: () => void;
   onEnd: () => void;
   onCameraFrame: (imageDataUrl: string) => void;
 }
@@ -45,6 +47,8 @@ export function VideoCallView({
   onInputTextChange,
   onInputModeChange,
   onSend,
+  onAccept,
+  onReject,
   onEnd,
   onCameraFrame,
 }: VideoCallViewProps) {
@@ -279,9 +283,23 @@ export function VideoCallView({
       </main>
 
       <footer className="relative z-10 flex shrink-0 items-center justify-between px-8 pb-[calc(env(safe-area-inset-bottom,0px)+14px)] pt-3">
+        {status === "ringing" && isIncoming ? <>
+          <button type="button" onClick={() => { stopCamera(); onReject(); }} className="flex flex-col items-center gap-1.5" aria-label="拒绝视频通话">
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-white shadow-xl shadow-red-950/40 active:scale-95"><Phone className="h-7 w-7 rotate-[135deg] fill-current" /></span>
+            <span className="text-[11px] text-white/70">拒绝</span>
+          </button>
+          <button type="button" onClick={onAccept} className="flex flex-col items-center gap-1.5" aria-label="接听视频通话">
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-white shadow-xl shadow-emerald-950/40 active:scale-95"><Phone className="h-7 w-7 fill-current" /></span>
+            <span className="text-[11px] text-white/70">接听</span>
+          </button>
+        </> : status === "ringing" ? <button type="button" onClick={handleCallEnd} className="mx-auto flex flex-col items-center gap-1.5" aria-label="取消视频通话">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-white shadow-xl shadow-red-950/40 active:scale-95"><Phone className="h-7 w-7 rotate-[135deg] fill-current" /></span>
+          <span className="text-[11px] text-white/70">取消</span>
+        </button> : <>
           <button type="button" onClick={() => setShowSceneHistory(true)} className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/85" aria-label="查看对方历史画面"><Clock3 className="h-5 w-5" /></button>
-        <button type="button" onClick={handleCallEnd} className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-white shadow-xl shadow-red-950/40 active:scale-95" aria-label="挂断视频通话"><Phone className="h-7 w-7 rotate-[135deg] fill-current" /></button>
-        <button type="button" onClick={() => void handleCameraClick()} disabled={cameraStarting} className={`flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/85 ${cameraStream ? "ring-2 ring-red-300/80" : ""}`} aria-label={cameraStream ? "拍摄并发送我的摄像头画面" : "打开我的摄像头"} title={cameraStream ? "拍摄并发送画面" : "打开摄像头"}><Camera className="h-5 w-5" /></button>
+          <button type="button" onClick={handleCallEnd} className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-white shadow-xl shadow-red-950/40 active:scale-95" aria-label="挂断视频通话"><Phone className="h-7 w-7 rotate-[135deg] fill-current" /></button>
+          <button type="button" onClick={() => void handleCameraClick()} disabled={cameraStarting} className={`flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/85 ${cameraStream ? "ring-2 ring-red-300/80" : ""}`} aria-label={cameraStream ? "拍摄并发送我的摄像头画面" : "打开我的摄像头"} title={cameraStream ? "拍摄并发送画面" : "打开摄像头"}><Camera className="h-5 w-5" /></button>
+        </>}
       </footer>
 
       {showSceneHistory && <div className="absolute inset-0 z-40 flex items-end bg-black/55 p-4 backdrop-blur-sm" role="dialog" aria-label="对方历史画面">

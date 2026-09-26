@@ -1869,6 +1869,18 @@ export default function AppChat({
     activeCallIntentRef.current = null;
   };
 
+  const acceptIncomingCall = () => {
+    if (!isIncomingCall || callingStatus !== "ringing") return;
+    unlockCallTtsPlayback();
+    setCallingStatus("connected");
+    setCallStartTime(Date.now());
+  };
+
+  const rejectIncomingCall = () => {
+    if (!isIncomingCall || callingStatus !== "ringing") return;
+    finishVoiceCall("rejected");
+  };
+
   const endVoiceCall = () => finishVoiceCall(callingStatus === "connected" ? "completed" : "cancelled", { userEndedCall: true });
 
   useVoiceCallTimers({
@@ -9560,6 +9572,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               onInputTextChange={setCallingInputText}
               onInputModeChange={setVideoCallInputMode}
               onSend={sendVoiceCallMessage}
+              onAccept={acceptIncomingCall}
+              onReject={rejectIncomingCall}
               onEnd={endVoiceCall}
               onCameraFrame={sendVideoCameraFrame}
             />
@@ -9680,11 +9694,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
                       {/* Accept (Incoming Call) */}
                       <button
-                        onClick={() => {
-                          unlockCallTtsPlayback();
-                          setCallingStatus("connected");
-                          setCallStartTime(Date.now());
-                        }}
+                        onClick={acceptIncomingCall}
                         className="flex flex-col items-center gap-2"
                       >
                         <div className="w-14 h-14 bg-[#16c76f] hover:bg-emerald-600 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95">
