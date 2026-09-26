@@ -99,10 +99,17 @@ function sse(payload: Record<string, unknown>, sessionId: string): Response {
   return new Response(body, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", "Mcp-Session-Id": sessionId } });
 }
 
+let hotSearchSessionCounter = 0;
+
+function createSessionId(): string {
+  hotSearchSessionCounter = (hotSearchSessionCounter + 1) % 1_000_000_000;
+  return `fanfanji-hotsearch-${hotSearchSessionCounter.toString(36)}`;
+}
+
 export async function handleHotSearchMcp(body: Record<string, unknown>): Promise<Response> {
   const method = typeof body.method === "string" ? body.method : "";
   const id = body.id ?? null;
-  const sessionId = `fanfanji-hotsearch-${crypto.randomUUID()}`;
+  const sessionId = createSessionId();
   if (method.startsWith("notifications/")) return new Response(null, { status: 202, headers: { "Cache-Control": "no-store", "Mcp-Session-Id": sessionId } });
   if (method === "initialize") return sse({ jsonrpc: "2.0", id, result: { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "fanfanji-hotsearch", version: "1.0.0" } } }, sessionId);
   if (method === "tools/list") return sse({ jsonrpc: "2.0", id, result: { tools: [
