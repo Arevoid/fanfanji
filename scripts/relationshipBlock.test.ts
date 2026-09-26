@@ -99,10 +99,21 @@ const blockReaction = buildAdaptiveCharacterBlockReaction({
   requestCreated: true,
   attempt: 1,
   now: 1000,
+  variationSeed: "cycle-a",
 });
 assert.equal(blockReaction.length, 2);
 assert.match(blockReaction[0], /生气|拉黑|说清楚|解释/u);
 assert.notEqual(blockReaction[1], "我先给你发好友申请，你记得看看。", "拉黑反应不能退回统一模板");
+const alternateBlockReaction = buildAdaptiveCharacterBlockReaction({
+  character,
+  relationship: { relationship: "close_friend" },
+  recentMessages: conflictMessages,
+  requestCreated: true,
+  attempt: 1,
+  now: 1000,
+  variationSeed: "cycle-b",
+});
+assert.notDeepEqual(alternateBlockReaction, blockReaction, "不同拉黑周期不应复用整套反应");
 
 const delivery = createBlockedDeliveryRecord({
   id: "blocked-1",

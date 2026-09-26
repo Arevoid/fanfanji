@@ -2673,27 +2673,45 @@ export default function AppCharacterPhone({
     diaryScrollTopRef.current = scrollTop;
   };
   const allCurrentThreadMessages = selectedContact
-    ? [
-      ...listCharacterPhoneThreadMessages(currentPhone, selectedContact.id),
-      ...loadBlockedDeliveries().value
-        // The role phone must not mirror the user's failed-send attempts. A
-        // character can only see its own outgoing messages that were rejected
-        // after the user blocked it.
-        .filter((record) => record.relationId === selectedContact.relationId && record.direction === "character_to_user")
-        .filter((record) => !currentPhone.threadMessages.some((message) =>
-          message.sourceMessageId && record.sourceMessageId && message.sourceMessageId === record.sourceMessageId,
-        ))
-        .map((record): CharacterPhoneThreadMessage => ({
-          id: `blocked-phone-${record.id}`,
-          contactId: selectedContact.id,
-          sender: "character",
-          content: record.content,
-          timestamp: record.createdAt,
-          deliveryStatus: "blocked",
-          deliverySummary: record.summary,
-          sourceMessageId: record.sourceMessageId,
-        })),
-    ].sort((left, right) => left.timestamp - right.timestamp)
+    ? (() => {
+        const threadMessages = listCharacterPhoneThreadMessages(currentPhone, selectedContact.id);
+        const blockedMessages = loadBlockedDeliveries().value
+          // The role phone must not mirror the user's failed-send attempts. A
+          // character can only see its own outgoing messages that were rejected
+          // after the user blocked it.
+          .filter((record) => record.relationId === selectedContact.relationId && record.direction === "character_to_user")
+          .filter((record) => !currentPhone.threadMessages.some((message) =>
+            message.sourceMessageId && record.sourceMessageId && message.sourceMessageId === record.sourceMessageId,
+          ))
+          .map((record): CharacterPhoneThreadMessage => ({
+            id: `blocked-phone-${record.id}`,
+            contactId: selectedContact.id,
+            sender: "character",
+            content: record.content,
+            timestamp: record.createdAt,
+            deliveryStatus: "blocked",
+            deliverySummary: record.summary,
+            sourceMessageId: record.sourceMessageId,
+          }));
+        const seenBlockReactionKeys = new Set<string>();
+        return [...threadMessages, ...blockedMessages]
+          .sort((left, right) => left.timestamp - right.timestamp)
+          .filter((message) => {
+            // Older builds could persist two near-identical “why did you
+            // block me?” reactions from separate retry paths. Keep the first
+            // contextual reaction visible instead of showing it twice.
+            const normalized = message.content.replace(/\s+/gu, "");
+            const isRepeatedBlockQuestion = message.sender === "character"
+              && isCharacterBlockReactionMessage(message.sourceMessageId)
+              && /拉黑我/u.test(normalized)
+              && /(为什么|原因|解释|说清楚|不要)/u.test(normalized);
+            if (!isRepeatedBlockQuestion) return true;
+            const key = "block-reaction-question";
+            if (seenBlockReactionKeys.has(key)) return false;
+            seenBlockReactionKeys.add(key);
+            return true;
+          });
+      })()
     : [];
   const currentThreadMessages = allCurrentThreadMessages.slice(-threadVisibleCount);
   const loadOlderThreadMessages = () => {

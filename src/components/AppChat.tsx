@@ -805,17 +805,25 @@ export default function AppChat({
     message.relationId === relation.id
     || (!message.relationId && activeRelationship?.id === relation.id && message.characterId === relation.characterId),
   );
-  const getFriendRequestRemark = (relation: CharacterRelationship, attempt: number): string => {
+  const getFriendRequestRemark = (relation: CharacterRelationship, attempt: number, variationSeed?: string): string => {
     const character = characters.find((candidate) =>
       resolveCanonicalCharacterId(candidate.id, characters) === resolveCanonicalCharacterId(relation.characterId, characters),
     );
-    if (!character) return "如果你愿意，请告诉我发生了什么，我们把话说清楚。";
-    return buildAdaptiveFriendRequestRemark({
-      character,
-      relationship: relation,
-      recentMessages: getRecentRelationMessages(relation),
-      attempt,
-    });
+    const base = character
+      ? buildAdaptiveFriendRequestRemark({
+          character,
+          relationship: relation,
+          recentMessages: getRecentRelationMessages(relation),
+          attempt,
+        })
+      : "如果你愿意，请告诉我发生了什么，我们把话说清楚。";
+    // Keep the semantic/persona-aware sentence, but vary the wording across
+    // block cycles so historical requests do not all collapse to one template.
+    const seed = variationSeed || relation.blockCycleId || `${relation.id}:${attempt}`;
+    let hash = 0;
+    for (const character of seed) hash = (hash * 31 + character.codePointAt(0)!) >>> 0;
+    const suffixes = ["", " 我只是想把原因听明白。", " 你愿意时，再给我一句话就好。"];
+    return `${base}${suffixes[hash % suffixes.length]}`;
   };
   const blockRelationship = (relation: CharacterRelationship, blockedBy: "user" | "character" = "user") => {
     if (isRelationshipBlocked(relation)) return;
@@ -846,7 +854,7 @@ export default function AppChat({
           userIdentityId: relation.userIdentityId,
           direction: "character_to_user",
           status: "pending",
-          remark: getFriendRequestRemark(relation, 1),
+          remark: getFriendRequestRemark({ ...relation, blockCycleId }, 1, blockCycleId),
           reason: "拉黑后的关系修复申请",
           attempt: 1,
           blockCycleId,
@@ -895,7 +903,7 @@ export default function AppChat({
       direction,
       remark: direction === "user_to_character"
         ? "我想申请重新添加好友。"
-        : getFriendRequestRemark(relation, attempt),
+        : getFriendRequestRemark(relation, attempt, `${relation.blockCycleId || relation.id}:${attempt}`),
       reason: direction === "user_to_character" ? "用户申请重新添加好友" : "角色希望重新联系",
       attempt,
       blockCycleId: relation.blockCycleId,
@@ -938,7 +946,7 @@ export default function AppChat({
           userIdentityId: relation.userIdentityId,
           direction: "character_to_user",
           status: "pending",
-          remark: getFriendRequestRemark(relation, request.attempt + 1),
+          remark: getFriendRequestRemark(relation, request.attempt + 1, `${relation.blockCycleId || relation.id}:${request.attempt + 1}`),
           reason: "拉黑后的关系修复申请",
           attempt: request.attempt + 1,
           blockCycleId: relation.blockCycleId,
@@ -1222,6 +1230,27 @@ export default function AppChat({
     .filter((request) => !(request.status === "pending" && request.nextAttemptAt && request.nextAttemptAt > currentFriendRequestTime))
     .sort((left, right) => right.createdAt - left.createdAt);
   const pendingWorkspaceFriendRequests = workspaceFriendRequests.filter((request) => isFriendRequestActionable(request));
+
+  // Migrate friend-request remarks that were created by older builds. Without
+  // this pass, already-persisted requests would keep displaying the old
+  // repeated template forever even though new requests use contextual text.
+  useEffect(() => {
+    let changed = false;
+    const repaired = friendRequests.map((request) => {
+      if (request.direction !== "character_to_user") return request;
+      const relation = relationships.find((candidate) => candidate.id === request.relationId);
+      if (!relation) return request;
+      const remark = getFriendRequestRemark(
+        relation,
+        request.attempt,
+        `${request.blockCycleId || relation.id}:${request.attempt}:${request.id}`,
+      );
+      if (remark === request.remark) return request;
+      changed = true;
+      return { ...request, remark };
+    });
+    if (changed) saveFriendRequestList(repaired);
+  }, [friendRequests, relationships, characters, messages]);
 
   // Rejected requests are persisted with a short natural delay. Refresh when
   // the delay expires so a scheduled retry becomes actionable without a

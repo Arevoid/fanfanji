@@ -74,6 +74,7 @@ export function recordCharacterBlockReaction(input: {
     recentMessages: input.recentMessages,
     requestCreated: input.requestCreated,
     attempt: input.attempt,
+    variationSeed: input.relation.blockCycleId,
     now,
   });
   const reactedPhone = reactionTexts.reduce((current, content, index) => appendCharacterPhoneThreadMessage({
