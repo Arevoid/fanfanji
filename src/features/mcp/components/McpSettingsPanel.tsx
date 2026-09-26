@@ -13,7 +13,9 @@ const RESEARCH_MCP_SERVER: McpServerConfig = {
   name: "联网",
   url: "https://mcp.exa.ai/mcp",
   enabled: true,
-  directFetch: false,
+  // Exa allows CORS, while its Cloudflare edge rejects requests originating
+  // from our Cloudflare Worker proxy. Use the browser path for the hosted app.
+  directFetch: true,
   readOnlyOnly: true,
   discoveredTools: [],
   connectionStatus: "unverified",
@@ -56,8 +58,17 @@ export function McpSettingsPanel() {
       existing = loadMcpServers();
     }
     const research = existing.find((server) => server.id === RESEARCH_MCP_SERVER.id);
-    if (research && research.name !== RESEARCH_MCP_SERVER.name) {
-      const renamed = { ...research, name: RESEARCH_MCP_SERVER.name, updatedAt: Date.now() };
+    if (research && (research.name !== RESEARCH_MCP_SERVER.name || research.directFetch !== RESEARCH_MCP_SERVER.directFetch)) {
+      const renamed = {
+        ...research,
+        name: RESEARCH_MCP_SERVER.name,
+        directFetch: RESEARCH_MCP_SERVER.directFetch,
+        discoveredTools: [],
+        connectionStatus: "unverified" as const,
+        lastError: undefined,
+        lastCheckedAt: undefined,
+        updatedAt: Date.now(),
+      };
       upsertMcpServer(renamed);
       existing = existing.map((server) => server.id === renamed.id ? renamed : server);
     }
