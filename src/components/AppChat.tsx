@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
+import React, { useState, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { currentDevDiagnosticMode, registerDevModuleTrace, isDevDiagnosticRuntime } from "../core/runtime/devDiagnostics";
@@ -23,6 +23,7 @@ import {
   createCharacterPhone,
   changeCharacterPhonePasscode,
   deriveCharacterPhonePasscode,
+  getCharacterPhoneUnlockPasscode,
   getCharacterPhone,
   normalizeCharacterPhonePasscode,
   saveCharacterPhone,
@@ -43,6 +44,22 @@ import { enqueueProactiveAction, takePendingProactiveAction } from "../features/
 import { evaluateProactiveAction } from "../features/chat/services/proactiveActionPolicy";
 import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallMessage";
 import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
+import { recordCharacterBlockReaction } from "../features/characterPhone/characterPhoneBlockReaction";
+import {
+  createBlockCycleId,
+  createBlockedDeliveryRecord,
+  isBlockedDeliveryDirection,
+  isRelationshipBlocked,
+  type BlockedDeliveryKind,
+  type BlockedDeliveryRecord,
+  type FriendRequestRecord,
+} from "../domain/relationship/relationshipBlock";
+import {
+  loadBlockedDeliveries,
+  loadFriendRequests,
+  saveBlockedDeliveries,
+  saveFriendRequests,
+} from "../features/chat/services/relationshipBlockRuntime";
 import { completeVoiceCall } from "../features/chat/services/voiceCallCompletion";
 import { buildDirectChatContextSnapshot } from "../features/chat/services/directChatContextSnapshotBuilder";
 import { prepareDirectReplyContext, prepareDirectReplyTurn, type DirectReplyPromptPreparationInput } from "../features/chat/services/directReplyPreparation";
@@ -345,7 +362,8 @@ import {
   Database,
   Check,
   Edit3,
-  Square
+  Square,
+  UserPlus
 } from "lucide-react";
 
 
@@ -502,7 +520,7 @@ export default function AppChat({
   settings,
   messages,
   moments,
-  onSendMessage: onSendMessageRaw,
+  onSendMessage: onPersistMessage,
   onEnsureMessageDurability,
   onSaveImageToCharacterPhone,
   characterPhoneOwnerIdentityId,
@@ -588,6 +606,8 @@ export default function AppChat({
 
   const { initiatedChatIds, setInitiatedChatIds, lastReadTimestamps, setLastReadTimestamps, getUnreadCount } = useChatReadState({ activeChatCharId, activeChatRelationId, messages });
   const [showAliasDirectory, setShowAliasDirectory] = useState(false);
+  const [showNewFriendsPage, setShowNewFriendsPage] = useState(false);
+  const [newFriendsSearch, setNewFriendsSearch] = useState("");
   const [showContactAddMenu, setShowContactAddMenu] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [aliasDeleteTarget, setAliasDeleteTarget] = useState<string | null>(null);
@@ -602,6 +622,7 @@ export default function AppChat({
   const [identityDraftBio, setIdentityDraftBio] = useState("");
   const [identityDraftAvatar, setIdentityDraftAvatar] = useState("");
   const [selectedIdentityId, setSelectedIdentityId] = useState<string | null>(null);
+  const [showDeleteFriendConfirmModal, setShowDeleteFriendConfirmModal] = useState(false);
   const aliasLongPressTimerRef = useRef<number | null>(null);
   const startAliasLongPress = (identityId: string) => {
     if (aliasLongPressTimerRef.current !== null) window.clearTimeout(aliasLongPressTimerRef.current);
@@ -730,6 +751,202 @@ export default function AppChat({
       ? activeCharacter.name
       : (activeCharacter.remark || activeCharacter.name)
     : "";
+  const [blockedDeliveries, setBlockedDeliveries] = useState<BlockedDeliveryRecord[]>(() => loadBlockedDeliveries().value);
+  const [friendRequests, setFriendRequests] = useState<FriendRequestRecord[]>(() => loadFriendRequests().value);
+  const appendBlockedDelivery = (input: {
+    relation: CharacterRelationship;
+    direction: BlockedDeliveryRecord["direction"];
+    content: string;
+    kind?: BlockedDeliveryKind;
+    sourceMessageId?: string;
+  }) => {
+    const record = createBlockedDeliveryRecord({
+      id: createId("blocked-delivery"),
+      relationId: input.relation.id,
+      characterId: input.relation.characterId,
+      userIdentityId: input.relation.userIdentityId,
+      direction: input.direction,
+      content: input.content,
+      kind: input.kind,
+      blockCycleId: input.relation.blockCycleId,
+      sourceMessageId: input.sourceMessageId,
+    });
+    setBlockedDeliveries((previous) => {
+      const next = [...previous, record].slice(-500);
+      saveBlockedDeliveries(next);
+      return next;
+    });
+    return record;
+  };
+  const activeRelationBlocked = isRelationshipBlocked(activeRelationship);
+  const activeBlockedDeliveries = activeRelationship
+    ? blockedDeliveries.filter((record) => record.relationId === activeRelationship.id)
+    : [];
+  const activeFriendRequests = activeRelationship
+    ? friendRequests.filter((request) => request.relationId === activeRelationship.id)
+    : [];
+  const [showBlockConfirmModal, setShowBlockConfirmModal] = useState(false);
+  const saveFriendRequestList = (next: FriendRequestRecord[]) => {
+    setFriendRequests(next);
+    saveFriendRequests(next);
+  };
+  const blockRelationship = (relation: CharacterRelationship, blockedBy: "user" | "character" = "user") => {
+    if (isRelationshipBlocked(relation)) return;
+    const blockCycleId = createBlockCycleId(relation.id);
+    // `never` is the explicit opt-out. Adaptive relationships still receive a
+    // concrete pending request so the user can reject or accept it; the role's
+    // reaction remains in the role phone and never becomes a user-chat bubble.
+    const mayRequest = relation.friendRequestPolicy !== "never";
+    onSaveRelationships((previous) => previous.map((candidate) => candidate.id === relation.id
+      ? {
+        ...candidate,
+        communicationStatus: "blocked",
+        blockedBy,
+        blockCycleId,
+        friendRequestAttempts: blockedBy === "user" && mayRequest ? 1 : 0,
+        updatedAt: Date.now(),
+      }
+      : candidate));
+    if (blockedBy === "user" && mayRequest) {
+      // The first request is created as one relationship event. Future turns
+      // can add or abandon requests without writing an ordinary chat bubble.
+      const existingAttempt = friendRequests.some((request) => request.relationId === relation.id && request.blockCycleId === blockCycleId);
+      if (!existingAttempt) {
+        const request: FriendRequestRecord = {
+          id: `friend-request-${relation.id}-character-${Date.now()}`,
+          relationId: relation.id,
+          characterId: relation.characterId,
+          userIdentityId: relation.userIdentityId,
+          direction: "character_to_user",
+          status: "pending",
+          remark: relation.relationship === "partner" || relation.relationship === "close_friend"
+            ? "我不想就这样失去联系，想和你重新说清楚。"
+            : "如果你愿意，我们可以重新联系。",
+          reason: "拉黑后的关系修复申请",
+          attempt: 1,
+          blockCycleId,
+          createdAt: Date.now(),
+        };
+        saveFriendRequestList([...friendRequests, request]);
+      }
+    }
+    if (blockedBy === "user" && activeCharacter && !activeCharacter.isGroupChat) {
+      recordCharacterBlockReaction({
+        ownerIdentityId: resolvedCharacterPhoneOwnerIdentityId || activeIdentityId,
+        character: activeCharacter,
+        relation: { ...relation, blockCycleId },
+        identity: settings.identities?.find((identity) => identity.id === relation.userIdentityId),
+        requestCreated: mayRequest,
+      });
+    }
+    showToast(blockedBy === "user" ? "已拉黑好友，所有互动将被拦截" : "对方已将你拉黑");
+  };
+  const unblockRelationship = (relation: CharacterRelationship) => {
+    onSaveRelationships((previous) => previous.map((candidate) => candidate.id === relation.id
+      ? {
+        ...candidate,
+        communicationStatus: "active",
+        blockedBy: undefined,
+        blockCycleId: undefined,
+        updatedAt: Date.now(),
+      }
+      : candidate));
+    showToast("已解除拉黑，关系已恢复");
+  };
+  const createFriendRequest = (relation: CharacterRelationship, direction: FriendRequestRecord["direction"]) => {
+    const latestAttempt = friendRequests
+      .filter((request) => request.relationId === relation.id && request.direction === direction)
+      .reduce((max, request) => Math.max(max, request.attempt), 0);
+    const attempt = latestAttempt + 1;
+    if (attempt > 5) {
+      showToast("好友申请已达到 5 次上限");
+      return;
+    }
+    const request = {
+      id: `friend-request-${relation.id}-${direction}-${Date.now()}`,
+      relation,
+      direction,
+      remark: direction === "user_to_character"
+        ? "我想申请重新添加好友。"
+        : (relation.relationship === "partner" || relation.relationship === "close_friend"
+          ? "我不想就这样失去联系，想和你重新说清楚。"
+          : "如果你愿意，我们可以重新联系。"),
+      reason: direction === "user_to_character" ? "用户申请重新添加好友" : "角色希望重新联系",
+      attempt,
+      blockCycleId: relation.blockCycleId,
+      createdAt: Date.now(),
+    };
+    const nextRequest = {
+      id: request.id,
+      relationId: request.relation.id,
+      characterId: request.relation.characterId,
+      userIdentityId: request.relation.userIdentityId,
+      direction: request.direction,
+      status: "pending" as const,
+      remark: request.remark,
+      reason: request.reason,
+      attempt: request.attempt,
+      blockCycleId: request.blockCycleId,
+      createdAt: request.createdAt,
+    };
+    saveFriendRequestList([...friendRequests, nextRequest]);
+    onSaveRelationships((previous) => previous.map((candidate) => candidate.id === relation.id
+      ? { ...candidate, friendRequestAttempts: attempt, updatedAt: Date.now() }
+      : candidate));
+    showToast("好友申请已发送");
+  };
+  const decideFriendRequest = (request: FriendRequestRecord, status: "accepted" | "rejected", handledBy: FriendRequestRecord["handledBy"] = "user") => {
+    const next = friendRequests.map((candidate) => candidate.id === request.id
+      ? { ...candidate, status, handledAt: Date.now(), handledBy }
+      : candidate);
+    saveFriendRequestList(next);
+    const relation = relationships.find((candidate) => candidate.id === request.relationId);
+    if (relation && status === "accepted") unblockRelationship(relation);
+    if (relation && status === "rejected" && request.direction === "character_to_user") {
+      const mayRequestAgain = relation.friendRequestPolicy !== "never" && request.attempt < 5;
+      if (mayRequestAgain) {
+        const retry: FriendRequestRecord = {
+          id: `friend-request-${relation.id}-character-${Date.now()}`,
+          relationId: relation.id,
+          characterId: relation.characterId,
+          userIdentityId: relation.userIdentityId,
+          direction: "character_to_user",
+          status: "pending",
+          remark: request.attempt >= 2
+            ? "我还是想和你重新联系，如果你愿意，再给我一次机会。"
+            : "我不想就这样失去联系，想和你重新说清楚。",
+          reason: "拉黑后的关系修复申请",
+          attempt: request.attempt + 1,
+          blockCycleId: relation.blockCycleId,
+          createdAt: Date.now(),
+        };
+        saveFriendRequestList([...next, retry]);
+        onSaveRelationships((previous) => previous.map((candidate) => candidate.id === relation.id
+          ? { ...candidate, friendRequestAttempts: retry.attempt, updatedAt: Date.now() }
+          : candidate));
+      }
+    }
+    showToast(status === "accepted" ? "已同意好友申请，关系已恢复" : "已拒绝好友申请");
+  };
+  const onSendMessageRaw = (message: Message) => {
+    const relation = message.relationId
+      ? relationships.find((candidate) => candidate.id === message.relationId)
+      : (!activeCharacter?.isGroupChat && message.characterId === activeCharacter?.id ? activeRelationship : undefined);
+    const direction: BlockedDeliveryRecord["direction"] = message.sender === "user"
+      ? "user_to_character"
+      : "character_to_user";
+    if (relation && isBlockedDeliveryDirection(relation, direction)) {
+      appendBlockedDelivery({
+        relation,
+        direction,
+        content: message.content,
+        kind: message.callMedia === "video" ? "video_call" : message.callMedia === "voice" ? "voice_call" : "message",
+        sourceMessageId: message.id,
+      });
+      return;
+    }
+    onPersistMessage(message);
+  };
   const readyOfflineAppointment = useChatAppointment({ activeRelationship, appointments });
   const characterCustomChatCss = activeCharacter?.customChatCSS || activeCharacter?.customCss || "";
   // bubbleCss remains a scoped legacy compatibility source.
@@ -757,12 +974,26 @@ export default function AppChat({
   latestActiveCharacterRef.current = activeCharacter;
   latestActiveRelationshipRef.current = activeRelationship;
   latestMemoriesRef.current = memories || [];
-  const { currentChatMessages, visibleChatMessages } = useChatMessageProjection({
+  const { currentChatMessages, visibleChatMessages: projectedVisibleChatMessages } = useChatMessageProjection({
     messages,
     activeChatCharId,
     activeRelationship,
     activeCharacter,
   });
+  const blockedChatMessages = useMemo<Message[]>(() => activeBlockedDeliveries
+    .filter((record) => record.direction === "user_to_character" && record.visibleToUser)
+    .map((record) => ({
+      id: `blocked-delivery-inline-${record.id}`,
+      characterId: record.characterId,
+      relationId: record.relationId,
+      conversationId: activeRelationship?.conversationId,
+      sender: "user" as const,
+      content: record.content.trim()
+        || (record.kind === "video_call" ? "视频通话" : record.kind === "voice_call" ? "语音通话" : record.summary),
+      timestamp: record.createdAt,
+    })), [activeBlockedDeliveries, activeRelationship?.conversationId]);
+  const visibleChatMessages = useMemo<Message[]>(() => [...projectedVisibleChatMessages, ...blockedChatMessages]
+    .sort((left, right) => left.timestamp - right.timestamp), [blockedChatMessages, projectedVisibleChatMessages]);
   const activeDirectScope = resolveDirectInteractionScope({
     characterId: activeCharacter?.id,
     activeIdentityId,
@@ -958,6 +1189,10 @@ export default function AppChat({
       : undefined;
     return { id: relation.id, character, subtitle };
   }).filter((item) => Boolean(item.character));
+  const workspaceFriendRequests = friendRequests
+    .filter((request) => getRootIdentityId(request.userIdentityId, settings.identities || []) === currentIdentityRootId)
+    .sort((left, right) => right.createdAt - left.createdAt);
+  const pendingWorkspaceFriendRequests = workspaceFriendRequests.filter((request) => request.status === "pending");
 
   // Never leave an old identity's direct or group thread open after switching
   // profiles. Otherwise the next profile can temporarily render and act on
@@ -1043,6 +1278,8 @@ export default function AppChat({
     setMeActiveSubView("none");
     setSelectedIdentityId(null);
     setShowAliasDirectory(false);
+    setShowNewFriendsPage(false);
+    setNewFriendsSearch("");
     setSelectedAliasId(null);
     setAliasEditTargetId(null);
     setAliasDeleteTarget(null);
@@ -1704,6 +1941,18 @@ export default function AppChat({
   const beginCall = (mode: ChatCallMode, incoming: boolean, scopeOverride?: DirectVoiceCallScope) => {
     const callScope = scopeOverride || activeVoiceCallScope;
     if (!activeCharacter || activeCharacter.isGroupChat || !callScope) return;
+    const callRelation = relationships.find((relation) => relation.id === callScope.relationId);
+    const callDirection = incoming ? "character_to_user" : "user_to_character";
+    if (callRelation && isBlockedDeliveryDirection(callRelation, callDirection)) {
+      appendBlockedDelivery({
+        relation: callRelation,
+        direction: callDirection,
+        content: mode === "video" ? "视频通话请求" : "语音通话请求",
+        kind: mode === "video" ? "video_call" : "voice_call",
+      });
+      if (!incoming) showToast("消息未送达，对方暂时无法接收。");
+      return;
+    }
     if (!activeCallIntentRef.current || activeCallIntentRef.current.relationId !== callScope.relationId) {
       const source: CallIntent["source"] = incoming ? "ai" : "user";
       activeCallIntentRef.current = {
@@ -1763,6 +2012,16 @@ export default function AppChat({
     reason?: string;
   }): boolean => {
     if (activeAttachModal || !activeChatCharId) return false;
+    const callRelation = relationships.find((relation) => relation.id === input.scope.relationId);
+    if (callRelation && isBlockedDeliveryDirection(callRelation, "character_to_user")) {
+      appendBlockedDelivery({
+        relation: callRelation,
+        direction: "character_to_user",
+        content: input.media === "video" ? "视频通话请求" : "语音通话请求",
+        kind: input.media === "video" ? "video_call" : "voice_call",
+      });
+      return false;
+    }
     const intent: CallIntent = {
       id: "",
       direction: "incoming",
@@ -1792,6 +2051,7 @@ export default function AppChat({
       || activeAttachModal || !activeVoiceCallScope
       || activeVoiceCallScope.relationId !== activeRelationship.id
       || activeRelationship.userIdentityId !== activeIdentityId
+      || activeRelationship.blockedBy === "user"
       || !activeCharacter.enableProactiveCall) return;
     const pending = takePendingProactiveAction({
       relationId: activeRelationship.id,
@@ -2334,8 +2594,11 @@ export default function AppChat({
         .slice(-12)
         .map((moment) => `${moment.authorName}:${moment.content}`);
       const contextSeed = JSON.stringify({ worldBook: worldBookContext, recentMessages, recentMoments }).slice(-12000);
-      const passcode = normalizeCharacterPhonePasscode(existingPhone?.passcode)
-        || deriveCharacterPhonePasscode(character, "unlock", contextSeed);
+      const isDemoCharacter = character.name.trim() === "演示角色" || character.remark?.trim() === "演示角色";
+      const passcode = isDemoCharacter
+        ? getCharacterPhoneUnlockPasscode(character, contextSeed)
+        : normalizeCharacterPhonePasscode(existingPhone?.passcode)
+          || deriveCharacterPhonePasscode(character, "unlock", contextSeed);
       const hiddenGalleryPasscode = normalizeCharacterPhonePasscode(existingPhone?.hiddenGalleryPasscode)
         || deriveCharacterPhonePasscode(character, "hidden-gallery", contextSeed);
       if (existingPhone) {
@@ -3649,6 +3912,19 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     options: { triggerReply?: boolean; redPacket?: RedPacketPayload } = {},
   ) => {
     if (!activeChatCharId || !activeCharacter || !isCapturedRuntimeCurrent(capturedContext)) return;
+    const capturedRelation = capturedContext.relationId
+      ? relationships.find((relation) => relation.id === capturedContext.relationId)
+      : undefined;
+    if (capturedRelation && isBlockedDeliveryDirection(capturedRelation, "user_to_character")) {
+      appendBlockedDelivery({
+        relation: capturedRelation,
+        direction: "user_to_character",
+        content: contentString,
+        kind: "message",
+      });
+      showToast("消息未送达，对方暂时无法接收。");
+      return;
+    }
     const capturedIdentity = settings.identities?.find((identity) => identity.id === capturedContext.userIdentityId);
     const userMsg = createUserTextMessage({
       id: Date.now().toString(),
@@ -3831,6 +4107,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       : undefined,
     currentChatMessages,
     onSendMessage,
+    canSendMessage: () => !isBlockedDeliveryDirection(latestActiveRelationshipRef.current, "user_to_character"),
     onMessagePersistenceComplete: confirmMessageDurability,
     generateResponseForUserMessage,
     generateAndSendCharacterImage,
@@ -4028,7 +4305,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         window.clearTimeout(lateTimer);
       };
     }
-  }, [messages.length, activeChatCharId, activeChatRelationId, latestActiveMessageId, isTyping]);
+  }, [messages.length, activeChatCharId, activeChatRelationId, latestActiveMessageId, isTyping, activeBlockedDeliveries.length]);
 
   // The root viewport controller owns sizing. Only keep the latest message visible
   // when the reader was already near the bottom; opening the keyboard must not pull
@@ -4311,6 +4588,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const triggerProactiveFor = async (relationId: string, customTaskText?: string, backdateTimestamp?: number) => {
     if (backgroundGenerationBlockedRef.current || isOfflineStoryActiveFor(relationId) || proactiveMessageInFlightRef.current.has(relationId)) return;
     const relationship = relationships.find((relation) => relation.id === relationId);
+    if (relationship?.blockedBy === "user") return;
     const friend = relationship && characters.find((character) => character.id === relationship.characterId);
     if (!friend || friend.isGroupChat) return;
 
@@ -7621,14 +7899,41 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   </button>
 
                   {!activeCharacter.isGroupChat ? (
-                    <button
-                      type="button"
-                      onClick={handleDeleteFriend}
-                       className="w-full h-[52px] px-4 flex items-center justify-between text-[16px] font-medium text-[#FF3B30] transition-colors hover:bg-red-50 active:bg-red-100"
-                    >
-                       <span>删除好友</span>
-                       <ChevronRight className="w-5 h-5 text-[#C7C7CC]" />
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!activeRelationship) return;
+                          if (activeRelationBlocked) {
+                            unblockRelationship(activeRelationship);
+                          } else {
+                            setShowBlockConfirmModal(true);
+                          }
+                        }}
+                        className="w-full h-[52px] px-4 flex items-center justify-between text-[16px] font-medium text-[#FF3B30] transition-colors hover:bg-red-50 active:bg-red-100"
+                      >
+                        <span>{activeRelationBlocked ? "解除拉黑" : "拉黑好友"}</span>
+                        <ChevronRight className="w-5 h-5 text-[#C7C7CC]" />
+                      </button>
+                      {activeRelationBlocked && activeRelationship && activeRelationship.blockedBy === "character" && (
+                        <button
+                          type="button"
+                          onClick={() => createFriendRequest(activeRelationship, "user_to_character")}
+                          className="w-full h-[52px] px-4 flex items-center justify-between text-[16px] font-medium text-blue-600 transition-colors hover:bg-blue-50 active:bg-blue-100"
+                        >
+                          <span className="flex items-center gap-2"><UserPlus className="w-4 h-4" />申请重新添加好友</span>
+                          <ChevronRight className="w-5 h-5 text-[#C7C7CC]" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteFriendConfirmModal(true)}
+                        className="w-full h-[52px] px-4 flex items-center justify-between text-[16px] font-medium text-[#FF3B30] transition-colors hover:bg-red-50 active:bg-red-100"
+                      >
+                        <span>删除好友</span>
+                        <ChevronRight className="w-5 h-5 text-[#C7C7CC]" />
+                      </button>
+                    </>
                   ) : (
                     <button
                       type="button"
@@ -7646,21 +7951,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
               {/* Clear History Choice Modal Overlay */}
               {showClearHistoryModal && (
-                <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                  <div className="bg-white rounded-[24px] p-6 max-w-xs w-full shadow-2xl border border-slate-100 text-center space-y-4">
-                    <div className="w-12 h-12 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto">
-                      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                  <div className="w-full max-w-xs overflow-hidden rounded-3xl bg-white shadow-2xl">
+                    <div className="space-y-2 px-6 pb-5 pt-6 text-center">
+                      <h3 className="text-lg font-bold text-slate-900">清空好友全部记忆</h3>
+                      <p className="text-sm leading-relaxed text-slate-600">
+                        将清除与当前好友关系相关的聊天、朋友圈、记忆、线下剧本、日记及其他生成记录，但不会删除好友、人设或关系设置。
+                      </p>
                     </div>
-                    <div className="space-y-1">
-                        <h3 className="font-bold text-slate-800 text-sm">清空好友全部记忆</h3>
-                        <p className="text-[11px] text-slate-500 leading-relaxed">
-                         将清除与当前好友关系相关的聊天、朋友圈、记忆、线下剧本、日记及其他生成记录，但不会删除好友、人设或关系设置。
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-2.5 pt-2">
+                    <div className="grid grid-cols-2 border-t border-slate-100">
                        <button
+                         type="button"
                          onClick={() => {
                            if (!activeCharacter || activeCharacter.isGroupChat) return;
                            const currentIdentityRelation = relationForCharacter(activeCharacter.id);
@@ -7672,22 +7973,86 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                              showToast("找不到当前好友关系，无法执行安全清理。");
                              return;
                            }
-                           if (!window.confirm("确定要清空该好友的全部记忆吗？聊天、朋友圈、记忆、线下剧本、日记及其他相关记录都会永久删除，好友和人设不会删除。")) return;
-                           clearFriendScopedMemory(activeCharacter.id, relationId);
+                            clearFriendScopedMemory(activeCharacter.id, relationId);
                            setShowClearHistoryModal(false);
                            setEmptyGreetingCheckedCharIds((previous) => previous.filter((id) => id !== activeChatCharId));
                            setSentGreetings((previous) => previous.filter((id) => id !== activeChatCharId));
                            showToast("已清空好友全部记忆");
                          }}
-                         className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl text-xs transition-colors border border-red-200"
+                          className="order-last py-4 text-base font-medium text-red-600 transition-colors hover:bg-red-50"
                        >
-                         直接彻底清空
+                          确定
                       </button>
-                      <button
-                        onClick={() => setShowClearHistoryModal(false)}
-                        className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs transition-colors"
+                       <button
+                         type="button"
+                         onClick={() => setShowClearHistoryModal(false)}
+                         className="order-first border-r border-slate-100 py-4 text-base font-medium text-slate-600 transition-colors hover:bg-slate-50"
                       >
                         取消
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showDeleteFriendConfirmModal && activeCharacter && !activeCharacter.isGroupChat && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                  <div className="w-full max-w-xs overflow-hidden rounded-3xl bg-white shadow-2xl">
+                    <div className="space-y-2 px-6 pb-5 pt-6 text-center">
+                      <h3 className="text-lg font-bold text-slate-900">删除好友</h3>
+                      <p className="text-sm leading-relaxed text-slate-600">
+                        删除“{activeCharacter.remark || activeCharacter.name}”后，好友关系、聊天、朋友圈、记忆和线下剧本都会被删除，且无法恢复。
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteFriendConfirmModal(false)}
+                        className="border-r border-slate-100 py-4 text-base font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowDeleteFriendConfirmModal(false);
+                          handleDeleteFriend();
+                        }}
+                        className="py-4 text-base font-medium text-red-600 transition-colors hover:bg-red-50"
+                      >
+                        确定
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showBlockConfirmModal && activeRelationship && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                  <div className="w-full max-w-xs overflow-hidden rounded-3xl bg-white shadow-2xl">
+                    <div className="space-y-2 px-6 pb-5 pt-6 text-center">
+                      <h3 className="text-lg font-bold text-slate-900">加入黑名单</h3>
+                      <p className="text-sm leading-relaxed text-slate-600">
+                        加入黑名单后，你将收不到对方的新消息，也看不到对方朋友圈的更新。聊天历史和好友关系会保留。
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => setShowBlockConfirmModal(false)}
+                        className="border-r border-slate-100 py-4 text-base font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          blockRelationship(activeRelationship, "user");
+                          setShowBlockConfirmModal(false);
+                        }}
+                        className="py-4 text-base font-bold text-[#FF3B30] transition-colors hover:bg-red-50"
+                      >
+                        确定
                       </button>
                     </div>
                   </div>
@@ -7989,6 +8354,29 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 );
               };
 
+              const blockedDeliveryMessage = msg.id.startsWith("blocked-delivery-inline-");
+              if (blockedDeliveryMessage) {
+                return wrapMessageWithDivider(
+                  <div key={msg.id} className="w-full flex flex-col items-end my-4 select-text">
+                    <div className="flex max-w-full items-center justify-end gap-2">
+                      <span aria-label="消息未送达" title="消息已发出，但被对方拒收了" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#e56b6f] text-sm font-bold text-white shadow-sm">!</span>
+                      <div className={`chat-message--text max-w-[calc(100%-4.5rem)] px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative ${isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self"}`}>
+                        <div className="text-left" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>
+                          <ChatTextWithLinks text={msg.content} />
+                        </div>
+                      </div>
+                      <RenderAvatar
+                        src={activeIdentityAvatar}
+                        alt=""
+                        name={activeIdentityName}
+                        className={`h-9 w-9 shrink-0 border object-cover aspect-square avatar user-avatar ${isFloatingCute ? "rounded-xl border-slate-200/60" : "rounded-full"}`}
+                      />
+                    </div>
+                    <div className="mt-1 max-w-[92%] text-right text-[11px] leading-relaxed text-slate-400">消息已发出，但被对方拒收了。</div>
+                  </div>,
+                );
+              }
+
               if (isOfflineModeActive) {
                 // 1. Narration (centered divider with grey text and dashed line)
                 if (msg.isNarration) {
@@ -8093,13 +8481,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               const isSelf = msg.sender === "user";
               const prevMsg = idx > 0 ? visibleChatMessages[idx - 1] : null;
               const nextMsg = idx + 1 < visibleChatMessages.length ? visibleChatMessages[idx + 1] : null;
+              const isBlockedDeliveryMessage = (candidate: Message | null) => Boolean(candidate?.id.startsWith("blocked-delivery-inline-"));
               const sameMessageGroup = (candidate: Message | null) => Boolean(
                 !msg.isNarration
                 && !msg.sentFromCharacterPhone
+                && !isBlockedDeliveryMessage(msg)
                 &&
                 candidate
                 && !candidate.isNarration
                 && !candidate.sentFromCharacterPhone
+                && !isBlockedDeliveryMessage(candidate)
                 && candidate.sender === msg.sender
                 && (
                   msg.sender === "user"
@@ -8694,6 +9085,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 );
               })()
             )}
+
+            {activeRelationBlocked && activeRelationship?.blockedBy === "character" && activeFriendRequests.filter((request) => request.status === "pending").map((request) => (
+              <div key={`friend-request-inline-${request.id}`} className="my-3 flex w-full flex-col items-center gap-2 text-center text-[11px] text-slate-500">
+                <span>对方暂时拒收消息，好友申请待处理 · 第 {request.attempt} 次</span>
+                <span className="max-w-[90%] whitespace-pre-wrap text-[10px] text-slate-400">{request.remark}</span>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => decideFriendRequest(request, "accepted")} className="rounded-lg bg-emerald-600 px-3 py-1 text-[10px] font-bold text-white">同意</button>
+                  <button type="button" onClick={() => decideFriendRequest(request, "rejected")} className="rounded-lg bg-slate-100 px-3 py-1 text-[10px] font-bold text-slate-600">拒绝</button>
+                </div>
+              </div>
+            ))}
 
            <div ref={chatEndRef} />
           </MessageList>
@@ -9890,7 +10292,75 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
           {/* TABS: CONTACTS LIST (通讯录) */}
           {activeTab === "contacts" && (
-            showAliasDirectory ? (
+            showNewFriendsPage ? (
+              <div className="min-h-full bg-[var(--surface)] text-[var(--text-primary)]">
+                <ChatTopBar
+                  title="新的朋友"
+                  leftAction={<button type="button" onClick={() => { setShowNewFriendsPage(false); setNewFriendsSearch(""); }} className="app-nav-icon-button flex h-8 w-8 items-center justify-center" title="返回通讯录"><ChevronLeft className="h-4 w-4 text-slate-700" /></button>}
+                  rightAction={<div className="h-8 w-8" />}
+                />
+                <div className="border-b border-[var(--divider)] bg-[var(--surface)] p-3">
+                  <input
+                    value={newFriendsSearch}
+                    onChange={(event) => setNewFriendsSearch(event.target.value)}
+                    placeholder="搜索账号/备注"
+                    className="h-10 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                    aria-label="搜索新的朋友"
+                  />
+                </div>
+                <div className="space-y-0 bg-[var(--surface)] pb-24">
+                  <div className="bg-[var(--surface)] px-4 py-2 text-xs font-medium text-[var(--text-secondary)]">好友申请</div>
+                  {workspaceFriendRequests
+                    .filter((request) => {
+                      const character = characters.find((item) => item.id === resolveCanonicalCharacterId(request.characterId, characters));
+                      const query = newFriendsSearch.trim().toLocaleLowerCase();
+                      if (!query) return true;
+                      return `${character?.remark || ""} ${character?.name || ""} ${request.remark}`.toLocaleLowerCase().includes(query);
+                    })
+                    .map((request) => {
+                      const character = characters.find((item) => item.id === resolveCanonicalCharacterId(request.characterId, characters));
+                      if (!character) return null;
+                      const isIncoming = request.direction === "character_to_user";
+                      const statusLabel = request.status === "pending"
+                        ? (isIncoming ? "待验证" : "等待对方处理")
+                        : request.status === "accepted" ? "已同意"
+                          : request.status === "rejected" ? "已拒绝"
+                            : request.status === "ignored" ? "已忽略" : "已结束";
+                      return (
+                        <div key={request.id} className="flex items-center gap-3 border-b border-[var(--divider)] px-4 py-3">
+                          <RenderAvatar src={character.avatar} alt="" name={character.remark || character.name} className="h-12 w-12 shrink-0 rounded-xl border border-[var(--border)] object-cover" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{character.remark || character.name}</p>
+                              <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">第 {request.attempt} 次</span>
+                            </div>
+                            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[var(--text-secondary)]">{isIncoming ? request.remark : `我：${request.remark}`}</p>
+                            <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">{new Date(request.createdAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}</p>
+                          </div>
+                          {request.status === "pending" && isIncoming ? (
+                            <div className="flex shrink-0 flex-col gap-1.5">
+                              <button type="button" onClick={() => decideFriendRequest(request, "accepted")} className="rounded-lg bg-[var(--button-primary-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--button-primary-text)]">同意</button>
+                              <button type="button" onClick={() => decideFriendRequest(request, "rejected")} className="rounded-lg bg-[var(--surface-muted)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)]">拒绝</button>
+                            </div>
+                          ) : (
+                            <span className={`shrink-0 text-xs ${request.status === "rejected" ? "text-red-500" : request.status === "accepted" ? "text-emerald-600" : "text-[var(--text-tertiary)]"}`}>{statusLabel}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  {workspaceFriendRequests.length === 0 && (
+                    <div className="px-4 py-16 text-center text-xs text-[var(--text-tertiary)]">暂无新的好友申请</div>
+                  )}
+                  {workspaceFriendRequests.length > 0 && workspaceFriendRequests.filter((request) => {
+                    const character = characters.find((item) => item.id === resolveCanonicalCharacterId(request.characterId, characters));
+                    const query = newFriendsSearch.trim().toLocaleLowerCase();
+                    return !query || `${character?.remark || ""} ${character?.name || ""} ${request.remark}`.toLocaleLowerCase().includes(query);
+                  }).length === 0 && (
+                    <div className="px-4 py-16 text-center text-xs text-[var(--text-tertiary)]">没有匹配的好友申请</div>
+                  )}
+                </div>
+              </div>
+            ) : showAliasDirectory ? (
               <div className="min-h-full bg-[var(--surface)] text-[var(--text-primary)]">
                 {selectedAliasId ? (
                   (() => {
@@ -10182,6 +10652,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-lg">◎</div>
                       <div className="min-w-0 flex-1"><p className="text-sm font-bold">我的马甲</p><p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">管理多个身份，分别与角色聊天</p></div>
                       <ChevronRight className="h-4 w-4 text-[var(--text-tertiary)]" />
+                    </button>
+                    <button type="button" onClick={() => setShowNewFriendsPage(true)} className="flex w-full items-center gap-3 border-b border-[var(--divider)] bg-[var(--surface)] px-4 py-3 text-left hover:bg-[var(--surface-muted)]">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-lg">＋</div>
+                      <div className="min-w-0 flex-1"><p className="text-sm font-bold">新的朋友</p><p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">好友申请与验证消息</p></div>
+                      <div className="flex items-center gap-2">
+                        {pendingWorkspaceFriendRequests.length > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{pendingWorkspaceFriendRequests.length}</span>}
+                        <ChevronRight className="h-4 w-4 text-[var(--text-tertiary)]" />
+                      </div>
                     </button>
                   </>}
                 />

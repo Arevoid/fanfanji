@@ -14,6 +14,7 @@ import { removeForumGenerationTasksByRelation } from "../../../domain/forum/foru
 import { removeCharacterLifeEventsForRelations } from "../../characterLife/services/characterEventCaptureService";
 import { removeCharacterTruthForRelations } from "../../characterKnowledge/services/characterTruthCleanupService";
 import { removeProactiveTopicsForRelations } from "../../../core/storage/repositories/proactiveTopicRepository";
+import { removeBlockedDeliveriesByRelation, removeFriendRequestsByRelation } from "../services/relationshipBlockRuntime";
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, type RedPacketStatusMap } from "../services/paymentScope";
 
 interface UseChatDeleteFriendActionOptions {
@@ -75,9 +76,6 @@ export function useChatDeleteFriendAction({
   const handleDeleteFriend = useCallback(() => {
     if (!activeCharacter || activeCharacter.isGroupChat) return;
 
-    const friendName = activeCharacter.remark || activeCharacter.name;
-    if (!window.confirm(`确定删除好友“${friendName}”吗？与该好友的聊天、朋友圈、记忆和线下剧本将一并删除，且无法恢复。`)) return;
-
     const currentIdentityRelation = relationForCharacter(activeCharacter.id);
     const relationToDelete = activeRelationship?.userIdentityId === activeIdentityId
       ? activeRelationship
@@ -89,6 +87,8 @@ export function useChatDeleteFriendAction({
     }
     const friendId = activeCharacter.id;
     const relationId = relationToDelete?.id || orphanRelationId!;
+    removeBlockedDeliveriesByRelation(relationId);
+    removeFriendRequestsByRelation(relationId);
     clearMessagesAndLinkedArtifacts(friendId, relationId);
     removeCharacterLifeEventsForRelations([relationId]);
     removeCharacterTruthForRelations([relationId]);

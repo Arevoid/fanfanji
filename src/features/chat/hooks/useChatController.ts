@@ -29,6 +29,8 @@ export interface UseChatControllerOptions {
   getQuotedSenderName?: (message: Message) => string | undefined;
   currentChatMessages: Message[];
   onSendMessage: (message: Message) => void;
+  /** Blocks user turns without starting a second AI request. */
+  canSendMessage?: () => boolean;
   /** Allows the host surface to observe a user-authored message without
    * moving feature-specific side effects into this controller. */
   onUserMessageCreated?: (message: Message, context: ChatRuntimeContext) => void;
@@ -59,6 +61,7 @@ export function useChatController({
   getQuotedSenderName,
   currentChatMessages,
   onSendMessage,
+  canSendMessage,
   onUserMessageCreated,
   onExplicitIncomingCallRequest,
   onMessagePersistenceComplete,
@@ -144,6 +147,10 @@ export function useChatController({
       authorAvatarSnapshot: activeIdentityAvatar,
     });
     onSendMessage(userMessage);
+    if (canSendMessage?.() === false) {
+      await confirmMessagePersistence();
+      return;
+    }
     onUserMessageCreated?.(userMessage, runtimeContext);
     const callStarted = routeExplicitIncomingCallRequest(userMessage);
     if (callStarted) {
@@ -177,6 +184,21 @@ export function useChatController({
     replyAbortControllerRef.current.set(scopeKey, abortController);
 
     try {
+      if (canSendMessage?.() === false) {
+        if (inputText.trim()) {
+          const blockedMessage = createChatUserMessage({
+            context: runtimeContext,
+            content: inputText.trim(),
+            isOfflineModeActive,
+            isInputNarration,
+            authorIdentityId: runtimeContext.userIdentityId,
+            authorNameSnapshot: activeIdentityName,
+            authorAvatarSnapshot: activeIdentityAvatar,
+          });
+          onSendMessage(blockedMessage);
+        }
+        return;
+      }
       if (!inputText.trim()) {
         // If user input is empty, trigger AI response directly (continue the story)
         await generateResponseForUserMessage(null, currentChatMessages, abortController.signal);

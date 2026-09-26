@@ -74,6 +74,9 @@ export interface CharacterPhoneThreadMessage {
   lifeEventId?: string;
   promise?: { summary: string; dueAt?: number };
   attachment?: { kind: "screenshot" | "text-image"; label: string; content: string };
+  /** A blocked delivery is visible as a failed-send trace, not a normal chat message. */
+  deliveryStatus?: "blocked" | "delivered";
+  deliverySummary?: string;
 }
 
 export interface CharacterPhonePost {

@@ -59,6 +59,7 @@ import {
   CHARACTER_PHONE_DATA_VERSION,
   createCharacterPhone,
   deriveCharacterPhonePasscode,
+  getCharacterPhoneUnlockPasscode,
   getCharacterPhone,
   normalizeCharacterPhonePasscode,
   saveCharacterPhone,
@@ -104,6 +105,7 @@ import {
   listCharacterPhoneThreadMessages,
 } from "../features/characterPhone/characterPhoneThreadService";
 import { generateCharacterPhoneContactReply } from "../features/characterPhone/characterPhoneConversation";
+import { isCharacterBlockReactionMessage } from "../features/characterPhone/characterPhoneBlockReaction";
 import {
   formatCharacterPhoneDate,
   formatCharacterPhoneTime,
@@ -117,6 +119,7 @@ import { imageAssetDb } from "../utils/imageAssetDb";
 import { normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
 import { buildCharacterPhoneBrowserDetail } from "../features/characterPhone/characterPhoneBrowserDetails";
 import { resolveCharacterPhoneContactAvatar } from "../features/characterPhone/characterPhoneContactVisuals";
+import { loadBlockedDeliveries } from "../features/chat/services/relationshipBlockRuntime";
 import {
   formatCharacterPhoneCooldownRemaining,
   getCharacterPhoneGenerationCooldowns,
@@ -442,8 +445,10 @@ function openCharacterPhone(
   // is still unopened: doing so makes a password the character already said
   // stop working after the context changes. Only genuinely missing legacy
   // fields may be filled in here.
-  const normalizedPasscode = normalizeCharacterPhonePasscode(basePhone.passcode)
-    || deriveCharacterPhonePasscode(character, "unlock", passcodeContext);
+  const normalizedPasscode = character.name.trim() === "演示角色" || character.remark?.trim() === "演示角色"
+    ? getCharacterPhoneUnlockPasscode(character, passcodeContext)
+    : normalizeCharacterPhonePasscode(basePhone.passcode)
+      || deriveCharacterPhonePasscode(character, "unlock", passcodeContext);
   const normalizedHiddenGalleryPasscode = normalizeCharacterPhonePasscode(basePhone.hiddenGalleryPasscode)
     || deriveCharacterPhonePasscode(character, "hidden-gallery", passcodeContext);
   const isLocked = Boolean(basePhone.lockedUntil && basePhone.lockedUntil > Date.now());
@@ -1166,6 +1171,31 @@ export default function AppCharacterPhone({
         : null,
     [phone, selectedCharacter, userIdentityId],
   );
+  useEffect(() => {
+    // The role-phone component stays mounted while the user switches between
+    // apps. A message sent in the main chat can therefore arrive after this
+    // phone snapshot was created. Re-run the same evidence-backed chat sync
+    // whenever the source conversation changes so a message that was actually
+    // delivered to the character is visible in the character's phone too.
+    if (!phone || !selectedCharacter) return;
+    const hydrated = ensureCharacterPhoneContent({
+      phone,
+      character: selectedCharacter,
+      characters: phoneContext.characters,
+      activeIdentity: phoneContext.activeIdentity,
+      identities: phoneContext.identities,
+      relationships: phoneContext.relationships,
+      messages: phoneContext.messages,
+      moments: phoneContext.moments,
+      worldBookEntries: phoneContext.worldBookEntries,
+      relationshipNetworkNpcs: phoneContext.relationshipNetworkNpcs,
+      relationshipNetworkMaps: phoneContext.relationshipNetworkMaps,
+      musicTracks: phoneContext.musicTracks,
+    });
+    if (hydrated === phone) return;
+    saveCharacterPhone(hydrated);
+    setPhone(hydrated);
+  }, [phone, phoneContext, selectedCharacter]);
   const discoverPhoneActions = async (
     candidatePhone: CharacterPhoneRecord,
     now: number,
@@ -2626,7 +2656,23 @@ export default function AppCharacterPhone({
     diaryScrollTopRef.current = scrollTop;
   };
   const allCurrentThreadMessages = selectedContact
-    ? listCharacterPhoneThreadMessages(currentPhone, selectedContact.id)
+    ? [
+      ...listCharacterPhoneThreadMessages(currentPhone, selectedContact.id),
+      ...loadBlockedDeliveries().value
+        // The role phone must not mirror the user's failed-send attempts. A
+        // character can only see its own outgoing messages that were rejected
+        // after the user blocked it.
+        .filter((record) => record.relationId === selectedContact.relationId && record.direction === "character_to_user")
+        .map((record): CharacterPhoneThreadMessage => ({
+          id: `blocked-phone-${record.id}`,
+          contactId: selectedContact.id,
+          sender: "character",
+          content: record.content,
+          timestamp: record.createdAt,
+          deliveryStatus: "blocked",
+          deliverySummary: record.summary,
+        })),
+    ].sort((left, right) => left.timestamp - right.timestamp)
     : [];
   const currentThreadMessages = allCurrentThreadMessages.slice(-threadVisibleCount);
   const loadOlderThreadMessages = () => {
@@ -3056,6 +3102,9 @@ export default function AppCharacterPhone({
         )}
         {currentThreadMessages.map((message) => {
           const canOperate = message.sender === "character" && message.operatedByUser;
+          const isBlockedDelivery = message.deliveryStatus === "blocked"
+            || isCharacterBlockReactionMessage(message.sourceMessageId);
+          const isCharacterBlockedDelivery = isBlockedDelivery && message.sender === "character";
           const isSelected = selectedThreadMessageId === message.id;
           return (
             <div
@@ -3071,18 +3120,43 @@ export default function AppCharacterPhone({
                 openThreadMessageMenu(message);
               }}
             >
-              <div className={message.recalledAt
-                ? "max-w-[82%] px-3 py-1 text-xs leading-relaxed text-neutral-400"
-                : `max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${message.sender === "character" ? "rounded-tr-sm bg-[#95ec69] text-[#191919]" : "rounded-tl-sm border border-slate-100 bg-white text-slate-800"}`}>
-                {message.recalledAt ? (
-                  <p className="whitespace-pre-wrap text-xs text-neutral-500">你撤回了一条信息</p>
-                ) : parseCharacterPhoneStickerContent(message.content) ? (
-                  <CharacterPhoneStickerMessage content={message.content} />
-                ) : (
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                )}
-                {!message.recalledAt && message.attachment && <div className="mt-2 rounded-xl bg-black/10 p-2 text-[10px]">▣ {message.attachment.label}<br />{message.attachment.content}</div>}
-              </div>
+              {isCharacterBlockedDelivery ? (
+                <>
+                  <div className="flex max-w-[92%] items-center justify-end gap-2">
+                    <span aria-label="消息未送达" title="消息已发出，但被对方拒收了" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#e56b6f] text-sm font-bold text-white shadow-sm">!</span>
+                    <div className="max-w-[82%] rounded-2xl rounded-tr-sm bg-[#95ec69] px-3 py-2 text-sm leading-relaxed text-[#191919]">
+                      {message.recalledAt ? (
+                        <p className="whitespace-pre-wrap text-xs text-neutral-500">你撤回了一条信息</p>
+                      ) : parseCharacterPhoneStickerContent(message.content) ? (
+                        <CharacterPhoneStickerMessage content={message.content} />
+                      ) : (
+                        <p className="whitespace-pre-wrap">{message.content}</p>
+                      )}
+                    </div>
+                  </div>
+                  <p className="mt-1 max-w-[92%] text-right text-[10px] leading-relaxed text-slate-400">消息已发出，但被对方拒收了。</p>
+                </>
+              ) : (
+                <div className={message.recalledAt
+                  ? "max-w-[82%] px-3 py-1 text-xs leading-relaxed text-neutral-400"
+                  : isBlockedDelivery
+                    ? "max-w-[88%] rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-900"
+                    : `max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${message.sender === "character" ? "rounded-tr-sm bg-[#95ec69] text-[#191919]" : "rounded-tl-sm border border-slate-100 bg-white text-slate-800"}`}>
+                  {message.recalledAt ? (
+                    <p className="whitespace-pre-wrap text-xs text-neutral-500">你撤回了一条信息</p>
+                  ) : isBlockedDelivery ? (
+                    <>
+                      <p className="mb-1 text-[10px] font-bold text-amber-700">未送达 · {message.deliverySummary || "消息发送失败"}</p>
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                    </>
+                  ) : parseCharacterPhoneStickerContent(message.content) ? (
+                    <CharacterPhoneStickerMessage content={message.content} />
+                  ) : (
+                    <p className="whitespace-pre-wrap">{message.content}</p>
+                  )}
+                  {!message.recalledAt && message.attachment && <div className="mt-2 rounded-xl bg-black/10 p-2 text-[10px]">▣ {message.attachment.label}<br />{message.attachment.content}</div>}
+                </div>
+              )}
               {isSelected && canOperate && (
                 <div className="mt-1 flex items-center gap-1 rounded-xl border border-black/5 bg-white px-1 py-1 text-[10px] shadow-sm" role="menu" aria-label="消息操作">
                   {!message.recalledAt && (

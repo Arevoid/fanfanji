@@ -12,6 +12,8 @@ export function appendCharacterPhoneThreadMessage(input: {
   character?: Character;
   /** Incoming contact replies are generated content, not a user operation. */
   recordActivity?: boolean;
+  deliveryStatus?: CharacterPhoneThreadMessage["deliveryStatus"];
+  deliverySummary?: string;
   now?: number;
 }): CharacterPhoneRecord {
   const now = input.now ?? Date.now();
@@ -24,6 +26,8 @@ export function appendCharacterPhoneThreadMessage(input: {
     timestamp: now,
     ...(input.operatedByUser ? { operatedByUser: true } : {}),
     ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
+    ...(input.deliveryStatus ? { deliveryStatus: input.deliveryStatus } : {}),
+    ...(input.deliverySummary ? { deliverySummary: input.deliverySummary } : {}),
   };
   return {
     ...input.phone,

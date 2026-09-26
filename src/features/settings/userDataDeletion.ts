@@ -85,6 +85,8 @@ const USER_DATA_MANIFEST: Record<UserDataAppId, DataManifest> = {
       "phone_immediate_summary_task",
       storageKeys.redPacketStatuses,
       storageKeys.proactiveActions,
+      storageKeys.relationshipBlockedDeliveries,
+      storageKeys.relationshipFriendRequests,
     ],
     clearBinary: async () => {
       await messageEntryDb.clearAll();

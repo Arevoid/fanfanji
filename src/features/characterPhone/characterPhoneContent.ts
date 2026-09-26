@@ -11,6 +11,7 @@ import { resolveCanonicalCharacterId } from "../../domain/character/characterIde
 import { buildCharacterPhoneLifeContext } from "./characterPhoneLifeContext";
 import { listCharacterPhoneRelationshipNetworkContacts, type CharacterPhoneRelationshipNetworkContact } from "./characterPhoneRelationshipNetwork";
 import { createCharacterPhoneInitialAvatar, normalizeCharacterPhoneContactName } from "./characterPhoneContactVisuals";
+import { isCharacterBlockReactionMessage } from "./characterPhoneBlockReaction";
 export { selectCharacterPhoneWorldBookEntries } from "./characterPhoneLifeContext";
 import type {
   CharacterPhoneContact,
@@ -550,7 +551,12 @@ function syncUserChat(
   // User-authored role-phone messages are written back to the main chat with a
   // sourceMessageId, so they are retained whenever their source still exists.
   const otherContactMessages = (phone.threadMessages ?? []).filter((message) => !currentUserContactIds.has(message.contactId));
-  const threadMessages = [...otherContactMessages, ...synced];
+  // Block reactions are deliberate role-phone-only events. They have no
+  // source Message in the user's chat, so retain them across phone hydration
+  // instead of treating them as stale mirror data.
+  const retainedRolePhoneEvents = (phone.threadMessages ?? []).filter((message) =>
+    currentUserContactIds.has(message.contactId) && isCharacterBlockReactionMessage(message.sourceMessageId));
+  const threadMessages = [...otherContactMessages, ...retainedRolePhoneEvents, ...synced];
   return {
     threadMessages: threadMessages.sort((left, right) => left.timestamp - right.timestamp),
     lastMessageId: sourceMessages.at(-1)?.id,
@@ -988,15 +994,53 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
   if (sourceHydrationSuppressed) {
     // A cleared phone must not resurrect old records, but an explicitly
     // linked relationship-network NPC is fresh evidence and must remain
-    // available for the next first-life generation.
+    // available for the next first-life generation. Messages created after
+    // the clear are different: they are new evidence and must still reach the
+    // role phone (for example, a user can send a final message after blocking
+    // the character). Only source messages from before the isolation marker
+    // remain suppressed.
     const evidenceContacts = (sourcePhone.contacts ?? []).length > 0
       ? sourcePhone.contacts ?? []
       : buildRelationshipNetworkPhoneContacts(sourcePhone, relationshipNetworkContacts);
+    const freshMessages = input.messages.filter((message) =>
+      message.timestamp >= (sourcePhone.sourceHydrationSuppressedAt || now)
+        && resolveCanonicalCharacterId(message.characterId, input.characters)
+          === resolveCanonicalCharacterId(input.character.id, input.characters));
+    const freshUserContacts = freshMessages.length > 0
+      ? makeUserContacts({ ...input, phone: sourcePhone }).filter((contact) => {
+          const relation = contact.relationId
+            ? input.relationships.find((candidate) => candidate.id === contact.relationId)
+            : undefined;
+          return freshMessages.some((message) =>
+            resolveCanonicalCharacterId(message.characterId, input.characters) === resolveCanonicalCharacterId(input.character.id, input.characters)
+              && (relation
+                ? findRelationshipForMessage(message, input.relationships)?.id === relation.id
+                : !message.relationId && !message.conversationId));
+        })
+      : [];
+    const hydrationBase: CharacterPhoneRecord = {
+      ...sourcePhone,
+      contacts: [...evidenceContacts, ...freshUserContacts],
+    };
+    const synced = freshMessages.length > 0
+      ? syncContacts({ ...input, phone: hydrationBase })
+      : { contacts: evidenceContacts, threadMessages: sourcePhone.threadMessages ?? [] };
+    const userContacts = synced.contacts.filter((contact) => isUserPhoneContact(contact) && !contact.historyOnly);
+    const chat = freshMessages.length > 0
+      ? syncUserChat(
+          { ...hydrationBase, threadMessages: synced.threadMessages },
+          input.character,
+          userContacts,
+          freshMessages,
+          input.relationships,
+          input.characters,
+        )
+      : { threadMessages: sourcePhone.threadMessages ?? [], lastMessageId: sourcePhone.lastSyncedMessageId };
     const isolated: CharacterPhoneRecord = {
       ...sourcePhone,
       messages: normalizeCharacterPhoneMessages(sourcePhone.messages),
-      contacts: evidenceContacts,
-      threadMessages: sourcePhone.threadMessages ?? [],
+      contacts: synced.contacts,
+      threadMessages: chat.threadMessages,
       posts: sourcePhone.posts ?? [],
       browserHistory: normalizeCharacterPhoneBrowserHistory(sourcePhone.browserHistory),
       diaryEntries: normalizeDiaryEntries(sourcePhone.diaryEntries),
@@ -1008,6 +1052,7 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
       musicTracks: sourcePhone.musicTracks ?? [],
       listeningHistory: sourcePhone.listeningHistory ?? [],
       musicPlaylists: sourcePhone.musicPlaylists ?? [],
+      lastSyncedMessageId: chat.lastMessageId ?? sourcePhone.lastSyncedMessageId,
       updatedAt: sourcePhone.updatedAt,
     };
     const changed = JSON.stringify(isolated) !== JSON.stringify(input.phone);

@@ -3,6 +3,7 @@ import { resolveCanonicalCharacterId } from "../character/characterIdentity";
 
 export type CharacterRelationshipState = "unknown" | "friend" | "close_friend" | "ambiguous" | "partner";
 export type IdentityRecognitionState = "unknown" | "suspected" | "recognized" | "confirmed";
+export type RelationshipBlockDirection = "user" | "character";
 
 /** A direct, user-identity-to-canonical-character relationship. */
 export interface CharacterRelationship {
@@ -33,6 +34,12 @@ export interface CharacterRelationship {
   proactiveCallRetryAvailable?: boolean;
   lastImmediateSummaryMsgId?: string;
   compressedMemory?: string;
+  /** Communication access is separate from the relationship label and history. */
+  communicationStatus?: "active" | "blocked";
+  blockedBy?: RelationshipBlockDirection;
+  blockCycleId?: string;
+  friendRequestAttempts?: number;
+  friendRequestPolicy?: "adaptive" | "always" | "never";
 }
 
 export const DEFAULT_IDENTITY_ID = "identity-1";

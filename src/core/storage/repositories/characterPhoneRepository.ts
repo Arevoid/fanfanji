@@ -395,7 +395,17 @@ export function deriveCharacterPhonePasscode(
   return String((hash >>> 0) % 9999 + 1).padStart(4, "0");
 }
 
-const passcodeFor = (character: Character, contextSeed = "") => deriveCharacterPhonePasscode(character, "unlock", contextSeed);
+/**
+ * The built-in demo persona is intentionally deterministic so the demo phone
+ * can be opened without first asking the user to discover a generated code.
+ * User-created characters continue to receive their stable derived code.
+ */
+export function getCharacterPhoneUnlockPasscode(character: Character, contextSeed = ""): string {
+  if (character.name.trim() === "演示角色" || character.remark?.trim() === "演示角色") return "0000";
+  return deriveCharacterPhonePasscode(character, "unlock", contextSeed);
+}
+
+const passcodeFor = (character: Character, contextSeed = "") => getCharacterPhoneUnlockPasscode(character, contextSeed);
 
 export function getCharacterPhone(
   ownerIdentityId: string,

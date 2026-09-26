@@ -128,6 +128,87 @@ assert.equal(phoneA.musicTracks?.length, 0, "does not seed a synthetic music lib
 assert.equal(phoneA.listeningHistory?.length, 0, "does not seed synthetic listening history without a user source");
 assert.equal(phoneA.musicPlaylists?.length, 0, "does not seed a synthetic playlist without a user source");
 
+// A phone screen can remain mounted while the main chat receives a new
+// message. A user-side block is directional: the user's new message still
+// reaches the character and must be mirrored into the role phone as a normal
+// incoming contact message, while the character's later rejected sends are
+// represented separately by blocked-delivery records.
+const blockedRelation = {
+  ...relation,
+  communicationStatus: "blocked" as const,
+  blockedBy: "user" as const,
+};
+const phoneAfterUserBlockMessage = ensureCharacterPhoneContent({
+  phone: phoneA,
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [blockedRelation],
+  messages: [
+    ...messages,
+    {
+      id: "user-block-message",
+      characterId: characterA.id,
+      relationId: relation.id,
+      conversationId: relation.conversationId,
+      sender: "user",
+      content: "我拉黑你啦",
+      timestamp: 50,
+    },
+  ],
+  moments,
+  worldBookEntries: worldBook,
+  now: 200,
+});
+const rolePhoneBlockContact = phoneAfterUserBlockMessage.contacts.find((contact) => contact.relationId === relation.id);
+assert.ok(rolePhoneBlockContact, "keeps the blocked relationship's role-phone contact");
+assert.ok(
+  phoneAfterUserBlockMessage.threadMessages.some((message) =>
+    message.contactId === rolePhoneBlockContact?.id
+      && message.sourceMessageId === "user-block-message"
+      && message.sender === "contact"
+      && message.content === "我拉黑你啦"),
+  "mirrors a user message delivered after the user blocked the character",
+);
+
+const isolatedPhone = {
+  ...phoneA,
+  sourceHydrationSuppressedAt: 25,
+  threadMessages: [],
+  contacts: [],
+};
+const phoneAfterIsolation = ensureCharacterPhoneContent({
+  phone: isolatedPhone,
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [blockedRelation],
+  messages: [
+    ...messages,
+    {
+      id: "user-after-isolation",
+      characterId: characterA.id,
+      relationId: relation.id,
+      conversationId: relation.conversationId,
+      sender: "user",
+      content: "隔离后仍应送达",
+      timestamp: 30,
+    },
+  ],
+  moments: [],
+  worldBookEntries: [],
+  now: 40,
+});
+assert.ok(
+  phoneAfterIsolation.threadMessages.some((message) =>
+    message.sourceMessageId === "user-after-isolation" && message.content === "隔离后仍应送达"),
+  "keeps newly delivered messages after role-phone isolation",
+);
+assert.ok(
+  !phoneAfterIsolation.threadMessages.some((message) => message.sourceMessageId === "message-a"),
+  "does not resurrect source messages from before role-phone isolation",
+);
+
 const aliasIdentity: UserIdentity = {
   id: "identity-alias",
   name: "小号",

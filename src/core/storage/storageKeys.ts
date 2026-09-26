@@ -41,6 +41,8 @@ export const storageKeys = {
   worldBookEntries: "phone_worldbook_entries",
   memoryVaultItems: "phone_memory_vault_items",
   characterRelationships: "phone_character_relationships",
+  relationshipBlockedDeliveries: "phone_relationship_blocked_deliveries_v1",
+  relationshipFriendRequests: "phone_relationship_friend_requests_v1",
   characterEvents: "phone_character_events",
   characterKnowledgeClaims: "phone_character_knowledge_claims",
   conversationSummaries: "phone_conversation_summaries",
