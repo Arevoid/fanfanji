@@ -1,5 +1,6 @@
-import type { Character, UserIdentity } from "../../types";
+import type { Character, Message, UserIdentity } from "../../types";
 import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
+import { buildAdaptiveCharacterBlockReaction } from "../../domain/relationship/blockReaction";
 import type { CharacterPhoneContact, CharacterPhoneRecord } from "../../domain/characterPhone/types";
 import {
   createCharacterPhone,
@@ -53,7 +54,9 @@ export function recordCharacterBlockReaction(input: {
   character: Character;
   relation: CharacterRelationship;
   identity?: UserIdentity;
+  recentMessages?: readonly Message[];
   requestCreated: boolean;
+  attempt?: number;
   now?: number;
 }): CharacterPhoneRecord | undefined {
   if (input.character.isGroupChat || !input.ownerIdentityId) return undefined;
@@ -65,9 +68,14 @@ export function recordCharacterBlockReaction(input: {
   if (ensured.phone.threadMessages.some((message) => message.sourceMessageId === sourceMessageId)) {
     return ensured.phone;
   }
-  const reactionTexts = input.requestCreated
-    ? ["我怎么被拉黑啦？不要啊！", "我先给你发好友申请，你记得看看。"]
-    : ["我怎么被拉黑啦？不要啊！", "我知道你现在不想联系，我先不打扰。"];
+  const reactionTexts = buildAdaptiveCharacterBlockReaction({
+    character: input.character,
+    relationship: input.relation,
+    recentMessages: input.recentMessages,
+    requestCreated: input.requestCreated,
+    attempt: input.attempt,
+    now,
+  });
   const reactedPhone = reactionTexts.reduce((current, content, index) => appendCharacterPhoneThreadMessage({
     phone: current,
     contactId: ensured.contactId,

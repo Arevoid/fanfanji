@@ -105,6 +105,7 @@ import { formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary } fro
 import { formatUserKnowledgeBoundary } from "../domain/prompt/userKnowledgeBoundary";
 import { buildAliasIdentityBoundaryPrompt, buildAliasIdentityFinalGuardPrompt } from "../domain/prompt/aliasIdentityBoundary";
 import { hasExplicitIdentityDisclosure } from "../domain/relationship/identityRecognition";
+import { buildAdaptiveFriendRequestRemark } from "../domain/relationship/friendRequestRemark";
 import { buildCharacterCognitiveContext } from "../domain/characterCognitive/contextBuilder";
 import { createDirectChatKnowledgeBoundary } from "../domain/characterCognitive/contextPolicy";
 import type { CharacterCognitiveContext, CharacterCognitiveEventCandidate } from "../domain/characterCognitive/characterCognitiveTypes";
@@ -790,6 +791,22 @@ export default function AppChat({
     setFriendRequests(next);
     saveFriendRequests(next);
   };
+  const getRecentRelationMessages = (relation: CharacterRelationship): Message[] => messages.filter((message) =>
+    message.relationId === relation.id
+    || (!message.relationId && activeRelationship?.id === relation.id && message.characterId === relation.characterId),
+  );
+  const getFriendRequestRemark = (relation: CharacterRelationship, attempt: number): string => {
+    const character = characters.find((candidate) =>
+      resolveCanonicalCharacterId(candidate.id, characters) === resolveCanonicalCharacterId(relation.characterId, characters),
+    );
+    if (!character) return "如果你愿意，请告诉我发生了什么，我们把话说清楚。";
+    return buildAdaptiveFriendRequestRemark({
+      character,
+      relationship: relation,
+      recentMessages: getRecentRelationMessages(relation),
+      attempt,
+    });
+  };
   const blockRelationship = (relation: CharacterRelationship, blockedBy: "user" | "character" = "user") => {
     if (isRelationshipBlocked(relation)) return;
     const blockCycleId = createBlockCycleId(relation.id);
@@ -819,9 +836,7 @@ export default function AppChat({
           userIdentityId: relation.userIdentityId,
           direction: "character_to_user",
           status: "pending",
-          remark: relation.relationship === "partner" || relation.relationship === "close_friend"
-            ? "我不想就这样失去联系，想和你重新说清楚。"
-            : "如果你愿意，我们可以重新联系。",
+          remark: getFriendRequestRemark(relation, 1),
           reason: "拉黑后的关系修复申请",
           attempt: 1,
           blockCycleId,
@@ -836,7 +851,9 @@ export default function AppChat({
         character: activeCharacter,
         relation: { ...relation, blockCycleId },
         identity: settings.identities?.find((identity) => identity.id === relation.userIdentityId),
+        recentMessages: getRecentRelationMessages(relation),
         requestCreated: mayRequest,
+        attempt: 1,
       });
     }
     showToast(blockedBy === "user" ? "已拉黑好友，所有互动将被拦截" : "对方已将你拉黑");
@@ -868,9 +885,7 @@ export default function AppChat({
       direction,
       remark: direction === "user_to_character"
         ? "我想申请重新添加好友。"
-        : (relation.relationship === "partner" || relation.relationship === "close_friend"
-          ? "我不想就这样失去联系，想和你重新说清楚。"
-          : "如果你愿意，我们可以重新联系。"),
+        : getFriendRequestRemark(relation, attempt),
       reason: direction === "user_to_character" ? "用户申请重新添加好友" : "角色希望重新联系",
       attempt,
       blockCycleId: relation.blockCycleId,
@@ -912,9 +927,7 @@ export default function AppChat({
           userIdentityId: relation.userIdentityId,
           direction: "character_to_user",
           status: "pending",
-          remark: request.attempt >= 2
-            ? "我还是想和你重新联系，如果你愿意，再给我一次机会。"
-            : "我不想就这样失去联系，想和你重新说清楚。",
+          remark: getFriendRequestRemark(relation, request.attempt + 1),
           reason: "拉黑后的关系修复申请",
           attempt: request.attempt + 1,
           blockCycleId: relation.blockCycleId,
@@ -2796,6 +2809,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 1. Truth Layer 中按关系投影的 confirmed/asserted 事实优先；未来计划、假设、争议和旧数据必须遵守各自标签，不能互相改写。
 2. Conversation summary 是可重建的派生缓存，只能补充上下文，不能覆盖具体事实或制造来源中没有的细节。
 3. 历史检索及短期上下文：短期聊天记录已按用户限制截断；需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
+      if (activeRelationship?.communicationStatus === "blocked" && activeRelationship.blockedBy === "user") {
+        const pendingRepairRequest = activeFriendRequests
+          .filter((request) => request.direction === "character_to_user" && request.status === "pending")
+          .sort((left, right) => right.createdAt - left.createdAt)[0];
+        characterContextText += `\n【当前关系状态：你仍被对方拉黑｜高优先级连续性规则】
+对方主动把你拉黑了；你仍然可能看到对方发来的消息，但你发出的消息不会送达到对方。这不是普通聊天，也不代表拉黑已经解除。即使对方发来“人呢”“在吗”或其他日常内容，本轮也必须先接住这条消息，同时保持“被拉黑、想联系、想被加回、委屈、道歉、质问或撒娇”等关系主线，具体语气服从你的人设和最近上下文，不要突然跳到完全无关的普通话题。
+不要把每次回复都写成同一套台词；如果刚刚在吵架，就延续争吵后的情绪，如果没有明显冲突，就自然表达困惑和想知道原因。可以像真实的人一样回复“宝宝我在呢”“快把我加回去”“我错了”“你至少告诉我为什么”等同类意思，但必须自行改写，不要照抄示例。
+不要声称对方已经收到、看到或读到了你的回复，也不要提及系统、API、角色手机、拦截规则或内部消息状态。${pendingRepairRequest ? `\n你已经发起第 ${pendingRepairRequest.attempt} 次好友申请；可以根据当前情绪自然提及自己正在等对方处理，但不要机械重复申请模板。` : ""}`;
+      }
       const characterPhoneProxyMessages = sourceMsgs.filter((message) =>
         message.sender === "character" && message.sentFromCharacterPhone,
       );
@@ -3141,6 +3163,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           ? `\n\n[本轮隐性归因提醒] 历史中的“角色手机代发消息”不是${activeCharacter.name}本人说的。用户当前只是在对这条消息作反应；回复第一句必须先自然地质疑或否认作者身份（例如“分手？我什么时候说过这句？”），再回应用户，不要先道歉、认领、说成玩笑或把代发内容归因于模型抽风。不要把代发内容改写成${activeCharacter.name}刚刚主动说过的话，也不要主动告诉用户是谁操作的。`
           : ""}`
         : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
+      // An explicit callback request is a user command, not proactive
+      // behavior. It deliberately bypasses enableProactiveCall; that setting
+      // remains reserved for unsolicited scheduler/model call actions.
       const explicitIncomingCallPrompt = userMsg?.sender === "user" && isExplicitIncomingCallRequest(userMsg.content)
         ? `\n【来电动作协议】用户明确要求你主动给用户打电话。请先正常回复一到数条符合人设的聊天内容；本轮回复末尾必须追加且只能追加一个私有动作标记，不要向用户解释标记：[[CALL_ACTION]]{"type":"${isExplicitIncomingVideoCallRequest(userMsg.content) ? "video_call" : "call"}","reason":"用户明确请求${isExplicitIncomingVideoCallRequest(userMsg.content) ? "视频" : "语音"}来电"}[[/CALL_ACTION]]。type=video_call 只能用于视频，type=call 只能用于语音。不要根据“我拨过去了”等普通台词自行推断动作。`
         : turnCharacter.enableProactiveCall

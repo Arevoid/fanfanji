@@ -8,6 +8,8 @@ import {
   isBlockedDeliveryDirection,
   updateFriendRequestStatus,
 } from "../src/domain/relationship/relationshipBlock";
+import { buildAdaptiveFriendRequestRemark } from "../src/domain/relationship/friendRequestRemark";
+import { buildAdaptiveCharacterBlockReaction } from "../src/domain/relationship/blockReaction";
 
 const relation = { id: "relation-1", characterId: "char-1", userIdentityId: "identity-1" };
 
@@ -33,6 +35,54 @@ const request = createFriendRequestRecord({
 assert.equal(request.status, "pending");
 assert.equal(request.attempt, 2);
 assert.equal(updateFriendRequestStatus(request, "rejected", "user", 200).handledAt, 200);
+
+const character = {
+  personality: "嘴硬但很在意关系，遇到冲突时不愿意示弱",
+  backstory: "和亲近的人吵架后仍然希望把话说清楚",
+};
+const conflictMessages = [{
+  id: "message-conflict",
+  characterId: relation.characterId,
+  sender: "user" as const,
+  content: "我们刚刚还在吵架，你怎么又不理我了？",
+  timestamp: 900,
+}];
+const conflictRemark = buildAdaptiveFriendRequestRemark({
+  character,
+  relationship: { relationship: "close_friend" },
+  recentMessages: conflictMessages,
+  attempt: 1,
+  now: 1000,
+});
+const neutralRemark = buildAdaptiveFriendRequestRemark({
+  character: { personality: "冷静理性", backstory: "不喜欢情绪化争执" },
+  relationship: { relationship: "friend" },
+  recentMessages: [],
+  attempt: 1,
+  now: 1000,
+});
+const retryRemark = buildAdaptiveFriendRequestRemark({
+  character,
+  relationship: { relationship: "close_friend" },
+  recentMessages: conflictMessages,
+  attempt: 2,
+  now: 1000,
+});
+assert.match(conflictRemark, /生气|吵架|拉黑|说清楚|解释/u);
+assert.match(neutralRemark, /原因|发生了什么|拉黑/u);
+assert.notEqual(conflictRemark, neutralRemark);
+assert.notEqual(conflictRemark, retryRemark);
+const blockReaction = buildAdaptiveCharacterBlockReaction({
+  character,
+  relationship: { relationship: "close_friend" },
+  recentMessages: conflictMessages,
+  requestCreated: true,
+  attempt: 1,
+  now: 1000,
+});
+assert.equal(blockReaction.length, 2);
+assert.match(blockReaction[0], /生气|拉黑|说清楚|解释/u);
+assert.notEqual(blockReaction[1], "我先给你发好友申请，你记得看看。", "拉黑反应不能退回统一模板");
 
 const delivery = createBlockedDeliveryRecord({
   id: "blocked-1",
