@@ -4,6 +4,7 @@
  * requests to avoid a call, must remain ordinary chat text.
  */
 const EXPLICIT_CALL_REQUEST_PATTERN = /(?:打吧|打电话(?:给我|过来|吧|啊|呀|呗)?|拨电话(?:给我|过来|吧|啊|呀|呗)?|给(?:我|你|您)(?:打|拨)(?:个|一下)?电话|跟我(?:打|聊|通)电话|和我(?:打|聊|通)电话|打过来|拨过来|来(?:个|一下)?电话|(?:语音|视频)通话(?:吧|啊|呀|呗)?)/u;
+const EXPLICIT_CALLBACK_REQUEST_PATTERN = /(?:你.{0,8}(?:给我(?:打|拨)(?:个|一下)?|打过来|拨过来|打回来|拨回来|回拨)|(?:重新|再|待会儿?|一会儿?).{0,8}(?:给我打|给我拨|打过来|拨过来|回拨|打回来|拨回来))/u;
 const CALL_NEGATION_PATTERN = /(?:不要|别(?:再)?|不用|不想|无需|拒绝|先别|暂时别|晚点|等会儿?|以后|明天)/u;
 const INDIRECT_CALL_CONTEXT_PATTERN = /^(?:我|他|她|朋友|同事|家人)[^。！？!?]{0,12}(?:打|拨)电话/u;
 
@@ -14,4 +15,18 @@ export function isExplicitVoiceCallRequest(text: string): boolean {
   // call UI. Direct second-person requests ("给你/给我") remain eligible.
   if (INDIRECT_CALL_CONTEXT_PATTERN.test(normalized) && !/(?:给我|给你|给您|跟我|和我)/u.test(normalized)) return false;
   return EXPLICIT_CALL_REQUEST_PATTERN.test(normalized);
+}
+
+/**
+ * A callback request is an incoming call from the character, not an outgoing
+ * call initiated by the user. Keep this narrower than the general call intent
+ * so ordinary mentions of calling still remain chat text.
+ */
+export function isExplicitIncomingCallRequest(text: string): boolean {
+  const normalized = text.replace(/\s+/gu, " ").trim();
+  if (!normalized || normalized.length > 120 || CALL_NEGATION_PATTERN.test(normalized)) return false;
+  // “我给你打电话” is an outgoing request and must not be reversed into an
+  // incoming call merely because it contains the character's pronoun.
+  if (/(?:我|他|她|朋友|同事|家人)给你(?:打|拨)/u.test(normalized)) return false;
+  return EXPLICIT_CALLBACK_REQUEST_PATTERN.test(normalized);
 }

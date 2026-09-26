@@ -54,11 +54,12 @@ export function VideoCallView({
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState("");
+  const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
   const callViewRef = useRef<HTMLDivElement | null>(null);
   const selfPreviewRef = useRef<HTMLDivElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
-  const cameraAutoCapturePendingRef = useRef(false);
   const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
+  const previewMovedRef = useRef(false);
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
   const stickTranscriptToBottomRef = useRef(true);
   const characterName = character.remark || character.name;
@@ -120,12 +121,6 @@ export function VideoCallView({
     onCameraFrame(canvas.toDataURL("image/jpeg", 0.78));
   };
 
-  const handleCameraVideoReady = () => {
-    if (!cameraAutoCapturePendingRef.current) return;
-    cameraAutoCapturePendingRef.current = false;
-    window.requestAnimationFrame(captureCameraFrame);
-  };
-
   const handleCameraClick = async () => {
     if (cameraStarting) return;
     if (cameraStream) {
@@ -138,12 +133,10 @@ export function VideoCallView({
     }
     setCameraStarting(true);
     setCameraError("");
-    cameraAutoCapturePendingRef.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: cameraFacingMode } }, audio: false });
       setCameraStream(stream);
     } catch (error) {
-      cameraAutoCapturePendingRef.current = false;
       setCameraError(error instanceof DOMException && error.name === "NotAllowedError" ? "摄像头权限被拒绝" : "无法打开摄像头");
     } finally {
       setCameraStarting(false);
@@ -153,7 +146,23 @@ export function VideoCallView({
   const stopCamera = () => {
     cameraStream?.getTracks().forEach((track) => track.stop());
     setCameraStream(null);
-    cameraAutoCapturePendingRef.current = false;
+  };
+
+  const switchCamera = async () => {
+    if (!cameraStream || cameraStarting || !navigator.mediaDevices?.getUserMedia) return;
+    const nextFacingMode = cameraFacingMode === "user" ? "environment" : "user";
+    setCameraStarting(true);
+    setCameraError("");
+    try {
+      const nextStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: nextFacingMode } }, audio: false });
+      cameraStream.getTracks().forEach((track) => track.stop());
+      setCameraStream(nextStream);
+      setCameraFacingMode(nextFacingMode);
+    } catch (error) {
+      setCameraError(error instanceof DOMException && error.name === "NotAllowedError" ? "切换摄像头需要浏览器权限" : "暂时无法切换摄像头");
+    } finally {
+      setCameraStarting(false);
+    }
   };
 
   const handleCallEnd = () => {
@@ -173,6 +182,7 @@ export function VideoCallView({
       offsetX: event.clientX - previewRect.left,
       offsetY: event.clientY - previewRect.top,
     };
+    previewMovedRef.current = false;
     preview.setPointerCapture(event.pointerId);
     event.preventDefault();
   };
@@ -182,6 +192,7 @@ export function VideoCallView({
     const root = callViewRef.current;
     const preview = selfPreviewRef.current;
     if (!drag || drag.pointerId !== event.pointerId || !root || !preview) return;
+    previewMovedRef.current = true;
     const rootRect = root.getBoundingClientRect();
     const previewRect = preview.getBoundingClientRect();
     const left = Math.max(0, Math.min(rootRect.width - previewRect.width, event.clientX - rootRect.left - drag.offsetX));
@@ -193,6 +204,7 @@ export function VideoCallView({
     if (dragRef.current?.pointerId === event.pointerId) {
       dragRef.current = null;
       selfPreviewRef.current?.releasePointerCapture(event.pointerId);
+      if (!previewMovedRef.current && cameraStream) void switchCamera();
     }
   };
 
@@ -226,7 +238,7 @@ export function VideoCallView({
         aria-label="拖动我的视频窗口"
       >
         <div className="aspect-[3/4] w-full bg-white/10">
-          {cameraStream ? <video ref={cameraVideoRef} autoPlay muted playsInline onLoadedMetadata={handleCameraVideoReady} className="h-full w-full object-cover" aria-label="我的摄像头画面" /> : userAvatar ? <img src={userAvatar} alt={userName} className="h-full w-full object-cover" /> : <ImageIcon className="mx-auto mt-8 h-6 w-6 text-white/60" />}
+          {cameraStream ? <video ref={cameraVideoRef} autoPlay muted playsInline className="h-full w-full object-cover" aria-label="我的摄像头画面" /> : userAvatar ? <img src={userAvatar} alt={userName} className="h-full w-full object-cover" /> : <ImageIcon className="mx-auto mt-8 h-6 w-6 text-white/60" />}
         </div>
         <div className="overflow-hidden px-2 py-1 text-center text-[9px] text-white/75">
           {showSelfSceneTicker && selfScene ? <div key={selfScene} className="video-call-self-scene-strip" aria-label={`我的画面：${selfScene}`}><div className="video-call-self-scene-marquee inline-block whitespace-nowrap">画面：{selfScene}</div></div> : <p className="truncate">{userName || "我"}</p>}
