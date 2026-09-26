@@ -55,6 +55,8 @@ export function recordCharacterBlockReaction(input: {
   relation: CharacterRelationship;
   identity?: UserIdentity;
   recentMessages?: readonly Message[];
+  /** AI-generated messages from the same block event as the friend request. */
+  generatedMessages?: readonly string[];
   requestCreated: boolean;
   attempt?: number;
   now?: number;
@@ -68,7 +70,9 @@ export function recordCharacterBlockReaction(input: {
   if (ensured.phone.threadMessages.some((message) => message.sourceMessageId === sourceMessageId)) {
     return ensured.phone;
   }
-  const reactionTexts = buildAdaptiveCharacterBlockReaction({
+  const reactionTexts = input.generatedMessages && input.generatedMessages.length > 0
+    ? input.generatedMessages.filter((content) => content.trim()).slice(0, 3)
+    : buildAdaptiveCharacterBlockReaction({
     character: input.character,
     relationship: input.relation,
     recentMessages: input.recentMessages,

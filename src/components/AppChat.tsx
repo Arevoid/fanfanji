@@ -45,6 +45,7 @@ import { evaluateProactiveAction } from "../features/chat/services/proactiveActi
 import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallMessage";
 import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
 import { recordCharacterBlockReaction } from "../features/characterPhone/characterPhoneBlockReaction";
+import { generateCharacterBlockAiResponse } from "../features/characterPhone/characterBlockAi";
 import {
   createBlockCycleId,
   createBlockedDeliveryRecord,
@@ -797,14 +798,42 @@ export default function AppChat({
     ? friendRequests.filter((request) => request.relationId === activeRelationship.id)
     : [];
   const [showBlockConfirmModal, setShowBlockConfirmModal] = useState(false);
+  const blockReactionAiInFlightRef = useRef(new Set<string>());
   const saveFriendRequestList = (next: FriendRequestRecord[]) => {
     setFriendRequests(next);
     saveFriendRequests(next);
   };
-  const getRecentRelationMessages = (relation: CharacterRelationship): Message[] => messages.filter((message) =>
-    message.relationId === relation.id
-    || (!message.relationId && activeRelationship?.id === relation.id && message.characterId === relation.characterId),
-  );
+  const getRecentRelationMessages = (relation: CharacterRelationship): Message[] => {
+    const chatMessages = messages.filter((message) =>
+      message.relationId === relation.id
+      || (!message.relationId && activeRelationship?.id === relation.id && message.characterId === relation.characterId),
+    );
+    // The role's private phone is also part of the relationship context. In
+    // particular, questions asked there (such as a phone-password request)
+    // must be available when composing a block reaction or friend-request
+    // remark; otherwise the generator can only fall back to “why did you
+    // block me?” regardless of what just happened.
+    const canonicalCharacterId = resolveCanonicalCharacterId(relation.characterId, characters);
+    const ownerIdentityId = resolvedCharacterPhoneOwnerIdentityId || relation.userIdentityId;
+    const phone = ownerIdentityId ? getCharacterPhone(ownerIdentityId, canonicalCharacterId) : undefined;
+    const phoneContactIds = new Set((phone?.contacts || [])
+      .filter((contact) => contact.relationId === relation.id)
+      .map((contact) => contact.id));
+    const phoneMessages: Message[] = (phone?.threadMessages || [])
+      .filter((message) => phoneContactIds.has(message.contactId) && message.content.trim())
+      .slice(-12)
+      .map((message) => ({
+        id: `phone-context-${message.id}`,
+        characterId: canonicalCharacterId,
+        relationId: relation.id,
+        sender: message.sender === "character" ? "character" : "user",
+        content: message.content,
+        timestamp: message.timestamp,
+      }));
+    return [...chatMessages, ...phoneMessages]
+      .sort((left, right) => left.timestamp - right.timestamp)
+      .slice(-24);
+  };
   const getFriendRequestRemark = (relation: CharacterRelationship, attempt: number, variationSeed?: string): string => {
     const character = characters.find((candidate) =>
       resolveCanonicalCharacterId(candidate.id, characters) === resolveCanonicalCharacterId(relation.characterId, characters),
@@ -825,8 +854,9 @@ export default function AppChat({
     const suffixes = ["", " 我只是想把原因听明白。", " 你愿意时，再给我一句话就好。"];
     return `${base}${suffixes[hash % suffixes.length]}`;
   };
-  const blockRelationship = (relation: CharacterRelationship, blockedBy: "user" | "character" = "user") => {
+  const blockRelationship = async (relation: CharacterRelationship, blockedBy: "user" | "character" = "user") => {
     if (isRelationshipBlocked(relation)) return;
+    if ([...blockReactionAiInFlightRef.current].some((key) => key.startsWith(`${relation.id}:`))) return;
     const blockCycleId = createBlockCycleId(relation.id);
     // `never` is the explicit opt-out. Adaptive relationships still receive a
     // concrete pending request so the user can reject or accept it; the role's
@@ -842,39 +872,66 @@ export default function AppChat({
         updatedAt: Date.now(),
       }
       : candidate));
-    if (blockedBy === "user" && mayRequest) {
-      // The first request is created as one relationship event. Future turns
-      // can add or abandon requests without writing an ordinary chat bubble.
-      const existingAttempt = friendRequests.some((request) => request.relationId === relation.id && request.blockCycleId === blockCycleId);
-      if (!existingAttempt) {
-        const request: FriendRequestRecord = {
-          id: `friend-request-${relation.id}-character-${Date.now()}`,
-          relationId: relation.id,
-          characterId: relation.characterId,
-          userIdentityId: relation.userIdentityId,
-          direction: "character_to_user",
-          status: "pending",
-          remark: getFriendRequestRemark({ ...relation, blockCycleId }, 1, blockCycleId),
-          reason: "拉黑后的关系修复申请",
-          attempt: 1,
-          blockCycleId,
-          createdAt: Date.now(),
-        };
-        saveFriendRequestList([...friendRequests, request]);
-      }
+    if (blockedBy !== "user" || !activeCharacter || activeCharacter.isGroupChat) {
+      showToast(blockedBy === "user" ? "已拉黑好友，所有互动将被拦截" : "对方已将你拉黑");
+      return;
     }
-    if (blockedBy === "user" && activeCharacter && !activeCharacter.isGroupChat) {
-      recordCharacterBlockReaction({
-        ownerIdentityId: resolvedCharacterPhoneOwnerIdentityId || activeIdentityId,
-        character: activeCharacter,
-        relation: { ...relation, blockCycleId },
-        identity: settings.identities?.find((identity) => identity.id === relation.userIdentityId),
-        recentMessages: getRecentRelationMessages(relation),
-        requestCreated: mayRequest,
+
+    const relationWithCycle = { ...relation, blockCycleId, blockedBy };
+    const recentMessages = getRecentRelationMessages(relationWithCycle);
+    const requestHistory = friendRequests
+      .filter((request) => request.relationId === relation.id && request.direction === "character_to_user")
+      .map((request) => request.remark);
+    const generationKey = `${relation.id}:${blockCycleId}`;
+    blockReactionAiInFlightRef.current.add(generationKey);
+    showToast("正在根据最近对话整理角色回应…");
+    const generated = await generateCharacterBlockAiResponse({
+      character: activeCharacter,
+      relationship: relationWithCycle,
+      recentMessages,
+      previousRequestRemarks: requestHistory,
+      requestCreated: mayRequest,
+      attempt: 1,
+      settings,
+      now: Date.now(),
+    });
+    blockReactionAiInFlightRef.current.delete(generationKey);
+
+    // The API path is the normal path. The local contextual builder remains
+    // only as a network/key failure fallback so a block never loses the
+    // relationship event entirely.
+    const remark = generated?.friendRequestRemark
+      || (mayRequest ? getFriendRequestRemark(relationWithCycle, 1, blockCycleId) : undefined);
+    const existingAttempt = friendRequests.some((request) => request.relationId === relation.id && request.blockCycleId === blockCycleId);
+    if (mayRequest && !existingAttempt && remark) {
+      const createdAt = Date.now();
+      const request: FriendRequestRecord = {
+        id: `friend-request-${relation.id}-character-${createdAt}`,
+        relationId: relation.id,
+        characterId: relation.characterId,
+        userIdentityId: relation.userIdentityId,
+        direction: "character_to_user",
+        status: "pending",
+        remark,
+        ...(generated?.friendRequestRemark ? { remarkSource: "ai" as const } : { remarkSource: "local-context" as const }),
+        reason: "拉黑后的关系修复申请",
         attempt: 1,
-      });
+        blockCycleId,
+        createdAt,
+      };
+      saveFriendRequestList([...friendRequests, request]);
     }
-    showToast(blockedBy === "user" ? "已拉黑好友，所有互动将被拦截" : "对方已将你拉黑");
+    recordCharacterBlockReaction({
+      ownerIdentityId: resolvedCharacterPhoneOwnerIdentityId || activeIdentityId,
+      character: activeCharacter,
+      relation: relationWithCycle,
+      identity: settings.identities?.find((identity) => identity.id === relation.userIdentityId),
+      recentMessages,
+      generatedMessages: generated?.phoneMessages,
+      requestCreated: mayRequest,
+      attempt: 1,
+    });
+    showToast(generated ? "已拉黑好友，角色已根据最近对话做出反应" : "已拉黑好友，角色回应暂使用本地上下文生成");
   };
   const unblockRelationship = (relation: CharacterRelationship) => {
     onSaveRelationships((previous) => previous.map((candidate) => candidate.id === relation.id
@@ -928,7 +985,7 @@ export default function AppChat({
       : candidate));
     showToast("好友申请已发送");
   };
-  const decideFriendRequest = (request: FriendRequestRecord, status: "accepted" | "rejected", handledBy: FriendRequestRecord["handledBy"] = "user") => {
+  const decideFriendRequest = async (request: FriendRequestRecord, status: "accepted" | "rejected", handledBy: FriendRequestRecord["handledBy"] = "user") => {
     const next = friendRequests.map((candidate) => candidate.id === request.id
       ? { ...candidate, status, handledAt: Date.now(), handledBy }
       : candidate);
@@ -939,6 +996,25 @@ export default function AppChat({
       const mayRequestAgain = relation.friendRequestPolicy !== "never" && request.attempt < 5;
       if (mayRequestAgain) {
         const retryAvailableAt = Date.now() + FRIEND_REQUEST_RETRY_DELAY_MS;
+        const retryAttempt = request.attempt + 1;
+        const retryMessages = getRecentRelationMessages(relation);
+        const retryCharacter = characters.find((candidate) =>
+          resolveCanonicalCharacterId(candidate.id, characters) === resolveCanonicalCharacterId(relation.characterId, characters),
+        );
+        const generatedRetry = retryCharacter
+          ? await generateCharacterBlockAiResponse({
+            character: retryCharacter,
+            relationship: relation,
+            recentMessages: retryMessages,
+            previousRequestRemarks: friendRequests
+              .filter((candidate) => candidate.relationId === relation.id && candidate.direction === "character_to_user")
+              .map((candidate) => candidate.remark),
+            requestCreated: true,
+            attempt: retryAttempt,
+            settings,
+            now: Date.now(),
+          })
+          : null;
         const retry: FriendRequestRecord = {
           id: `friend-request-${relation.id}-character-${Date.now()}`,
           relationId: relation.id,
@@ -946,9 +1022,11 @@ export default function AppChat({
           userIdentityId: relation.userIdentityId,
           direction: "character_to_user",
           status: "pending",
-          remark: getFriendRequestRemark(relation, request.attempt + 1, `${relation.blockCycleId || relation.id}:${request.attempt + 1}`),
+          remark: generatedRetry?.friendRequestRemark
+            || getFriendRequestRemark(relation, retryAttempt, `${relation.blockCycleId || relation.id}:${retryAttempt}`),
+          ...(generatedRetry?.friendRequestRemark ? { remarkSource: "ai" as const } : { remarkSource: "local-context" as const }),
           reason: "拉黑后的关系修复申请",
-          attempt: request.attempt + 1,
+          attempt: retryAttempt,
           blockCycleId: relation.blockCycleId,
           nextAttemptAt: retryAvailableAt,
           createdAt: Date.now(),
@@ -1235,9 +1313,10 @@ export default function AppChat({
   // this pass, already-persisted requests would keep displaying the old
   // repeated template forever even though new requests use contextual text.
   useEffect(() => {
+    if (settings.apiKey?.trim() && settings.selectedModel?.trim()) return;
     let changed = false;
     const repaired = friendRequests.map((request) => {
-      if (request.direction !== "character_to_user") return request;
+      if (request.direction !== "character_to_user" || request.remarkSource === "ai") return request;
       const relation = relationships.find((candidate) => candidate.id === request.relationId);
       if (!relation) return request;
       const remark = getFriendRequestRemark(
@@ -1247,10 +1326,49 @@ export default function AppChat({
       );
       if (remark === request.remark) return request;
       changed = true;
-      return { ...request, remark };
+      return { ...request, remark, remarkSource: "local-context" as const };
     });
     if (changed) saveFriendRequestList(repaired);
-  }, [friendRequests, relationships, characters, messages]);
+  }, [friendRequests, relationships, characters, messages, settings.apiKey, settings.selectedModel]);
+
+  // Existing records from builds before the AI response package had no source
+  // marker. Repair them once through the same API path used for new blocks so
+  // old “why did you block me?” remarks do not remain as visible templates.
+  useEffect(() => {
+    if (!settings.apiKey?.trim() || !settings.selectedModel?.trim()) return;
+    friendRequests
+      .filter((request) => request.direction === "character_to_user" && request.remarkSource !== "ai")
+      .forEach((request) => {
+        if (blockReactionAiInFlightRef.current.has(`repair:${request.id}`)) return;
+        const relation = relationships.find((candidate) => candidate.id === request.relationId);
+        const character = relation && characters.find((candidate) =>
+          resolveCanonicalCharacterId(candidate.id, characters) === resolveCanonicalCharacterId(relation.characterId, characters),
+        );
+        if (!relation || !character) return;
+        blockReactionAiInFlightRef.current.add(`repair:${request.id}`);
+        void generateCharacterBlockAiResponse({
+          character,
+          relationship: relation,
+          recentMessages: getRecentRelationMessages(relation),
+          previousRequestRemarks: friendRequests
+            .filter((candidate) => candidate.relationId === relation.id && candidate.id !== request.id)
+            .map((candidate) => candidate.remark),
+          requestCreated: true,
+          attempt: request.attempt,
+          settings,
+          now: Date.now(),
+        }).then((generated) => {
+          if (!generated?.friendRequestRemark) return;
+          const latest = loadFriendRequests().value;
+          const updated = latest.map((candidate) => candidate.id === request.id
+            ? { ...candidate, remark: generated.friendRequestRemark!, remarkSource: "ai" as const }
+            : candidate);
+          saveFriendRequestList(updated);
+        }).finally(() => {
+          blockReactionAiInFlightRef.current.delete(`repair:${request.id}`);
+        });
+      });
+  }, [friendRequests, relationships, characters, messages, settings.apiKey, settings.selectedModel]);
 
   // Rejected requests are persisted with a short natural delay. Refresh when
   // the delay expires so a scheduled retry becomes actionable without a
@@ -8137,7 +8255,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       <button
                         type="button"
                         onClick={() => {
-                          blockRelationship(activeRelationship, "user");
+                          void blockRelationship(activeRelationship, "user");
                           setShowBlockConfirmModal(false);
                         }}
                         className="py-4 text-base font-bold text-[#FF3B30] transition-colors hover:bg-red-50"

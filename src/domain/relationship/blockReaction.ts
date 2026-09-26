@@ -1,5 +1,6 @@
 import type { Character, Message } from "../../types";
 import type { CharacterRelationship } from "./characterRelationship";
+import { resolveRelationshipContextCue } from "./friendRequestRemark";
 
 function recentContext(messages: readonly Message[] | undefined, now: number): string {
   return (messages || [])
@@ -44,9 +45,18 @@ export function buildAdaptiveCharacterBlockReaction(input: {
   const soft = includesAny(persona, ["温柔", "体贴", "细腻", "敏感", "善解人意"]);
   const calm = includesAny(persona, ["冷静", "理性", "克制", "成熟", "稳重"]);
   const variant = stableVariant(input.variationSeed);
+  const contextCue = resolveRelationshipContextCue(context, input.recentMessages);
 
   let opening: string;
-  if (conflict) {
+  if (contextCue) {
+    opening = sharp
+      ? (variant ? `${contextCue}，你就这样把我拉黑了？至少给个说法。` : `${contextCue}，怎么转头就把我拉黑？我还没反应过来。`)
+      : soft
+        ? `${contextCue}，是不是我哪里让你不舒服了？别突然把我拉黑，好吗？`
+        : calm
+          ? `${contextCue}，你突然把我拉黑，我想知道发生了什么。愿意的话，我们把话说清楚。`
+          : (variant ? `${contextCue}，你突然把我拉黑，我有点没反应过来。能告诉我为什么吗？` : `${contextCue}，怎么突然把我拉黑了？我还想把这件事说清楚。`);
+  } else if (conflict) {
     opening = sharp
       ? (variant ? "行，你生气我认了，但别把我直接关在门外。我还有话想当面说清楚。" : "行，你生气我认了，但为什么直接把我拉黑？我还没把话说完。")
       : soft

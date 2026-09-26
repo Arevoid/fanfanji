@@ -20,6 +20,8 @@ export interface FriendRequestRecord {
   direction: "character_to_user" | "user_to_character";
   status: FriendRequestStatus;
   remark: string;
+  /** How the remark was produced; legacy records omit this field. */
+  remarkSource?: "ai" | "local-context" | "legacy";
   reason?: string;
   attempt: number;
   blockCycleId?: string;

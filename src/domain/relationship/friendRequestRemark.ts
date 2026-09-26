@@ -32,10 +32,33 @@ function recentContext(messages: readonly Message[] | undefined, now: number): s
 }
 
 /**
+ * Pull one high-signal, human-readable cue from the latest conversation.
+ * These cues deliberately stay narrow: they make a request feel grounded in
+ * the actual event that preceded the block without copying an arbitrary whole
+ * message into a system-generated remark.
+ */
+export function resolveRelationshipContextCue(context: string, messages?: readonly Message[]): string | undefined {
+  if (/(手机密码|解锁密码|密码)/u.test(context)) return "刚刚还在问我的手机密码";
+  if (/(视频通话|语音通话|打电话|来电)/u.test(context)) return "刚刚还在说通话的事";
+  if (/(好友申请|加回来|加回)/u.test(context)) return "刚刚还在处理好友申请";
+  if (/(知乎|链接|新闻|热搜)/u.test(context)) return "刚刚还在聊你发来的内容";
+  const recentUserMessage = (messages || [])
+    .filter((message) => message.sender === "user" && message.content.trim().length >= 6)
+    .filter((message) => !/(拉黑|消息未送达|好友申请)/u.test(message.content))
+    .sort((left, right) => right.timestamp - left.timestamp)[0];
+  if (!recentUserMessage) return undefined;
+  const rawExcerpt = normalize(recentUserMessage.content);
+  const excerpt = rawExcerpt.slice(0, 28);
+  return excerpt
+    ? `刚刚还在聊“${excerpt}${rawExcerpt.length > 28 ? "…”" : "”"}`
+    : undefined;
+}
+
+/**
  * Builds the character's friend-request remark from relationship and recent
- * conversation evidence. This is intentionally local and deterministic: the
- * request must be available immediately after blocking, without a second API
- * turn or a chance of exposing an internal prompt to the user.
+ * conversation evidence. This is the offline/error fallback. The normal block
+ * path uses the shared API response package so the phone reaction and request
+ * remark are generated together from the same recent-turn context.
  */
 export function buildAdaptiveFriendRequestRemark(input: {
   character: Pick<Character, "personality" | "backstory">;
@@ -51,6 +74,20 @@ export function buildAdaptiveFriendRequestRemark(input: {
   const conflict = hasAny(context, ["吵架", "生气", "争吵", "争执", "误会", "分手", "滚", "讨厌", "不理", "别联系", "委屈", "失望", "拉黑"]);
   const warmth = hasAny(context, ["想你", "喜欢", "爱你", "晚安", "抱", "陪你", "宝贝", "亲爱的", "开心"]);
   const closeRelation = input.relationship.relationship === "partner" || input.relationship.relationship === "close_friend";
+  const contextCue = resolveRelationshipContextCue(context, input.recentMessages);
+
+  if (contextCue) {
+    if (attempt >= 3) return `${contextCue}，你还是决定把我拉黑？我再试一次，不是想纠缠你。`;
+    if (attempt === 2) {
+      if (style === "sharp") return `${contextCue}，转头就把我拉黑了？至少给我一句解释。`;
+      if (style === "soft") return `${contextCue}，是不是我哪里让你不舒服了？别突然把我拉黑，好吗？`;
+      return `${contextCue}，我知道你还在生气，但能不能先把原因说清楚？`;
+    }
+    if (style === "sharp") return `${contextCue}，怎么转头就把我拉黑了？给我个说法。`;
+    if (style === "soft") return `${contextCue}，是不是我哪里让你不舒服了？别突然把我拉黑，好吗？`;
+    if (style === "calm") return `${contextCue}，你突然把我拉黑，我想知道发生了什么。愿意的话，我们把话说清楚。`;
+    return `${contextCue}，你突然把我拉黑，我有点没反应过来。能告诉我为什么吗？`;
+  }
 
   if (attempt >= 3) {
     if (conflict) return style === "sharp"

@@ -77,6 +77,34 @@ assert.match(conflictRemark, /生气|吵架|拉黑|说清楚|解释/u);
 assert.match(neutralRemark, /原因|发生了什么|拉黑/u);
 assert.notEqual(conflictRemark, neutralRemark);
 assert.notEqual(conflictRemark, retryRemark);
+const passwordContext = buildAdaptiveFriendRequestRemark({
+  character: { personality: "嘴硬但在意关系", backstory: "习惯把重要的事说清楚" },
+  relationship: { relationship: "friend" },
+  recentMessages: [{
+    id: "message-password",
+    characterId: relation.characterId,
+    sender: "user",
+    content: "我刚问完你的手机密码，你怎么突然不说话了？",
+    timestamp: 950,
+  }],
+  attempt: 1,
+  now: 1000,
+});
+assert.match(passwordContext, /手机密码/u, "申请备注应引用最近的高信号事件");
+const arbitraryContextRemark = buildAdaptiveFriendRequestRemark({
+  character: { personality: "冷静理性", backstory: "会认真回应具体问题" },
+  relationship: { relationship: "friend" },
+  recentMessages: [{
+    id: "message-arbitrary",
+    characterId: relation.characterId,
+    sender: "user",
+    content: "我刚看到你收藏的那家店，周末一起去吗？",
+    timestamp: 950,
+  }],
+  attempt: 1,
+  now: 1000,
+});
+assert.match(arbitraryContextRemark, /收藏的那家店/u, "未知主题也应保留最近对话线索");
 const closeRemarkAttemptOne = buildAdaptiveFriendRequestRemark({
   character: { personality: "温柔体贴", backstory: "重视亲密关系" },
   relationship: { relationship: "close_friend" },
@@ -114,6 +142,21 @@ const alternateBlockReaction = buildAdaptiveCharacterBlockReaction({
   variationSeed: "cycle-b",
 });
 assert.notDeepEqual(alternateBlockReaction, blockReaction, "不同拉黑周期不应复用整套反应");
+const passwordBlockReaction = buildAdaptiveCharacterBlockReaction({
+  character,
+  relationship: { relationship: "close_friend" },
+  recentMessages: [{
+    id: "message-password-block",
+    characterId: relation.characterId,
+    sender: "user",
+    content: "刚问完手机密码就把我拉黑？",
+    timestamp: 950,
+  }],
+  requestCreated: true,
+  attempt: 1,
+  now: 1000,
+});
+assert.match(passwordBlockReaction[0], /手机密码/u, "角色手机拉黑反应应引用最近的高信号事件");
 
 const delivery = createBlockedDeliveryRecord({
   id: "blocked-1",
