@@ -4,6 +4,7 @@ import { createRelationship } from "../src/domain/relationship/characterRelation
 import {
   findRelationshipNetworkCharacterMomentCommentCandidate,
   listRelationshipNetworkCharacterMomentCommentCandidates,
+  listRelationshipNetworkCharacterToCharacterMomentCommentCandidates,
   listRelationshipNetworkMomentCommentCandidates,
   formatRelationshipBehaviorBoundary,
   shouldGenerateRelationshipNetworkMomentComment,
@@ -144,6 +145,41 @@ assert.equal(findRelationshipNetworkCharacterMomentCommentCandidate({
   characters: [sourceCharacter, targetCharacter],
   relationships: [sourceRelationship, targetRelationship],
 })?.targetRelationship.id, targetRelationship.id);
+
+assert.equal(upsertRelationshipNetworkSocialLink({
+  id: "social-character-to-character-a",
+  ownerIdentityId,
+  sourceEntityType: "character",
+  sourceEntityId: targetCharacter.id,
+  targetEntityType: "character",
+  targetEntityId: sourceCharacter.id,
+  relationshipLabel: "同事",
+  enabled: true,
+  canViewMoments: true,
+  canCommentMoments: true,
+  commentFrequency: "high",
+  createdAt: 2,
+  updatedAt: 2,
+}).success, true);
+const sourceCharacterMoment: Moment = {
+  ...targetMoment,
+  id: "moment-source-character-1",
+  characterId: sourceCharacter.id,
+  relationId: sourceRelationship.id,
+  authorName: sourceCharacter.name,
+  authorAvatar: sourceCharacter.avatar,
+};
+const characterToCharacterCandidates = listRelationshipNetworkCharacterToCharacterMomentCommentCandidates({
+  ownerIdentityId,
+  moment: sourceCharacterMoment,
+  characters: [sourceCharacter, targetCharacter],
+  relationships: [sourceRelationship, targetRelationship],
+  existingMoments: [],
+  force: true,
+});
+assert.equal(characterToCharacterCandidates.length, 1, "a character can comment on another character's public Moment");
+assert.equal(characterToCharacterCandidates[0]?.sourceCharacter.id, targetCharacter.id);
+assert.equal(characterToCharacterCandidates[0]?.targetCharacter.id, sourceCharacter.id);
 
 assert.equal(upsertRelationshipNetworkSocialLink({
   id: "social-identity-a",

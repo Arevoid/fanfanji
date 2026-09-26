@@ -40,6 +40,11 @@ export const listRelationshipNetworkSocialLinksForIdentity = (ownerIdentityId: s
 export const findRelationshipNetworkSocialLinkByEdge = (ownerIdentityId: string, networkEdgeId: string): RelationshipNetworkSocialLink | undefined =>
   loadRelationshipNetworkSocialLinks().find((link) => link.ownerIdentityId === ownerIdentityId && link.networkEdgeId === networkEdgeId);
 
+export const listRelationshipNetworkSocialLinksForEdge = (ownerIdentityId: string, networkEdgeId: string): RelationshipNetworkSocialLink[] =>
+  loadRelationshipNetworkSocialLinks()
+    .filter((link) => link.ownerIdentityId === ownerIdentityId && link.networkEdgeId === networkEdgeId)
+    .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id));
+
 export const upsertRelationshipNetworkSocialLink = (link: RelationshipNetworkSocialLink): StorageWriteResult => {
   const current = loadRelationshipNetworkSocialLinks();
   const conflict = current.find((item) => item.id === link.id && item.ownerIdentityId !== link.ownerIdentityId);

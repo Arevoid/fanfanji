@@ -71,7 +71,8 @@ export interface RelationshipNetworkInteractionRecord {
   id: string;
   ownerIdentityId: string;
   socialLinkId: string;
-  sourceNpcId: string;
+  /** Set for lightweight-NPC interactions; absent for direct character interactions. */
+  sourceNpcId?: string;
   sourceCharacterId: string;
   /** Stable lightweight-NPC relation scope; absent on older audit records. */
   sourceRelationId?: string;
@@ -93,7 +94,8 @@ export interface RelationshipNetworkPendingInteraction {
   id: string;
   ownerIdentityId: string;
   socialLinkId: string;
-  sourceNpcId: string;
+  /** Set for lightweight-NPC interactions; absent for direct character interactions. */
+  sourceNpcId?: string;
   sourceCharacterId: string;
   /** Optional for pending records created before relation metadata was added. */
   sourceRelationId?: string;

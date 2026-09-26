@@ -61,6 +61,88 @@ export interface RelationshipNetworkCharacterMomentCommentCandidate {
   targetRelationship: CharacterRelationship;
 }
 
+/** A full character participating in another full character's public Moment. */
+export interface RelationshipNetworkCharacterToCharacterMomentCommentCandidate {
+  socialLink: RelationshipNetworkSocialLink;
+  sourceCharacter: Character;
+  sourceRelationship: CharacterRelationship;
+  targetCharacter: Character;
+  targetRelationship: CharacterRelationship;
+}
+
+const findScopedCharacterRelationship = (
+  characterId: string,
+  ownerIdentityId: string,
+  characters: readonly Character[],
+  relationships: readonly CharacterRelationship[],
+): CharacterRelationship | undefined => {
+  const canonicalId = resolveCanonicalCharacterId(characterId, characters);
+  return relationships.find((relationship) =>
+    relationship.userIdentityId === ownerIdentityId
+    && resolveCanonicalCharacterId(relationship.characterId, characters) === canonicalId,
+  );
+};
+
+/**
+ * Lists directed character-to-character Moment interactions. A relationship
+ * line remains presentation-only until a matching social link is enabled.
+ */
+export function listRelationshipNetworkCharacterToCharacterMomentCommentCandidates(input: {
+  ownerIdentityId: string;
+  moment: Moment;
+  characters: readonly Character[];
+  relationships: readonly CharacterRelationship[];
+  existingMoments: readonly Moment[];
+  force?: boolean;
+}): RelationshipNetworkCharacterToCharacterMomentCommentCandidate[] {
+  if (!isPublicCharacterMoment(input.moment, input.ownerIdentityId)) return [];
+  const targetCharacter = input.characters.find((character) =>
+    character.id === input.moment.characterId
+    && belongsToIdentity(character, input.ownerIdentityId)
+    && !character.isGroupChat,
+  );
+  if (!targetCharacter) return [];
+  const targetCanonicalId = resolveCanonicalCharacterId(targetCharacter.id, input.characters);
+
+  return listRelationshipNetworkSocialLinksForIdentity(input.ownerIdentityId)
+    .filter((socialLink) =>
+      socialLink.enabled
+      && socialLink.canViewMoments
+      && socialLink.canCommentMoments
+      && socialLink.sourceEntityType === "character"
+      && socialLink.targetEntityType === "character"
+      && resolveCanonicalCharacterId(socialLink.targetEntityId, input.characters) === targetCanonicalId,
+    )
+    .map((socialLink) => {
+      const sourceCharacter = input.characters.find((character) =>
+        character.id === socialLink.sourceEntityId
+        && belongsToIdentity(character, input.ownerIdentityId)
+        && !character.isGroupChat,
+      );
+      if (!sourceCharacter || resolveCanonicalCharacterId(sourceCharacter.id, input.characters) === targetCanonicalId) return undefined;
+      const sourceRelationship = findScopedCharacterRelationship(sourceCharacter.id, input.ownerIdentityId, input.characters, input.relationships);
+      const targetRelationship = findScopedCharacterRelationship(targetCharacter.id, input.ownerIdentityId, input.characters, input.relationships);
+      if (!sourceRelationship || !targetRelationship) return undefined;
+      if (hasSourceCommented(input.moment, sourceCharacter.id, sourceRelationship.id)) return undefined;
+      if (!input.force && !shouldGenerateRelationshipNetworkMomentComment({
+        existingMoments: input.existingMoments,
+        targetCharacterId: targetCharacter.id,
+        sourceCharacterId: sourceCharacter.id,
+        sourceRelationId: sourceRelationship.id,
+        ownerIdentityId: input.ownerIdentityId,
+        frequency: socialLink.commentFrequency,
+      })) return undefined;
+      return { socialLink, sourceCharacter, sourceRelationship, targetCharacter, targetRelationship };
+    })
+    .filter((candidate): candidate is RelationshipNetworkCharacterToCharacterMomentCommentCandidate => Boolean(candidate));
+}
+
+function isPublicCharacterMoment(moment: Moment, ownerIdentityId: string): boolean {
+  return Boolean(moment.characterId)
+    && (moment.visibility || "public") === "public"
+    && (moment.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId;
+}
+
 function hasSourceCommented(
   moment: Moment,
   sourceCharacterId: string,
@@ -434,6 +516,56 @@ export async function generateRelationshipNetworkCharacterMomentComment(input: {
     targetDescription: networkTargetDescription,
     character: candidate.targetCharacter,
     relationship: candidate.targetRelationship,
+    worldBookEntries: input.worldBookEntries,
+    topicHistory: input.topicHistory,
+    knowledgeClaims: input.knowledgeClaims,
+    memories: input.memories,
+    events: input.events,
+    settings: input.settings,
+    requestAi: input.requestAi,
+    cleanText: input.cleanText,
+    characterExpressionPrompt: input.characterExpressionPrompt,
+    additionalWorldKnowledge: targetWorldKnowledge,
+    allowSkip: true,
+  });
+}
+
+export async function generateRelationshipNetworkCharacterToCharacterMomentComment(input: {
+  candidate: RelationshipNetworkCharacterToCharacterMomentCommentCandidate;
+  moment: Moment;
+  targetDescription: string;
+  worldBookEntries: readonly WorldBookEntry[];
+  topicHistory: Parameters<typeof generateAutomaticMomentComment>[0]["topicHistory"];
+  knowledgeClaims: readonly KnowledgeClaim[];
+  memories: readonly MemoryItem[];
+  events: readonly CharacterEvent[];
+  settings: UserSettings;
+  requestAi: typeof apiChat;
+  cleanText: (text: string) => string;
+  characterExpressionPrompt: string;
+}): Promise<Awaited<ReturnType<typeof generateAutomaticMomentComment>>> {
+  const { candidate } = input;
+  const targetName = candidate.targetCharacter.remark || candidate.targetCharacter.name;
+  const sourceName = candidate.sourceCharacter.remark || candidate.sourceCharacter.name;
+  const targetDescription = [
+    input.targetDescription,
+    `发帖人：${targetName}`,
+    `你是${sourceName}，正在浏览${targetName}的公开朋友圈。`,
+    `你与${targetName}的关系是「${candidate.socialLink.relationshipLabel || "认识"}」。`,
+    formatRelationshipBehaviorBoundary(candidate.socialLink.relationshipLabel),
+    "这是角色之间的公开朋友圈互动；只有确实有自然想法时才评论，没有合适内容请输出 [SKIP]。",
+  ].join("\n");
+  const targetWorldKnowledge = buildWorldBookSystemBlocks(
+    [...input.worldBookEntries],
+    candidate.targetCharacter.id,
+    targetDescription,
+    { scenario: "public", characterId: candidate.targetCharacter.id },
+  ).allTriggered.map((entry) => ({ title: entry.title, content: entry.content }));
+  return generateAutomaticMomentComment({
+    moment: input.moment,
+    targetDescription,
+    character: candidate.sourceCharacter,
+    relationship: candidate.sourceRelationship,
     worldBookEntries: input.worldBookEntries,
     topicHistory: input.topicHistory,
     knowledgeClaims: input.knowledgeClaims,

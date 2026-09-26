@@ -9,7 +9,7 @@ function isInteractionRecord(value: unknown): value is RelationshipNetworkIntera
   return typeof candidate.id === "string"
     && typeof candidate.ownerIdentityId === "string"
     && typeof candidate.socialLinkId === "string"
-    && typeof candidate.sourceNpcId === "string"
+    && (candidate.sourceNpcId === undefined || typeof candidate.sourceNpcId === "string")
     && typeof candidate.sourceCharacterId === "string"
     && (candidate.sourceRelationId === undefined || typeof candidate.sourceRelationId === "string")
     && (typeof candidate.targetCharacterId === "string") !== (typeof candidate.targetIdentityId === "string")
@@ -74,4 +74,6 @@ export const removeRelationshipNetworkInteractionRecordsForEntity = (
 ): StorageWriteResult =>
   writeArray(storageKeys.relationshipNetworkInteractionRecords, loadRelationshipNetworkInteractionRecords().filter((record) =>
     record.ownerIdentityId !== ownerIdentityId
-    || (entityType === "npc" ? record.sourceNpcId !== entityId : record.targetCharacterId !== entityId)));
+    || (entityType === "npc"
+      ? record.sourceNpcId !== entityId
+      : record.sourceCharacterId !== entityId && record.targetCharacterId !== entityId)));

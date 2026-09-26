@@ -22,6 +22,7 @@ import {
 } from "../core/storage/repositories/relationshipNetworkChatLinkRepository";
 import {
   findRelationshipNetworkSocialLinkByEdge,
+  listRelationshipNetworkSocialLinksForEdge,
   listRelationshipNetworkSocialLinksForIdentity,
   removeRelationshipNetworkSocialLink,
   removeRelationshipNetworkSocialLinksForEntity,
@@ -366,9 +367,10 @@ export default function AppRelationshipNetwork({
   const selectedEdge = network.edges.find((edge) => edge.id === selectedEdgeId);
   const sourceName = edgeDraft ? nodeModels.find((model) => model.node.id === edgeDraft.sourceNodeId)?.name || "人物 A" : "人物 A";
   const targetName = edgeDraft ? nodeModels.find((model) => model.node.id === edgeDraft.targetNodeId)?.name || "人物 B" : "人物 B";
-  const socialSourceName = socialDraft ? nodeModels.find((model) => model.type === socialDraft.sourceEntityType && model.node.entityId === socialDraft.sourceEntityId)?.name || "NPC" : "NPC";
-  const socialTargetName = socialDraft ? nodeModels.find((model) => model.type === socialDraft.targetEntityType && model.node.entityId === socialDraft.targetEntityId)?.name || "角色" : "角色";
+  const socialSourceName = socialDraft ? nodeModels.find((model) => model.type === socialDraft.sourceEntityType && model.node.entityId === socialDraft.sourceEntityId)?.name || "人物" : "人物";
+  const socialTargetName = socialDraft ? nodeModels.find((model) => model.type === socialDraft.targetEntityType && model.node.entityId === socialDraft.targetEntityId)?.name || "人物" : "人物";
   const socialTargetTypeLabel = socialDraft?.targetEntityType === "identity" ? "身份" : "角色";
+  const isCharacterToCharacterSocialDraft = socialDraft?.sourceEntityType === "character" && socialDraft.targetEntityType === "character";
   const socialDraftNpc = socialDraft?.sourceEntityType === "npc"
     ? npcs.find((npc) => npc.id === socialDraft.sourceEntityId)
     : undefined;
@@ -470,14 +472,26 @@ export default function AppRelationshipNetwork({
     if (!source || !target) return null;
     const npc = source.entityType === "npc" ? source : target.entityType === "npc" ? target : null;
     const recipient = source.entityType !== "npc" ? source : target.entityType !== "npc" ? target : null;
-    if (!npc || !recipient || !["character", "identity"].includes(recipient.entityType)) return null;
-    const stored = networkEdgeId ? findRelationshipNetworkSocialLinkByEdge(activeIdentity.id, networkEdgeId) : undefined;
+    const edge = networkEdgeId ? networkRef.current.edges.find((item) => item.id === networkEdgeId) : undefined;
+    const isCharacterPair = source.entityType === "character" && target.entityType === "character";
+    if (!isCharacterPair && (!npc || !recipient || !["character", "identity"].includes(recipient.entityType))) return null;
+    const storedLinks = networkEdgeId ? listRelationshipNetworkSocialLinksForEdge(activeIdentity.id, networkEdgeId) : [];
+    const directedSource = isCharacterPair && edge?.direction === "reverse" ? target : source;
+    const directedTarget = isCharacterPair && edge?.direction === "reverse" ? source : target;
+    const stored = storedLinks.find((link) =>
+      link.sourceEntityType === (isCharacterPair ? directedSource.entityType : "npc")
+      && link.sourceEntityId === (isCharacterPair ? directedSource.entityId : npc?.entityId)
+      && link.targetEntityType === (isCharacterPair ? directedTarget.entityType : recipient?.entityType)
+      && link.targetEntityId === (isCharacterPair ? directedTarget.entityId : recipient?.entityId),
+    ) || storedLinks[0];
+    const draftSource = isCharacterPair ? directedSource : npc!;
+    const draftTarget = isCharacterPair ? directedTarget : recipient!;
     return {
       id: stored?.id,
-      sourceEntityType: "npc",
-      sourceEntityId: npc.entityId,
-      targetEntityType: recipient.entityType,
-      targetEntityId: recipient.entityId,
+      sourceEntityType: draftSource.entityType,
+      sourceEntityId: draftSource.entityId,
+      targetEntityType: draftTarget.entityType,
+      targetEntityId: draftTarget.entityId,
       relationshipLabel: stored?.relationshipLabel || "认识",
       enabled: stored?.enabled ?? false,
       canViewMoments: stored?.canViewMoments ?? false,
@@ -489,12 +503,12 @@ export default function AppRelationshipNetwork({
     };
   };
 
-  const resolveNpcRelationshipLabel = (edge: RelationshipNetworkEdge, sourceEntityId: string): string => {
+  const resolveRelationshipLabel = (edge: RelationshipNetworkEdge, sourceEntityId: string): string => {
     const source = networkRef.current.nodes.find((node) => node.id === edge.sourceNodeId);
     const target = networkRef.current.nodes.find((node) => node.id === edge.targetNodeId);
-    const label = source?.entityType === "npc" && source.entityId === sourceEntityId
+    const label = source?.entityId === sourceEntityId
       ? edge.forwardLabel
-      : target?.entityType === "npc" && target.entityId === sourceEntityId
+      : target?.entityId === sourceEntityId
         ? edge.reverseLabel
         : undefined;
     return label?.trim() || "认识";
@@ -511,7 +525,7 @@ export default function AppRelationshipNetwork({
       if (!link.networkEdgeId) return;
       const edge = networkRef.current.edges.find((item) => item.id === link.networkEdgeId);
       if (!edge) return;
-      const relationshipLabel = resolveNpcRelationshipLabel(edge, link.sourceEntityId);
+      const relationshipLabel = resolveRelationshipLabel(edge, link.sourceEntityId);
       if (relationshipLabel === link.relationshipLabel) return;
       const result = upsertRelationshipNetworkSocialLink({ ...link, relationshipLabel, updatedAt: Date.now() });
       if (result.success) changed = true;
@@ -584,40 +598,66 @@ export default function AppRelationshipNetwork({
       ? networkRef.current.edges.map((item) => item.id === edge.id ? edge : item)
       : [...networkRef.current.edges, edge];
     if (commitNetwork({ ...networkRef.current, edges }, "关系已保存。")) {
-      const existingSocialLink = findRelationshipNetworkSocialLinkByEdge(activeIdentity.id, edge.id);
+      const existingSocialLinks = listRelationshipNetworkSocialLinksForEdge(activeIdentity.id, edge.id);
       if (socialDraft?.enabled) {
-        const socialResult = upsertRelationshipNetworkSocialLink({
-          id: socialDraft.id || existingSocialLink?.id || createId("relationship-network-social"),
-          ownerIdentityId: activeIdentity.id,
-          sourceEntityType: socialDraft.sourceEntityType,
-          sourceEntityId: socialDraft.sourceEntityId,
-          targetEntityType: socialDraft.targetEntityType,
-          targetEntityId: socialDraft.targetEntityId,
-          // The edge direction is the source of truth. This also migrates old
-          // social-link records that were incorrectly defaulted to "好友".
-          relationshipLabel: resolveNpcRelationshipLabel(edge, socialDraft.sourceEntityId),
-          enabled: true,
-          canViewMoments: socialDraft.canViewMoments,
-          canCommentMoments: socialDraft.canCommentMoments,
-          canLikeMoments: socialDraft.canLikeMoments,
-          canReplyMoments: socialDraft.canReplyMoments,
-          interactionApprovalMode: socialDraft.interactionApprovalMode,
-          commentFrequency: socialDraft.commentFrequency,
-          networkEdgeId: edge.id,
-          createdAt: existingSocialLink?.createdAt || now,
-          updatedAt: now,
+        const sourceNode = networkRef.current.nodes.find((node) => node.id === edge.sourceNodeId);
+        const targetNode = networkRef.current.nodes.find((node) => node.id === edge.targetNodeId);
+        const isCharacterPair = sourceNode?.entityType === "character" && targetNode?.entityType === "character";
+        const desiredDirections = isCharacterPair
+          ? edge.direction === "both"
+            ? [[sourceNode, targetNode], [targetNode, sourceNode]]
+            : edge.direction === "reverse" ? [[targetNode, sourceNode]] : [[sourceNode, targetNode]]
+          : [[{
+            id: "social-draft-source",
+            entityType: socialDraft.sourceEntityType,
+            entityId: socialDraft.sourceEntityId,
+          }, {
+            id: "social-draft-target",
+            entityType: socialDraft.targetEntityType,
+            entityId: socialDraft.targetEntityId,
+          }]];
+        let failed = false;
+        const desiredKeys = new Set<string>();
+        desiredDirections.forEach(([sourceDirection, targetDirection], index) => {
+          if (!sourceDirection || !targetDirection) return;
+          const sourceEntityType = sourceDirection.entityType as RelationshipNetworkEntityType;
+          const targetEntityType = targetDirection.entityType as RelationshipNetworkEntityType;
+          const sourceEntityId = sourceDirection.entityId;
+          const targetEntityId = targetDirection.entityId;
+          const key = `${sourceEntityType}:${sourceEntityId}->${targetEntityType}:${targetEntityId}`;
+          desiredKeys.add(key);
+          const existing = existingSocialLinks.find((link) => `${link.sourceEntityType}:${link.sourceEntityId}->${link.targetEntityType}:${link.targetEntityId}` === key);
+          const result = upsertRelationshipNetworkSocialLink({
+            id: existing?.id || (index === 0 && !isCharacterPair && socialDraft.id) || createId("relationship-network-social"),
+            ownerIdentityId: activeIdentity.id,
+            sourceEntityType,
+            sourceEntityId,
+            targetEntityType,
+            targetEntityId,
+            relationshipLabel: resolveRelationshipLabel(edge, sourceEntityId),
+            enabled: true,
+            canViewMoments: socialDraft.canViewMoments,
+            canCommentMoments: socialDraft.canCommentMoments,
+            canLikeMoments: socialDraft.canLikeMoments,
+            canReplyMoments: socialDraft.canReplyMoments,
+            interactionApprovalMode: socialDraft.interactionApprovalMode,
+            commentFrequency: socialDraft.commentFrequency,
+            networkEdgeId: edge.id,
+            createdAt: existing?.createdAt || now,
+            updatedAt: now,
+          });
+          if (!result.success) failed = true;
         });
-        if (!socialResult.success) setError("关系已保存，但朋友圈互动设置保存失败。");
+        existingSocialLinks
+          .filter((link) => !desiredKeys.has(`${link.sourceEntityType}:${link.sourceEntityId}->${link.targetEntityType}:${link.targetEntityId}`))
+          .forEach((link) => { removeRelationshipNetworkSocialLink(activeIdentity.id, link.id); });
+        if (failed) setError("关系已保存，但朋友圈互动设置保存失败。");
         else setSocialLinks(listRelationshipNetworkSocialLinksForIdentity(activeIdentity.id));
-      } else if (existingSocialLink) {
+      } else if (existingSocialLinks.length > 0) {
         // Keep the disabled record so its frequency and audit trail can be
         // restored when the user enables this relationship again.
-        const socialResult = upsertRelationshipNetworkSocialLink({
-          ...existingSocialLink,
-          enabled: false,
-          updatedAt: now,
-        });
-        if (!socialResult.success) setError("关系已保存，但朋友圈互动设置未能关闭。");
+        const socialResults = existingSocialLinks.map((link) => upsertRelationshipNetworkSocialLink({ ...link, enabled: false, updatedAt: now }));
+        if (socialResults.some((result) => !result.success)) setError("关系已保存，但朋友圈互动设置未能关闭。");
         else setSocialLinks(listRelationshipNetworkSocialLinksForIdentity(activeIdentity.id));
       }
       setSelectedEdgeId(edge.id);
@@ -1331,8 +1371,8 @@ export default function AppRelationshipNetwork({
               <label className="block text-[10px] font-bold text-[#746c61]">关系分类（可选）<input value={edgeDraft.category} onChange={(event) => setEdgeDraft({ ...edgeDraft, category: event.target.value })} placeholder="例如：现实、过去、故事线" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
               <label className="block text-[10px] font-bold text-[#746c61]">备注（可选）<textarea value={edgeDraft.note} onChange={(event) => setEdgeDraft({ ...edgeDraft, note: event.target.value })} placeholder="补充这段关系的背景" className="mt-1.5 min-h-16 w-full resize-none rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs leading-5 outline-none focus:border-[#a99a87]" /></label>
               {socialDraft && <div className="rounded-2xl border border-[#e5ddd0] bg-[#faf7f1] p-3">
-                <div className="flex items-center justify-between"><div><p className="text-[10px] font-black text-[#62594f]">朋友圈互动关系</p><p className="mt-0.5 text-[9px] text-[#958c80]">NPC「{socialSourceName}」→ {socialTargetTypeLabel}「{socialTargetName}」</p><p className="mt-0.5 text-[9px] text-[#a1988c]">箭头左侧是互动发起者，右侧是它会查看和回应的对象。</p></div><span className="rounded-full bg-[#eeeae2] px-2 py-1 text-[8px] font-bold text-[#8d8377]">基础配置</span></div>
-                 <p className="mt-2 text-[9px] leading-4 text-[#958c80]">{socialDraftNpcReady ? "NPC 会直接使用自己的设定参与目标朋友圈；提升为完整角色后，会额外使用完整档案和世界书。" : "当前 NPC 已不存在，无法启用这条朋友圈互动关系。"}</p>
+                <div className="flex items-center justify-between"><div><p className="text-[10px] font-black text-[#62594f]">朋友圈互动关系</p><p className="mt-0.5 text-[9px] text-[#958c80]">{isCharacterToCharacterSocialDraft ? `角色「${socialSourceName}」→ 角色「${socialTargetName}」` : `NPC「${socialSourceName}」→ ${socialTargetTypeLabel}「${socialTargetName}」`}</p><p className="mt-0.5 text-[9px] text-[#a1988c]">箭头左侧是互动发起者，右侧是它会查看和回应的对象；双向关系会分别保存两条互动权限。</p></div><span className="rounded-full bg-[#eeeae2] px-2 py-1 text-[8px] font-bold text-[#8d8377]">基础配置</span></div>
+                 <p className="mt-2 text-[9px] leading-4 text-[#958c80]">{isCharacterToCharacterSocialDraft ? "角色会使用各自的人设、关系和世界书浏览对方的公开朋友圈；只有启用评论权限后才会自动评论。" : (socialDraftNpcReady ? "NPC 会直接使用自己的设定参与目标朋友圈；提升为完整角色后，会额外使用完整档案和世界书。" : "当前 NPC 已不存在，无法启用这条朋友圈互动关系。")}</p>
                 <label className="mt-2 flex items-center gap-2 text-[10px] font-bold text-[#6d6459]"><input type="checkbox" checked={socialDraft.enabled} onChange={(event) => setSocialDraft({ ...socialDraft, enabled: event.target.checked })} />启用朋友圈互动</label>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={socialDraft.canViewMoments} disabled={!socialDraft.enabled || socialDraft.canCommentMoments} onChange={(event) => setSocialDraft({ ...socialDraft, canViewMoments: event.target.checked })} />允许查看朋友圈</label>
