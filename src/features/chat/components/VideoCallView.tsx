@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeftRight, Camera, Clock3, Image as ImageIcon, Maximize2, Mic, Phone, Send, UserRound, Video, X } from "lucide-react";
+import { ArrowLeftRight, Camera, Clock3, Image as ImageIcon, Maximize2, Mic, Phone, RefreshCw, Send, UserRound, Video, X } from "lucide-react";
 import type { Character } from "../../../types";
 import type { CallTranscriptItem } from "../services/messageParser";
 import type { VideoCallInputMode } from "../hooks/useChatAttachmentState";
@@ -26,6 +26,7 @@ interface VideoCallViewProps {
   onReject: () => void;
   onEnd: () => void;
   onCameraFrame: (imageDataUrl: string) => void;
+  onRegenerateCallTurn: (item: CallTranscriptItem) => void;
 }
 
 const formatDuration = (duration: number) => `${Math.floor(duration / 60).toString().padStart(2, "0")}:${(duration % 60).toString().padStart(2, "0")}`;
@@ -51,6 +52,7 @@ export function VideoCallView({
   onReject,
   onEnd,
   onCameraFrame,
+  onRegenerateCallTurn,
 }: VideoCallViewProps) {
   const [showSceneHistory, setShowSceneHistory] = useState(false);
   const [showSelfSceneTicker, setShowSelfSceneTicker] = useState(false);
@@ -59,11 +61,13 @@ export function VideoCallView({
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
+  const [transcriptMenu, setTranscriptMenu] = useState<{ item: CallTranscriptItem; x: number; y: number } | null>(null);
   const callViewRef = useRef<HTMLDivElement | null>(null);
   const selfPreviewRef = useRef<HTMLDivElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
   const previewMovedRef = useRef(false);
+  const transcriptLongPressRef = useRef<{ timer: ReturnType<typeof window.setTimeout>; itemId: string; origin: { x: number; y: number } } | null>(null);
   const transcriptViewportRef = useRef<HTMLDivElement | null>(null);
   const stickTranscriptToBottomRef = useRef(true);
   const characterName = character.remark || character.name;
@@ -218,6 +222,35 @@ export function VideoCallView({
     stickTranscriptToBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 28;
   };
 
+  const clearTranscriptLongPress = () => {
+    if (transcriptLongPressRef.current) window.clearTimeout(transcriptLongPressRef.current.timer);
+    transcriptLongPressRef.current = null;
+  };
+
+  const handleTranscriptPointerDown = (event: ReactPointerEvent<HTMLDivElement>, item: CallTranscriptItem) => {
+    if (item.sender !== "character") return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    clearTranscriptLongPress();
+    const origin = { x: event.clientX, y: event.clientY };
+    const timer = window.setTimeout(() => {
+      transcriptLongPressRef.current = null;
+      setTranscriptMenu({ item, x: origin.x, y: origin.y });
+    }, 500);
+    transcriptLongPressRef.current = { timer, itemId: item.id, origin };
+  };
+
+  const handleTranscriptPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pending = transcriptLongPressRef.current;
+    if (!pending) return;
+    if (Math.hypot(event.clientX - pending.origin.x, event.clientY - pending.origin.y) > 10) clearTranscriptLongPress();
+  };
+
+  const regenerateTranscriptTurn = (item: CallTranscriptItem) => {
+    setTranscriptMenu(null);
+    clearTranscriptLongPress();
+    onRegenerateCallTurn(item);
+  };
+
   return (
     <div ref={callViewRef} className="absolute inset-0 z-50 flex transform-gpu flex-col overflow-hidden bg-[#080910] text-white animate-fade-in" data-video-call-view>
       <div className="absolute -inset-5 scale-105 bg-cover bg-center blur-[6px]" style={{ backgroundImage: avatar ? `url(${avatar})` : undefined }} />
@@ -257,7 +290,7 @@ export function VideoCallView({
             <p>{status === "connected" ? (sceneText || "等待对方画面...") : "视频通话准备中"}</p>
           </div>
 
-          {status === "connected" && (transcript.length > 0 || isTyping) && <div ref={transcriptViewportRef} onScroll={handleTranscriptScroll} className="absolute bottom-3 left-1 flex max-h-[34%] w-[86%] flex-col gap-1 overflow-y-auto overscroll-contain pr-1 text-[12px] leading-relaxed [scrollbar-width:thin]" data-video-call-subtitles>
+          {status === "connected" && (transcript.length > 0 || isTyping) && <div ref={transcriptViewportRef} onScroll={handleTranscriptScroll} className="absolute inset-x-1 bottom-3 flex max-h-[34%] flex-col gap-1 overflow-y-auto overscroll-contain pr-1 text-[12px] leading-relaxed [scrollbar-width:thin]" data-video-call-subtitles>
             {transcript.filter((item) => {
               if (item.sender !== "user") return true;
               const content = item.content.trim();
@@ -269,7 +302,22 @@ export function VideoCallView({
                 && !legacyFreeText.startsWith("画面:");
             }).map((item) => {
               const isUserMessage = item.sender === "user";
-              return <div key={item.id} className={`max-w-[92%] rounded-lg bg-black/40 px-3 py-1.5 text-white/90 shadow-lg backdrop-blur-sm ${isUserMessage ? "self-end text-right" : "self-start"}`}><span className="mr-1 text-[10px] text-white/55">{isUserMessage ? "我：" : `${characterName}：`}</span>{getVideoCallDisplayText(item.content)}</div>;
+              return <div
+                key={item.id}
+                className={`relative max-w-[92%] rounded-lg bg-black/40 px-3 py-1.5 text-left text-white/90 shadow-lg backdrop-blur-sm ${isUserMessage ? "self-end" : "self-start"}`}
+                onContextMenu={(event) => {
+                  if (item.sender !== "character") return;
+                  event.preventDefault();
+                  clearTranscriptLongPress();
+                  setTranscriptMenu({ item, x: event.clientX, y: event.clientY });
+                }}
+                onPointerDown={(event) => handleTranscriptPointerDown(event, item)}
+                onPointerMove={handleTranscriptPointerMove}
+                onPointerUp={clearTranscriptLongPress}
+                onPointerCancel={clearTranscriptLongPress}
+              >
+                <span className="mr-1 text-[10px] text-white/55">{isUserMessage ? "我：" : `${characterName}：`}</span>{getVideoCallDisplayText(item.content)}
+              </div>;
             })}
             {isTyping && <div className="flex w-fit items-center gap-1 rounded-lg bg-black/40 px-3 py-2 text-white/80 shadow-lg backdrop-blur-sm" aria-live="polite" aria-label="对方正在说话"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/80" style={{ animationDelay: "0ms" }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/80" style={{ animationDelay: "140ms" }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/80" style={{ animationDelay: "280ms" }} /></div>}
           </div>}
@@ -281,6 +329,28 @@ export function VideoCallView({
           <button type="button" onClick={onSend} disabled={!inputText.trim() || isTyping} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white/85 text-slate-950 disabled:opacity-35" aria-label="发送视频通话内容"><Send className="h-4 w-4" /></button>
         </div>}
       </main>
+
+      {transcriptMenu && <div
+        className="fixed inset-0 z-[80]"
+        onClick={() => setTranscriptMenu(null)}
+        onContextMenu={(event) => { event.preventDefault(); setTranscriptMenu(null); }}
+      >
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            regenerateTranscriptTurn(transcriptMenu.item);
+          }}
+          className="absolute inline-flex items-center gap-1 rounded-lg border border-white/20 bg-[#11131c]/95 px-2.5 py-1.5 text-[11px] text-white shadow-xl backdrop-blur-md"
+          style={{
+            left: Math.max(10, Math.min(window.innerWidth - 92, transcriptMenu.x - 12)),
+            top: Math.max(10, Math.min(window.innerHeight - 54, transcriptMenu.y - 48)),
+          }}
+          aria-label="重回这轮视频通话回复"
+        >
+          <RefreshCw className="h-3 w-3" />重回
+        </button>
+      </div>}
 
       <footer className="relative z-10 flex shrink-0 items-center justify-between px-8 pb-[calc(env(safe-area-inset-bottom,0px)+14px)] pt-3">
         {status === "ringing" && isIncoming ? <>

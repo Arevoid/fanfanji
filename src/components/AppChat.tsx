@@ -17,6 +17,7 @@ import { startAppointmentOfflineSession } from "../domain/schedule/appointmentOf
 import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
 import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseRedPacketClaimNotice, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
+import type { CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import {
   createCharacterPhone,
@@ -1510,6 +1511,9 @@ export default function AppChat({
   // AI turn from opening both a voice and a video surface.
   const acceptedCallIntentIdsRef = useRef<Set<string>>(new Set());
   const activeCallIntentRef = useRef<CallIntent | null>(null);
+  const callRetryMessageRef = useRef<Message | null>(null);
+  const voiceCallTranscriptLongPressRef = useRef<{ timer: ReturnType<typeof window.setTimeout>; origin: { x: number; y: number } } | null>(null);
+  const [voiceCallTranscriptMenu, setVoiceCallTranscriptMenu] = useState<{ item: CallTranscriptItem; x: number; y: number } | null>(null);
   const videoCallOpeningRelationRef = useRef<string | null>(null);
   const videoCallOpeningScopeRef = useRef<DirectVoiceCallScope | null>(null);
   // Keep the scope that actually opened a call while identity/contact state
@@ -1737,6 +1741,9 @@ export default function AppChat({
     setVideoCallSelfScene("");
     setVideoCallSceneHistory([]);
     setCallTranscript([]);
+    callRetryMessageRef.current = null;
+    setVoiceCallTranscriptMenu(null);
+    clearVoiceCallTranscriptLongPress();
     setActiveAttachModal("calling");
     setShowAttachPanel(false);
     videoCallOpeningRelationRef.current = null;
@@ -1829,6 +1836,9 @@ export default function AppChat({
       setVoiceCallRelationId(null);
       voiceCallScopeRef.current = null;
       activeCallIntentRef.current = null;
+      callRetryMessageRef.current = null;
+      setVoiceCallTranscriptMenu(null);
+      clearVoiceCallTranscriptLongPress();
       return;
     }
     const completion = completeVoiceCall({
@@ -1867,6 +1877,9 @@ export default function AppChat({
     setVoiceCallRelationId(null);
     voiceCallScopeRef.current = null;
     activeCallIntentRef.current = null;
+    callRetryMessageRef.current = null;
+    setVoiceCallTranscriptMenu(null);
+    clearVoiceCallTranscriptLongPress();
   };
 
   const acceptIncomingCall = () => {
@@ -1918,6 +1931,7 @@ export default function AppChat({
       authorAvatarSnapshot: activeIdentityAvatar,
     });
     if (!userMsg) return;
+    callRetryMessageRef.current = userMsg;
     // Determine the input kind from the actual wire markup rather than only
     // the captured UI state. This keeps scene descriptions out of subtitles
     // even when an older HMR-rendered handler is still mounted.
@@ -1953,6 +1967,7 @@ export default function AppChat({
       authorAvatarSnapshot: activeIdentityAvatar,
     });
     if (!userMsg) return;
+    callRetryMessageRef.current = userMsg;
     setVideoCallSelfScene("摄像头画面已发送");
     onSendMessage(userMsg);
     void generateResponseForUserMessage(userMsg, undefined, undefined, imageDataUrl, true);
@@ -3442,6 +3457,41 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     ephemeralImage?: boolean,
   ) => chatReplyController.generate({ userMsg, customHistoryOverride, signal, imageDataUrlOverride, ephemeralImage });
 
+  const clearVoiceCallTranscriptLongPress = () => {
+    if (voiceCallTranscriptLongPressRef.current) clearTimeout(voiceCallTranscriptLongPressRef.current.timer);
+    voiceCallTranscriptLongPressRef.current = null;
+  };
+
+  const regenerateCallTurn = (target: CallTranscriptItem) => {
+    if (isTyping || activeAttachModal !== "calling" || callingStatus !== "connected") return;
+    const targetIndex = callTranscript.findIndex((item) => item.id === target.id);
+    if (targetIndex < 0) return;
+    const previousUserIndex = callTranscript.slice(0, targetIndex).map((item, index) => item.sender === "user" ? index : -1).filter((index) => index >= 0).pop() ?? -1;
+    const transcriptTrigger = previousUserIndex >= 0 ? callTranscript[previousUserIndex] : undefined;
+    const persistedTrigger = transcriptTrigger ? currentChatMessages.find((message) => message.id === transcriptTrigger.id) : undefined;
+    const triggerMessage = persistedTrigger || (transcriptTrigger ? {
+      ...callRetryMessageRef.current,
+      id: transcriptTrigger.id,
+      characterId: activeChatCharId,
+      sender: "user" as const,
+      content: transcriptTrigger.content,
+      timestamp: transcriptTrigger.timestamp,
+      relationId: voiceCallRelationId || undefined,
+    } as Message : callRetryMessageRef.current);
+    if (!triggerMessage) {
+      showToast("找不到这轮通话输入，暂时无法重回。");
+      return;
+    }
+    const removeStart = previousUserIndex >= 0 ? previousUserIndex + 1 : targetIndex;
+    let removeEnd = targetIndex + 1;
+    while (removeEnd < callTranscript.length && callTranscript[removeEnd].sender === "character") removeEnd += 1;
+    setCallTranscript((previous) => previous.filter((_, index) => index < removeStart || index >= removeEnd));
+    setVoiceCallTranscriptMenu(null);
+    clearVoiceCallTranscriptLongPress();
+    callRetryMessageRef.current = triggerMessage;
+    void generateResponseForUserMessage(triggerMessage);
+  };
+
   // A video call should not open onto an empty canvas. Once the outgoing call
   // is connected, ask the character for a first scene/line using the same
   // context-aware reply pipeline as later turns. The synthetic turn is kept
@@ -3470,7 +3520,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       authorNameSnapshot: activeIdentityName,
       authorAvatarSnapshot: activeIdentityAvatar,
     });
-    if (openingMessage) void generateResponseForUserMessage(openingMessage);
+    if (openingMessage) {
+      callRetryMessageRef.current = openingMessage;
+      void generateResponseForUserMessage(openingMessage);
+    }
   }, [
     activeAttachModal,
     activeChatCharId,
@@ -9576,6 +9629,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               onReject={rejectIncomingCall}
               onEnd={endVoiceCall}
               onCameraFrame={sendVideoCameraFrame}
+              onRegenerateCallTurn={regenerateCallTurn}
             />
           )}
 
@@ -9616,9 +9670,36 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       const isSelfMessage = item.sender === "user";
                       return (
                         <div key={item.id} className={`flex ${isSelfMessage ? "justify-end" : "justify-start"} animate-fade-in`}>
-                          <div className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-sm ${
+                          <div
+                            className={`relative max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-sm ${
                             isSelfMessage ? "bg-white/85 text-slate-800 rounded-br-sm" : "bg-white/15 text-white border border-white/10 rounded-bl-sm"
-                          }`}>
+                            }`}
+                            onContextMenu={(event) => {
+                              if (item.sender !== "character") return;
+                              event.preventDefault();
+                              clearVoiceCallTranscriptLongPress();
+                              setVoiceCallTranscriptMenu({ item, x: event.clientX, y: event.clientY });
+                            }}
+                            onPointerDown={(event) => {
+                              if (item.sender !== "character") return;
+                              if (event.pointerType === "mouse" && event.button !== 0) return;
+                              clearVoiceCallTranscriptLongPress();
+                              const origin = { x: event.clientX, y: event.clientY };
+                              const timer = window.setTimeout(() => {
+                                voiceCallTranscriptLongPressRef.current = null;
+                                setVoiceCallTranscriptMenu({ item, x: event.clientX, y: event.clientY });
+                              }, LONG_PRESS_DELAY);
+                              voiceCallTranscriptLongPressRef.current = { timer, origin };
+                            }}
+                            onPointerMove={(event) => {
+                              const pending = voiceCallTranscriptLongPressRef.current;
+                              if (pending && Math.hypot(event.clientX - pending.origin.x, event.clientY - pending.origin.y) > LONG_PRESS_MOVE_TOLERANCE) {
+                                clearVoiceCallTranscriptLongPress();
+                              }
+                            }}
+                            onPointerUp={clearVoiceCallTranscriptLongPress}
+                            onPointerCancel={clearVoiceCallTranscriptLongPress}
+                          >
                             {getCallTranscriptText(item.content)}
                           </div>
                         </div>
@@ -9675,6 +9756,30 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   </p>
                 </div>
               )}
+
+              {voiceCallTranscriptMenu && <div
+                className="fixed inset-0 z-[80]"
+                onClick={() => setVoiceCallTranscriptMenu(null)}
+                onContextMenu={(event) => { event.preventDefault(); setVoiceCallTranscriptMenu(null); }}
+              >
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const target = voiceCallTranscriptMenu.item;
+                    setVoiceCallTranscriptMenu(null);
+                    regenerateCallTurn(target);
+                  }}
+                  className="absolute inline-flex items-center gap-1 rounded-lg border border-white/20 bg-[#11131c]/95 px-2.5 py-1.5 text-[11px] text-white shadow-xl backdrop-blur-md"
+                  style={{
+                    left: Math.max(10, Math.min(window.innerWidth - 92, voiceCallTranscriptMenu.x - 12)),
+                    top: Math.max(10, Math.min(window.innerHeight - 54, voiceCallTranscriptMenu.y - 48)),
+                  }}
+                  aria-label="重回这轮语音通话回复"
+                >
+                  <RefreshCw className="h-3 w-3" />重回
+                </button>
+              </div>}
 
               {/* Ringing Action Controls */}
               {callingStatus === "ringing" && (
