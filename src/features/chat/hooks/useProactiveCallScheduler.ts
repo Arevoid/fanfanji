@@ -12,7 +12,7 @@ interface UseProactiveCallSchedulerOptions {
   messagesRef: { current: Message[] };
   isOfflineStoryActiveFor: (relationId: string) => boolean;
   updateRelationshipSession: (relationId: string, patch: Partial<CharacterRelationship>) => void;
-  beginVoiceCall: (incoming: boolean) => void;
+  beginCall: (media: "voice" | "video", incoming: boolean, scope: DirectVoiceCallScope) => void;
 }
 
 /** Keeps proactive-call timing separate from the chat view's render lifecycle. */
@@ -24,7 +24,7 @@ export function useProactiveCallScheduler({
   messagesRef,
   isOfflineStoryActiveFor,
   updateRelationshipSession,
-  beginVoiceCall,
+  beginCall,
 }: UseProactiveCallSchedulerOptions): void {
   const run = async () => {
     if (!character || !relationship || !voiceCallScope || character.isGroupChat || !character.enableProactiveCall) return;
@@ -42,7 +42,7 @@ export function useProactiveCallScheduler({
       randomValue: Math.random(),
     })) return;
     updateRelationshipSession(voiceCallScope.relationId, createProactiveCallTriggerPatch(relationship, now));
-    beginVoiceCall(true);
+    beginCall("voice", true, voiceCallScope);
   };
 
   useBackgroundScheduler({

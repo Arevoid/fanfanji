@@ -21,6 +21,10 @@ export function completeVoiceCall(input: {
   authorNameSnapshot?: string;
   authorAvatarSnapshot?: string;
   callType?: string;
+  callId?: string;
+  callMedia?: "voice" | "video";
+  callSource?: "user" | "ai" | "scheduler";
+  callResponseBatchId?: string;
 }): { status: VoiceCallStatus; callRecord: Message; rejectionPatch?: Partial<CharacterRelationship> } {
   const meaningfulTranscript = input.transcript.filter((item) => getCallTranscriptText(item.content || "").trim());
   const status: VoiceCallStatus = input.requestedStatus === "completed" && meaningfulTranscript.length === 0
@@ -36,6 +40,11 @@ export function completeVoiceCall(input: {
     authorIdentityId: input.sender === "user" ? input.authorIdentityId : undefined,
     authorNameSnapshot: input.sender === "user" ? input.authorNameSnapshot : undefined,
     authorAvatarSnapshot: input.sender === "user" ? input.authorAvatarSnapshot : undefined,
+    callId: input.callId,
+    callMedia: input.callMedia,
+    callDirection: input.incoming ? "incoming" : "outgoing",
+    callSource: input.callSource,
+    callResponseBatchId: input.callResponseBatchId,
     content: createCallRecordMarkup({
       callType: input.callType || "语音通话",
       status,

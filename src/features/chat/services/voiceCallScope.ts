@@ -39,6 +39,11 @@ export function createVoiceCallRecordMessage(input: {
   authorIdentityId?: string;
   authorNameSnapshot?: string;
   authorAvatarSnapshot?: string;
+  callId?: string;
+  callMedia?: "voice" | "video";
+  callDirection?: "incoming" | "outgoing";
+  callSource?: "user" | "ai" | "scheduler";
+  callResponseBatchId?: string;
 }): Message {
   return {
     id: input.id,
@@ -49,6 +54,11 @@ export function createVoiceCallRecordMessage(input: {
     ...(input.authorIdentityId ? { authorIdentityId: input.authorIdentityId } : {}),
     ...(input.authorNameSnapshot ? { authorNameSnapshot: input.authorNameSnapshot } : {}),
     ...(input.authorAvatarSnapshot ? { authorAvatarSnapshot: input.authorAvatarSnapshot } : {}),
+    ...(input.callId ? { callId: input.callId } : {}),
+    ...(input.callMedia ? { callMedia: input.callMedia } : {}),
+    ...(input.callDirection ? { callDirection: input.callDirection } : {}),
+    ...(input.callSource ? { callSource: input.callSource } : {}),
+    ...(input.callResponseBatchId ? { callResponseBatchId: input.callResponseBatchId } : {}),
     content: input.content,
     timestamp: input.timestamp,
   };

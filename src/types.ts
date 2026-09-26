@@ -110,6 +110,12 @@ export interface Message {
   sender: "user" | "character";
   /** Groups character bubbles created by one model turn for turn-level actions. */
   replyBatchId?: string;
+  /** Stable call session metadata for voice/video records. Legacy messages omit it. */
+  callId?: string;
+  callMedia?: "voice" | "video";
+  callDirection?: "incoming" | "outgoing";
+  callSource?: "user" | "ai" | "scheduler";
+  callResponseBatchId?: string;
   senderId?: string;
   /** Frozen identity metadata for user-authored messages. Legacy messages fall back to current settings. */
   authorIdentityId?: string;

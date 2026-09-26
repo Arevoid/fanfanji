@@ -47,7 +47,7 @@ import { buildDirectChatContextSnapshot } from "../features/chat/services/direct
 import { prepareDirectReplyContext, prepareDirectReplyTurn, type DirectReplyPromptPreparationInput } from "../features/chat/services/directReplyPreparation";
 import { useProactiveCallScheduler } from "../features/chat/hooks/useProactiveCallScheduler";
 import { isExplicitIncomingCallRequest, isExplicitIncomingVideoCallRequest } from "../features/chat/services/voiceCallIntent";
-import { resolveCharacterCallIntent } from "../features/chat/services/characterCallIntent";
+import { acceptCallIntent, createCallIntentId, mediaFromCallAction, parseCallActionDirective, type CallIntent } from "../features/chat/services/callIntent";
 import { useChatPaymentState } from "../features/chat/hooks/useChatPaymentState";
 import { useChatProfileState } from "../features/chat/hooks/useChatProfileState";
 import { useChatGroupState } from "../features/chat/hooks/useChatGroupState";
@@ -1505,6 +1505,11 @@ export default function AppChat({
   const displayedTokenEstimate = isShowingLastChatRequestEstimate ? lastChatRequestEstimate! : estimatedTokens;
   // Memory Compression and Proactive Chat states
   const proactiveMessageInFlightRef = useRef<Set<string>>(new Set());
+  // Every call trigger (direct reply, queued proactive action, or scheduler)
+  // is accepted once per response/action identity. This prevents the same
+  // AI turn from opening both a voice and a video surface.
+  const acceptedCallIntentIdsRef = useRef<Set<string>>(new Set());
+  const activeCallIntentRef = useRef<CallIntent | null>(null);
   const videoCallOpeningRelationRef = useRef<string | null>(null);
   const videoCallOpeningScopeRef = useRef<DirectVoiceCallScope | null>(null);
   // Keep the scope that actually opened a call while identity/contact state
@@ -1695,6 +1700,25 @@ export default function AppChat({
   const beginCall = (mode: ChatCallMode, incoming: boolean, scopeOverride?: DirectVoiceCallScope) => {
     const callScope = scopeOverride || activeVoiceCallScope;
     if (!activeCharacter || activeCharacter.isGroupChat || !callScope) return;
+    if (!activeCallIntentRef.current || activeCallIntentRef.current.relationId !== callScope.relationId) {
+      const source: CallIntent["source"] = incoming ? "ai" : "user";
+      activeCallIntentRef.current = {
+        id: `call-session-${Date.now()}`,
+        direction: incoming ? "incoming" : "outgoing",
+        media: mode,
+        source,
+        characterId: activeCharacter.id,
+        relationId: callScope.relationId,
+        conversationId: callScope.conversationId,
+        userIdentityId: activeIdentityId,
+      };
+    } else {
+      activeCallIntentRef.current = {
+        ...activeCallIntentRef.current,
+        direction: incoming ? "incoming" : "outgoing",
+        media: mode,
+      };
+    }
     clearCallSpeechQueue();
     resetCallTtsPlayback();
     if (!incoming) unlockCallTtsPlayback();
@@ -1723,6 +1747,36 @@ export default function AppChat({
   const beginVoiceCall = (incoming: boolean, scope?: DirectVoiceCallScope) => beginCall("voice", incoming, scope);
   const beginVideoCall = (incoming = false, scope?: DirectVoiceCallScope) => beginCall("video", incoming, scope);
 
+  const dispatchIncomingCallIntent = (input: {
+    media: "voice" | "video";
+    source: CallIntent["source"];
+    scope: DirectVoiceCallScope;
+    responseBatchId?: string;
+    triggerMessageId?: string;
+    reason?: string;
+  }): boolean => {
+    if (activeAttachModal || !activeChatCharId) return false;
+    const intent: CallIntent = {
+      id: "",
+      direction: "incoming",
+      media: input.media,
+      source: input.source,
+      characterId: activeChatCharId,
+      relationId: input.scope.relationId,
+      conversationId: input.scope.conversationId,
+      userIdentityId: activeIdentityId,
+      responseBatchId: input.responseBatchId,
+      triggerMessageId: input.triggerMessageId,
+      reason: input.reason,
+    };
+    intent.id = createCallIntentId(intent);
+    if (!acceptCallIntent(acceptedCallIntentIdsRef.current, intent)) return false;
+    activeCallIntentRef.current = intent;
+    if (intent.media === "video") beginVideoCall(true, input.scope);
+    else beginVoiceCall(true, input.scope);
+    return true;
+  };
+
   // A proactive action generated while another chat is open is kept in a
   // relation-scoped queue. Consume it only after the exact relationship is
   // visible, so aliases and characters can never receive one another's call.
@@ -1750,9 +1804,19 @@ export default function AppChat({
       endTime: activeCharacter.proactiveEndTime,
     })) return;
     updateRelationshipSession(activeRelationship.id, createProactiveCallTriggerPatch(activeRelationship, now));
-    if (pending.type === "video_call") beginVideoCall(true);
-    else beginVoiceCall(true);
-  }, [activeAttachModal, activeCharacter?.enableProactiveCall, activeCharacter?.id, activeIdentityId, activeRelationship?.id, activeVoiceCallScope?.relationId]);
+    const callScope = activeVoiceCallScope || {
+      relationId: activeRelationship.id,
+      conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
+    };
+    dispatchIncomingCallIntent({
+      media: pending.type === "video_call" ? "video" : "voice",
+      source: "scheduler",
+      scope: callScope,
+      responseBatchId: pending.id,
+      triggerMessageId: pending.sourceMessageId,
+      reason: pending.reason,
+    });
+  }, [activeAttachModal, activeCharacter?.enableProactiveCall, activeCharacter?.id, activeIdentityId, activeRelationship?.id, activeRelationship?.conversationId, activeVoiceCallScope?.relationId]);
 
   const finishVoiceCall = (requestedStatus: VoiceCallStatus, options: { userEndedCall?: boolean } = {}) => {
     const activeScopeMatches = isCurrentVoiceCallScope(voiceCallRelationId, activeVoiceCallScope);
@@ -1764,6 +1828,7 @@ export default function AppChat({
       setActiveAttachModal(null);
       setVoiceCallRelationId(null);
       voiceCallScopeRef.current = null;
+      activeCallIntentRef.current = null;
       return;
     }
     const completion = completeVoiceCall({
@@ -1782,6 +1847,10 @@ export default function AppChat({
       incoming: isIncomingCall,
       userEndedCall: options.userEndedCall,
       recentMessages: messagesRef.current,
+      callId: activeCallIntentRef.current?.id,
+      callMedia: activeCallIntentRef.current?.media || callMode,
+      callSource: activeCallIntentRef.current?.source,
+      callResponseBatchId: activeCallIntentRef.current?.responseBatchId,
     });
     onSendMessageRaw(completion.callRecord);
     if (completion.status === "completed" && activeDirectScope) {
@@ -1797,6 +1866,7 @@ export default function AppChat({
     setActiveAttachModal(null);
     setVoiceCallRelationId(null);
     voiceCallScopeRef.current = null;
+    activeCallIntentRef.current = null;
   };
 
   const endVoiceCall = () => finishVoiceCall(callingStatus === "connected" ? "completed" : "cancelled", { userEndedCall: true });
@@ -2781,6 +2851,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           ? `\n\n[本轮隐性归因提醒] 历史中的“角色手机代发消息”不是${activeCharacter.name}本人说的。用户当前只是在对这条消息作反应；回复第一句必须先自然地质疑或否认作者身份（例如“分手？我什么时候说过这句？”），再回应用户，不要先道歉、认领、说成玩笑或把代发内容归因于模型抽风。不要把代发内容改写成${activeCharacter.name}刚刚主动说过的话，也不要主动告诉用户是谁操作的。`
           : ""}`
         : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
+      const explicitIncomingCallPrompt = userMsg?.sender === "user" && isExplicitIncomingCallRequest(userMsg.content)
+        ? `\n【来电动作协议】用户明确要求你主动给用户打电话。请先正常回复一到数条符合人设的聊天内容；本轮回复末尾必须追加且只能追加一个私有动作标记，不要向用户解释标记：[[CALL_ACTION]]{"type":"${isExplicitIncomingVideoCallRequest(userMsg.content) ? "video_call" : "call"}","reason":"用户明确请求${isExplicitIncomingVideoCallRequest(userMsg.content) ? "视频" : "语音"}来电"}[[/CALL_ACTION]]。type=video_call 只能用于视频，type=call 只能用于语音。不要根据“我拨过去了”等普通台词自行推断动作。`
+        : turnCharacter.enableProactiveCall
+          ? `\n【主动来电动作协议】只有当当前上下文确实适合角色立即主动联系用户时，才追加一个私有动作标记：[[CALL_ACTION]]{"type":"call"或"video_call","reason":"简短说明"}[[/CALL_ACTION]]。不要仅因为台词出现“拨过去了”“打过来了”就推断来电；没有动作标记就不要打开来电界面。`
+          : "";
       const imageScopeKey = `${replyContext.userIdentityId}:${replyContext.characterId}:${replyContext.relationId || replyContext.conversationId || "group"}`;
       const imageDataUrl = imageDataUrlOverride || resolveRecentUserImageForTurn({
         messages: sourceMsgs,
@@ -2797,7 +2872,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const preparedDirectReply = prepareDirectReplyTurn({
         context: historyContext,
         prompt: directChatPromptInput,
-        message: `${promptMessage}${imageInstruction}`,
+        message: `${promptMessage}${explicitIncomingCallPrompt}${imageInstruction}`,
         imageDataUrl,
         historyInjections: wbBlocks.at_depth,
         settings,
@@ -2817,7 +2892,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const requestTokenEstimate = estimateChatRequestTokens({
         systemInstruction,
         history,
-        message: `${promptMessage}${imageInstruction}`,
+        message: `${promptMessage}${explicitIncomingCallPrompt}${imageInstruction}`,
         historyInjections: wbBlocks.at_depth,
         retrievalText: truthRetrievalPrompt,
         retrievalIncludedInSystem: true,
@@ -2835,11 +2910,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         innerVoiceRecord?: InnerVoiceRecord;
         proactiveOfflineResponseParse?: ReturnType<typeof parseProactiveOfflineResponseDirective>;
         proactiveOfflineParse?: ReturnType<typeof parseProactiveOfflineInvitationDirective>;
+        callAction?: ReturnType<typeof parseCallActionDirective>;
       };
       const normalizeDirectReplyResponse = async (rawData: Awaited<ReturnType<typeof requestDirectChatTurn>>): Promise<PreparedDirectReplyResponse> => {
         const data = { ...rawData };
         let proactiveOfflineResponseParse: PreparedDirectReplyResponse["proactiveOfflineResponseParse"];
         let proactiveOfflineParse: PreparedDirectReplyResponse["proactiveOfflineParse"];
+        let callAction: PreparedDirectReplyResponse["callAction"];
         if (data.text) {
           const hadPhonePasswordActionMarker = /\[\[\s*CHARACTER_PHONE_PASSWORD_CHANGE\s*\]\]/u.test(data.text);
           data.text = applyCharacterPhonePasswordAction(data.text);
@@ -2891,6 +2968,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             now: Date.now(),
           });
           data.text = proactiveOfflineParse.visibleText;
+          callAction = parseCallActionDirective({ text: data.text });
+          data.text = callAction.visibleText;
           // Clean any accidental "[发送时间: ...]" prefixes
           data.text = data.text.replace(/\[\s*发送时间\s*:\s*[^\]]+\]/gi, "").trim();
           data.text = stripInternalDeliveryMarkers(data.text);
@@ -2900,7 +2979,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           settings,
           translate: apiTranslate,
         });
-        return { data: translatedData, proactiveOfflineResponseParse, proactiveOfflineParse };
+        return { data: translatedData, proactiveOfflineResponseParse, proactiveOfflineParse, callAction };
       };
       const directTurnRequest = preparedDirectReply.request;
 
@@ -3045,19 +3124,25 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         durableCompletion: async () => confirmMessageDurability(),
         postReply: ({ response: prepared, deliveredMessages: createdMessages }) => {
           const data = prepared.data;
-          const generatedCallIntent = resolveCharacterCallIntent(createdMessages);
+          const structuredCallIntent = prepared.callAction?.directive
+            ? mediaFromCallAction(prepared.callAction.directive.type)
+            : undefined;
           const explicitCallbackRequested = userMsg?.sender === "user"
             && isExplicitIncomingCallRequest(userMsg.content);
           const explicitCallbackIntent = explicitCallbackRequested
             ? (isExplicitIncomingVideoCallRequest(userMsg!.content) ? "video" : "voice")
             : undefined;
-          const incomingCallIntent = explicitCallbackIntent || generatedCallIntent;
-          if (!activeAttachModal && (explicitCallbackRequested || (generatedCallIntent && turnCharacter.enableProactiveCall))) {
+          const incomingCallIntent = explicitCallbackIntent || structuredCallIntent;
+          if (incomingCallIntent) {
             const callScope = resolveVoiceCallScopeForContext(replyContext);
-            if (callScope) {
-              if (incomingCallIntent === "video") beginVideoCall(true, callScope);
-              else beginVoiceCall(true, callScope);
-            }
+            if (callScope) dispatchIncomingCallIntent({
+              media: incomingCallIntent,
+              source: explicitCallbackIntent ? "user" : "ai",
+              scope: callScope,
+              responseBatchId: replyBatchId,
+              triggerMessageId: createdMessages[createdMessages.length - 1]?.id,
+              reason: prepared.callAction?.directive?.reason,
+            });
           }
           const inlineRelationship = turnRelationship
             || (replyContext.relationId ? relationships.find((relation) => relation.id === replyContext.relationId) : undefined);
@@ -3705,24 +3790,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
     },
     onExplicitIncomingCallRequest: (message, context) => {
-      const callScope = resolveVoiceCallScopeForContext(context)
-        || (activeDirectScope
-          && activeDirectScope.userIdentityId === context.userIdentityId
-          && activeDirectScope.characterId === context.characterId
-          && (!context.relationId || activeDirectScope.relationId === context.relationId)
-          ? {
-            relationId: activeDirectScope.relationId,
-            conversationId: activeDirectScope.conversationId,
-          }
-          : undefined);
-      if (!callScope) return false;
-      // An explicit “call me back” request is user-authorized and must not be
-      // blocked by the optional unsolicited-proactive-call toggle. That
-      // toggle only governs calls the character decides to initiate alone.
-      if (!isExplicitIncomingCallRequest(message.content)) return false;
-      if (isExplicitIncomingVideoCallRequest(message.content)) beginVideoCall(true, callScope);
-      else beginVoiceCall(true, callScope);
-      return true;
+      // Explicit callback requests are now carried through the same AI turn as
+      // the visible reply. Opening the call here used to short-circuit
+      // generation, which caused the “send once, click again” behaviour. The
+      // post-reply dispatcher below owns the actual call surface; retaining
+      // this observer keeps the controller boundary backwards compatible.
+      void message;
+      void context;
+      return false;
     },
     onReplyStopped: () => {
       setIsTyping(false);
@@ -3816,7 +3891,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     messagesRef,
     isOfflineStoryActiveFor,
     updateRelationshipSession,
-    beginVoiceCall,
+    beginCall: (media, incoming, scope) => {
+      if (!incoming) return;
+      dispatchIncomingCallIntent({
+        media,
+        source: "scheduler",
+        scope,
+        responseBatchId: `scheduler-${scope.relationId}-${Date.now()}`,
+      });
+    },
   });
 
   // Pre-seed moments if state empty
