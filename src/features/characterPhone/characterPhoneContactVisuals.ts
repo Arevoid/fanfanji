@@ -84,11 +84,22 @@ export function normalizeCharacterPhoneContactName(
     .split(/[\r\n。！？!?；;，,：:、|]/, 1)[0]
     .trim();
   if (!cleaned || cleaned.length < 2 || cleaned.length > 16) return "";
-  if (/^(?:很多|不少|一些|若干|几个|几位|一群|一堆|各种|多人|无|没有|未知|不详)$/.test(cleaned)) return "";
+  if (/^(?:很多|不少|一些|若干|几个|几位|一群|一堆|各种|多人|无|没有|未知|不详|user|npc|contact|unknown|内容|备注|角色|用户)$/i.test(cleaned)) return "";
   // A name beginning with a first/second/third-person pronoun is almost
   // always a sentence fragment. Real linked names are returned by the known
   // name fast path above and therefore remain untouched.
   if (!options.allowPronounStart && /^(?:我|你|他|她|它|这|那|因为|所以|感觉|看来|其实|可能|怎么|是不是|有没有|不如|如果)/.test(cleaned)) return "";
+  // Providers occasionally omit punctuation and return the beginning of an
+  // instruction or an explanatory sentence as `contacts[].name`. These are
+  // not recoverable names: keeping them makes every refresh create another
+  // fake contact (for example “两人依然可以正常作” or “允许一个没有写进设定的人后来成”).
+  // Use conservative sentence-leading/function-word checks while allowing
+  // short, ordinary nicknames and known linked names above.
+  if (!options.allowPronounStart && (
+    /^(?:两人|两个|多个|一位|一名|允许|更多|实际上|应该|可以|应该|不会|没有|正在|开始|拒绝|同意|全部|说明|详见|成为|关系网)/.test(cleaned)
+    || (cleaned.length >= 4 && /^(?:喜欢|当然|但是|然而|无论)/.test(cleaned))
+    || (cleaned.length >= 6 && /(?:可以|应该|不会|没有|已经|正式|内容|人物|形式|接受|生成|设定|说明)/.test(cleaned))
+  )) return "";
   if (/[。！？!?；;，,：:]/.test(cleaned)) return "";
   return cleaned;
 }

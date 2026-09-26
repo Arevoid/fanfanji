@@ -1434,6 +1434,15 @@ export default function AppCharacterPhone({
   const unreadCount =
     currentPhone?.messages.filter((message) => message.unread).length ?? 0;
   const visiblePhoneContacts = (currentPhone?.contacts ?? []).filter((contact) => !contact.removedAt);
+  // The chat inbox is a thread list, not the complete address book. Older
+  // phone records (and provider responses that only describe a contact) can
+  // contain contacts with no messages; rendering those here produced dozens
+  // of duplicate “暂无聊天记录” rows and made unrelated phone contacts look
+  // like active conversations. Keep them available in 通讯录, but only show
+  // contacts that have a real, scoped thread in 聊天.
+  const visiblePhoneChatContacts = visiblePhoneContacts.filter((contact) =>
+    listCharacterPhoneThreadMessages(currentPhone, contact.id).length > 0,
+  );
   const selectedContact =
     visiblePhoneContacts.find(
       (contact) => contact.id === selectedContactId,
@@ -3258,7 +3267,7 @@ export default function AppCharacterPhone({
         >
           <ChevronLeft className="h-4 w-4 text-slate-700" />
         </button>
-        <h2 className="absolute left-1/2 -translate-x-1/2 text-sm font-bold">{phoneSocialTab === "contacts" ? `通讯录 (${visiblePhoneContacts.length})` : `聊天 (${visiblePhoneContacts.length})`}</h2>
+        <h2 className="absolute left-1/2 -translate-x-1/2 text-sm font-bold">{phoneSocialTab === "contacts" ? `通讯录 (${visiblePhoneContacts.length})` : `聊天 (${visiblePhoneChatContacts.length})`}</h2>
         <button
           type="button"
           onClick={() => { setPhoneChatMode("inbox"); setContactMenuOpen(false); }}
@@ -3270,7 +3279,7 @@ export default function AppCharacterPhone({
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto divide-y divide-[var(--divider)] bg-[var(--surface)]">
-        {visiblePhoneContacts.map((contact) => {
+        {(phoneSocialTab === "contacts" ? visiblePhoneContacts : visiblePhoneChatContacts).map((contact) => {
           const latest = listCharacterPhoneThreadMessages(currentPhone, contact.id).at(-1);
           return (
             <button key={contact.id} type="button" onClick={() => openPhoneContact(contact)} className="relative flex w-full items-center gap-3 bg-[var(--surface)] p-3 text-left transition-colors hover:bg-[var(--surface-muted)]" aria-label={`打开与${contact.remark || contact.name}的聊天`}>
@@ -3286,7 +3295,7 @@ export default function AppCharacterPhone({
             </button>
           );
         })}
-        {visiblePhoneContacts.length === 0 && <p className="px-5 py-14 text-center text-xs text-[var(--text-tertiary)]">没有可显示的联系人</p>}
+        {(phoneSocialTab === "contacts" ? visiblePhoneContacts : visiblePhoneChatContacts).length === 0 && <p className="px-5 py-14 text-center text-xs text-[var(--text-tertiary)]">没有可显示的联系人</p>}
       </div>
       {phoneSocialNav}
     </div>

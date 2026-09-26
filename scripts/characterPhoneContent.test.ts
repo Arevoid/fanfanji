@@ -807,6 +807,9 @@ assert.deepEqual(familyGroup?.memberNames, ["妈妈", "哥哥"]);
 assert.deepEqual(familyGroup?.sourceRefs, [{ kind: "worldbook", id: "world-correct-relation" }]);
 
 assert.equal(normalizeCharacterPhoneContactName("我都开始怀疑你是不是"), "", "rejects sentence fragments as generated contact names");
+assert.equal(normalizeCharacterPhoneContactName("两人依然可以正常作"), "", "rejects punctuation-free generated sentence fragments");
+assert.equal(normalizeCharacterPhoneContactName("允许一个没有写进设定的人后来成"), "", "rejects long model instructions used as contact names");
+assert.equal(normalizeCharacterPhoneContactName("内容"), "", "rejects generic provider placeholder contact names");
 assert.equal(normalizeCharacterPhoneContactName("顾沉"), "顾沉");
 assert.equal(normalizeCharacterPhoneContactName("我们一家", [], { allowPronounStart: true }), "我们一家");
 assert.notEqual(createCharacterPhoneInitialAvatar("顾沉"), createCharacterPhoneInitialAvatar("温知遥"), "initial avatars are deterministic but not shared");

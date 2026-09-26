@@ -1022,9 +1022,20 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
       ...sourcePhone,
       contacts: [...evidenceContacts, ...freshUserContacts],
     };
-    const synced = freshMessages.length > 0
-      ? syncContacts({ ...input, phone: hydrationBase })
-      : { contacts: evidenceContacts, threadMessages: sourcePhone.threadMessages ?? [] };
+    // Even while source hydration is suppressed, normalize the persisted
+    // evidence contacts once. Older failed generations can leave sentence
+    // fragments or placeholder rows in this branch, which otherwise bypasses
+    // the normal sync path and resurfaces on every phone open. When there is
+    // no fresh source message, retain only the original evidence IDs so this
+    // cleanup cannot re-import unrelated contacts from the current context.
+    const synced = syncContacts({ ...input, phone: hydrationBase });
+    const evidenceContactIds = new Set(evidenceContacts.map((contact) => contact.id));
+    const scopedContacts = freshMessages.length > 0
+      ? synced.contacts
+      : synced.contacts.filter((contact) => evidenceContactIds.has(contact.id));
+    const scopedThreadMessages = freshMessages.length > 0
+      ? synced.threadMessages
+      : synced.threadMessages.filter((message) => scopedContacts.some((contact) => contact.id === message.contactId));
     const userContacts = synced.contacts.filter((contact) => isUserPhoneContact(contact) && !contact.historyOnly);
     const chat = freshMessages.length > 0
       ? syncUserChat(
@@ -1035,11 +1046,11 @@ export function ensureCharacterPhoneContent(input: CharacterPhoneContentInput): 
           input.relationships,
           input.characters,
         )
-      : { threadMessages: sourcePhone.threadMessages ?? [], lastMessageId: sourcePhone.lastSyncedMessageId };
+      : { threadMessages: scopedThreadMessages, lastMessageId: sourcePhone.lastSyncedMessageId };
     const isolated: CharacterPhoneRecord = {
       ...sourcePhone,
       messages: normalizeCharacterPhoneMessages(sourcePhone.messages),
-      contacts: synced.contacts,
+      contacts: scopedContacts,
       threadMessages: chat.threadMessages,
       posts: sourcePhone.posts ?? [],
       browserHistory: normalizeCharacterPhoneBrowserHistory(sourcePhone.browserHistory),

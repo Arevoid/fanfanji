@@ -1051,9 +1051,22 @@ export async function advanceCharacterPhoneWithResult(
   const requestedSourceIds = Array.isArray(raw.evidenceSourceIds)
     ? raw.evidenceSourceIds.filter((value): value is string => typeof value === "string")
     : [];
-  const validatedSourceRefs = requestedSourceIds
+  let validatedSourceRefs = requestedSourceIds
     .map((id) => allowedSources.get(id))
     .filter((source): source is NonNullable<typeof source> => Boolean(source));
+  // A brand-new role phone can legitimately have no recent chat or world-book
+  // row yet. The role profile itself is still scoped evidence, and rejecting a
+  // perfectly valid first-life response only because a provider omitted the
+  // citation made some phones appear to “generate nothing”. Allow that one
+  // deterministic character source for initial generation only; follow-up
+  // generations remain citation-gated so they cannot invent a new life event
+  // from an empty context.
+  if (validatedSourceRefs.length === 0 && isInitialGeneration) {
+    const profileSource = allowedSources.get(`character:${input.character.id}`);
+    if (profileSource && (input.character.personality?.trim() || input.character.backstory?.trim())) {
+      validatedSourceRefs = [profileSource];
+    }
+  }
   // Regular generation requires provider citations. A contact repair can also
   // use the persisted contact's own validated source references; requiring one
   // global citation used to leave every missing NPC thread untouched when the
