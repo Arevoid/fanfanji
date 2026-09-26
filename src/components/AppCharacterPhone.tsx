@@ -119,7 +119,7 @@ import { imageAssetDb } from "../utils/imageAssetDb";
 import { normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
 import { buildCharacterPhoneBrowserDetail } from "../features/characterPhone/characterPhoneBrowserDetails";
 import { resolveCharacterPhoneContactAvatar } from "../features/characterPhone/characterPhoneContactVisuals";
-import { loadBlockedDeliveries } from "../features/chat/services/relationshipBlockRuntime";
+import { loadBlockedDeliveries, saveBlockedDeliveries } from "../features/chat/services/relationshipBlockRuntime";
 import {
   formatCharacterPhoneCooldownRemaining,
   getCharacterPhoneGenerationCooldowns,
@@ -1996,7 +1996,11 @@ export default function AppCharacterPhone({
       return;
     }
     if (passcode === normalizeCharacterPhonePasscode(currentPhone.passcode)) {
-      const openedPhone = await discoverPhoneActions(withPhoneAction({
+      // Unlocking is a local operation and must never wait for an optional AI
+      // discovery call. The old flow awaited discoverPhoneActions here, so a
+      // slow provider made a correct password appear to hang. Persist and
+      // reveal the phone first; discovery is best-effort background work.
+      const openedPhoneBase = withPhoneAction({
         ...currentPhone,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -2013,18 +2017,31 @@ export default function AppCharacterPhone({
         app: "phone",
         detail: `进入${selectedCharacter.name}的角色手机`,
         detectability: "none",
-      }, now), now);
-      forwardDelayedPhoneDiscoveries(currentPhone, openedPhone);
-      setPhone(openedPhone);
-      saveCharacterPhone(openedPhone);
+      }, now);
+      setPhone(openedPhoneBase);
+      saveCharacterPhone(openedPhoneBase);
       setUnlocked(true);
       setInput("");
       setNotice("");
-      if (openedPhone.initialContentPending && !openedPhone.initialContentGeneratedAt) {
-        void generateCharacterPhoneContent({ initial: true, phone: openedPhone });
-      } else if (hasMissingCharacterPhoneContactThreads(openedPhone)) {
-        void generateCharacterPhoneContent({ contactThreadRepair: true, phone: openedPhone });
-      }
+      void discoverPhoneActions(openedPhoneBase, now).then((discoveredPhone) => {
+        if (!mountedRef.current || phoneScopeRef.current.characterId !== selectedCharacter.id) return;
+        forwardDelayedPhoneDiscoveries(openedPhoneBase, discoveredPhone);
+        setPhone(discoveredPhone);
+        saveCharacterPhone(discoveredPhone);
+        if (discoveredPhone.initialContentPending && !discoveredPhone.initialContentGeneratedAt) {
+          void generateCharacterPhoneContent({ initial: true, phone: discoveredPhone });
+        } else if (hasMissingCharacterPhoneContactThreads(discoveredPhone)) {
+          void generateCharacterPhoneContent({ contactThreadRepair: true, phone: discoveredPhone });
+        }
+      }).catch(() => {
+        // Phone access remains successful when discovery generation fails.
+        if (!mountedRef.current || phoneScopeRef.current.characterId !== selectedCharacter.id) return;
+        if (openedPhoneBase.initialContentPending && !openedPhoneBase.initialContentGeneratedAt) {
+          void generateCharacterPhoneContent({ initial: true, phone: openedPhoneBase });
+        } else if (hasMissingCharacterPhoneContactThreads(openedPhoneBase)) {
+          void generateCharacterPhoneContent({ contactThreadRepair: true, phone: openedPhoneBase });
+        }
+      });
       return;
     }
     const failedAttempts = currentPhone.failedAttempts + 1;
@@ -2663,6 +2680,9 @@ export default function AppCharacterPhone({
         // character can only see its own outgoing messages that were rejected
         // after the user blocked it.
         .filter((record) => record.relationId === selectedContact.relationId && record.direction === "character_to_user")
+        .filter((record) => !currentPhone.threadMessages.some((message) =>
+          message.sourceMessageId && record.sourceMessageId && message.sourceMessageId === record.sourceMessageId,
+        ))
         .map((record): CharacterPhoneThreadMessage => ({
           id: `blocked-phone-${record.id}`,
           contactId: selectedContact.id,
@@ -2671,6 +2691,7 @@ export default function AppCharacterPhone({
           timestamp: record.createdAt,
           deliveryStatus: "blocked",
           deliverySummary: record.summary,
+          sourceMessageId: record.sourceMessageId,
         })),
     ].sort((left, right) => left.timestamp - right.timestamp)
     : [];
@@ -2688,11 +2709,10 @@ export default function AppCharacterPhone({
     }
   };
   const openThreadMessageMenu = (message: CharacterPhoneThreadMessage) => {
-    if (message.sender !== "character" || !message.operatedByUser) return;
     setSelectedThreadMessageId(message.id);
   };
   const beginThreadMessagePress = (event: React.PointerEvent<HTMLDivElement>, message: CharacterPhoneThreadMessage) => {
-    if (event.pointerType === "mouse" || message.sender !== "character" || !message.operatedByUser) return;
+    if (event.pointerType === "mouse") return;
     clearThreadMessagePressTimer();
     threadMessagePressTimerRef.current = window.setTimeout(() => {
       threadMessagePressTimerRef.current = null;
@@ -2735,8 +2755,22 @@ export default function AppCharacterPhone({
   const deleteOrRecallPhoneThreadMessage = (messageId: string, mode: "delete" | "recall") => {
     if (!currentPhone || !selectedContact) return;
     const message = currentPhone.threadMessages.find((candidate) => candidate.id === messageId);
-    if (!message || message.sender !== "character" || !message.operatedByUser) return;
     const now = Date.now();
+    // Blocked deliveries are rendered from the shared delivery journal rather
+    // than the phone thread itself. They still need to be removable from the
+    // role phone, so handle their synthetic IDs explicitly.
+    if (!message && messageId.startsWith("blocked-phone-")) {
+      if (mode !== "delete") return;
+      const blockedDeliveryId = messageId.slice("blocked-phone-".length);
+      const nextDeliveries = loadBlockedDeliveries().value.filter((record) => record.id !== blockedDeliveryId);
+      saveBlockedDeliveries(nextDeliveries);
+      setPhone((previous) => previous ? { ...previous, updatedAt: now } : previous);
+      setSelectedThreadMessageId(null);
+      return;
+    }
+    if (!message) return;
+    const canRecall = message.sender === "character" && message.operatedByUser && Boolean(message.sourceMessageId);
+    if (mode === "recall" && !canRecall) return;
     const scope = getPhoneMutationScopeForMessage(message);
     if (mode === "delete") {
       const next = updatePhoneThreadContactPreview({
@@ -2747,7 +2781,9 @@ export default function AppCharacterPhone({
       // Deletion is intentionally hard removal: do not retain a hidden
       // operation-log entry or any other trace in the role phone.
       persistPhone(next);
-      if (message.sourceMessageId) onDeleteMessage?.(message.sourceMessageId, scope);
+      if (message.sender === "character" && message.operatedByUser && message.sourceMessageId) {
+        onDeleteMessage?.(message.sourceMessageId, scope);
+      }
     } else {
       const next = updatePhoneThreadContactPreview({
         ...currentPhone,
@@ -3101,7 +3137,8 @@ export default function AppCharacterPhone({
           </button>
         )}
         {currentThreadMessages.map((message) => {
-          const canOperate = message.sender === "character" && message.operatedByUser;
+          const canOperate = true;
+          const canRecall = message.sender === "character" && message.operatedByUser && Boolean(message.sourceMessageId);
           const isBlockedDelivery = message.deliveryStatus === "blocked"
             || isCharacterBlockReactionMessage(message.sourceMessageId);
           const isCharacterBlockedDelivery = isBlockedDelivery && message.sender === "character";
@@ -3115,7 +3152,6 @@ export default function AppCharacterPhone({
               onPointerCancel={endThreadMessagePress}
               onPointerLeave={endThreadMessagePress}
               onContextMenu={(event) => {
-                if (!canOperate) return;
                 event.preventDefault();
                 openThreadMessageMenu(message);
               }}
@@ -3159,7 +3195,7 @@ export default function AppCharacterPhone({
               )}
               {isSelected && canOperate && (
                 <div className="mt-1 flex items-center gap-1 rounded-xl border border-black/5 bg-white px-1 py-1 text-[10px] shadow-sm" role="menu" aria-label="消息操作">
-                  {!message.recalledAt && (
+                  {!message.recalledAt && canRecall && (
                     <button type="button" onClick={() => deleteOrRecallPhoneThreadMessage(message.id, "recall")} className="rounded-lg px-2 py-1 text-neutral-600 hover:bg-neutral-100" role="menuitem">撤回</button>
                   )}
                   <button type="button" onClick={() => deleteOrRecallPhoneThreadMessage(message.id, "delete")} className="rounded-lg px-2 py-1 text-rose-600 hover:bg-rose-50" role="menuitem">删除</button>

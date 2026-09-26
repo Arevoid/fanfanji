@@ -48,7 +48,9 @@ import { recordCharacterBlockReaction } from "../features/characterPhone/charact
 import {
   createBlockCycleId,
   createBlockedDeliveryRecord,
+  FRIEND_REQUEST_RETRY_DELAY_MS,
   isBlockedDeliveryDirection,
+  isFriendRequestActionable,
   isRelationshipBlocked,
   type BlockedDeliveryKind,
   type BlockedDeliveryRecord,
@@ -773,6 +775,14 @@ export default function AppChat({
       sourceMessageId: input.sourceMessageId,
     });
     setBlockedDeliveries((previous) => {
+      // A turn can be replayed by a retry or by two UI paths observing the
+      // same source message. Keep one blocked-delivery record per source so
+      // the role phone does not show the same failed message twice.
+      if (input.sourceMessageId && previous.some((candidate) =>
+        candidate.relationId === record.relationId
+        && candidate.direction === record.direction
+        && candidate.sourceMessageId === input.sourceMessageId,
+      )) return previous;
       const next = [...previous, record].slice(-500);
       saveBlockedDeliveries(next);
       return next;
@@ -920,6 +930,7 @@ export default function AppChat({
     if (relation && status === "rejected" && request.direction === "character_to_user") {
       const mayRequestAgain = relation.friendRequestPolicy !== "never" && request.attempt < 5;
       if (mayRequestAgain) {
+        const retryAvailableAt = Date.now() + FRIEND_REQUEST_RETRY_DELAY_MS;
         const retry: FriendRequestRecord = {
           id: `friend-request-${relation.id}-character-${Date.now()}`,
           relationId: relation.id,
@@ -931,6 +942,7 @@ export default function AppChat({
           reason: "拉黑后的关系修复申请",
           attempt: request.attempt + 1,
           blockCycleId: relation.blockCycleId,
+          nextAttemptAt: retryAvailableAt,
           createdAt: Date.now(),
         };
         saveFriendRequestList([...next, retry]);
@@ -1202,10 +1214,29 @@ export default function AppChat({
       : undefined;
     return { id: relation.id, character, subtitle };
   }).filter((item) => Boolean(item.character));
+  const currentFriendRequestTime = Date.now();
   const workspaceFriendRequests = friendRequests
     .filter((request) => getRootIdentityId(request.userIdentityId, settings.identities || []) === currentIdentityRootId)
+    // Keep a delayed retry in storage for durability, but do not show it as a
+    // new request until its scheduled time arrives.
+    .filter((request) => !(request.status === "pending" && request.nextAttemptAt && request.nextAttemptAt > currentFriendRequestTime))
     .sort((left, right) => right.createdAt - left.createdAt);
-  const pendingWorkspaceFriendRequests = workspaceFriendRequests.filter((request) => request.status === "pending");
+  const pendingWorkspaceFriendRequests = workspaceFriendRequests.filter((request) => isFriendRequestActionable(request));
+
+  // Rejected requests are persisted with a short natural delay. Refresh when
+  // the delay expires so a scheduled retry becomes actionable without a
+  // reload, while avoiding an immediate second request in the same tick.
+  useEffect(() => {
+    const now = currentFriendRequestTime;
+    const nextAttemptAt = friendRequests
+      .filter((request) => getRootIdentityId(request.userIdentityId, settings.identities || []) === currentIdentityRootId)
+      .filter((request) => request.status === "pending" && request.nextAttemptAt && request.nextAttemptAt > now)
+      .map((request) => request.nextAttemptAt as number)
+      .sort((left, right) => left - right)[0];
+    if (!nextAttemptAt) return;
+    const timer = window.setTimeout(() => setFriendRequests(loadFriendRequests().value), Math.max(0, nextAttemptAt - now) + 20);
+    return () => window.clearTimeout(timer);
+  }, [currentIdentityRootId, friendRequests, settings.identities]);
 
   // Never leave an old identity's direct or group thread open after switching
   // profiles. Otherwise the next profile can temporarily render and act on
@@ -3025,10 +3056,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           + "- 回复的第一句必须先对这条来源异常的消息表示疑问或否认，例如“分手？我什么时候说过这句？”或“等等，这不是我发的吧？”。不得先道歉、认领“我刚刚说的”、说成玩笑、或归咎“模型抽风/账号混淆”；不必主动向用户解释系统规则，也不必直接说“是你发的”，除非用户主动说明来源。\n"
           + "- 这条规则只约束代发消息的作者归属，不限制你对用户当前这句“分手？好啊分手就分手”的情绪化回应；先澄清归属，再自然继续对话。"
         : "";
+      const blockedRelationshipFinalInstruction = activeRelationship?.communicationStatus === "blocked"
+        && activeRelationship.blockedBy === "user"
+        ? `\n\n【拉黑关系最终约束·优先于普通话题】\n你仍被对方拉黑。即使对方发送的是“人呢”“在吗”或其他日常句子，也必须先保持被拉黑后的关系情绪，再回答当前内容；不要突然像普通聊天一样换到无关话题。具体语气必须服从你的角色卡、关系和最近上下文，可以委屈、嘴硬、道歉、质问或撒娇，但不要使用固定模板，也不要照抄示例。不得凭空引入最近上下文和人设中没有的 C++、报警、外星人等新事件；不要声称消息已经送达、被看见，或提及系统、API、角色手机和拦截规则。若最近上下文没有明确冲突，就自然表达困惑并请求说明原因；若正在争吵，就延续争吵后的情绪。`
+        : "";
       const directChatSystemInstructionSuffix = [
         "\n\n",
         INLINE_INNER_VOICE_INSTRUCTION,
         characterPhoneProxyFinalInstruction,
+        blockedRelationshipFinalInstruction,
       ].join("");
 
       const stickerPrompt = activeAttachModal !== "calling"
@@ -10346,8 +10382,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       const character = characters.find((item) => item.id === resolveCanonicalCharacterId(request.characterId, characters));
                       if (!character) return null;
                       const isIncoming = request.direction === "character_to_user";
+                      const requestActionable = isFriendRequestActionable(request);
                       const statusLabel = request.status === "pending"
-                        ? (isIncoming ? "待验证" : "等待对方处理")
+                        ? (requestActionable ? (isIncoming ? "待验证" : "等待对方处理") : "稍后再联系")
                         : request.status === "accepted" ? "已同意"
                           : request.status === "rejected" ? "已拒绝"
                             : request.status === "ignored" ? "已忽略" : "已结束";
@@ -10362,7 +10399,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[var(--text-secondary)]">{isIncoming ? request.remark : `我：${request.remark}`}</p>
                             <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">{new Date(request.createdAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}</p>
                           </div>
-                          {request.status === "pending" && isIncoming ? (
+                          {requestActionable && isIncoming ? (
                             <div className="flex shrink-0 flex-col gap-1.5">
                               <button type="button" onClick={() => decideFriendRequest(request, "accepted")} className="rounded-lg bg-[var(--button-primary-bg)] px-3 py-1.5 text-xs font-semibold text-[var(--button-primary-text)]">同意</button>
                               <button type="button" onClick={() => decideFriendRequest(request, "rejected")} className="rounded-lg bg-[var(--surface-muted)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)]">拒绝</button>

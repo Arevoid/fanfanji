@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import {
   MAX_FRIEND_REQUEST_ATTEMPTS,
+  FRIEND_REQUEST_RETRY_DELAY_MS,
   buildBlockedDeliverySummary,
   canCreateFriendRequest,
   createBlockedDeliveryRecord,
   createFriendRequestRecord,
   isBlockedDeliveryDirection,
+  isFriendRequestActionable,
   updateFriendRequestStatus,
 } from "../src/domain/relationship/relationshipBlock";
 import { buildAdaptiveFriendRequestRemark } from "../src/domain/relationship/friendRequestRemark";
@@ -16,6 +18,9 @@ const relation = { id: "relation-1", characterId: "char-1", userIdentityId: "ide
 assert.equal(MAX_FRIEND_REQUEST_ATTEMPTS, 5);
 assert.equal(canCreateFriendRequest(4), true);
 assert.equal(canCreateFriendRequest(5), false);
+assert.equal(isFriendRequestActionable({ status: "pending", nextAttemptAt: 200 }, 100), false);
+assert.equal(isFriendRequestActionable({ status: "pending", nextAttemptAt: 200 }, 200), true);
+assert.equal(FRIEND_REQUEST_RETRY_DELAY_MS > 0, true);
 assert.equal(buildBlockedDeliverySummary("hello", "message"), "消息未送达：hello");
 assert.equal(buildBlockedDeliverySummary("", "video_call"), "视频通话请求未送达");
 assert.equal(isBlockedDeliveryDirection({ communicationStatus: "blocked", blockedBy: "user" }, "character_to_user"), true);
@@ -72,6 +77,21 @@ assert.match(conflictRemark, /生气|吵架|拉黑|说清楚|解释/u);
 assert.match(neutralRemark, /原因|发生了什么|拉黑/u);
 assert.notEqual(conflictRemark, neutralRemark);
 assert.notEqual(conflictRemark, retryRemark);
+const closeRemarkAttemptOne = buildAdaptiveFriendRequestRemark({
+  character: { personality: "温柔体贴", backstory: "重视亲密关系" },
+  relationship: { relationship: "close_friend" },
+  recentMessages: [],
+  attempt: 1,
+  now: 1000,
+});
+const closeRemarkAttemptTwo = buildAdaptiveFriendRequestRemark({
+  character: { personality: "温柔体贴", backstory: "重视亲密关系" },
+  relationship: { relationship: "close_friend" },
+  recentMessages: [],
+  attempt: 2,
+  now: 1000,
+});
+assert.notEqual(closeRemarkAttemptOne, closeRemarkAttemptTwo, "第二次申请不能复用第一次备注");
 const blockReaction = buildAdaptiveCharacterBlockReaction({
   character,
   relationship: { relationship: "close_friend" },

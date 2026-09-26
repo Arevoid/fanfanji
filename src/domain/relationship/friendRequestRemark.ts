@@ -75,10 +75,23 @@ export function buildAdaptiveFriendRequestRemark(input: {
   }
 
   if (warmth || closeRelation) {
+    if (attempt === 2) {
+      if (style === "sharp") return "我知道你看见了。你可以继续生我的气，但别把这段关系就这样关掉。";
+      if (style === "soft") return "我不会催你马上原谅我，只想再问一次：我们能不能留一点以后说清楚的机会？";
+      if (style === "calm") return "我尊重你现在的决定，但还是想把原因听明白。你愿意时，我们再谈一次。";
+      return "我再来问一次，不是想纠缠你，只是不想我们停在这句沉默上。";
+    }
     if (style === "sharp") return "刚刚还好好的，你突然拉黑我是什么意思？我不接受你一句话都不留。";
     if (style === "soft") return "刚刚明明还好好的，是不是我哪里让你难过了？别突然把我拉黑，好吗？";
     if (style === "calm") return "我们刚才还在好好说话。我想知道发生了什么，能不能先别把我拉黑？";
     return "我们刚刚还好好的，你为什么突然拉黑我？给我一个解释，好吗？";
+  }
+
+  if (attempt === 2) {
+    if (style === "sharp") return "你不想理我可以直说，但别让我一直猜。给我一个明确的答复，好吗？";
+    if (style === "soft") return "如果你还不想联系我，我会先等着；只是希望你愿意告诉我原因。";
+    if (style === "calm") return "我会尊重你的边界。等你方便时，请告诉我这段关系该怎么继续。";
+    return "我再问一次：你愿意把原因告诉我吗？不愿意也请给我一个明确答复。";
   }
 
   if (style === "sharp") return "为什么突然拉黑我？至少把原因说清楚，别让我自己猜。";

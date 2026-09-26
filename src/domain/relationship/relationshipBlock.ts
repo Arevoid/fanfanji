@@ -23,6 +23,8 @@ export interface FriendRequestRecord {
   reason?: string;
   attempt: number;
   blockCycleId?: string;
+  /** Earliest time a retry becomes actionable after a rejection. */
+  nextAttemptAt?: number;
   createdAt: number;
   handledAt?: number;
   handledBy?: "character" | "user_assisted_character" | "user";
@@ -46,6 +48,12 @@ export interface BlockedDeliveryRecord {
 }
 
 export const MAX_FRIEND_REQUEST_ATTEMPTS = 5;
+/** A rejected request should not be replaced by another request in the same tick. */
+export const FRIEND_REQUEST_RETRY_DELAY_MS = 30 * 1000;
+
+export function isFriendRequestActionable(request: Pick<FriendRequestRecord, "status" | "nextAttemptAt">, now = Date.now()): boolean {
+  return request.status === "pending" && (!request.nextAttemptAt || request.nextAttemptAt <= now);
+}
 
 export function isRelationshipBlocked(relation?: Pick<CharacterRelationship, "communicationStatus"> | null): boolean {
   return relation?.communicationStatus === "blocked";
@@ -124,6 +132,7 @@ export function createFriendRequestRecord(input: {
   reason?: string;
   attempt?: number;
   blockCycleId?: string;
+  nextAttemptAt?: number;
   createdAt?: number;
 }): FriendRequestRecord {
   return {
@@ -137,6 +146,7 @@ export function createFriendRequestRecord(input: {
     ...(input.reason ? { reason: input.reason } : {}),
     attempt: Math.max(1, input.attempt || 1),
     ...(input.blockCycleId ? { blockCycleId: input.blockCycleId } : {}),
+    ...(input.nextAttemptAt ? { nextAttemptAt: input.nextAttemptAt } : {}),
     createdAt: input.createdAt || Date.now(),
   };
 }
