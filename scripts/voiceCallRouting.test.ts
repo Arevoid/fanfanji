@@ -16,6 +16,9 @@ assert.equal(
 assert.match(appChat, /const resolveVoiceCallScopeForContext =/);
 assert.match(appChat, /beginVoiceCall\(true, callScope\)/);
 assert.match(appChat, /beginVideoCall\(true, callScope\)/);
+assert.match(appChat, /const explicitCallbackIntent =/);
+assert.match(appChat, /const incomingCallIntent = explicitCallbackIntent \|\| generatedCallIntent/);
+assert.match(appChat, /incomingCallIntent === "video"/);
 assert.doesNotMatch(appChat, /onExplicitVoiceCallRequest/);
 assert.doesNotMatch(controller, /routeExplicitVoiceCallRequest/);
 assert.doesNotMatch(incomingCallHandler, /beginVoiceCall\(false/);

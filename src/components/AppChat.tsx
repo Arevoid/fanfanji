@@ -3048,10 +3048,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           const generatedCallIntent = resolveCharacterCallIntent(createdMessages);
           const explicitCallbackRequested = userMsg?.sender === "user"
             && isExplicitIncomingCallRequest(userMsg.content);
+          const explicitCallbackIntent = explicitCallbackRequested
+            ? (isExplicitIncomingVideoCallRequest(userMsg!.content) ? "video" : "voice")
+            : undefined;
+          const incomingCallIntent = explicitCallbackIntent || generatedCallIntent;
           if (!activeAttachModal && (explicitCallbackRequested || (generatedCallIntent && turnCharacter.enableProactiveCall))) {
             const callScope = resolveVoiceCallScopeForContext(replyContext);
             if (callScope) {
-              if (generatedCallIntent === "video") beginVideoCall(true, callScope);
+              if (incomingCallIntent === "video") beginVideoCall(true, callScope);
               else beginVoiceCall(true, callScope);
             }
           }
