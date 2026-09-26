@@ -11890,6 +11890,21 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               <span>复制</span>
             </button>
 
+            {activeMenuMsg.sender !== "user" && (
+              <button
+                onClick={() => {
+                  const targetMsg = activeMenuMsg;
+                  setActiveMenuMsg(null);
+                  void handleRegenerateResponse(targetMsg);
+                }}
+                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
+                title="重新生成这条 AI 回复"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-stone-500" />
+                <span>重回</span>
+              </button>
+            )}
+
             {onDeleteMessage && (
               <>
                 <button

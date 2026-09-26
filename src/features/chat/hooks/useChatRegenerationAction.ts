@@ -36,7 +36,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     recordPendingOfflineHandoffDelivery,
   } = context;
 
-  const handleRegenerateResponse = async (targetMsg: Message, oocComment: string) => {
+  const handleRegenerateResponse = async (targetMsg: Message, oocComment = "") => {
     if (!activeChatCharId || !activeCharacter) return;
 
     // 1. Delete target message
@@ -175,11 +175,15 @@ export function useChatRegenerationAction(context: Record<string, any>) {
 3. 历史检索及短期上下文：需要长期连续性时优先使用同一关系的 Truth Layer 数据。`;
       if (crossDayHistoricalReference) characterContextText += `\n${crossDayHistoricalReference}`;
 
-      // Add OOC comment correction as high priority instruction
-      characterContextText += `\n\n[🚨 CRITICAL CORRECTION (OOC FEEDBACK)]:
+      // Add OOC correction only when the user explicitly supplied feedback.
+      // Plain "重回" should regenerate from the same turn without an empty
+      // correction instruction influencing the character's response.
+      if (oocComment.trim()) {
+        characterContextText += `\n\n[🚨 CRITICAL CORRECTION (OOC FEEDBACK)]:
 Your previous response was marked as "OOC" (Out Of Character). 
 Feedback from the user: "${oocComment}".
 Please read the feedback carefully and rewrite your response to perfectly match your profile. Do NOT repeat the previous tone/behavior!`;
+      }
 
       // Recall memories
       const topK = resolveChatLongTermMemoryLimit(activeCharacter?.retrievalHistoryLimit);
