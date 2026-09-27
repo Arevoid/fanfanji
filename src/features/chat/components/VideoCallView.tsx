@@ -65,6 +65,7 @@ export function VideoCallView({
   const callViewRef = useRef<HTMLDivElement | null>(null);
   const selfPreviewRef = useRef<HTMLDivElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const autoCapturedStreamRef = useRef<MediaStream | null>(null);
   const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
   const previewMovedRef = useRef(false);
   const transcriptLongPressRef = useRef<{ timer: ReturnType<typeof window.setTimeout>; itemId: string; origin: { x: number; y: number } } | null>(null);
@@ -94,16 +95,6 @@ export function VideoCallView({
     return () => window.clearTimeout(timer);
   }, [selfScene]);
 
-  useEffect(() => {
-    const video = cameraVideoRef.current;
-    if (!video || !cameraStream) return;
-    video.srcObject = cameraStream;
-    void video.play().catch(() => undefined);
-    return () => {
-      if (video.srcObject === cameraStream) video.srcObject = null;
-    };
-  }, [cameraStream]);
-
   useEffect(() => () => {
     cameraStream?.getTracks().forEach((track) => track.stop());
   }, [cameraStream]);
@@ -129,10 +120,28 @@ export function VideoCallView({
     onCameraFrame(canvas.toDataURL("image/jpeg", 0.78));
   };
 
+  useEffect(() => {
+    const video = cameraVideoRef.current;
+    if (!video || !cameraStream) return;
+    video.srcObject = cameraStream;
+    const captureWhenReady = () => {
+      if (isTyping || autoCapturedStreamRef.current === cameraStream || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+      autoCapturedStreamRef.current = cameraStream;
+      captureCameraFrame();
+    };
+    video.addEventListener("loadeddata", captureWhenReady);
+    void video.play().then(captureWhenReady).catch(() => undefined);
+    return () => {
+      video.removeEventListener("loadeddata", captureWhenReady);
+      if (video.srcObject === cameraStream) video.srcObject = null;
+    };
+  }, [cameraStream, isTyping]);
+
   const handleCameraClick = async () => {
     if (cameraStarting) return;
     if (cameraStream) {
-      captureCameraFrame();
+      stopCamera();
+      setCameraError("");
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -151,10 +160,10 @@ export function VideoCallView({
     }
   };
 
-  const stopCamera = () => {
+  function stopCamera() {
     cameraStream?.getTracks().forEach((track) => track.stop());
     setCameraStream(null);
-  };
+  }
 
   const switchCamera = async () => {
     if (!cameraStream || cameraStarting || !navigator.mediaDevices?.getUserMedia) return;
@@ -162,12 +171,39 @@ export function VideoCallView({
     setCameraStarting(true);
     setCameraError("");
     try {
-      const nextStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: nextFacingMode } }, audio: false });
+      // Prefer switching the active track in place. Mobile browsers that expose
+      // both cameras support this without a second permission prompt.
+      const activeTrack = cameraStream.getVideoTracks()[0];
+      if (activeTrack?.applyConstraints) {
+        try {
+          await activeTrack.applyConstraints({ facingMode: { exact: nextFacingMode } });
+          const actualFacingMode = activeTrack.getSettings?.().facingMode;
+          if (!actualFacingMode || actualFacingMode === nextFacingMode) {
+            setCameraFacingMode(nextFacingMode);
+            setCameraError("");
+            return;
+          }
+        } catch {
+          // Fall back to reopening the stream below. Some WebViews expose
+          // applyConstraints but reject facingMode at runtime.
+        }
+      }
+
+      const devices = navigator.mediaDevices.enumerateDevices
+        ? await navigator.mediaDevices.enumerateDevices()
+        : [];
+      const videoInputCount = devices.filter((device) => device.kind === "videoinput").length;
+      if (videoInputCount > 0 && videoInputCount < 2) {
+        setCameraError("当前设备没有可切换的摄像头");
+        return;
+      }
+
+      const nextStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: nextFacingMode } }, audio: false });
       cameraStream.getTracks().forEach((track) => track.stop());
       setCameraStream(nextStream);
       setCameraFacingMode(nextFacingMode);
     } catch (error) {
-      setCameraError(error instanceof DOMException && error.name === "NotAllowedError" ? "切换摄像头需要浏览器权限" : "暂时无法切换摄像头");
+      setCameraError(error instanceof DOMException && error.name === "NotAllowedError" ? "切换摄像头需要浏览器权限" : "当前设备没有可用的摄像头");
     } finally {
       setCameraStarting(false);
     }
@@ -291,16 +327,7 @@ export function VideoCallView({
           </div>
 
           {status === "connected" && (transcript.length > 0 || isTyping) && <div ref={transcriptViewportRef} onScroll={handleTranscriptScroll} className="absolute inset-x-1 bottom-3 flex max-h-[34%] flex-col gap-1 overflow-y-auto overscroll-contain pr-1 text-[12px] leading-relaxed [scrollbar-width:thin]" data-video-call-subtitles>
-            {transcript.filter((item) => {
-              if (item.sender !== "user") return true;
-              const content = item.content.trim();
-              // Hide both the current wire format and legacy scene subtitles
-              // that may already exist in a persisted call transcript.
-              const legacyFreeText = content.replace(/^\[(?:视频画面|视频说话)\]\|/u, "").trim();
-              return !content.startsWith("[视频画面]|")
-                && !legacyFreeText.startsWith("画面：")
-                && !legacyFreeText.startsWith("画面:");
-            }).map((item) => {
+            {transcript.filter((item) => item.content.trim()).map((item) => {
               const isUserMessage = item.sender === "user";
               return <div
                 key={item.id}
@@ -368,7 +395,7 @@ export function VideoCallView({
         </button> : <>
           <button type="button" onClick={() => setShowSceneHistory(true)} className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/85" aria-label="查看对方历史画面"><Clock3 className="h-5 w-5" /></button>
           <button type="button" onClick={handleCallEnd} className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-white shadow-xl shadow-red-950/40 active:scale-95" aria-label="挂断视频通话"><Phone className="h-7 w-7 rotate-[135deg] fill-current" /></button>
-          <button type="button" onClick={() => void handleCameraClick()} disabled={cameraStarting} className={`flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/85 ${cameraStream ? "ring-2 ring-red-300/80" : ""}`} aria-label={cameraStream ? "拍摄并发送我的摄像头画面" : "打开我的摄像头"} title={cameraStream ? "拍摄并发送画面" : "打开摄像头"}><Camera className="h-5 w-5" /></button>
+          <button type="button" onClick={() => void handleCameraClick()} disabled={cameraStarting} className={`flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/85 ${cameraStream ? "ring-2 ring-red-300/80" : ""}`} aria-label={cameraStream ? "关闭我的摄像头" : "打开我的摄像头"} title={cameraStream ? "关闭摄像头" : "打开摄像头"}><Camera className="h-5 w-5" /></button>
         </>}
       </footer>
 

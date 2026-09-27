@@ -41,6 +41,32 @@ const message = (overrides: Partial<Message> = {}): Message => ({
 }
 
 {
+  const transcripts: Array<{ id: string; sender: Message["sender"]; content: string; timestamp: number }> = [];
+  const handler = createChatMessageDeliveryHandler({
+    settings: { enableMiniMaxTts: false } as never,
+    activeCharacter: { id: "c1", isGroupChat: false } as never,
+    activeDirectScope: { relationId: "r1", characterId: "c1", conversationId: "direct:r1", userIdentityId: "i1" },
+    activeAttachModal: "calling",
+    callingStatus: "connected",
+    callMode: "video",
+    onSendMessageRaw: () => { throw new Error("video call turn leaked to timeline"); },
+    setCallTranscript: (next) => transcripts.push(...next([])),
+    enqueueCallSpeech: async () => undefined,
+  });
+
+  handler(message({ id: "camera", sender: "user", content: "[视频画面]|我打开了摄像头", timestamp: 2 }));
+  assert.deepEqual(transcripts, [{ id: "camera", content: "画面：我打开了摄像头", sender: "user", timestamp: 2 }]);
+
+  handler(message({ id: "reply", sender: "character", content: "[画面]|他抬手挡住镜头\n[台词]|别急，我看到了。", timestamp: 3 }));
+  assert.deepEqual(transcripts[1], {
+    id: "reply",
+    content: "画面：他抬手挡住镜头\n别急，我看到了。",
+    sender: "character",
+    timestamp: 3,
+  });
+}
+
+{
   const sent: Message[] = [];
   createChatMessageDeliveryHandler({
     settings: {} as never,

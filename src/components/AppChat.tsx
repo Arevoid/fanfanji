@@ -2388,16 +2388,9 @@ export default function AppChat({
     // even when an older HMR-rendered handler is still mounted.
     const isVideoSceneInput = videoCallInputMarkup.startsWith("[视频画面]|");
     if (isVideoSceneInput) setVideoCallSelfScene(callingInputText.trim());
-    // Keep spoken user turns visible immediately in the video overlay. Scene
-    // inputs are rendered in the self-preview ticker instead of this dialogue.
-    if (!isVideoSceneInput) setCallTranscript((previous) => previous.some((item) => item.id === userMsg.id)
-      ? previous
-      : [...previous, {
-        id: userMsg.id,
-        sender: "user",
-        content: userMsg.content,
-        timestamp: userMsg.timestamp,
-      }]);
+    // Delivery owns the call transcript for both spoken turns and scene turns.
+    // Keeping one owner prevents camera descriptions from being hidden or
+    // inserted twice when they are sent through the live-call channel.
     onSendMessage(userMsg);
     generateResponseForUserMessage(userMsg);
     setCallingInputText("");

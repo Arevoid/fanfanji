@@ -66,9 +66,6 @@ export function createChatMessageDeliveryHandler(options: ChatMessageDeliveryOpt
 
     if (isCallActive) {
       const rawSubtitleContent = getCallTranscriptText(normalizedMessage.content);
-      // A user-provided camera description belongs in the self-preview ticker,
-      // not in the spoken dialogue transcript.
-      if (normalizedMessage.sender === "user" && normalizedMessage.content.startsWith("[视频画面]|")) return;
       const parsedVideo = options.callMode === "video" && normalizedMessage.sender === "character"
         ? parseVideoCallResponse(rawSubtitleContent)
         : undefined;
@@ -79,7 +76,13 @@ export function createChatMessageDeliveryHandler(options: ChatMessageDeliveryOpt
           : [...previous, { id: normalizedMessage.id, content: parsedVideo.scene!, timestamp: normalizedMessage.timestamp }]);
       }
       const subtitleContent = parsedVideo ? parsedVideo.speech : getVideoCallDisplayText(rawSubtitleContent);
-      if (!subtitleContent.trim()) return;
+      // Keep the visual part in the dialogue area as well as the central scene
+      // label. This makes camera/scene turns readable after the scene changes,
+      // while speech playback still receives only the spoken text.
+      const transcriptContent = parsedVideo
+        ? [parsedVideo.scene ? `画面：${parsedVideo.scene}` : "", parsedVideo.speech].filter(Boolean).join("\n")
+        : subtitleContent;
+      if (!transcriptContent.trim()) return;
       let subtitleCommitted = false;
       const commitSubtitleOnce = () => {
         if (subtitleCommitted) return;
@@ -89,12 +92,12 @@ export function createChatMessageDeliveryHandler(options: ChatMessageDeliveryOpt
           : [...previous, {
             id: normalizedMessage.id,
             sender: normalizedMessage.sender,
-            content: subtitleContent,
+            content: transcriptContent,
             timestamp: normalizedMessage.timestamp,
           }]);
       };
 
-      if (options.settings.enableMiniMaxTts && shouldQueueCallSpeech(normalizedMessage.sender, subtitleContent)) {
+      if (subtitleContent.trim() && options.settings.enableMiniMaxTts && shouldQueueCallSpeech(normalizedMessage.sender, subtitleContent)) {
         return options.enqueueCallSpeech({ ...normalizedMessage, content: subtitleContent }, commitSubtitleOnce);
       }
       commitSubtitleOnce();
