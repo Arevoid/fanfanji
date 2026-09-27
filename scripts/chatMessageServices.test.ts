@@ -1,11 +1,14 @@
 import { strict as assert } from "node:assert";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../src/features/chat/services/messageFactory";
-import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, expandCallRecordHistory, formatCallRecordHistory, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizeDirectReplyBubbles, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripInternalDeliveryMarkers } from "../src/features/chat/services/messageParser";
+import { cleanAiReplyText, createCallRecordMarkup, createTextImageMarkup, expandCallRecordHistory, formatCallRecordHistory, getChatMessageVisualType, isCallRecordMarkup, isInternalDeliveryMarkerOnly, isRedPacketMarkup, isTransferMarkup, normalizeDirectReplyBubbles, normalizePaymentMarkup, parseCallRecord, parseTextImageDescription, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripInternalDeliveryMarkers, stripOuterDialogueQuotes } from "../src/features/chat/services/messageParser";
 
 const clean = (text: string) => cleanAiReplyText(text, false);
 
 // A-C: short sentences are grouped, while blank lines remain explicit bubble boundaries.
 assert.equal(clean("你好"), "你好");
+assert.equal(stripOuterDialogueQuotes("“就这一次”"), "就这一次");
+assert.equal(stripOuterDialogueQuotes("（轻笑）\n“你来了”"), "（轻笑）\n你来了");
+assert.equal(stripOuterDialogueQuotes("“他说‘别急’”"), "他说‘别急’");
 assert.deepEqual(splitAiReplyBubbles("你好。再见！", false), ["你好。再见！"]);
 assert.deepEqual(splitAiReplyBubbles("第一句。第二句。第三句。第四句。", false), ["第一句。第二句。第三句。第四句。"]);
 assert.equal(splitAiReplyBubbles("这是一段很长的完整说明。".repeat(20), false).length > 1, true);

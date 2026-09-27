@@ -1,12 +1,12 @@
 import { createCharacterTextMessage } from "./messageFactory";
-import { cleanAiReplyText, normalizeDirectReplyBubbles, normalizePaymentMarkup, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripSimulatedUserTurns } from "./messageParser";
+import { cleanAiReplyText, normalizeDirectReplyBubbles, normalizePaymentMarkup, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripOuterDialogueQuotes, stripSimulatedUserTurns } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatServiceTypes";
 import { containsNonChineseText } from "../../../utils/textLanguage";
 
 export function createDirectReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
   const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(
-    stripSimulatedUserTurns(cleanAiReplyText(context.rawText, context.disableBracketActions), context),
+    stripSimulatedUserTurns(stripOuterDialogueQuotes(cleanAiReplyText(context.rawText, context.disableBracketActions)), context),
     context.allowEmoji,
   ));
   // Never fall back to rawText here: it may consist solely of a model's fake

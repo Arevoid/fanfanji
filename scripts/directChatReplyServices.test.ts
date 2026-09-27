@@ -27,6 +27,8 @@ const response = await requestAiReply(async (input) => {
 assert.equal(requestCount, 1);
 assert.equal(response.text, "你好。再见！");
 assert.deepEqual(createDirectReplyCandidates(candidateContext("你好")).messages.map((message) => message.content), ["你好"]);
+assert.deepEqual(createDirectReplyCandidates(candidateContext("“就这一次”")).messages.map((message) => message.content), ["就这一次"]);
+assert.deepEqual(createDirectReplyCandidates(candidateContext("“他说‘别急’”")).messages.map((message) => message.content), ["他说‘别急’"]);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("你好。再见！")).messages.map((message) => message.content), ["你好。再见！"]);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句。第二句。第三句。第四句。")).messages.map((message) => message.content), ["第一句。第二句。第三句。第四句。"]);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("第一条。\n\n第二条。\n\n第三条。")).messages.map((message) => message.content), ["第一条", "第二条", "第三条"], "repeated trailing stops are normalized only across multiple short bubbles");

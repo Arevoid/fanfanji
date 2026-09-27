@@ -61,6 +61,15 @@ export const cleanAiReplyText = (text: string, disableBracketActions: boolean): 
   removeFakeImageNarration(cleanOnlineMessage(removeFakeImageNarration(text), disableBracketActions));
 export const splitAiReplyBubbles = splitIntoWeChatBubbles;
 
+/** Remove only a dialogue bubble's outer pair of quotes. Inner quotes remain intact. */
+export function stripOuterDialogueQuotes(text: string): string {
+  return text
+    .replace(/(^|\n)[\t ]*“([\s\S]*?)”[\t ]*(?=\n|$)/gu, "$1$2")
+    .replace(/(^|\n)[\t ]*「([\s\S]*?)」[\t ]*(?=\n|$)/gu, "$1$2")
+    .replace(/(^|\n)[\t ]*『([\s\S]*?)』[\t ]*(?=\n|$)/gu, "$1$2")
+    .trim();
+}
+
 /**
  * A few providers append the same terminal mark to every short bubble. Keep
  * punctuation for a persona that explicitly requires it, and otherwise remove

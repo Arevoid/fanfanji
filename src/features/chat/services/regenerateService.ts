@@ -1,12 +1,12 @@
 import { createCharacterTextMessage } from "./messageFactory";
-import { cleanAiReplyText, normalizeDirectReplyBubbles, normalizePaymentMarkup, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripSimulatedUserTurns } from "./messageParser";
+import { cleanAiReplyText, normalizeDirectReplyBubbles, normalizePaymentMarkup, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripOuterDialogueQuotes, stripSimulatedUserTurns } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatServiceTypes";
 
 /** Regeneration preserves its legacy non-payment-normalizing parse path. */
 export function createRegeneratedReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
   const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(
-    stripSimulatedUserTurns(cleanAiReplyText(context.rawText, context.disableBracketActions), context),
+    stripSimulatedUserTurns(stripOuterDialogueQuotes(cleanAiReplyText(context.rawText, context.disableBracketActions)), context),
     context.allowEmoji,
   ));
   // Never restore raw model output after the sanitizer intentionally removed
