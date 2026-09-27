@@ -62,9 +62,11 @@ export function BerryGridIcon({ id, className = "h-8 w-8" }: { id: BerryGridIcon
       </>);
     case "music":
       return iconFrame(className, <>
-        <circle cx="7.2" cy="18" r="3.1" fill="currentColor" />
-        <path d="M10 5.1 19 3v10.2a3.7 3.7 0 1 1-2-3.3V6.6l-7 1.7v6.5a3.7 3.7 0 1 1-2-3.3V5.1Z" fill="currentColor" />
-        <path d="M17 6.5 19 6v2l-2 .5V6.5Z" fill={white} opacity=".9" />
+        <circle cx="6.2" cy="18" r="3" fill="currentColor" />
+        <circle cx="16.7" cy="15.1" r="3" fill="currentColor" />
+        <rect x="8" y="6.9" width="2.35" height="11.25" rx="1.17" fill="currentColor" />
+        <rect x="17.55" y="4.25" width="2.35" height="11.35" rx="1.17" fill="currentColor" />
+        <path d="m8.15 6.8 11.6-3.05v2.7L8.15 9.5V6.8Z" fill="currentColor" />
       </>);
     case "forum":
       return iconFrame(className, <>

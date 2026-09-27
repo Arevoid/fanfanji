@@ -193,6 +193,26 @@ const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置�
 .chat-attachment-label { display: var(--chat-attachment-label-display, block); }
 `;
 
+const GLOBAL_CSS_EXAMPLE_TEMPLATE = `/* 全局主题 CSS：作用于手机桌面与各应用页面。
+   建议使用 .phone-screen-container 作为作用域，避免影响应用外的内容。 */
+.phone-screen-container {
+  --desktop-app-text-color: var(--text-primary);
+}
+
+.phone-screen-container .home-screen-drag-surface {
+  background: var(--app-bg);
+}
+
+.phone-screen-container .app-icon-surface {
+  background: var(--surface);
+  border-radius: 30%;
+  box-shadow: 0 4px 12px var(--shadow-color);
+}
+
+.phone-screen-container .desktop-app-label {
+  color: var(--desktop-app-text-color);
+}`;
+
 const BACKUP_KEYS = [
   "phone_schedule_v1",
   "phone_characters",
@@ -332,6 +352,7 @@ export default function AppSettings({
   const effectiveBubbleStylePreset = bubbleStylePreset || settings.globalChatStylePreset || "default";
   const [iconUploadMessage, setIconUploadMessage] = React.useState("");
   const [chatEnterKeyNewline, setChatEnterKeyNewline] = React.useState(settings.chatEnterKeyNewline === true);
+  const [globalCssTemplateCopied, setGlobalCssTemplateCopied] = React.useState(false);
 
   const { isPwaInstallable, isStandalone, handlePwaInstall } = usePwaInstall();
 
@@ -516,6 +537,10 @@ export default function AppSettings({
   const { copyGlobalChatCssTemplate } = useSettingsCssTemplateCopy({
     template: GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE,
     setCopied: setGlobalChatCssTemplateCopied,
+  });
+  const { copyGlobalChatCssTemplate: copyGlobalCssTemplate } = useSettingsCssTemplateCopy({
+    template: GLOBAL_CSS_EXAMPLE_TEMPLATE,
+    setCopied: setGlobalCssTemplateCopied,
   });
 
   const { handleClearApplicationData } = useSettingsClearDataActions({
@@ -2396,15 +2421,26 @@ export default function AppSettings({
 
                   {/* 全局 CSS 注入 */}
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <span className="text-xs font-bold text-slate-700">全局高阶 CSS 样式注入</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-bold text-slate-700">全局主题 CSS 样式</span>
+                      <button
+                        type="button"
+                        onClick={copyGlobalCssTemplate}
+                        aria-label="复制全局主题 CSS 模板"
+                        className="shrink-0 rounded-[8px] bg-slate-100 px-2 py-1 text-[9px] font-medium text-slate-500 transition-colors hover:bg-slate-200"
+                      >
+                        {globalCssTemplateCopied ? "已复制" : "复制模板"}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">用于修改手机桌面与各应用页面的整体视觉效果；建议使用 .phone-screen-container 限定作用范围。</p>
                     <textarea
-                      rows={3}
+                      rows={6}
                       value={globalCss}
                       onChange={(e) => {
                         setGlobalCss(e.target.value);
                         handleSave({ globalCss: e.target.value });
                       }}
-                      placeholder={`/* 全局样式覆盖 */\n.phone-screen-container {\n  filter: contrast(1.05);\n}`}
+                      placeholder={GLOBAL_CSS_EXAMPLE_TEMPLATE}
                       className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
                     />
                   </div>

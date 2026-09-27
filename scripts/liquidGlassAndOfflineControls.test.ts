@@ -124,5 +124,9 @@ assert.match(offline, /translate-x-5/);
 assert.match(settings, /全局聊天样式 CSS/);
 assert.match(settings, /copyGlobalChatCssTemplate/);
 assert.match(settings, /复制模板/);
+assert.match(settings, /const GLOBAL_CSS_EXAMPLE_TEMPLATE =/);
+assert.match(settings, /placeholder=\{GLOBAL_CSS_EXAMPLE_TEMPLATE\}/);
+assert.match(settings, /onClick=\{copyGlobalCssTemplate\}/);
+assert.match(settings, /aria-label="复制全局主题 CSS 模板"/);
 
 console.log("PASS liquid-glass first-use colours, offline toggle alignment, and global CSS template control");

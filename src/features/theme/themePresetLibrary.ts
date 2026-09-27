@@ -10,7 +10,8 @@ export const BERRY_GRID_PRESET_ID = "p-berry-grid";
 export const BERRY_GRID_PRESET_NAME = "莓粉方格";
 
 export const BERRY_GRID_LIGHT_TOKENS: ThemeTokenMap = {
-  "--app-bg": "#eee5e4",
+  // App surfaces stay readable white; the pink-grey grid remains the desktop wallpaper.
+  "--app-bg": "#fffdfc",
   "--surface": "#fffdfc",
   "--surface-raised": "#fff8f7",
   "--surface-muted": "#f5eeee",
@@ -71,7 +72,7 @@ export const BERRY_GRID_LIGHT_TOKENS: ThemeTokenMap = {
   "--progress-track": "#e4d9db",
   "--progress-value": "#d295a0",
   "--status-bar-bg": "#fffdfc",
-  "--nav-bg": "#eee5e4",
+  "--nav-bg": "#fffdfc",
   "--nav-text": "#514b4e",
   "--desktop-default-bg": "#eee5e4",
   "--desktop-default-text": "#514b4e",

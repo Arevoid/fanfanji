@@ -29,9 +29,10 @@ assert.equal(resolveThemePreset("薄巧莓莓", []).id, BERRY_GRID_PRESET_ID);
 
 applyThemePresetToRoot(BERRY_GRID_PRESET, "light", root);
 assert.equal(root.dataset.themePreset, BERRY_GRID_PRESET_ID);
-assert.equal(rootVars.get("--app-bg"), "#eee5e4");
+assert.equal(rootVars.get("--app-bg"), "#fffdfc");
 assert.equal(rootVars.get("--accent"), "#d295a0");
-assert.equal(rootVars.get("--nav-bg"), "#eee5e4");
+assert.equal(rootVars.get("--nav-bg"), "#fffdfc");
+assert.equal(rootVars.get("--desktop-default-bg"), "#eee5e4");
 assert.equal(rootVars.get("--nav-text"), "#514b4e");
 
 applyThemePresetToRoot(BERRY_GRID_PRESET, "dark", root);
