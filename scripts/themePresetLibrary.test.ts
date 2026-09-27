@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import {
   applyThemePresetToRoot,
   resolveThemePreset,
-  THIN_STRAWBERRY_PRESET,
-  THIN_STRAWBERRY_PRESET_ID,
-  THIN_STRAWBERRY_PRESET_NAME,
+  BERRY_GRID_PRESET,
+  BERRY_GRID_PRESET_ID,
+  BERRY_GRID_PRESET_NAME,
 } from "../src/features/theme/themePresetLibrary";
 
 const rootVars = new Map<string, string>();
@@ -16,27 +16,32 @@ const root = {
   },
 } as unknown as HTMLElement;
 
-assert.equal(THIN_STRAWBERRY_PRESET.id, THIN_STRAWBERRY_PRESET_ID);
-assert.equal(THIN_STRAWBERRY_PRESET.name, THIN_STRAWBERRY_PRESET_NAME);
-assert.deepEqual(THIN_STRAWBERRY_PRESET.previewColors, ["#ffd3d4", "#d5ebe4", "#f8f4e8", "#775c56"]);
-assert.equal(resolveThemePreset(THIN_STRAWBERRY_PRESET_ID, []).id, THIN_STRAWBERRY_PRESET_ID);
-assert.equal(resolveThemePreset(THIN_STRAWBERRY_PRESET_NAME, []).id, THIN_STRAWBERRY_PRESET_ID);
+assert.equal(BERRY_GRID_PRESET.id, BERRY_GRID_PRESET_ID);
+assert.equal(BERRY_GRID_PRESET.name, BERRY_GRID_PRESET_NAME);
+assert.deepEqual(BERRY_GRID_PRESET.previewColors, ["#eee5e4", "#fffdfc", "#e8b5be", "#756b70"]);
+assert.match(BERRY_GRID_PRESET.wallpaper, /repeating-linear-gradient/);
+assert.match(BERRY_GRID_PRESET.globalCss, /app-icon-surface/);
+assert.match(BERRY_GRID_PRESET.globalCss, /dock-container/);
+assert.equal(resolveThemePreset(BERRY_GRID_PRESET_ID, []).id, BERRY_GRID_PRESET_ID);
+assert.equal(resolveThemePreset(BERRY_GRID_PRESET_NAME, []).id, BERRY_GRID_PRESET_ID);
+assert.equal(resolveThemePreset("p-thin-strawberry", []).id, BERRY_GRID_PRESET_ID);
+assert.equal(resolveThemePreset("薄巧莓莓", []).id, BERRY_GRID_PRESET_ID);
 
-applyThemePresetToRoot(THIN_STRAWBERRY_PRESET, "light", root);
-assert.equal(root.dataset.themePreset, THIN_STRAWBERRY_PRESET_ID);
-assert.equal(rootVars.get("--app-bg"), "#f8f4e8");
-assert.equal(rootVars.get("--accent"), "#c98288");
-assert.equal(rootVars.get("--nav-bg"), "#f8f4e8");
-assert.equal(rootVars.get("--nav-text"), "#775c56");
+applyThemePresetToRoot(BERRY_GRID_PRESET, "light", root);
+assert.equal(root.dataset.themePreset, BERRY_GRID_PRESET_ID);
+assert.equal(rootVars.get("--app-bg"), "#eee5e4");
+assert.equal(rootVars.get("--accent"), "#d295a0");
+assert.equal(rootVars.get("--nav-bg"), "#eee5e4");
+assert.equal(rootVars.get("--nav-text"), "#514b4e");
 
-applyThemePresetToRoot(THIN_STRAWBERRY_PRESET, "dark", root);
-assert.equal(rootVars.get("--app-bg"), "#2d2524");
-assert.equal(rootVars.get("--accent"), "#ffb7bb");
-assert.equal(rootVars.get("--nav-bg"), "#2d2524");
-assert.equal(rootVars.get("--nav-text"), "#fff3e8");
+applyThemePresetToRoot(BERRY_GRID_PRESET, "dark", root);
+assert.equal(rootVars.get("--app-bg"), "#2d282a");
+assert.equal(rootVars.get("--accent"), "#f0aeb8");
+assert.equal(rootVars.get("--nav-bg"), "#2d282a");
+assert.equal(rootVars.get("--nav-text"), "#fff3f1");
 
 applyThemePresetToRoot(undefined, "light", root);
 assert.equal(root.dataset.themePreset, undefined);
 assert.equal(rootVars.size, 0);
 
-console.log("PASS thin strawberry theme preset resolves, applies, switches mode, and cleans up");
+console.log("PASS berry grid theme preset resolves, applies, switches mode, migrates, and cleans up");

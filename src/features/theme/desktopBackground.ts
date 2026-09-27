@@ -33,6 +33,10 @@ export function resolveDesktopBackground({
     hasUserWallpaper: true,
     // Pin to the top edge so a small viewport-height change (browser chrome /
     // PWA safe area on refresh) does not recenter and visibly shift the image.
-    background: value.startsWith("linear-gradient") ? value : `url(${value}) center top / cover no-repeat`,
+    // CSS gradients are passed through directly. This includes repeating
+    // gradients used by the built-in grid wallpaper preset.
+    background: /^(?:repeating-)?linear-gradient\(/i.test(value)
+      ? value
+      : `url(${value}) center top / cover no-repeat`,
   };
 }

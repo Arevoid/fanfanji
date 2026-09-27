@@ -1,85 +1,85 @@
 import type { ResolvedTheme } from "./theme";
 import type { StylePreset, ThemeTokenMap } from "../../types";
 
-export const THIN_STRAWBERRY_PRESET_ID = "p-thin-strawberry";
-export const THIN_STRAWBERRY_PRESET_NAME = "薄巧莓莓";
-
 /**
- * Semantic tokens intentionally mirror the variables in styles/tokens.css.
- * The light palette follows the supplied mint / strawberry / cream / cocoa
- * reference, while the dark palette keeps the same hue family readable.
+ * The built-in preset is deliberately named after the visual language rather
+ * than the reference image: a warm pink-grey grid, creamy surfaces and soft
+ * berry accents. The reference is used as direction, not copied as an asset.
  */
-export const THIN_STRAWBERRY_LIGHT_TOKENS: ThemeTokenMap = {
-  "--app-bg": "#f8f4e8",
-  "--surface": "#fffdf7",
-  "--surface-raised": "#fffaf1",
-  "--surface-muted": "#eaf4ef",
-  "--surface-selected": "#ffd3d4",
-  "--text-primary": "#775c56",
-  "--text-secondary": "#987c75",
-  "--text-tertiary": "#b29a92",
-  "--text-disabled": "#cbbdb7",
-  "--text-inverse": "#fffdf7",
-  "--border": "#d5ebe4",
-  "--border-strong": "#b8d8d0",
-  "--divider": "#e5ddd0",
-  "--input-bg": "#fffdf7",
-  "--input-placeholder": "#b29a92",
-  "--overlay": "rgb(80 62 57 / 44%)",
-  "--shadow-color": "rgb(119 92 86 / 14%)",
-  "--accent": "#c98288",
-  "--accent-hover": "#b96f76",
-  "--accent-contrast": "#fffdf7",
-  "--danger": "#b86d72",
-  "--danger-bg": "#fff0ef",
-  "--success": "#75a995",
-  "--success-bg": "#edf8f1",
-  "--warning": "#b98b63",
-  "--warning-bg": "#fff6e8",
-  "--focus-ring": "rgb(255 211 212 / 72%)",
-  "--button-primary-bg": "#775c56",
-  "--button-primary-text": "#fffdf7",
-  "--button-primary-hover-bg": "#624945",
-  "--button-secondary-bg": "#ffd3d4",
-  "--button-secondary-text": "#775c56",
-  "--button-secondary-border": "#efb8bb",
-  "--button-ghost-text": "#775c56",
-  "--button-ghost-hover-bg": "#eaf4ef",
-  "--button-disabled-bg": "#eee8dc",
-  "--button-disabled-text": "#b29a92",
-  "--button-disabled-border": "#e5ddd0",
-  "--tab-active-bg": "#775c56",
-  "--tab-active-text": "#fffdf7",
+export const BERRY_GRID_PRESET_ID = "p-berry-grid";
+export const BERRY_GRID_PRESET_NAME = "莓粉方格";
+
+export const BERRY_GRID_LIGHT_TOKENS: ThemeTokenMap = {
+  "--app-bg": "#eee5e4",
+  "--surface": "#fffdfc",
+  "--surface-raised": "#fff8f7",
+  "--surface-muted": "#f5eeee",
+  "--surface-selected": "#f3dce0",
+  "--text-primary": "#514b4e",
+  "--text-secondary": "#756b70",
+  "--text-tertiary": "#a3989c",
+  "--text-disabled": "#c9bec1",
+  "--text-inverse": "#fffdfc",
+  "--border": "#e4d9db",
+  "--border-strong": "#d4c3c7",
+  "--divider": "#ebe2e3",
+  "--input-bg": "#fffdfc",
+  "--input-placeholder": "#a3989c",
+  "--overlay": "rgb(69 57 62 / 44%)",
+  "--shadow-color": "rgb(112 83 91 / 15%)",
+  "--accent": "#d295a0",
+  "--accent-hover": "#c17f8c",
+  "--accent-contrast": "#fffdfc",
+  "--danger": "#c97482",
+  "--danger-bg": "#fff0f2",
+  "--success": "#78a391",
+  "--success-bg": "#edf7f1",
+  "--warning": "#bd946e",
+  "--warning-bg": "#fff7ec",
+  "--focus-ring": "rgb(210 149 160 / 58%)",
+  "--button-primary-bg": "#756b70",
+  "--button-primary-text": "#fffdfc",
+  "--button-primary-hover-bg": "#5f565b",
+  "--button-secondary-bg": "#f3dce0",
+  "--button-secondary-text": "#514b4e",
+  "--button-secondary-border": "#e1bbc3",
+  "--button-ghost-text": "#756b70",
+  "--button-ghost-hover-bg": "#f5eeee",
+  "--button-disabled-bg": "#eee7e7",
+  "--button-disabled-text": "#a3989c",
+  "--button-disabled-border": "#e4d9db",
+  "--tab-active-bg": "#756b70",
+  "--tab-active-text": "#fffdfc",
   "--tab-inactive-bg": "transparent",
-  "--tab-inactive-text": "#987c75",
-  "--badge-bg": "#ffd3d4",
-  "--badge-text": "#775c56",
-  "--badge-muted-bg": "#eaf4ef",
-  "--badge-muted-text": "#775c56",
-  "--segmented-active-bg": "#775c56",
-  "--segmented-active-text": "#fffdf7",
-  "--segmented-inactive-bg": "#eaf4ef",
-  "--segmented-inactive-text": "#987c75",
-  "--segmented-border": "#b8d8d0",
-  "--toggle-mono-on-bg": "#775c56",
-  "--toggle-mono-on-thumb": "#fffdf7",
-  "--toggle-mono-off-bg": "#d5ebe4",
-  "--toggle-mono-off-thumb": "#775c56",
-  "--toggle-mono-border": "#b8d8d0",
-  "--media-placeholder-bg": "#eaf4ef",
-  "--media-placeholder-text": "#987c75",
-  "--progress-track": "#d5ebe4",
-  "--progress-value": "#c98288",
-  "--status-bar-bg": "#fffdf7",
-  "--nav-bg": "#f8f4e8",
-  "--nav-text": "#775c56",
-  "--desktop-default-bg": "#f8f4e8",
-  "--desktop-default-text": "#775c56",
-  "--scrollbar-thumb": "#b8d8d0",
-  "--chat-user-bg": "#ffd3d4",
-  "--chat-user-text": "#775c56",
-  "--chat-ai-bg": "#fffaf1",
-  "--chat-ai-text": "#775c56",
+  "--tab-inactive-text": "#756b70",
+  "--badge-bg": "#f3dce0",
+  "--badge-text": "#514b4e",
+  "--badge-muted-bg": "#f5eeee",
+  "--badge-muted-text": "#756b70",
+  "--segmented-active-bg": "#756b70",
+  "--segmented-active-text": "#fffdfc",
+  "--segmented-inactive-bg": "#f5eeee",
+  "--segmented-inactive-text": "#756b70",
+  "--segmented-border": "#d4c3c7",
+  "--toggle-mono-on-bg": "#756b70",
+  "--toggle-mono-on-thumb": "#fffdfc",
+  "--toggle-mono-off-bg": "#e4d9db",
+  "--toggle-mono-off-thumb": "#756b70",
+  "--toggle-mono-border": "#d4c3c7",
+  "--media-placeholder-bg": "#f5eeee",
+  "--media-placeholder-text": "#756b70",
+  "--progress-track": "#e4d9db",
+  "--progress-value": "#d295a0",
+  "--status-bar-bg": "#fffdfc",
+  "--nav-bg": "#eee5e4",
+  "--nav-text": "#514b4e",
+  "--desktop-default-bg": "#eee5e4",
+  "--desktop-default-text": "#514b4e",
+  "--scrollbar-thumb": "#d4c3c7",
+  "--chat-user-bg": "#e8b5be",
+  "--chat-user-text": "#514b4e",
+  "--chat-ai-bg": "#fffdfc",
+  "--chat-ai-text": "#514b4e",
   "--color-background": "var(--app-bg)",
   "--color-surface": "var(--surface)",
   "--color-surface-secondary": "var(--surface-muted)",
@@ -92,100 +92,151 @@ export const THIN_STRAWBERRY_LIGHT_TOKENS: ThemeTokenMap = {
   "--color-overlay": "var(--overlay)",
 };
 
-export const THIN_STRAWBERRY_DARK_TOKENS: ThemeTokenMap = {
-  ...THIN_STRAWBERRY_LIGHT_TOKENS,
-  "--app-bg": "#2d2524",
-  "--surface": "#3a302f",
-  "--surface-raised": "#463937",
-  "--surface-muted": "#354542",
-  "--surface-selected": "#714c50",
-  "--text-primary": "#fff3e8",
-  "--text-secondary": "#e9d4cb",
-  "--text-tertiary": "#c7aca3",
-  "--text-disabled": "#947b75",
-  "--text-inverse": "#2d2524",
-  "--border": "#5b716c",
-  "--border-strong": "#78968e",
-  "--divider": "#51403d",
-  "--input-bg": "#463937",
-  "--input-placeholder": "#c7aca3",
+export const BERRY_GRID_DARK_TOKENS: ThemeTokenMap = {
+  ...BERRY_GRID_LIGHT_TOKENS,
+  "--app-bg": "#2d282a",
+  "--surface": "#3b3336",
+  "--surface-raised": "#473c40",
+  "--surface-muted": "#40363a",
+  "--surface-selected": "#654750",
+  "--text-primary": "#fff3f1",
+  "--text-secondary": "#e5ced1",
+  "--text-tertiary": "#bda8ad",
+  "--text-disabled": "#8c777d",
+  "--text-inverse": "#2d282a",
+  "--border": "#5c4c52",
+  "--border-strong": "#79636b",
+  "--divider": "#514248",
+  "--input-bg": "#473c40",
+  "--input-placeholder": "#bda8ad",
   "--overlay": "rgb(0 0 0 / 64%)",
-  "--shadow-color": "rgb(0 0 0 / 34%)",
-  "--accent": "#ffb7bb",
-  "--accent-hover": "#ffcbd0",
-  "--accent-contrast": "#2d2524",
-  "--danger": "#ff9b9f",
-  "--danger-bg": "#533436",
-  "--success": "#9bd0ba",
-  "--success-bg": "#29453d",
-  "--warning": "#e7b581",
-  "--warning-bg": "#54402d",
-  "--focus-ring": "rgb(255 183 187 / 56%)",
-  "--button-primary-bg": "#ffd3d4",
-  "--button-primary-text": "#2d2524",
-  "--button-primary-hover-bg": "#ffe2e3",
-  "--button-secondary-bg": "#714c50",
-  "--button-secondary-text": "#fff3e8",
-  "--button-secondary-border": "#99666b",
-  "--button-ghost-text": "#ffd3d4",
-  "--button-ghost-hover-bg": "#463937",
-  "--button-disabled-bg": "#4a3d3b",
-  "--button-disabled-text": "#947b75",
-  "--button-disabled-border": "#5b4d49",
-  "--tab-active-bg": "#ffd3d4",
-  "--tab-active-text": "#2d2524",
-  "--tab-inactive-text": "#e9d4cb",
-  "--badge-bg": "#714c50",
-  "--badge-text": "#fff3e8",
-  "--badge-muted-bg": "#354542",
-  "--badge-muted-text": "#e9d4cb",
-  "--segmented-active-bg": "#ffd3d4",
-  "--segmented-active-text": "#2d2524",
-  "--segmented-inactive-bg": "#354542",
-  "--segmented-inactive-text": "#e9d4cb",
-  "--segmented-border": "#78968e",
-  "--toggle-mono-on-bg": "#ffd3d4",
-  "--toggle-mono-on-thumb": "#2d2524",
-  "--toggle-mono-off-bg": "#5b716c",
-  "--toggle-mono-off-thumb": "#fff3e8",
-  "--toggle-mono-border": "#78968e",
-  "--media-placeholder-bg": "#354542",
-  "--media-placeholder-text": "#e9d4cb",
-  "--progress-track": "#5b716c",
-  "--progress-value": "#ffb7bb",
-  "--status-bar-bg": "#3a302f",
-  "--nav-bg": "#2d2524",
-  "--nav-text": "#fff3e8",
-  "--desktop-default-bg": "#2d2524",
-  "--desktop-default-text": "#fff3e8",
-  "--scrollbar-thumb": "#78968e",
-  "--chat-user-bg": "#714c50",
-  "--chat-user-text": "#fff3e8",
-  "--chat-ai-bg": "#463937",
-  "--chat-ai-text": "#fff3e8",
+  "--shadow-color": "rgb(0 0 0 / 35%)",
+  "--accent": "#f0aeb8",
+  "--accent-hover": "#f6c4cb",
+  "--accent-contrast": "#2d282a",
+  "--danger": "#ff9eaa",
+  "--danger-bg": "#56343d",
+  "--success": "#a2d0bb",
+  "--success-bg": "#29473b",
+  "--warning": "#e2b483",
+  "--warning-bg": "#54402e",
+  "--focus-ring": "rgb(240 174 184 / 54%)",
+  "--button-primary-bg": "#f0aeb8",
+  "--button-primary-text": "#2d282a",
+  "--button-primary-hover-bg": "#f6c4cb",
+  "--button-secondary-bg": "#654750",
+  "--button-secondary-text": "#fff3f1",
+  "--button-secondary-border": "#8a606c",
+  "--button-ghost-text": "#f0aeb8",
+  "--button-ghost-hover-bg": "#473c40",
+  "--button-disabled-bg": "#4a3f43",
+  "--button-disabled-text": "#8c777d",
+  "--button-disabled-border": "#5c4c52",
+  "--tab-active-bg": "#f0aeb8",
+  "--tab-active-text": "#2d282a",
+  "--tab-inactive-text": "#e5ced1",
+  "--badge-bg": "#654750",
+  "--badge-text": "#fff3f1",
+  "--badge-muted-bg": "#40363a",
+  "--badge-muted-text": "#e5ced1",
+  "--segmented-active-bg": "#f0aeb8",
+  "--segmented-active-text": "#2d282a",
+  "--segmented-inactive-bg": "#40363a",
+  "--segmented-inactive-text": "#e5ced1",
+  "--segmented-border": "#79636b",
+  "--toggle-mono-on-bg": "#f0aeb8",
+  "--toggle-mono-on-thumb": "#2d282a",
+  "--toggle-mono-off-bg": "#5c4c52",
+  "--toggle-mono-off-thumb": "#fff3f1",
+  "--toggle-mono-border": "#79636b",
+  "--media-placeholder-bg": "#40363a",
+  "--media-placeholder-text": "#e5ced1",
+  "--progress-track": "#5c4c52",
+  "--progress-value": "#f0aeb8",
+  "--status-bar-bg": "#3b3336",
+  "--nav-bg": "#2d282a",
+  "--nav-text": "#fff3f1",
+  "--desktop-default-bg": "#2d282a",
+  "--desktop-default-text": "#fff3f1",
+  "--scrollbar-thumb": "#79636b",
+  "--chat-user-bg": "#654750",
+  "--chat-user-text": "#fff3f1",
+  "--chat-ai-bg": "#473c40",
+  "--chat-ai-text": "#fff3f1",
 };
 
-export const THIN_STRAWBERRY_PRESET: StylePreset = {
-  id: THIN_STRAWBERRY_PRESET_ID,
-  name: THIN_STRAWBERRY_PRESET_NAME,
+const BERRY_GRID_WALLPAPER = [
+  "repeating-linear-gradient(0deg, rgb(137 118 118 / 14%) 0 1px, transparent 1px 24px)",
+  "repeating-linear-gradient(90deg, rgb(137 118 118 / 14%) 0 1px, transparent 1px 24px)",
+  "#eee5e4",
+].join(", ");
+
+/** CSS additions that make the existing desktop primitives read like the reference. */
+const BERRY_GRID_DESKTOP_CSS = `
+.phone-screen-container {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --app-icon-radius: 30%;
+  --app-default-icon-color: #d695a0;
+  --app-default-icon-surface: #ffffff;
+  --app-default-icon-border: rgb(255 255 255 / 86%);
+  --desktop-app-text-color: #756b70;
+}
+.phone-screen-container .home-screen-drag-surface {
+  background-color: transparent !important;
+}
+.phone-screen-container .app-icon-surface {
+  background: #ffffff !important;
+  border-color: rgb(255 255 255 / 90%) !important;
+  box-shadow: 0 4px 10px rgb(112 83 91 / 12%), inset 0 0 0 1px rgb(255 255 255 / 55%) !important;
+}
+.phone-screen-container .app-icon-surface .app-default-icon {
+  color: #d695a0 !important;
+}
+.phone-screen-container .desktop-app-label {
+  color: #756b70 !important;
+  text-shadow: 0 1px rgb(255 255 255 / 72%);
+}
+.phone-screen-container .dock-container {
+  background: rgb(255 253 252 / 68%) !important;
+  border-color: rgb(255 255 255 / 84%) !important;
+  box-shadow: 0 10px 28px rgb(112 83 91 / 16%) !important;
+  backdrop-filter: blur(18px) saturate(1.05);
+}
+.phone-screen-container .home-widget-card {
+  background: rgb(255 253 252 / 78%) !important;
+  border-color: rgb(255 255 255 / 82%) !important;
+  box-shadow: 0 8px 20px rgb(112 83 91 / 12%) !important;
+}
+`;
+
+export const BERRY_GRID_PRESET: StylePreset = {
+  id: BERRY_GRID_PRESET_ID,
+  name: BERRY_GRID_PRESET_NAME,
   bubbleCss: "",
-  globalCss: ".phone-screen-container { font-family: 'Inter', sans-serif; }",
-  wallpaper: "linear-gradient(160deg, #d5ebe4 0%, #f8f4e8 72%)",
-  themeColor: "#775c56",
-  previewColors: ["#ffd3d4", "#d5ebe4", "#f8f4e8", "#775c56"],
+  globalCss: BERRY_GRID_DESKTOP_CSS,
+  wallpaper: BERRY_GRID_WALLPAPER,
+  themeColor: "#d295a0",
+  previewColors: ["#eee5e4", "#fffdfc", "#e8b5be", "#756b70"],
   themeTokens: {
-    light: THIN_STRAWBERRY_LIGHT_TOKENS,
-    dark: THIN_STRAWBERRY_DARK_TOKENS,
+    light: BERRY_GRID_LIGHT_TOKENS,
+    dark: BERRY_GRID_DARK_TOKENS,
   },
 };
+
+/**
+ * The previous built-in preset was removed from the library. These aliases are
+ * intentionally private and only keep an existing user's saved preference
+ * from becoming a blank theme after upgrading.
+ */
+const REMOVED_PRESET_ALIASES = new Set(["p-thin-strawberry", "薄巧莓莓"]);
 
 export function resolveThemePreset(
   activePreset: string | undefined,
   customPresets: readonly StylePreset[] = [],
 ): StylePreset | undefined {
   if (!activePreset) return undefined;
-  if (activePreset === THIN_STRAWBERRY_PRESET_ID || activePreset === THIN_STRAWBERRY_PRESET_NAME) {
-    return THIN_STRAWBERRY_PRESET;
+  if (activePreset === BERRY_GRID_PRESET_ID || activePreset === BERRY_GRID_PRESET_NAME || REMOVED_PRESET_ALIASES.has(activePreset)) {
+    return BERRY_GRID_PRESET;
   }
   return customPresets.find((preset) => preset.id === activePreset || preset.name === activePreset);
 }

@@ -132,7 +132,8 @@ import { getMusicPlaybackAction, shouldRecordIdentityListening } from "./feature
 import { persistDirectChatMemoryLongEvidenceArtifact } from "./features/chat/services/directChatMemoryLongEvidencePersistenceClient";
 import { resolveDesktopBackground } from "./features/theme/desktopBackground";
 import { useTheme } from "./features/theme/ThemeProvider";
-import { applyThemePresetToRoot, resolveThemePreset } from "./features/theme/themePresetLibrary";
+import { applyThemePresetToRoot, BERRY_GRID_PRESET, resolveThemePreset } from "./features/theme/themePresetLibrary";
+import { BerryGridIcon, type BerryGridIconId } from "./features/theme/berryGridIcons";
 import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
@@ -724,10 +725,22 @@ export default function App() {
     const loadedSettings = loadSettings(DEFAULT_SETTINGS).value;
     const migration = migrateLegacyClassicBubblePreset(loadedSettings);
     const classicPaletteMigration = migrateUnreadableClassicBubblePalette(migration.settings);
-    const migratedSettings = applyLiquidGlassTextDefaults(classicPaletteMigration.settings);
+    const liquidGlassSettings = applyLiquidGlassTextDefaults(classicPaletteMigration.settings);
+    const removedThemeSelected = liquidGlassSettings.activePreset === "p-thin-strawberry" || liquidGlassSettings.activePreset === "薄巧莓莓";
+    const migratedSettings = removedThemeSelected
+      ? {
+          ...liquidGlassSettings,
+          activePreset: BERRY_GRID_PRESET.name,
+          wallpaper: BERRY_GRID_PRESET.wallpaper,
+          wallpaperSource: "preset" as const,
+          wallpaperAssetId: null,
+          bubbleCss: BERRY_GRID_PRESET.bubbleCss,
+          globalCss: BERRY_GRID_PRESET.globalCss,
+        }
+      : liquidGlassSettings;
     if (migration.migrated || classicPaletteMigration.settings !== migration.settings || migratedSettings !== classicPaletteMigration.settings) {
       const saved = saveSettings(migratedSettings);
-      if (!saved.success) console.warn("[settings] Could not persist the legacy bubble preset migration.");
+      if (!saved.success) console.warn("[settings] Could not persist the settings migration.");
     }
     return migratedSettings;
   });
@@ -3438,6 +3451,15 @@ export default function App() {
     setPresets((prev) => prev.filter((p) => p.id !== id));
   };
 
+  const berryGridActive = settings.activePreset === BERRY_GRID_PRESET.id || settings.activePreset === BERRY_GRID_PRESET.name;
+  const renderDesktopAppIcon = (appId: string, className = HOME_APP_ICON_GLYPH_CLASS) => {
+    if (berryGridActive) {
+      return <BerryGridIcon id={appId as BerryGridIconId} className={className} />;
+    }
+    const icon = AppIcons[appId as keyof typeof AppIcons];
+    return icon ? icon(className) : AppIcons.chat(className);
+  };
+
   // Desktop App Items rendering configuration
   const desktopApps = [
     {
@@ -3521,6 +3543,9 @@ export default function App() {
       icon: AppIcons.settings(HOME_APP_ICON_GLYPH_CLASS),
     }
   ];
+  const resolvedDesktopApps = berryGridActive
+    ? desktopApps.map((app) => ({ ...app, icon: renderDesktopAppIcon(app.id) }))
+    : desktopApps;
   const activeIdentityId = settings.activeIdentityId || DEFAULT_IDENTITY_ID;
   const activeIdentity = settings.identities?.find((identity) => identity.id === activeIdentityId) || {
     id: activeIdentityId,
@@ -4706,7 +4731,7 @@ export default function App() {
                                   };
 
                                   if (item.type === "app") {
-                                    const app = desktopApps.find(a => a.id === item.id);
+                                    const app = resolvedDesktopApps.find(a => a.id === item.id);
                                     if (!app) return null;
                                     const isDragged = draggedItem?.id === item.id;
                                     const customIconUrl = settings.customIcons[app.id];
@@ -4941,7 +4966,9 @@ export default function App() {
                               <img src={customIcon} alt="" className="w-full h-full object-cover" />
                             ) : (
                               <div className="app-default-icon w-full h-full flex items-center justify-center scale-90">
-                                {appIcon ? appIcon(HOME_APP_ICON_GLYPH_CLASS) : AppIcons.chat(HOME_APP_ICON_GLYPH_CLASS)}
+                                {berryGridActive
+                                  ? renderDesktopAppIcon(appId, HOME_APP_ICON_GLYPH_CLASS)
+                                  : appIcon ? appIcon(HOME_APP_ICON_GLYPH_CLASS) : AppIcons.chat(HOME_APP_ICON_GLYPH_CLASS)}
                               </div>
                             )}
                           </button>
@@ -5441,13 +5468,13 @@ export default function App() {
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center scale-90 text-stone-800">
-                      {desktopApps.find(a => a.id === draggedItem.id)?.icon}
+                      {resolvedDesktopApps.find(a => a.id === draggedItem.id)?.icon}
                     </div>
                   )}
                 </div>
                 {!settings.hideAppNames && (
                   <span className="desktop-app-label text-[10px] font-black mt-1">
-                    {desktopApps.find(a => a.id === draggedItem.id)?.name}
+                    {resolvedDesktopApps.find(a => a.id === draggedItem.id)?.name}
                   </span>
                 )}
               </div>

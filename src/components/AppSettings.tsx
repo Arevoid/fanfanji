@@ -31,7 +31,7 @@ import { compressImagePreservingTransparency, isTransparencyPreservedImage } fro
 import { useTheme } from "../features/theme/ThemeProvider";
 import { type ThemeMode } from "../features/theme/theme";
 import { hasUserDesktopWallpaper } from "../features/theme/desktopBackground";
-import { resolveThemePreset, THIN_STRAWBERRY_PRESET } from "../features/theme/themePresetLibrary";
+import { resolveThemePreset, BERRY_GRID_PRESET } from "../features/theme/themePresetLibrary";
 import {
   DEFAULT_GLOBAL_FONT_SIZE,
   MAX_GLOBAL_FONT_SIZE,
@@ -119,7 +119,7 @@ const DEFAULT_PRESETS: StylePreset[] = [
     wallpaper: "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)",
     themeColor: "#3b82f6"
   },
-  THIN_STRAWBERRY_PRESET,
+  BERRY_GRID_PRESET,
 ];
 
 const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
@@ -2375,7 +2375,7 @@ export default function AppSettings({
                               </div>
                               <span className="min-w-0">
                                 <span className="block text-[11px] text-[var(--text-primary)]">{preset.name}</span>
-                                {preset.id === THIN_STRAWBERRY_PRESET.id && <span className="mt-0.5 block text-[9px] font-normal text-[var(--text-secondary)]">薄荷绿 · 草莓粉 · 奶油白 · 可可棕</span>}
+                                {preset.id === BERRY_GRID_PRESET.id && <span className="mt-0.5 block text-[9px] font-normal text-[var(--text-secondary)]">粉灰方格 · 奶油白 · 莓果粉 · 柔和图标</span>}
                               </span>
                               {isActive && <Check className="w-3.5 h-3.5 text-neutral-950 ml-1" />}
                             </button>
