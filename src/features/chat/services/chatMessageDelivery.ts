@@ -66,6 +66,9 @@ export function createChatMessageDeliveryHandler(options: ChatMessageDeliveryOpt
 
     if (isCallActive) {
       const rawSubtitleContent = getCallTranscriptText(normalizedMessage.content);
+      // Scene descriptions are rendered by the central visual panel, not as
+      // spoken dialogue subtitles.
+      if (normalizedMessage.sender === "user" && normalizedMessage.content.startsWith("[视频画面]|")) return;
       const parsedVideo = options.callMode === "video" && normalizedMessage.sender === "character"
         ? parseVideoCallResponse(rawSubtitleContent)
         : undefined;
@@ -76,13 +79,9 @@ export function createChatMessageDeliveryHandler(options: ChatMessageDeliveryOpt
           : [...previous, { id: normalizedMessage.id, content: parsedVideo.scene!, timestamp: normalizedMessage.timestamp }]);
       }
       const subtitleContent = parsedVideo ? parsedVideo.speech : getVideoCallDisplayText(rawSubtitleContent);
-      // Keep the visual part in the dialogue area as well as the central scene
-      // label. This makes camera/scene turns readable after the scene changes,
-      // while speech playback still receives only the spoken text.
-      const transcriptContent = parsedVideo
-        ? [parsedVideo.scene ? `画面：${parsedVideo.scene}` : "", parsedVideo.speech].filter(Boolean).join("\n")
-        : subtitleContent;
-      if (!transcriptContent.trim()) return;
+      // Scene narration belongs in the central visual area and scene history;
+      // only spoken dialogue belongs in the lower conversation subtitles.
+      if (!subtitleContent.trim()) return;
       let subtitleCommitted = false;
       const commitSubtitleOnce = () => {
         if (subtitleCommitted) return;
@@ -92,7 +91,7 @@ export function createChatMessageDeliveryHandler(options: ChatMessageDeliveryOpt
           : [...previous, {
             id: normalizedMessage.id,
             sender: normalizedMessage.sender,
-            content: transcriptContent,
+            content: subtitleContent,
             timestamp: normalizedMessage.timestamp,
           }]);
       };

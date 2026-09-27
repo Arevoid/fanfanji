@@ -246,7 +246,7 @@ export function createCallRecordMarkup(input: VoiceCallRecord): string {
 
 /** Parses the status-aware format while retaining every existing duration-only record. */
 export function parseCallRecord(content: string): VoiceCallRecord {
-  const parts = content.split("|");
+  const parts = content.trim().split("|");
   const callType = parts[1] || "语音通话";
   const hasStructuredResult = CALL_STATUSES.has(parts[2] as VoiceCallStatus)
     && CALL_DIRECTIONS.has(parts[3] as VoiceCallDirection);

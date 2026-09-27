@@ -55,12 +55,12 @@ const message = (overrides: Partial<Message> = {}): Message => ({
   });
 
   handler(message({ id: "camera", sender: "user", content: "[视频画面]|我打开了摄像头", timestamp: 2 }));
-  assert.deepEqual(transcripts, [{ id: "camera", content: "画面：我打开了摄像头", sender: "user", timestamp: 2 }]);
+  assert.deepEqual(transcripts, []);
 
   handler(message({ id: "reply", sender: "character", content: "[画面]|他抬手挡住镜头\n[台词]|别急，我看到了。", timestamp: 3 }));
-  assert.deepEqual(transcripts[1], {
+  assert.deepEqual(transcripts[0], {
     id: "reply",
-    content: "画面：他抬手挡住镜头\n别急，我看到了。",
+    content: "别急，我看到了。",
     sender: "character",
     timestamp: 3,
   });

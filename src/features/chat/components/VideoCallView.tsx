@@ -61,6 +61,7 @@ export function VideoCallView({
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
+  const [cameraDeviceId, setCameraDeviceId] = useState<string | null>(null);
   const [transcriptMenu, setTranscriptMenu] = useState<{ item: CallTranscriptItem; x: number; y: number } | null>(null);
   const callViewRef = useRef<HTMLDivElement | null>(null);
   const selfPreviewRef = useRef<HTMLDivElement | null>(null);
@@ -152,6 +153,11 @@ export function VideoCallView({
     setCameraError("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: cameraFacingMode } }, audio: false });
+      const trackSettings = stream.getVideoTracks()[0]?.getSettings?.();
+      if (trackSettings?.deviceId) setCameraDeviceId(trackSettings.deviceId);
+      if (trackSettings?.facingMode === "user" || trackSettings?.facingMode === "environment") {
+        setCameraFacingMode(trackSettings.facingMode);
+      }
       setCameraStream(stream);
     } catch (error) {
       setCameraError(error instanceof DOMException && error.name === "NotAllowedError" ? "摄像头权限被拒绝" : "无法打开摄像头");
@@ -170,10 +176,53 @@ export function VideoCallView({
     const nextFacingMode = cameraFacingMode === "user" ? "environment" : "user";
     setCameraStarting(true);
     setCameraError("");
+    let availableCameraCount = 0;
     try {
-      // Prefer switching the active track in place. Mobile browsers that expose
-      // both cameras support this without a second permission prompt.
       const activeTrack = cameraStream.getVideoTracks()[0];
+      let devices: MediaDeviceInfo[] = [];
+      try {
+        devices = navigator.mediaDevices.enumerateDevices
+          ? await navigator.mediaDevices.enumerateDevices()
+          : [];
+      } catch {
+        // Some WebViews reject enumeration even after camera permission;
+        // facingMode fallback below can still work in that case.
+      }
+      const cameras = devices.filter((device) => device.kind === "videoinput");
+      availableCameraCount = cameras.length;
+      const currentTrackSettings = activeTrack?.getSettings?.();
+      const currentDeviceId = currentTrackSettings?.deviceId || cameraDeviceId;
+      const targetLabelPattern = nextFacingMode === "environment"
+        ? /back|rear|environment|后置|后摄|主摄|广角/i
+        : /front|user|selfie|前置|前摄/i;
+      const nextDevice = cameras.find((device) => device.deviceId !== currentDeviceId && targetLabelPattern.test(device.label))
+        || cameras.find((device) => device.deviceId !== currentDeviceId);
+
+      // On mobile Safari/Chrome, selecting the other deviceId is more reliable
+      // than asking an already-open track to reinterpret facingMode.
+      if (nextDevice?.deviceId) {
+        try {
+          const nextStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: nextDevice.deviceId } }, audio: false });
+          const nextTrackSettings = nextStream.getVideoTracks()[0]?.getSettings?.();
+          if (nextTrackSettings?.deviceId && currentDeviceId && nextTrackSettings.deviceId === currentDeviceId) {
+            nextStream.getTracks().forEach((track) => track.stop());
+          } else {
+            cameraStream.getTracks().forEach((track) => track.stop());
+            setCameraStream(nextStream);
+            setCameraDeviceId(nextTrackSettings?.deviceId || nextDevice.deviceId);
+            setCameraFacingMode(nextTrackSettings?.facingMode === "environment" || nextTrackSettings?.facingMode === "user"
+              ? nextTrackSettings.facingMode
+              : nextFacingMode);
+            return;
+          }
+        } catch (error) {
+          if (error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError")) throw error;
+          // Fall through to facingMode for browsers that list a device but
+          // reject deviceId constraints.
+        }
+      }
+
+      // Fallback for browsers that hide device IDs or expose only facingMode.
       if (activeTrack?.applyConstraints) {
         try {
           await activeTrack.applyConstraints({ facingMode: { exact: nextFacingMode } });
@@ -184,26 +233,31 @@ export function VideoCallView({
             return;
           }
         } catch {
-          // Fall back to reopening the stream below. Some WebViews expose
-          // applyConstraints but reject facingMode at runtime.
+          // Continue to a fresh getUserMedia request below.
         }
       }
 
-      const devices = navigator.mediaDevices.enumerateDevices
-        ? await navigator.mediaDevices.enumerateDevices()
-        : [];
-      const videoInputCount = devices.filter((device) => device.kind === "videoinput").length;
-      if (videoInputCount > 0 && videoInputCount < 2) {
-        setCameraError("当前设备没有可切换的摄像头");
-        return;
-      }
-
       const nextStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: nextFacingMode } }, audio: false });
+      const nextTrackSettings = nextStream.getVideoTracks()[0]?.getSettings?.();
+      if (nextTrackSettings?.deviceId && currentDeviceId && nextTrackSettings.deviceId === currentDeviceId) {
+        nextStream.getTracks().forEach((track) => track.stop());
+        throw new DOMException("The requested camera is not different from the active camera", "OverconstrainedError");
+      }
       cameraStream.getTracks().forEach((track) => track.stop());
       setCameraStream(nextStream);
-      setCameraFacingMode(nextFacingMode);
+      setCameraDeviceId(nextTrackSettings?.deviceId || null);
+      setCameraFacingMode(nextTrackSettings?.facingMode === "environment" || nextTrackSettings?.facingMode === "user"
+        ? nextTrackSettings.facingMode
+        : nextFacingMode);
     } catch (error) {
-      setCameraError(error instanceof DOMException && error.name === "NotAllowedError" ? "切换摄像头需要浏览器权限" : "当前设备没有可用的摄像头");
+      const errorName = error instanceof DOMException ? error.name : "";
+      if (errorName === "NotAllowedError" || errorName === "SecurityError") {
+        setCameraError("切换摄像头需要浏览器权限");
+      } else if (errorName === "OverconstrainedError" || errorName === "NotFoundError") {
+        setCameraError(availableCameraCount === 1 ? "当前设备只有一个可用的摄像头" : `未找到可用的${nextFacingMode === "environment" ? "后置" : "前置"}摄像头`);
+      } else {
+        setCameraError("切换摄像头失败，请稍后重试");
+      }
     } finally {
       setCameraStarting(false);
     }
@@ -327,7 +381,16 @@ export function VideoCallView({
           </div>
 
           {status === "connected" && (transcript.length > 0 || isTyping) && <div ref={transcriptViewportRef} onScroll={handleTranscriptScroll} className="absolute inset-x-1 bottom-3 flex max-h-[34%] flex-col gap-1 overflow-y-auto overscroll-contain pr-1 text-[12px] leading-relaxed [scrollbar-width:thin]" data-video-call-subtitles>
-            {transcript.filter((item) => item.content.trim()).map((item) => {
+            {transcript.filter((item) => {
+              if (item.sender !== "user") return true;
+              const content = item.content.trim();
+              // Camera/scene descriptions are shown in the central visual
+              // area, never as a duplicate spoken-dialogue bubble.
+              const legacyFreeText = content.replace(/^\[(?:视频画面|视频说话)\]\|/u, "").trim();
+              return !content.startsWith("[视频画面]|")
+                && !legacyFreeText.startsWith("画面：")
+                && !legacyFreeText.startsWith("画面:");
+            }).filter((item) => item.content.trim()).map((item) => {
               const isUserMessage = item.sender === "user";
               return <div
                 key={item.id}

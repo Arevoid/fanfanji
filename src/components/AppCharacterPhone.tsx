@@ -118,6 +118,7 @@ import { StoredCharacterPhoneImage } from "../features/characterPhone/components
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
 import { buildCharacterPhoneBrowserDetail } from "../features/characterPhone/characterPhoneBrowserDetails";
+import { isCallRecordMarkup, parseCallRecord } from "../features/chat/services/messageParser";
 import { resolveCharacterPhoneContactAvatar } from "../features/characterPhone/characterPhoneContactVisuals";
 import { loadBlockedDeliveries, saveBlockedDeliveries } from "../features/chat/services/relationshipBlockRuntime";
 import {
@@ -545,12 +546,43 @@ function parseCharacterPhoneStickerContent(content: string): CharacterPhoneStick
 }
 
 function getCharacterPhoneMessagePreview(content: string): string {
+  if (isCallRecordMarkup(content)) {
+    const call = parseCallRecord(content);
+    const callType = call.callType.includes("视频") ? "视频通话" : "语音通话";
+    return call.status === "completed"
+      ? `${callType} · 通话时长 ${call.duration}`
+      : `${callType} · ${call.status === "rejected" ? "已拒绝" : "已取消"}`;
+  }
   const sticker = parseCharacterPhoneStickerContent(content);
   return sticker ? `[表情] ${sticker.name}` : content;
 }
 
 function getCharacterPhoneThreadMessageDisplay(message: CharacterPhoneThreadMessage): string {
   return message.recalledAt ? "你撤回了一条信息" : getCharacterPhoneMessagePreview(message.content);
+}
+
+function CharacterPhoneCallRecordMessage({ content }: { content: string }) {
+  const call = parseCallRecord(content);
+  const isVideo = call.callType.includes("视频");
+  const Icon = isVideo ? Camera : Phone;
+  const callType = isVideo ? "视频通话" : "语音通话";
+  const label = call.status === "completed"
+    ? `${callType} · 通话时长 ${call.duration}`
+    : `${callType} · ${call.status === "rejected" ? "已拒绝" : "已取消"}`;
+  return (
+    <div className="flex min-w-[150px] items-center gap-2 rounded-xl border border-black/10 bg-black/[0.04] px-3 py-2" aria-label={label}>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/[0.08]">
+        <Icon className="h-4 w-4" aria-hidden="true" />
+      </span>
+      <span className="text-xs font-medium leading-5">{label}</span>
+    </div>
+  );
+}
+
+function CharacterPhoneMessageBody({ content }: { content: string }) {
+  if (isCallRecordMarkup(content)) return <CharacterPhoneCallRecordMessage content={content} />;
+  if (parseCharacterPhoneStickerContent(content)) return <CharacterPhoneStickerMessage content={content} />;
+  return <p className="whitespace-pre-wrap">{content}</p>;
 }
 
 /** Render the same sticker protocol used by the main chat instead of exposing
@@ -3190,10 +3222,8 @@ export default function AppCharacterPhone({
                     <div className="max-w-[82%] rounded-2xl rounded-tr-sm bg-[#95ec69] px-3 py-2 text-sm leading-relaxed text-[#191919]">
                       {message.recalledAt ? (
                         <p className="whitespace-pre-wrap text-xs text-neutral-500">你撤回了一条信息</p>
-                      ) : parseCharacterPhoneStickerContent(message.content) ? (
-                        <CharacterPhoneStickerMessage content={message.content} />
                       ) : (
-                        <p className="whitespace-pre-wrap">{message.content}</p>
+                        <CharacterPhoneMessageBody content={message.content} />
                       )}
                     </div>
                   </div>
@@ -3210,12 +3240,10 @@ export default function AppCharacterPhone({
                   ) : isBlockedDelivery ? (
                     <>
                       <p className="mb-1 text-[10px] font-bold text-amber-700">未送达 · {message.deliverySummary || "消息发送失败"}</p>
-                      <p className="whitespace-pre-wrap">{message.content}</p>
+                      <CharacterPhoneMessageBody content={message.content} />
                     </>
-                  ) : parseCharacterPhoneStickerContent(message.content) ? (
-                    <CharacterPhoneStickerMessage content={message.content} />
                   ) : (
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                    <CharacterPhoneMessageBody content={message.content} />
                   )}
                   {!message.recalledAt && message.attachment && <div className="mt-2 rounded-xl bg-black/10 p-2 text-[10px]">▣ {message.attachment.label}<br />{message.attachment.content}</div>}
                 </div>
@@ -3381,11 +3409,7 @@ export default function AppCharacterPhone({
                     : selectedContact.name}
                   {message.operatedByUser ? " · 用户代发" : ""}
                 </p>
-                {parseCharacterPhoneStickerContent(message.content) ? (
-                  <CharacterPhoneStickerMessage content={message.content} />
-                ) : (
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                )}
+                <CharacterPhoneMessageBody content={message.content} />
                 {message.attachment && (
                   <div className="mt-2 rounded-xl bg-black/10 p-2 text-[10px]">
                     ▣ {message.attachment.label}
