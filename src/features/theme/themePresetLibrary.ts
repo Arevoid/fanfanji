@@ -198,7 +198,7 @@ const BERRY_GRID_DESKTOP_CSS = `
   text-shadow: 0 1px rgb(255 255 255 / 72%);
 }
 .phone-screen-container .dock-container {
-  background: rgb(255 253 252 / 68%) !important;
+  background: rgb(255 253 252 / 68%);
   border-color: rgb(255 255 255 / 84%) !important;
   box-shadow: 0 10px 28px rgb(112 83 91 / 16%) !important;
   backdrop-filter: blur(18px) saturate(1.05);

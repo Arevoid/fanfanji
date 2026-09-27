@@ -22,6 +22,11 @@ assert.deepEqual(BERRY_GRID_PRESET.previewColors, ["#eee5e4", "#fffdfc", "#e8b5b
 assert.match(BERRY_GRID_PRESET.wallpaper, /repeating-linear-gradient/);
 assert.match(BERRY_GRID_PRESET.globalCss, /app-icon-surface/);
 assert.match(BERRY_GRID_PRESET.globalCss, /dock-container/);
+assert.doesNotMatch(
+  BERRY_GRID_PRESET.globalCss,
+  /\.phone-screen-container \.dock-container\s*\{\s*background:[^;]+!important/u,
+  "Berry Grid Dock background must not override the inline opacity setting",
+);
 assert.equal(resolveThemePreset(BERRY_GRID_PRESET_ID, []).id, BERRY_GRID_PRESET_ID);
 assert.equal(resolveThemePreset(BERRY_GRID_PRESET_NAME, []).id, BERRY_GRID_PRESET_ID);
 assert.equal(resolveThemePreset("p-thin-strawberry", []).id, BERRY_GRID_PRESET_ID);

@@ -90,7 +90,7 @@
 }
 
 :root[data-theme-preset="p-berry-grid"] .phone-screen-container .dock-container {
-  background: rgb(255 253 252 / 68%) !important;
+  background: rgb(255 253 252 / 68%);
   border-color: rgb(255 255 255 / 84%) !important;
   box-shadow: 0 10px 28px rgb(112 83 91 / 16%) !important;
 }
