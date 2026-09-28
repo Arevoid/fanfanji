@@ -8575,23 +8575,43 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                        <button
                          type="button"
                          onClick={() => {
-                           if (!activeCharacter || activeCharacter.isGroupChat) return;
+                           if (!activeCharacter) {
+                             setShowClearHistoryModal(false);
+                             showToast("找不到当前好友，无法执行清理。请返回聊天后重试。");
+                             return;
+                           }
+                           if (activeCharacter.isGroupChat) {
+                             setShowClearHistoryModal(false);
+                             showToast("群聊没有单独好友记忆可清理。");
+                             return;
+                           }
                            const currentIdentityRelation = relationForCharacter(activeCharacter.id);
                            const relationToClear = activeRelationship?.userIdentityId === activeIdentityId
                              ? activeRelationship
                              : currentIdentityRelation;
                            const relationId = relationToClear?.id || activeChatRelationId;
                            if (!relationId) {
+                             setShowClearHistoryModal(false);
                              showToast("找不到当前好友关系，无法执行安全清理。");
                              return;
                            }
-                            clearFriendScopedMemory(activeCharacter.id, relationId);
+                           // Close first so a large local cleanup cannot make the
+                           // destructive action look unresponsive on mobile.
                            setShowClearHistoryModal(false);
                            setEmptyGreetingCheckedCharIds((previous) => previous.filter((id) => id !== activeChatCharId));
                            setSentGreetings((previous) => previous.filter((id) => id !== activeChatCharId));
-                           showToast("已清空好友全部记忆");
+                           showToast("正在清空好友全部记忆…");
+                           window.setTimeout(() => {
+                             try {
+                               clearFriendScopedMemory(activeCharacter.id, relationId);
+                               showToast("已清空好友全部记忆");
+                             } catch (error) {
+                               console.error("Failed to clear friend-scoped memory:", error);
+                               showToast("清空好友记忆失败，请稍后重试。");
+                             }
+                           }, 0);
                          }}
-                          className="order-last py-4 text-base font-medium text-red-600 transition-colors hover:bg-red-50"
+                          className="order-last min-h-[52px] py-4 text-base font-medium text-red-600 transition-colors hover:bg-red-50 active:bg-red-100"
                        >
                           确定
                       </button>

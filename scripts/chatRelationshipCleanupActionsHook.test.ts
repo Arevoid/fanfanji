@@ -6,6 +6,9 @@ const hook = readFileSync(new URL("../src/features/chat/hooks/useChatRelationshi
 
 assert.match(appChat, /useChatRelationshipCleanupActions/);
 assert.match(appChat, /clearFriendScopedMemory/);
+assert.match(appChat, /正在清空好友全部记忆/);
+assert.match(appChat, /window\.setTimeout\(\(\) =>/);
+assert.match(appChat, /Failed to clear friend-scoped memory/);
 assert.doesNotMatch(appChat, /const clearFriendScopedMemory = \(friendId: string, relationId: string\)/);
 assert.match(hook, /removeCharacterLifeEventsForRelations/);
 assert.match(hook, /removeCharacterTruthForRelations/);
