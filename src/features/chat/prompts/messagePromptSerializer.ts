@@ -195,10 +195,12 @@ function serializeMessageContentForPromptBase(
     const description = semanticDescription
       ? `[表情包：${actor}发送了“${stickerName}”；图片语义：${semanticDescription}]`
       : `[表情包：${actor}发送了“${stickerName}”；未提供图片语义，只能谨慎按名称理解]`;
-    if (mode !== "current" || message.sender !== "user") return description;
-    return `${description}
+    const stickerHandlingRule = `
+【表情包理解边界】：这是表达语气和情绪的媒介，不是需要逐字复述的台词。不要复述、重复、翻译或改写表情包里的文字/画面。`;
+    if (mode !== "current" || message.sender !== "user") return `${description}${stickerHandlingRule}`;
+    return `${description}${stickerHandlingRule}
 【重要表情包处理规则】：
-这个表情包只是用户正常聊天时随性表达的状态、心情、气场或情绪。不要为了点评表情包而中断前面正在进行的话题，也不要复述“你发了表情包”。优先自然延续已有对话；适合时可以顺应氛围回应。`;
+这个表情包只是用户正常聊天时随性表达的状态、心情、气场或情绪。不要为了点评表情包而中断前面正在进行的话题，也不要复述、翻译、改写表情包里的文字或画面，不要说“你发了表情包”。优先自然延续已有对话；只有用户明确要求你发送表情包时，才判断是否发送一个新的表情包。`;
   }
 
   return content || "[空消息]";

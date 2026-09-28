@@ -11,6 +11,37 @@ const QUOTED_STICKER_MARKUP = /\[表情\]\|[^|\r\n]+\|sticker:\/\/[^|\r\n]+(?:\|
 const STICKER_DELIVERY_ACCEPTANCE = /(?:发过去了|发给你了|已经发(?:给你)?了?|已发送|发好了|发来了|这就发|马上发|我发|给你发|发这个|发一个|(?:好|行|可以|当然|没问题)[，,、。！! ]{0,4}(?:我)?(?:这就|马上)?发)/u;
 const STICKER_DELIVERY_REFUSAL = /(?:不发|别想|不会发|不想发|才不发|没发|还没发|拒绝发)/u;
 
+export interface StickerMarkupReference {
+  raw: string;
+  name: string;
+  stickerId: string;
+  semanticDescription?: string;
+}
+
+const STICKER_MARKUP_REFERENCE = /\[表情\]\|([^|\r\n]+)\|sticker:\/\/([^|\r\n]+)(?:\|([^\r\n]*))?/gu;
+
+/** Parse the legacy visible sticker markup so it can use the same executor as
+ * the newer private character-action envelope. */
+export function extractStickerMarkupReferences(value: string): StickerMarkupReference[] {
+  const references: StickerMarkupReference[] = [];
+  STICKER_MARKUP_REFERENCE.lastIndex = 0;
+  for (const match of value.matchAll(STICKER_MARKUP_REFERENCE)) {
+    const name = match[1]?.trim();
+    const stickerId = match[2]?.trim();
+    if (!name || !stickerId) continue;
+    let semanticDescription: string | undefined;
+    if (match[3]) {
+      try {
+        semanticDescription = decodeURIComponent(match[3]).trim() || undefined;
+      } catch {
+        semanticDescription = match[3].trim() || undefined;
+      }
+    }
+    references.push({ raw: match[0], name, stickerId, semanticDescription });
+  }
+  return references;
+}
+
 function matchesMedia(value: string): boolean {
   STICKER_MARKUP.lastIndex = 0;
   EMOJI.lastIndex = 0;

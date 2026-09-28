@@ -94,6 +94,7 @@ assert.match(buildRedPacketReactionPrompt("[红包]|6.66|开心"), /开心/);
 assert.match(buildRedPacketReactionPrompt("[红包]|6.66|开心", "老莫"), /来自老莫/);
 assert.match(buildStickerResponsePrompt("[表情]|笑|url"), /\[表情\]\|笑\|url/);
 assert.match(buildStickerResponsePrompt("震惊小狗｜语义：瞪大眼睛｜发送格式：[表情]|震惊小狗|sticker://dog", true), /不(?:见|到)|看不见|加载失败/);
+assert.match(buildStickerResponsePrompt("兔兔｜语义：撒娇｜发送格式：[表情]|兔兔|sticker://rabbit", true), /不要复述/u);
 
 const recentVoice = {
   id: "voice-1",

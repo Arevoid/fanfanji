@@ -38,4 +38,17 @@ assert.match(prompt, /publish_moment/u);
 assert.match(prompt, /send_sticker/u);
 assert.match(prompt, /引用/u);
 
+const extendedPrompt = formatCharacterActionPrompt([
+  "change_avatar",
+  "send_image",
+  "send_voice",
+  "friend_request",
+  "call",
+  "video_call",
+]);
+for (const action of ["change_avatar", "send_image", "send_voice", "friend_request", "call", "video_call"]) {
+  assert.match(extendedPrompt, new RegExp(action, "u"));
+}
+assert.match(extendedPrompt, /同一轮|本轮回复送达后/u);
+
 console.log("PASS character action protocol");

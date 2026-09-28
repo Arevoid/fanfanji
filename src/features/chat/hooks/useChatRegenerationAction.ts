@@ -4,7 +4,9 @@ import { buildAliasIdentityBoundaryPrompt, buildAliasIdentityFinalGuardPrompt } 
 import { resolveRecentUserImageForTurn } from "../services/recentUserImageContext";
 import { resolveRegenerationTurnScope } from "../services/regenerationTurnScope";
 import { buildWorldBookScanText } from "../../../domain/worldbook/worldBookTriggerScan";
-import { mayCharacterUseEmoji } from "../services/characterEmojiPolicy";
+import { extractStickerMarkupReferences, mayCharacterUseEmoji } from "../services/characterEmojiPolicy";
+import { createRegeneratedReplyCandidates } from "../services/regenerateService";
+import { formatCharacterActionPrompt, parseCharacterActionDirective } from "../services/characterActionProtocol";
 
 /** Mechanical extraction of the existing regeneration path; dependencies stay explicit in the page context. */
 export function useChatRegenerationAction(context: Record<string, any>) {
@@ -34,7 +36,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
     formatCharacterKnowledgeBoundary, formatOnlineChatSpatialBoundary, CHARACTER_MEDIA_USAGE_RULES,
     DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, CURRENT_SCENE_CONTINUITY_PROMPT,
     CHINESE_SEMANTIC_CONTINUITY_PROMPT, generateRegeneratedChatTurn, createId, onSendMessage, formatChatPromptContext, buildChatPromptContext,
-    recordPendingOfflineHandoffDelivery,
+    recordPendingOfflineHandoffDelivery, executeCharacterAction, executeCharacterCallAction,
   } = context;
 
   const handleRegenerateResponse = async (targetMsg: Message, oocComment = "") => {
@@ -386,6 +388,16 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           ? buildVoiceCallPrompts(callTopicShiftDetected)
           : undefined,
         stickerPrompt,
+        characterActionPrompt: activeAttachModal !== "calling"
+          ? formatCharacterActionPrompt([
+            "publish_moment",
+            ...(stickerGroups.some((group: { stickers: unknown[] }) => group.stickers.length > 0) ? ["send_sticker" as const] : []),
+            ...(activeCharacter && !activeCharacter.isGroupChat ? ["change_avatar" as const] : []),
+            ...(activeCharacter && !activeCharacter.isGroupChat && settings.enableImageGeneration && activeCharacter.enableImageGeneration ? ["send_image" as const] : []),
+            "send_voice",
+            ...(activeCharacter && !activeCharacter.isGroupChat ? ["friend_request" as const, "call" as const, "video_call" as const] : []),
+          ])
+          : undefined,
         worldBookContextPriority: wbBlocks.allTriggered.length > 0,
         characterProjection,
         diagnosticLabel: "regenerate prompt",
@@ -420,26 +432,27 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           isGroup: activeCharacter.isGroupChat,
         },
       });
-      const { data, candidates: replyCandidates } = await generateRegeneratedChatTurn({
+      const candidateContext = {
+        disableBracketActions: turnSettings.disableBracketActions,
+        keepPeriods,
+        characterId: activeChatCharId,
+        characterName: activeCharacter?.name,
+        userName: promptUserName,
+        allowEmoji: mayCharacterUseEmoji({
+          latestUserMessage: lastUserMsg.content,
+          recentCharacterMessages: previousMessages
+            .filter((message: Message) => message.sender === "character")
+            .map((message: Message) => message.content),
+        }),
+        requestedStickerMessage: lastUserMsg.content,
+        replyBatchId: createId("regen-batch"),
+        createId: () => createId("regen"),
+        currentTime: (idx: number) => Date.now() + idx,
+      };
+      const regenerated = await generateRegeneratedChatTurn({
         prompt: { scenario: "regenerate", message: promptMessage, history, systemInstruction, imageDataUrl, historyInjections: wbBlocks.at_depth },
         settings,
-        candidateContext: {
-          disableBracketActions: turnSettings.disableBracketActions,
-          keepPeriods,
-          characterId: activeChatCharId,
-          characterName: activeCharacter?.name,
-          userName: promptUserName,
-          allowEmoji: mayCharacterUseEmoji({
-            latestUserMessage: lastUserMsg.content,
-            recentCharacterMessages: previousMessages
-              .filter((message: Message) => message.sender === "character")
-              .map((message: Message) => message.content),
-          }),
-          requestedStickerMessage: lastUserMsg.content,
-          replyBatchId: createId("regen-batch"),
-          createId: () => createId("regen"),
-          currentTime: (idx) => Date.now() + idx,
-        },
+        candidateContext,
         aliasIdentityGuard: isAliasIdentity
           ? {
             aliasName: promptUserName,
@@ -451,8 +464,45 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           : undefined,
       });
 
+      let data = regenerated.data;
+      let replyCandidates = regenerated.candidates;
+      let parsedAction: ReturnType<typeof parseCharacterActionDirective> | undefined;
+      if (data?.text) {
+        parsedAction = parseCharacterActionDirective({ text: data.text });
+        data = { ...data, text: parsedAction.visibleText };
+        const inlineStickerReferences = extractStickerMarkupReferences(data.text);
+        if (parsedAction.directive?.type === "send_sticker") {
+          candidateContext.allowEmoji = true;
+        }
+        if (parsedAction.directive && executeCharacterAction) {
+          const actionResult = await executeCharacterAction(parsedAction.directive, {
+            relationship: activeRelationship,
+            character: activeCharacter,
+            userIdentityId: activeIdentityId,
+            actionKey: `regen:${activeIdentityId}:${activeRelationship?.id || activeChatCharId}:${parsedAction.directive.id || candidateContext.replyBatchId}:${parsedAction.directive.type}`,
+          });
+          if (actionResult.status === "success" && actionResult.stickerMarkup && inlineStickerReferences.length === 0) {
+            data = { ...data, text: `${data.text}\n\n${actionResult.stickerMarkup}`.trim() };
+          }
+          if (actionResult.status === "success" && actionResult.messageMarkup
+            && !data.text.includes(actionResult.messageMarkup.split("|")[0])) {
+            data = { ...data, text: `${data.text}\n\n${actionResult.messageMarkup}`.trim() };
+          }
+        }
+        replyCandidates = data.text
+          ? createRegeneratedReplyCandidates({ ...candidateContext, rawText: data.text })
+          : null;
+      }
+
       if (data && data.text && replyCandidates) {
         replyCandidates.messages.forEach(onSendMessage);
+        if ((parsedAction?.directive?.type === "call" || parsedAction?.directive?.type === "video_call")
+          && executeCharacterCallAction) {
+          executeCharacterCallAction(parsedAction.directive, {
+            responseBatchId: candidateContext.replyBatchId,
+            triggerMessageId: replyCandidates.messages[replyCandidates.messages.length - 1]?.id,
+          });
+        }
         if (replyCandidates.messages.length > 0) {
           recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
         }

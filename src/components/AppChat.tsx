@@ -37,7 +37,7 @@ import { resolveCharacterPhoneHiddenGalleryPasscode } from "../features/characte
 import type { CharacterPhoneImageSaveInput } from "../domain/characterPhone/types";
 import { runGroupChatReplyPipeline } from "../features/chat/services/groupChatReplyPipeline";
 import { scheduleGroupReplyDelivery } from "../features/chat/services/groupReplyDelivery";
-import { mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
+import { extractStickerMarkupReferences, mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope, type DirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
 import { canAcceptContextualProactiveCall, createProactiveCallTriggerPatch } from "../features/chat/services/proactiveVoiceCallPolicy";
 import { enqueueProactiveAction, takePendingProactiveAction } from "../features/chat/services/proactiveActionRepository";
@@ -3266,6 +3266,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           ? formatCharacterActionPrompt([
             "publish_moment",
             ...(stickerGroups.some((group) => group.stickers.length > 0) ? ["send_sticker" as const] : []),
+            ...(activeCharacter && !activeCharacter.isGroupChat ? ["change_avatar" as const] : []),
+            ...(activeCharacter && !activeCharacter.isGroupChat && settings.enableImageGeneration && activeCharacter.enableImageGeneration ? ["send_image" as const] : []),
+            "send_voice",
+            ...(activeCharacter && !activeCharacter.isGroupChat ? ["friend_request" as const, "call" as const, "video_call" as const] : []),
           ])
           : undefined,
         extraInstructions: [
@@ -3404,43 +3408,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         longTermMemoryLimit: topK,
       });
 
-      const executeCharacterAction = async (directive: CharacterActionDirective): Promise<{
-        status: "success" | "rejected" | "failed";
-        stickerMarkup?: string;
-      }> => {
-        if (directive.actor !== "character") return { status: "rejected" };
-        if (directive.type === "send_sticker") {
-          const sticker = directive.stickerId
-            ? stickerGroups.flatMap((group) => group.stickers).find((candidate) => candidate.id === directive.stickerId)
-            : undefined;
-          if (!sticker || (directive.stickerName && sticker.name !== directive.stickerName)) return { status: "failed" };
-          const semanticDescription = sticker.semanticDescription || `这是名为“${sticker.name}”的聊天表情包`;
-          return {
-            status: "success",
-            stickerMarkup: `[表情]|${sticker.name}|sticker://${sticker.id}|${encodeURIComponent(semanticDescription)}`,
-          };
-        }
-        if (directive.type !== "publish_moment") return { status: "rejected" };
-        if (!turnRelationship || turnRelationship.characterId !== activeCharacter.id || activeCharacter.isGroupChat) {
-          return { status: "rejected" };
-        }
-        const actionKey = `${replyContext.userIdentityId}:${turnRelationship.id}:${directive.id || replyBatchId}:publish_moment`;
-        if (characterActionInFlightRef.current.has(actionKey)) return { status: "rejected" };
-        characterActionInFlightRef.current.add(actionKey);
-        try {
-          const generated = await generateCharacterMoment(turnRelationship, Date.now(), {
-            allowProfileDrivenPost: true,
-            momentPromptHint: directive.contentHint || "用户刚刚明确要求你发布一条朋友圈",
-          });
-          return { status: generated ? "success" : "failed" };
-        } catch (error) {
-          console.warn("Character action publish_moment failed:", error);
-          return { status: "failed" };
-        } finally {
-          characterActionInFlightRef.current.delete(actionKey);
-        }
-      };
-
       type PreparedDirectReplyResponse = {
         data: Awaited<ReturnType<typeof requestDirectChatTurn>>;
         innerVoiceRecord?: InnerVoiceRecord;
@@ -3508,16 +3475,20 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           data.text = proactiveOfflineParse.visibleText;
           characterAction = parseCharacterActionDirective({ text: data.text });
           data.text = characterAction.visibleText;
+          const inlineStickerReferences = extractStickerMarkupReferences(data.text);
           if (characterAction.directive && !isOfflineModeActive) {
-            const actionResult = await executeCharacterAction(characterAction.directive);
-            if (actionResult.status === "success" && actionResult.stickerMarkup && !/\[表情\]\|/u.test(data.text)) {
+            const actionResult = await executeCharacterActionForRuntime(characterAction.directive, {
+              relationship: turnRelationship,
+              character: activeCharacter,
+              userIdentityId: replyContext.userIdentityId,
+              actionKey: `${replyContext.userIdentityId}:${turnRelationship?.id || replyContext.relationId || replyContext.conversationId || "chat"}:${characterAction.directive.id || replyBatchId}:${characterAction.directive.type}`,
+            });
+            if (actionResult.status === "success" && actionResult.stickerMarkup && inlineStickerReferences.length === 0) {
               data.text = `${data.text}\n\n${actionResult.stickerMarkup}`.trim();
             }
-            if (actionResult.status !== "success" && characterAction.directive.type === "publish_moment") {
-              data.text = `${data.text}\n\n朋友圈暂时没有发出去，我先不把它当作已经发布。`.trim();
-            }
-            if (actionResult.status !== "success" && characterAction.directive.type === "send_sticker") {
-              data.text = `${data.text}\n\n这个表情包暂时没有发出去，我不把它当作已经发送。`.trim();
+            if (actionResult.status === "success" && actionResult.messageMarkup
+              && !data.text.includes(actionResult.messageMarkup.split("|")[0])) {
+              data.text = `${data.text}\n\n${actionResult.messageMarkup}`.trim();
             }
           }
           callAction = parseCallActionDirective({ text: data.text });
@@ -3681,12 +3652,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           const structuredCallIntent = prepared.callAction?.directive
             ? mediaFromCallAction(prepared.callAction.directive.type)
             : undefined;
+          const characterActionCallIntent = prepared.characterAction?.directive?.type === "call"
+            || prepared.characterAction?.directive?.type === "video_call"
+            ? prepared.characterAction.directive.type === "video_call" ? "video" : "voice"
+            : undefined;
           const explicitCallbackRequested = userMsg?.sender === "user"
             && isExplicitIncomingCallRequest(userMsg.content);
           const explicitCallbackIntent = explicitCallbackRequested
             ? (isExplicitIncomingVideoCallRequest(userMsg!.content) ? "video" : "voice")
             : undefined;
-          const incomingCallIntent = explicitCallbackIntent || structuredCallIntent;
+          const incomingCallIntent = explicitCallbackIntent || structuredCallIntent || characterActionCallIntent;
           if (incomingCallIntent) {
             const callScope = resolveVoiceCallScopeForContext(replyContext);
             if (callScope) dispatchIncomingCallIntent({
@@ -3695,7 +3670,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               scope: callScope,
               responseBatchId: replyBatchId,
               triggerMessageId: createdMessages[createdMessages.length - 1]?.id,
-              reason: prepared.callAction?.directive?.reason,
+              reason: prepared.callAction?.directive?.reason || prepared.characterAction?.directive?.reason,
             });
           }
           const inlineRelationship = turnRelationship
@@ -4230,9 +4205,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       });
       if (claim && !appendKnowledgeClaim(claim).success) console.warn("Failed to capture chat-artifact knowledge claim.");
     }
-    // Sending a sticker is an ambient reaction rather than a request for a
-    // conversational turn. Keep it visible in history, but wait for the user
-    // to send text before asking the character to answer.
+    // A sticker is still a user turn. Deliver it and ask the character for a
+    // reply in the same request so the reply and any character action stay
+    // synchronized instead of requiring a second user message.
     if (options.triggerReply !== false) {
       generateResponseForUserMessage(normalizedUserMsg);
     }
@@ -4291,7 +4266,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     sendCustomMessage(
       `[表情]|${sticker.name}|sticker://${sticker.id}|${encodeURIComponent(semanticDescription)}`,
       capturedContext,
-      { triggerReply: false },
     );
 
     if (!sticker.semanticDescription && settings.apiKey) {
@@ -4827,6 +4801,179 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     getLastMemoryExtractionRunDiagnostics,
   ]);
   const { updateDraftChatIcon } = useChatDraftChatIcon(setDraftChatIcons);
+  type CharacterActionExecutionResult = {
+    status: "success" | "rejected" | "failed";
+    stickerMarkup?: string;
+    messageMarkup?: string;
+    callMedia?: "voice" | "video";
+  };
+
+  // Direct replies and regeneration must share one executor. Keeping the
+  // resolver here prevents a model from having to emit a second turn just to
+  // make a validated media, profile, relationship, moment, or call action
+  // take effect.
+  const executeCharacterActionForRuntime = async (
+    directive: CharacterActionDirective,
+    input: {
+      relationship?: CharacterRelationship;
+      character?: Character;
+      userIdentityId: string;
+      actionKey: string;
+    },
+  ): Promise<CharacterActionExecutionResult> => {
+    if (directive.actor !== "character") return { status: "rejected" };
+    if (directive.type === "call" || directive.type === "video_call") {
+      // The call surface must open after the visible reply has been delivered.
+      // The post-reply coordinator consumes this media hint in the same turn.
+      return { status: "success", callMedia: directive.type === "video_call" ? "video" : "voice" };
+    }
+    const characterDeliveryBlocked = input.relationship
+      ? isBlockedDeliveryDirection(input.relationship, "character_to_user")
+      : false;
+    if (directive.type === "send_sticker") {
+      if (characterDeliveryBlocked) return { status: "rejected" };
+      const allStickers = stickerGroups.flatMap((group) => group.stickers);
+      const requestedId = directive.stickerId?.trim().replace(/^sticker:\/\//u, "");
+      const requestedName = directive.stickerName?.trim();
+      const sticker = allStickers.find((candidate) =>
+        (requestedId && candidate.id === requestedId)
+        || (requestedName && candidate.name.trim() === requestedName),
+      );
+      if (!sticker) return { status: "failed" };
+      const semanticDescription = sticker.semanticDescription || `这是名为“${sticker.name}”的聊天表情包`;
+      return {
+        status: "success",
+        stickerMarkup: `[表情]|${sticker.name}|sticker://${sticker.id}|${encodeURIComponent(semanticDescription)}`,
+      };
+    }
+    if (directive.type === "send_voice") {
+      if (characterDeliveryBlocked) return { status: "rejected" };
+      const voiceText = directive.contentHint?.trim();
+      if (!voiceText) return { status: "failed" };
+      const seconds = Math.max(1, Math.min(60, Math.ceil(voiceText.length * 0.35 + 1.2)));
+      return { status: "success", messageMarkup: `[语音]|${seconds}|${voiceText}` };
+    }
+    if (directive.type === "send_image") {
+      if (characterDeliveryBlocked) return { status: "rejected" };
+      const sent = await generateAndSendCharacterImage(
+        "explicit-user-text",
+        directive.contentHint?.trim() || "角色主动发送一张符合当前语境的图片",
+      );
+      return { status: sent ? "success" : "failed" };
+    }
+    if (directive.type === "friend_request") {
+      const relationship = input.relationship;
+      const character = input.character;
+      if (!relationship || !character || relationship.characterId !== character.id || character.isGroupChat) {
+        return { status: "rejected" };
+      }
+      if (friendRequests.some((request) => request.relationId === relationship.id
+        && request.direction === "character_to_user"
+        && request.status === "pending")) {
+        return { status: "success" };
+      }
+      const latestAttempt = friendRequests
+        .filter((request) => request.relationId === relationship.id && request.direction === "character_to_user")
+        .reduce((max, request) => Math.max(max, request.attempt), 0);
+      const attempt = latestAttempt + 1;
+      if (attempt > 5 || relationship.friendRequestPolicy === "never") return { status: "rejected" };
+      const remark = directive.contentHint?.trim()
+        || getFriendRequestRemark(relationship, attempt, `${relationship.blockCycleId || relationship.id}:${attempt}`);
+      const createdAt = Date.now();
+      const request: FriendRequestRecord = {
+        id: `friend-request-${relationship.id}-character-${createdAt}`,
+        relationId: relationship.id,
+        characterId: relationship.characterId,
+        userIdentityId: relationship.userIdentityId,
+        direction: "character_to_user",
+        status: "pending",
+        remark,
+        remarkSource: directive.contentHint?.trim() ? "ai" : "local-context",
+        reason: directive.reason || "角色主动申请重新联系",
+        attempt,
+        blockCycleId: relationship.blockCycleId,
+        createdAt,
+      };
+      saveFriendRequestList([...friendRequests, request]);
+      onSaveRelationships((previous) => previous.map((candidate) => candidate.id === relationship.id
+        ? { ...candidate, friendRequestAttempts: attempt, updatedAt: Date.now() }
+        : candidate));
+      return { status: "success" };
+    }
+    if (directive.type === "change_avatar") {
+      const relationship = input.relationship;
+      const character = input.character;
+      if (!relationship || !character || relationship.characterId !== character.id || character.isGroupChat || !onUpdateCharacter) {
+        return { status: "rejected" };
+      }
+      const scopeKey = `${input.userIdentityId}:${character.id}:${relationship.id}`;
+      const recentImage = recentSharedImageByScopeRef.current[scopeKey];
+      const requestedAvatar = recentImage && Date.now() - recentImage.timestamp <= 10 * 60 * 1000
+        ? recentImage.dataUrl
+        : [...currentChatMessages].reverse().find((message) =>
+          message.sender === "user"
+          && /^data:image\//i.test(message.content.trim())
+          && message.characterId === character.id
+          && message.relationId === relationship.id
+          && Date.now() - message.timestamp <= 10 * 60 * 1000,
+        )?.content.trim();
+      if (!requestedAvatar) return { status: "failed" };
+      clearCharacterAvatarChangeTimer(scopeKey);
+      delete pendingCharacterAvatarChangesRef.current[scopeKey];
+      try {
+        const canonicalCharacterId = resolveCanonicalCharacterId(character.id, characters);
+        const saved = await Promise.resolve(onUpdateCharacter(canonicalCharacterId, { avatar: requestedAvatar }));
+        if (saved === false) return { status: "failed" };
+        delete recentSharedImageByScopeRef.current[scopeKey];
+        showToast("角色头像已更新");
+        return { status: "success" };
+      } catch (error) {
+        console.warn("Failed to execute character avatar action:", error);
+        return { status: "failed" };
+      }
+    }
+    if (directive.type !== "publish_moment") return { status: "rejected" };
+    const relationship = input.relationship;
+    const character = input.character;
+    if (!relationship || !character || relationship.characterId !== character.id || character.isGroupChat) {
+      return { status: "rejected" };
+    }
+    if (characterActionInFlightRef.current.has(input.actionKey)) return { status: "rejected" };
+    characterActionInFlightRef.current.add(input.actionKey);
+    try {
+      const generated = await generateCharacterMoment(relationship, Date.now(), {
+        allowProfileDrivenPost: true,
+        momentPromptHint: directive.contentHint || "用户刚刚明确要求你发布一条朋友圈",
+      });
+      return { status: generated ? "success" : "failed" };
+    } catch (error) {
+      console.warn("Character action publish_moment failed:", error);
+      return { status: "failed" };
+    } finally {
+      characterActionInFlightRef.current.delete(input.actionKey);
+    }
+  };
+
+  const executeCharacterCallActionForRuntime = (
+    directive: CharacterActionDirective,
+    input: { responseBatchId?: string; triggerMessageId?: string },
+  ): boolean => {
+    if (directive.actor !== "character" || (directive.type !== "call" && directive.type !== "video_call")) return false;
+    if (activeCharacter?.isGroupChat || !activeRelationship) return false;
+    const scope: DirectVoiceCallScope = {
+      relationId: activeRelationship.id,
+      conversationId: activeRelationship.conversationId || getConversationId(activeRelationship.id),
+    };
+    return dispatchIncomingCallIntent({
+      media: directive.type === "video_call" ? "video" : "voice",
+      source: "ai",
+      scope,
+      responseBatchId: input.responseBatchId,
+      triggerMessageId: input.triggerMessageId,
+      reason: directive.reason,
+    });
+  };
+
   const { handleRegenerateResponse } = useChatRegenerationAction({
     activeChatCharId, activeCharacter, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
     activeRelationship, listCharacterEventsByRelation, buildRelationshipCognitiveProjection, buildCharacterCognitiveContext,
@@ -4854,6 +5001,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, CURRENT_SCENE_CONTINUITY_PROMPT,
     CHINESE_SEMANTIC_CONTINUITY_PROMPT, generateRegeneratedChatTurn, createId, onSendMessage, formatChatPromptContext, buildChatPromptContext,
     recordPendingOfflineHandoffDelivery,
+    executeCharacterAction: executeCharacterActionForRuntime,
+    executeCharacterCallAction: executeCharacterCallActionForRuntime,
   });
 
   // Automated background proactive message generator for any character

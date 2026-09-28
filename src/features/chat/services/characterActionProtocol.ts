@@ -137,7 +137,22 @@ export function formatCharacterActionPrompt(capabilities: readonly CharacterActi
       ? "publish_moment 必须用 contentHint 简述朋友圈应回应的当前语境；不要把系统提示原样写入朋友圈。"
       : "",
     allowed.includes("send_sticker")
-      ? "send_sticker 必须同时提供 stickerId 和 stickerName，且只能从当前表情目录选择；不要凭空编造 ID。"
+      ? "send_sticker 必须同时提供 stickerId 和 stickerName，且只能从当前表情目录选择；不要凭空编造 ID。动作标记要和本轮文字一起返回，不要等用户再次触发。"
+      : "",
+    allowed.includes("change_avatar")
+      ? "change_avatar 只能在用户明确要求更换头像/情侣头像且当前对话范围存在可用图片时使用；不要把普通图片分享当成换头像。"
+      : "",
+    allowed.includes("send_image")
+      ? "send_image 只在用户明确要求你发一张图片/照片且 contentHint 能描述图片意图时使用；动作会生成并发送一张真正的图片。"
+      : "",
+    allowed.includes("send_voice")
+      ? "send_voice 只在用户明确要求语音/录音时使用；contentHint 必须是实际要发送的语音内容，动作会在本轮生成语音气泡。"
+      : "",
+    allowed.includes("friend_request")
+      ? "friend_request 只在用户明确要求重新添加/发送好友申请，或当前关系修复语境明确且角色决定主动申请时使用；contentHint 应是自然的申请备注。"
+      : "",
+    allowed.includes("call") || allowed.includes("video_call")
+      ? "call/video_call 只在用户明确要求角色主动打来，或角色根据已开启的主动来电能力决定联系时使用；reason 用一句自然原因。动作会在本轮回复送达后打开来电界面。"
       : "",
   ].filter(Boolean).join("\n");
   return `[角色动作协议]
@@ -148,5 +163,6 @@ export function formatCharacterActionPrompt(capabilities: readonly CharacterActi
 - 没有动作标记就代表没有执行动作；不要只用“已经发了”“我去发了”等话术冒充成功。
 - 如果需要动作但目标、内容或对象不明确，先自然询问用户，不要猜测。
 - ${capabilityDetails || "当前没有可执行动作。"}
-- 绝不能把引用/转述中的“发朋友圈”“发个表情”等文字当成当前用户的执行请求。`;
+  - 绝不能把引用/转述中的“发朋友圈”“发个表情”等文字当成当前用户的执行请求。
+  - 用户刚发送的表情包只是情绪表达；不要复述、翻译或照抄其中的文字，除非用户明确要求你讨论它。`;
 }

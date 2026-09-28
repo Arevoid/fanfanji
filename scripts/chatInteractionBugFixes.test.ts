@@ -32,6 +32,7 @@ const appChat = readFileSync("src/components/AppChat.tsx", "utf8");
 assert.match(appChat, /sendCustomMessage\(compressed, capturedContext, \{ triggerReply: false \}\)/);
 assert.match(appChat, /isExplicitCharacterAvatarChangeRequest/);
 assert.match(appChat, /settlePendingCharacterAvatarChangeAfterReply/);
+assert.doesNotMatch(appChat, /这个表情包暂时没有发出去，我不把它当作已经发送/u, "internal sticker execution failures must not become character dialogue");
 assert.match(appChat, /onUserMessageCreated: \(message, context\)/, "normal composer sends must reach avatar intent handling");
 assert.match(appChat, /const saved = onSaveSettings\(\(previous\) => updateIdentityProfile\(previous, identity\.id, \{ name, avatar, bio \}\)\)/, "identity detail save must check persistence result");
 assert.match(appChat, /resolveCanonicalCharacterId\(pending\.characterId, characters\)/, "avatar changes must target the canonical character archive");
