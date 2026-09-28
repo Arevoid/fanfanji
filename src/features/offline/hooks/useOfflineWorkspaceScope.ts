@@ -30,9 +30,18 @@ export function useOfflineWorkspaceScope({
   onOpenOfflineStoryHandled,
   showToast,
 }: UseOfflineWorkspaceScopeOptions) {
-  const selectableCharacters = characters.filter((character) => !character.isContactInstance);
-  const selectableCharacterIds = getAvailableCanonicalCharacterIds(selectableCharacters);
   const resolveCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
+  const activeRelationCharacterIds = new Set(
+    relationships
+      .filter((relation) => relation.userIdentityId === activeIdentityId)
+      .map((relation) => resolveCharacterId(relation.characterId)),
+  );
+  const selectableCharacters = characters.filter((character) => {
+    if (character.isContactInstance) return false;
+    if (activeRelationCharacterIds.has(resolveCharacterId(character.id))) return true;
+    return Boolean(character.isGroupChat && (character.ownerIdentityId || "identity-1") === activeIdentityId);
+  });
+  const selectableCharacterIds = getAvailableCanonicalCharacterIds(selectableCharacters);
   const [selectedCharId, setSelectedCharId] = useState<string>(() => {
     const canonicalActiveChatId = activeChatCharId ? resolveCharacterId(activeChatCharId) : null;
     return canonicalActiveChatId && selectableCharacters.some((character) => character.id === canonicalActiveChatId)

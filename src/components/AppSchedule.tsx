@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import type { Appointment, ScheduleEntry } from "../domain/schedule/scheduleTypes";
-import { filterScheduleEntries, formatScheduleDate, formatScheduleTime, SCHEDULE_FILTERS, SCHEDULE_STATUS_META, type ScheduleFilter } from "../features/schedule/schedulePresentation";
+import { filterScheduleEntries, filterScheduleEntriesForIdentity, formatScheduleDate, formatScheduleTime, SCHEDULE_FILTERS, SCHEDULE_STATUS_META, type ScheduleFilter } from "../features/schedule/schedulePresentation";
 import type { Character } from "../types";
 import AppointmentDetailSheet from "./schedule/AppointmentDetailSheet";
 import ScheduleEventCard from "./schedule/ScheduleEventCard";
 
 interface AppScheduleProps {
   entries: ScheduleEntry[];
+  /** Exact identity whose private calendar is being viewed. */
+  userIdentityId?: string;
   appointments: Appointment[];
   characters: Character[];
   onOpenChat: (characterId: string, relationId: string) => void;
@@ -39,7 +41,7 @@ const toDateKey = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-export default function AppSchedule({ entries, appointments, characters, onOpenChat, onClose, hideHeader = false, variant = "default", todaySignal = 0, onCharacterPhoneScheduleAdd }: AppScheduleProps) {
+export default function AppSchedule({ entries, userIdentityId, appointments, characters, onOpenChat, onClose, hideHeader = false, variant = "default", todaySignal = 0, onCharacterPhoneScheduleAdd }: AppScheduleProps) {
   const [visibleMonth, setVisibleMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -66,9 +68,15 @@ export default function AppSchedule({ entries, appointments, characters, onOpenC
     ];
   }, [visibleMonth]);
 
+  const scopedEntries = useMemo(
+    () => variant === "characterPhone" || !userIdentityId
+      ? entries
+      : filterScheduleEntriesForIdentity(entries, userIdentityId),
+    [entries, userIdentityId, variant],
+  );
   const characterPhoneEntries = useMemo(
-    () => variant === "characterPhone" ? [...entries, ...characterPhoneAddedEntries] : entries,
-    [characterPhoneAddedEntries, entries, variant],
+    () => variant === "characterPhone" ? [...scopedEntries, ...characterPhoneAddedEntries] : scopedEntries,
+    [characterPhoneAddedEntries, scopedEntries, variant],
   );
   const visibleEntries = useMemo(() => filterScheduleEntries(characterPhoneEntries, filter), [characterPhoneEntries, filter]);
   const selectedEntries = visibleEntries.filter((entry) => entry.dateKey === selectedDate);

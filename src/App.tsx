@@ -147,6 +147,7 @@ import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messagePa
 import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
 import { MOMENT_CHARACTER_EXPRESSION_PROMPT } from "./utils/livingPrompt";
 import { USER_DATA_RESET_EVENT, type UserDataAppId } from "./features/settings/userDataDeletion";
+import { createIdentityScope } from "./domain/identity/identityScope";
 import {
   migrateLegacyClassicBubblePreset,
   migrateUnreadableClassicBubblePalette,
@@ -1850,6 +1851,7 @@ export default function App() {
       const relation = relationships.find((item) =>
         item.id === relationId
         && item.characterId === characterId
+        && item.userIdentityId === (settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID)
         && item.conversationId === (conversationId || item.conversationId),
       );
       if (!relation) {
@@ -3554,19 +3556,17 @@ export default function App() {
     signature: settings.signature,
     bio: settings.bio,
   };
+  const identityScope = createIdentityScope(activeIdentityId, settings.identities || []);
   // Character phones belong to the主人设 only.  Alias identities continue to
   // have their own ordinary chat relationships, but opening the phone always
   // uses the primary identity's phone scope and profile so aliases cannot
   // create a second phone contact list or phone history.
-  const characterPhoneOwnerIdentityId = resolveCharacterPhoneOwnerIdentityId(
-    activeIdentityId,
-    settings.identities || [],
-  );
-  // Offline stories, diary, reading and the desktop chat-statistics widget
-  // belong to the primary persona workspace.  Selecting an alias changes the
-  // chat/contact identity only; these surfaces must keep reading the primary
-  // identity's records.
-  const primaryIdentityId = characterPhoneOwnerIdentityId;
+  const characterPhoneOwnerIdentityId = resolveCharacterPhoneOwnerIdentityId(activeIdentityId, settings.identities || []);
+  // Character phone remains a primary-owned device. Private memory, offline
+  // stories, diary, reading and schedule data follow the exact selected
+  // identity. The scope is explicit so each app cannot silently choose a
+  // different fallback identity.
+  const primaryIdentityId = identityScope.primaryIdentityId;
   const primaryIdentity = settings.identities?.find((identity) => identity.id === primaryIdentityId)
     || activeIdentity;
   const characterPhoneIdentity = settings.identities?.find((identity) => identity.id === characterPhoneOwnerIdentityId)
@@ -5184,6 +5184,7 @@ export default function App() {
                   <LazyAppBoundary visible={activeApp === "schedule"}>
                     <AppSchedule
                       entries={scheduleEntries}
+                      userIdentityId={activeIdentityId}
                       appointments={scheduleStore.appointments}
                       characters={characters}
                       onOpenChat={(characterId, relationId) => {
@@ -5197,7 +5198,7 @@ export default function App() {
                 {isAppMounted("reading") && (
                   <LazyAppBoundary visible={activeApp === "reading"}>
                     <AppReading
-                      userIdentityId={primaryIdentityId}
+                      userIdentityId={activeIdentityId}
                       settings={settings}
                       characters={characters}
                       relationships={relationships}
@@ -5279,7 +5280,7 @@ export default function App() {
                 {isAppMounted("diary") && (
                   <LazyAppBoundary visible={activeApp === "diary"}>
                     <AppDiary
-                      activeIdentity={primaryIdentity}
+                    activeIdentity={activeIdentity}
                     characters={characters}
                     relationships={relationships}
                     messages={messages}
@@ -5287,9 +5288,7 @@ export default function App() {
                     settings={settings}
                     onSendMessage={handleSendMessage}
                     onOpenChat={(characterId, relationId, sourceMessageId) => {
-                      if (primaryIdentityId !== activeIdentityId) {
-                        handleSwitchIdentity(primaryIdentityId, { relationId, characterId });
-                      } else if (!openChatForCurrentIdentity(characterId, relationId)) {
+                      if (!openChatForCurrentIdentity(characterId, relationId)) {
                         return;
                       }
                       setPendingDiaryShareMessageId(sourceMessageId || null);
@@ -5343,6 +5342,7 @@ export default function App() {
                     characters={characters}
                     relationships={relationships}
                     identities={settings.identities}
+                    activeIdentityId={activeIdentityId}
                     memories={memories}
                     onSaveMemories={setMemories}
                     recallSettings={recallSettings}
@@ -5364,7 +5364,7 @@ export default function App() {
                       characters={characters}
                       relationships={relationships}
                       settings={settings}
-                      ownerIdentityId={primaryIdentityId}
+                      ownerIdentityId={activeIdentityId}
                       offlineStories={offlineStories}
                       openStoryId={pendingOfflineStoryId}
                       onOpenOfflineStoryHandled={(storyId) => {
@@ -5381,7 +5381,7 @@ export default function App() {
                       onClose={() => setActiveApp(null)}
                       activeChatRelationId={activeChatRelationId}
                       onNavigateToChat={(charId, relationId, conversationId) => {
-                        const ownerIdentityId = primaryIdentityId;
+                        const ownerIdentityId = activeIdentityId;
                         const relationship = relationId
                           ? relationships.find((candidate) =>
                               candidate.id === relationId

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookHeart,
   ChevronLeft,
@@ -95,11 +95,19 @@ export default function AppDiary({
   const [busyRelationId, setBusyRelationId] = useState<string | null>(null);
   const [sharingRelationId, setSharingRelationId] = useState<string | null>(null);
   const [relationFilterId, setRelationFilterId] = useState<string | null>(null);
+  const previousIdentityIdRef = useRef(activeIdentity.id);
 
   useEffect(
     () => subscribeDiaryState(() => setEntries(loadDiaryEntries().value)),
     [],
   );
+  useEffect(() => {
+    if (previousIdentityIdRef.current === activeIdentity.id) return;
+    previousIdentityIdRef.current = activeIdentity.id;
+    setEditing(null);
+    setSelectedId(null);
+    setRelationFilterId(null);
+  }, [activeIdentity.id]);
   useEffect(() => {
     if (!editing || !draft.body.trim()) return;
     const id = editing.id || `new-${activeIdentity.id}`;

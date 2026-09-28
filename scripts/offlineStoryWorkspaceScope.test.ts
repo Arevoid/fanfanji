@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { Character, OfflineStory } from "../src/types";
 import type { CharacterRelationship } from "../src/domain/relationship/characterRelationship";
 import { canAccessOfflineStoryFromCurrentRelation, isGroupOfflineStory, resolveOfflineRelationChoices } from "../src/features/offline/services/offlineStoryWorkspaceScope";
+import { readFileSync } from "node:fs";
 
 const directCharacter = { id: "char-direct", name: "角色", isGroupChat: false } as Character;
 const groupCharacter = { id: "char-group", name: "群聊", isGroupChat: true, ownerIdentityId: "identity-2" } as Character;
@@ -42,5 +43,9 @@ assert.equal(canAccessOfflineStoryFromCurrentRelation({
   relationChoices: [],
   activeIdentityId: "identity-1",
 }), false, "group story cannot cross identity scope");
+
+const workspaceSource = readFileSync(new URL("../src/features/offline/hooks/useOfflineWorkspaceScope.ts", import.meta.url), "utf8");
+assert.match(workspaceSource, /activeRelationCharacterIds/, "offline character picker derives visibility from the exact identity relations");
+assert.match(workspaceSource, /character\.isGroupChat/, "group containers remain scoped by their owner identity");
 
 console.log("6 offline workspace scope checks passed");

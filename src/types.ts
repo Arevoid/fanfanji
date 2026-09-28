@@ -1042,6 +1042,8 @@ export interface ImmediateSummaryTask {
 export interface OfflineStory {
   id: string;
   characterId: string;
+  /** Exact identity that created this story. Legacy records infer it from relation/character. */
+  ownerIdentityId?: string;
   /** Direct relationship that owns this story. Group stories intentionally leave this unset. */
   relationId?: string;
   conversationId?: string;

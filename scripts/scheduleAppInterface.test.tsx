@@ -7,6 +7,7 @@ import ScheduleEventCard from "../src/components/schedule/ScheduleEventCard";
 import type { Appointment, ScheduleEntry } from "../src/domain/schedule/scheduleTypes";
 import {
   filterScheduleEntries,
+  filterScheduleEntriesForIdentity,
   formatProposalSummary,
   formatScheduleTime,
   SCHEDULE_FILTERS,
@@ -56,6 +57,11 @@ const entry: ScheduleEntry = {
 assert.deepEqual(SCHEDULE_FILTERS.map((item) => item.label), ["待见面", "进行中", "历史", "全部"]);
 assert.deepEqual(filterScheduleEntries([entry, { ...entry, id: "history", status: "completed" }], "upcoming").map((item) => item.id), [entry.id]);
 assert.deepEqual(filterScheduleEntries([entry, { ...entry, id: "active", status: "in_progress" }], "active").map((item) => item.id), ["active"]);
+assert.deepEqual(
+  filterScheduleEntriesForIdentity([entry, { ...entry, id: "other", userIdentityId: "identity-b" }], "identity-a").map((item) => item.id),
+  [entry.id],
+  "calendar entries remain private to the selected identity",
+);
 assert.equal(formatScheduleTime(entry), "上午");
 assert.match(formatProposalSummary(appointment.proposals[1]), /8月16日 周日 · 上午 · 一起吃饭 · 市中心 · 对方前往 · 乘车/);
 
@@ -75,6 +81,7 @@ assert.match(detail, /返回关联聊天/);
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const scheduleSource = readFileSync(new URL("../src/components/AppSchedule.tsx", import.meta.url), "utf8");
 assert.match(appSource, /appointments=\{scheduleStore\.appointments\}/);
+assert.match(appSource, /<AppSchedule[\s\S]*?userIdentityId=\{activeIdentityId\}/);
 assert.match(appSource, /setActiveChatRelationId\(relationship\?\.id \|\| null\)[\s\S]*setActiveApp\("chat"\)/);
 assert.match(scheduleSource, /SCHEDULE_STATUS_META\[entry\.status\]\.dotClass/);
 assert.match(scheduleSource, /aria-label="日程状态筛选"/);

@@ -247,6 +247,18 @@ export default function AppReading({
   const [bibleRulesDraft, setBibleRulesDraft] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
 
+  useEffect(() => {
+    setSelectedRoomId(null);
+    setSelectedBookId(null);
+    setReadingBookId(null);
+    setReadingRoomReaderId(null);
+    setReadingStoryBookId(null);
+    setReadingCoStoryBookId(null);
+    setInitialStoryId(undefined);
+    setInitialCoStoryId(undefined);
+    setStorySetupBookId(null);
+  }, [userIdentityId]);
+
   const refreshLibrary = useCallback(() => {
     const store = loadReadingStore().value;
     setBooks(

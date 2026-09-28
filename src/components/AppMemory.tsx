@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, UserIdentity } from "../types";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
+import { createIdentityScope, matchesIdentityScope } from "../domain/identity/identityScope";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { append as appendKnowledgeClaim, appendMany as appendKnowledgeClaims, loadKnowledgeClaims, remove as removeKnowledgeClaim, retract as retractKnowledgeClaim, saveKnowledgeClaims, supersede as supersedeKnowledgeClaim } from "../core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, saveConversationSummaries } from "../core/storage/repositories/conversationSummaryRepository";
@@ -40,6 +41,7 @@ interface AppMemoryProps {
   characters: Character[];
   relationships: CharacterRelationship[];
   identities?: UserIdentity[];
+  activeIdentityId?: string;
   memories: MemoryItem[];
   onSaveMemories: (updated: MemoryItem[]) => void;
   recallSettings: MemoryVaultSettings;
@@ -73,6 +75,7 @@ export default function AppMemory({
   characters,
   relationships,
   identities = [],
+  activeIdentityId = "identity-1",
   memories,
   onSaveMemories,
   recallSettings,
@@ -86,8 +89,11 @@ export default function AppMemory({
   apiEndpoint = "",
   openDiagnosticsRequestId = 0,
 }: AppMemoryProps) {
+  const identityScope = createIdentityScope(activeIdentityId, identities);
   const displayCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
   const normalizeCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
+  const scopedRelationships = relationships.filter((relation) => relation.userIdentityId === identityScope.selectedIdentityId);
+  const relationIdentityById = new Map(relationships.map((relation) => [relation.id, relation.userIdentityId]));
   const toTruthScope = (relation: CharacterRelationship) => ({
     relationId: relation.id,
     characterId: relation.characterId,
@@ -114,6 +120,13 @@ export default function AppMemory({
   useEffect(() => {
     if (openDiagnosticsRequestId > 0) setShowDiagnosticsModal(true);
   }, [openDiagnosticsRequestId]);
+
+  useEffect(() => {
+    setSelectedCharacterId("all");
+    setSelectedRelationId("all");
+    setImmediateCharId("");
+    setImmediateRelationId("");
+  }, [activeIdentityId]);
 
   // States for automatic summary settings
   const [selectedCharForAutoSummary, setSelectedCharForAutoSummary] = useState<string>("");
@@ -185,24 +198,31 @@ export default function AppMemory({
     const characterId = normalizeCharacterId(item.characterId);
     return characterId === item.characterId ? item : { ...item, characterId };
   });
+  const scopedMemories = normalizedMemories.filter((item) => matchesIdentityScope(
+    item.userIdentityId || (item.relationId ? relationIdentityById.get(item.relationId) : undefined),
+    identityScope,
+  ));
   const selectedCharacterRelations = Array.from(new Map(
-    relationships
+    scopedRelationships
       .filter((relation) => relation.characterId === normalizeCharacterId(selectedCharacterId))
       .map((relation) => [`${relation.userIdentityId}\u0000${relation.characterId}`, relation]),
   ).values());
 
-  const filteredMemories = normalizedMemories.filter(item => {
+  const filteredMemories = scopedMemories.filter(item => {
     const matchesChar = selectedCharacterId === "all" || item.characterId === normalizeCharacterId(selectedCharacterId);
     const matchesSearch = searchQuery.trim() === "" || item.content.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRelation = selectedRelationId === "all" || item.relationId === selectedRelationId;
     return matchesChar && matchesRelation && matchesSearch;
   });
 
-  const knowledgeClaims = loadKnowledgeClaims().value;
-  const conversationSummaries = loadConversationSummaries().value;
-  const behaviorCorrections = loadBehaviorCorrections().value;
+  const allKnowledgeClaims = loadKnowledgeClaims().value;
+  const allConversationSummaries = loadConversationSummaries().value;
+  const allBehaviorCorrections = loadBehaviorCorrections().value;
+  const knowledgeClaims = allKnowledgeClaims.filter((claim) => matchesIdentityScope(claim.userIdentityId, identityScope));
+  const conversationSummaries = allConversationSummaries.filter((summary) => matchesIdentityScope(summary.userIdentityId, identityScope));
+  const behaviorCorrections = allBehaviorCorrections.filter((correction) => matchesIdentityScope(correction.userIdentityId, identityScope));
   const memoryCenterRecords = buildMemoryCenterRecords({
-    memories: normalizedMemories,
+    memories: scopedMemories,
     claims: knowledgeClaims,
     summaries: conversationSummaries,
     corrections: behaviorCorrections,
@@ -278,7 +298,7 @@ export default function AppMemory({
     const nextDisabled = !item.recallDisabled;
     const claimIds = new Set(item.sourceKnowledgeClaimIds || []);
     if (claimIds.size > 0) {
-      const nextClaims = knowledgeClaims.map((claim) => claimIds.has(claim.id) ? { ...claim, recallDisabled: nextDisabled } : claim);
+      const nextClaims = allKnowledgeClaims.map((claim) => claimIds.has(claim.id) ? { ...claim, recallDisabled: nextDisabled } : claim);
       const claimWrite = saveKnowledgeClaims(nextClaims);
       if (!claimWrite.success) {
         alert("记忆状态保存失败，未改变召回状态。");
@@ -311,7 +331,7 @@ export default function AppMemory({
         return;
       }
       const nextDisabled = !claim.recallDisabled;
-      const write = saveKnowledgeClaims(knowledgeClaims.map((candidate) => candidate.id === claim.id
+      const write = saveKnowledgeClaims(allKnowledgeClaims.map((candidate) => candidate.id === claim.id
         ? { ...candidate, recallDisabled: nextDisabled }
         : candidate));
       if (!write.success) {
@@ -388,13 +408,13 @@ export default function AppMemory({
         return false;
       }
     } else if (record.recordType === "summary") {
-      const write = saveConversationSummaries(conversationSummaries.filter((summary) => summary.id !== record.id));
+      const write = saveConversationSummaries(allConversationSummaries.filter((summary) => summary.id !== record.id));
       if (!write.success) {
         alert("对话摘要删除失败，记录未改变。");
         return false;
       }
     } else if (record.recordType === "rule") {
-      const write = saveBehaviorCorrections(behaviorCorrections.filter((correction) => correction.id !== record.id));
+      const write = saveBehaviorCorrections(allBehaviorCorrections.filter((correction) => correction.id !== record.id));
       if (!write.success) {
         alert("规则记忆删除失败，记录未改变。");
         return false;
@@ -433,9 +453,9 @@ export default function AppMemory({
       version: 1,
       exportedAt: new Date().toISOString(),
       memories,
-      claims: knowledgeClaims,
-      summaries: conversationSummaries,
-      corrections: behaviorCorrections,
+      claims: allKnowledgeClaims,
+      summaries: allConversationSummaries,
+      corrections: allBehaviorCorrections,
       recallSettings,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
@@ -491,7 +511,7 @@ export default function AppMemory({
       return;
     }
 
-    const relation = relationships.find((item) => item.id === newRelationId && item.characterId === normalizeCharacterId(newCharId));
+    const relation = scopedRelationships.find((item) => item.id === newRelationId && item.characterId === normalizeCharacterId(newCharId));
     if (!relation) {
       alert("当前关系作用域无效，无法保存长期认知。");
       return;
@@ -527,7 +547,7 @@ export default function AppMemory({
 
   const saveCompatibilityMemoryEdit = async (item: MemoryItem, content: string): Promise<boolean> => {
     const relation = item.relationId
-      ? relationships.find((candidate) => candidate.id === item.relationId && candidate.characterId === normalizeCharacterId(item.characterId))
+      ? scopedRelationships.find((candidate) => candidate.id === item.relationId && candidate.characterId === normalizeCharacterId(item.characterId))
       : undefined;
     if (!relation) {
       alert("当前关系作用域无效，无法修改长期认知。");
@@ -642,7 +662,7 @@ export default function AppMemory({
     }
 
     if (record.recordType === "summary") {
-      const write = saveConversationSummaries(conversationSummaries.map((summary) => summary.id === record.id
+      const write = saveConversationSummaries(allConversationSummaries.map((summary) => summary.id === record.id
         ? { ...summary, summary: content, generatedAt: Date.now(), generator: "memory-ui.manual.v1", status: "active" as const }
         : summary));
       if (!write.success) {
@@ -650,7 +670,7 @@ export default function AppMemory({
         return;
       }
     } else {
-      const write = saveBehaviorCorrections(behaviorCorrections.map((correction) => correction.id === record.id
+      const write = saveBehaviorCorrections(allBehaviorCorrections.map((correction) => correction.id === record.id
         ? { ...correction, instruction: content, updatedAt: Date.now(), status: "active" as const }
         : correction));
       if (!write.success) {
@@ -1111,7 +1131,7 @@ export default function AppMemory({
                   </select>
                   <select value={newRelationId} onChange={(e) => setNewRelationId(e.target.value)} disabled={!newCharId} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs">
                     <option value="">选择关系身份</option>
-                    {relationships.filter((relation) => relation.characterId === normalizeCharacterId(newCharId)).map((relation) => (
+                    {scopedRelationships.filter((relation) => relation.characterId === normalizeCharacterId(newCharId)).map((relation) => (
                       <option key={relation.id} value={relation.id}>{getIdentityLabel(relation.userIdentityId)}</option>
                     ))}
                   </select>
@@ -1752,7 +1772,7 @@ export default function AppMemory({
                           className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-bold"
                         >
                           <option value="">选择关系（旧数据兼容）</option>
-                          {relationships.filter((relation) => relation.characterId === normalizeCharacterId(immediateCharId)).map((relation) => (
+                          {scopedRelationships.filter((relation) => relation.characterId === normalizeCharacterId(immediateCharId)).map((relation) => (
                             <option key={relation.id} value={relation.id}>{getIdentityLabel(relation.userIdentityId)}</option>
                           ))}
                         </select>
@@ -1799,7 +1819,7 @@ export default function AppMemory({
                         <button
                           onClick={async () => {
                             if (onStartImmediateSummary && immediateCharId) {
-                              const relation = relationships.find((item) => item.id === immediateRelationId);
+                              const relation = scopedRelationships.find((item) => item.id === immediateRelationId);
                               await onStartImmediateSummary(immediateCharId, immediateRounds, relation?.id, relation?.conversationId);
                             }
                           }}

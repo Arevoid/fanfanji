@@ -79,3 +79,9 @@ export const filterScheduleEntries = (entries: readonly ScheduleEntry[], filter:
   if (filter === "active") return entries.filter((entry) => entry.status === "in_progress");
   return entries.filter((entry) => entry.status === "completed" || entry.status === "cancelled" || entry.status === "expired");
 };
+
+/** Private calendar projection: never widen a schedule to another persona. */
+export const filterScheduleEntriesForIdentity = (
+  entries: readonly ScheduleEntry[],
+  userIdentityId: string,
+): ScheduleEntry[] => entries.filter((entry) => entry.userIdentityId === userIdentityId);

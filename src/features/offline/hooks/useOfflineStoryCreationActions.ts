@@ -116,6 +116,7 @@ export function useOfflineStoryCreationActions({
     const newStory: OfflineStory = {
       id: createId("story"),
       characterId: selectedCharId,
+      ownerIdentityId: activeIdentityId,
       ...(relationship ? { relationId: relationship.id } : {}),
       conversationId: isGroupStory ? `group:${selectedCharacter.id}` : relationship!.conversationId || getConversationId(relationship!.id),
       characterIds: participantIds,

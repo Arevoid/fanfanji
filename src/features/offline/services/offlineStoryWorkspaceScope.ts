@@ -42,13 +42,14 @@ export function canAccessOfflineStoryFromCurrentRelation({
   // created directly from the character picker. They intentionally have no
   // direct relationship, but still belong to the active identity.
   if (isGroupOfflineStory(story, characters)) {
-    return Boolean(storyCharacter && belongsToActiveIdentity(storyCharacter.ownerIdentityId));
+    return Boolean(storyCharacter && belongsToActiveIdentity(story.ownerIdentityId || storyCharacter.ownerIdentityId));
   }
 
   // Every direct story must be owned by the selected current relation. A
   // missing relationId is legacy direct data and is not opened cross-identity.
   return Boolean(
     story.relationId
+    && (!story.ownerIdentityId || belongsToActiveIdentity(story.ownerIdentityId))
     && story.relationId === selectedRelationId
     && relationChoices.some((relation) => relation.id === story.relationId),
   );
