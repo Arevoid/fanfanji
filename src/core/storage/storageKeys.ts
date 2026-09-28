@@ -48,6 +48,8 @@ export const storageKeys = {
   conversationSummaries: "phone_conversation_summaries",
   behaviorCorrections: "phone_behavior_corrections",
   characterKnowledgeMigrationState: "phone_character_knowledge_migration_state",
+  /** Idempotent cursors for group-to-member memory projections. */
+  groupMemorySync: "phone_group_memory_sync_v1",
   characterPhones: "phone_character_phones_v1",
   characterPhonesIndexV2: "phone_character_phone_index_v2",
   characterPhoneV2: (phoneId: string) => `phone_character_phone_v2_${encodeURIComponent(phoneId)}`,

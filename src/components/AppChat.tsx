@@ -153,6 +153,7 @@ import { createPostReplyCoordinator } from "../features/chat/controllers/postRep
 import { classifyDirectReplyError, createDirectReplyLifecycleOutcome, type DirectReplyLifecycleInput, type DirectReplyLifecycleOutcome, type DirectReplyLifecyclePhase } from "../features/chat/contracts/directReplyLifecycle";
 import { useChatController } from "../features/chat/hooks/useChatController";
 import { useChatSettingsDraft } from "../features/chat/hooks/useChatSettingsDraft";
+import { setGroupMemorySyncEnabled, syncGroupMemoryToMembers } from "../features/chat/services/groupMemorySyncService";
 import { useChatAttachmentState, type ChatCallMode } from "../features/chat/hooks/useChatAttachmentState";
 import { useInnerVoice } from "../features/chat/hooks/useInnerVoice";
 import { useChatAppointment } from "../features/chat/hooks/useChatAppointment";
@@ -1088,6 +1089,7 @@ export default function AppChat({
   const latestActiveCharacterRef = useRef<Character | undefined>(activeCharacter);
   const latestActiveRelationshipRef = useRef<CharacterRelationship | undefined>(activeRelationship);
   const latestMemoriesRef = useRef<MemoryItem[]>(memories || []);
+  const groupMemorySyncInFlightRef = useRef<Set<string>>(new Set());
   const consumedGroupWelcomeIdsRef = useRef(new Set<string>());
   const processedRedPacketClaimNoticeIdsRef = useRef(new Set<string>());
   const recentSharedImageByScopeRef = useRef<Record<string, { dataUrl: string; timestamp: number }>>({});
@@ -1386,6 +1388,40 @@ export default function AppChat({
         });
       });
   }, [friendRequests, relationships, characters, messages, settings.apiKey, settings.selectedModel]);
+
+  // Group memory synchronization is deliberately outside the direct-chat
+  // retrieval path. Once enabled, every historical/new group message is
+  // projected into each member's exact direct relation scope. The service
+  // keeps a per-member message hash ledger, so closing/reopening or a retry
+  // cannot duplicate records and edits create a new version after retracting
+  // the previous source projection.
+  useEffect(() => {
+    if (!activeCharacter?.isGroupChat) return;
+    const groupId = activeCharacter.id;
+    setGroupMemorySyncEnabled(groupId, activeCharacter.groupMemorySyncEnabled === true);
+    if (!activeCharacter.groupMemorySyncEnabled) return;
+    if (groupMemorySyncInFlightRef.current.has(groupId)) return;
+    const members = (activeCharacter.memberIds || [])
+      .map((id) => characters.find((character) => character.id === id))
+      .filter(Boolean) as Character[];
+    if (members.length === 0) return;
+    groupMemorySyncInFlightRef.current.add(groupId);
+    try {
+      syncGroupMemoryToMembers({
+        group: activeCharacter,
+        messages,
+        members,
+        characters,
+        relationships,
+        activeIdentityId,
+        userName: settings.name,
+      });
+    } catch (error) {
+      console.warn("[group-memory-sync] Projection failed; it will retry on the next group update.", error);
+    } finally {
+      groupMemorySyncInFlightRef.current.delete(groupId);
+    }
+  }, [activeCharacter?.id, activeCharacter?.isGroupChat, activeCharacter?.groupMemorySyncEnabled, activeCharacter?.memberIds?.join(","), messages, characters, relationships, activeIdentityId, settings.name]);
 
   // Rejected requests are persisted with a short natural delay. Refresh when
   // the delay expires so a scheduled retry becomes actionable without a
@@ -1818,6 +1854,7 @@ export default function AppChat({
     draftRemark, setDraftRemark, isEditingRemark, setIsEditingRemark, draftAvatar, setDraftAvatar,
     isDeleteMemberMode, setIsDeleteMemberMode, showAddMemberModal, setShowAddMemberModal,
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
+    draftGroupMemorySyncEnabled, setDraftGroupMemorySyncEnabled,
     draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
@@ -4650,6 +4687,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     draftRemark,
     draftAvatar,
     draftIsPinned,
+    draftGroupMemorySyncEnabled,
     draftChatBg,
     draftCustomCss,
     draftChatIcons,
@@ -8094,6 +8132,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       </div>
                       <SettingsSwitch checked={draftIsPinned} onChange={setDraftIsPinned} label="置顶聊天" />
                     </div>
+
+                    {activeCharacter.isGroupChat && (
+                      <div className="min-h-[52px] px-4 py-2 flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-slate-800 font-medium text-[16px] block">同步群聊记忆</span>
+                        </div>
+                        <SettingsSwitch checked={draftGroupMemorySyncEnabled} onChange={setDraftGroupMemorySyncEnabled} label="同步群聊记忆" />
+                      </div>
+                    )}
 
                     {/* Disable Bracket Actions */}
                     <div className="flex h-[52px] px-4 items-center justify-between gap-3">

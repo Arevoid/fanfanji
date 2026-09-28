@@ -25,6 +25,7 @@ interface UseChatSaveSettingsOptions {
   draftRemark: any;
   draftAvatar: any;
   draftIsPinned: any;
+  draftGroupMemorySyncEnabled: any;
   draftChatBg: any;
   draftCustomCss: any;
   draftChatIcons: any;
@@ -65,7 +66,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
   } = options;
   const {
     draftEnableAutoTranslate, draftEnableProactiveChat, draftProactiveStartTime, draftProactiveEndTime,
-    draftEnableProactiveOffline, draftRemark, draftAvatar, draftIsPinned, draftChatBg, draftCustomCss,
+    draftEnableProactiveOffline, draftRemark, draftAvatar, draftIsPinned, draftGroupMemorySyncEnabled, draftChatBg, draftCustomCss,
     draftChatIcons, draftChatStylePreset, draftEnableProactiveCall, draftProactiveChatInterval,
     draftDisableBracketActions, draftHistoryMemoryLimit, draftContextMemoryLimit, draftRetrievalHistoryLimit,
     draftArchiveTemplateType, draftEnableTimeAwareness,
@@ -107,6 +108,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
       // chats. The old branch silently discarded direct-chat avatar edits.
       avatar: draftAvatar || activeCharacter.avatar,
       isPinned: draftIsPinned,
+      ...(activeCharacter.isGroupChat ? { groupMemorySyncEnabled: draftGroupMemorySyncEnabled === true } : {}),
       chatBg: draftChatBg,
       customCss: draftCustomCss,
       customChatCSS: draftCustomCss,

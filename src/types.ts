@@ -79,6 +79,8 @@ export interface Character {
   enableTimeAwareness?: boolean;
   isGroupChat?: boolean;
   memberIds?: string[];
+  /** When enabled, group history is projected into each member's direct memory scope. */
+  groupMemorySyncEnabled?: boolean;
   /** Identity that owns this contact or group. Unset records belong to the legacy primary identity. */
   ownerIdentityId?: string;
   /** Contact copies are hidden from the archive and keep a link to their source profile. */

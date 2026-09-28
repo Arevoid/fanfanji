@@ -183,6 +183,11 @@ const isTextAlreadyPrompted = (candidate: string, promptedTexts: readonly string
   });
 };
 
+// Group sync claims are provenance anchors for their richer episode summary.
+// Keep the anchor out of the normal fact projection so the summary (which
+// contains the actual public exchange) is not suppressed as a duplicate.
+const isGroupMemorySyncClaim = (claim: KnowledgeClaim): boolean => claim.source.producer === "group-memory-sync.v1";
+
 const projectionClaims = (projection: KnowledgePromptProjection): KnowledgeClaim[] => [
   ...projection.confirmedFacts,
   ...projection.userAssertions,
@@ -266,7 +271,7 @@ export function retrieveTruthForPrivatePrompt(input: TruthRetrievalInput): Truth
   const alreadyPromptedClaimIds = new Set(scopedClaimCandidates
     .filter(isClaimAlreadyPrompted)
     .map((claim) => claim.id));
-  const scopedClaims = scopedClaimCandidates.filter((claim) => !alreadyPromptedClaimIds.has(claim.id));
+  const scopedClaims = scopedClaimCandidates.filter((claim) => !alreadyPromptedClaimIds.has(claim.id) && !isGroupMemorySyncClaim(claim));
   const ranked = rankClaims(scopedClaims, input.queryText || "", limit);
   const projection = selectKnowledgeForPrivatePrompt(ranked, input.scope, now);
   const selectedClaimIds = new Set(projectionClaims(projection).map((claim) => claim.id));

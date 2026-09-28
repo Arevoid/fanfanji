@@ -12,6 +12,7 @@ export function useChatSettingsDraft() {
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [selectedAddMemberIds, setSelectedAddMemberIds] = useState<string[]>([]);
   const [draftIsPinned, setDraftIsPinned] = useState(false);
+  const [draftGroupMemorySyncEnabled, setDraftGroupMemorySyncEnabled] = useState(false);
   const [draftChatBg, setDraftChatBg] = useState<string | undefined>();
   const [draftCustomCss, setDraftCustomCss] = useState("");
   const [draftChatIcons, setDraftChatIcons] = useState<ChatIconOverrides>({});
@@ -45,6 +46,7 @@ export function useChatSettingsDraft() {
     setDraftAvatar(character.avatar);
     setIsDeleteMemberMode(false);
     setDraftIsPinned(character.isPinned || false);
+    setDraftGroupMemorySyncEnabled(character.groupMemorySyncEnabled === true);
     setDraftChatBg(character.chatBg);
     setDraftCustomCss(character.customChatCSS || character.customCss || "");
     setDraftChatIcons(sanitizeChatIcons(character.customChatIcons));
@@ -80,6 +82,7 @@ export function useChatSettingsDraft() {
     draftRemark, setDraftRemark, isEditingRemark, setIsEditingRemark, draftAvatar, setDraftAvatar,
     isDeleteMemberMode, setIsDeleteMemberMode, showAddMemberModal, setShowAddMemberModal,
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
+    draftGroupMemorySyncEnabled, setDraftGroupMemorySyncEnabled,
     draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
