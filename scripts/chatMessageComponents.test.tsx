@@ -38,6 +38,7 @@ const rendered = renderToStaticMarkup(
 const normalQuote = renderToStaticMarkup(<QuotedMessagePreview message={makeMessage("q1", "引用文本", "user")} senderName="角色" onClear={() => undefined} closeIcon={<span>×</span>} />);
 const fileQuote = renderToStaticMarkup(<QuotedMessagePreview message={makeMessage("q2", "[文件]|计划书")} senderName="角色" onClear={() => undefined} closeIcon={<span>×</span>} />);
 const mediaQuote = renderToStaticMarkup(<QuotedMessagePreview message={makeMessage("q3", "[位置]|东京站")} senderName="角色" onClear={() => undefined} closeIcon={<span>×</span>} />);
+const stickerQuote = renderToStaticMarkup(<QuotedMessagePreview message={makeMessage("q4", "[表情]|兔兔|sticker://sticker-local-1|语义")} senderName="角色" onClear={() => undefined} closeIcon={<span>×</span>} />);
 const originalIds = messages.map((message) => message.id).join(",");
 const renderedWindowIds: string[] = [];
 const renderedWindowIndexes: number[] = [];
@@ -73,18 +74,19 @@ const checks: Array<[string, boolean]> = [
   ["M call passthrough", rendered.includes("[通话]|语音通话")],
   ["N normal quote", normalQuote.includes("自己:") && normalQuote.includes("引用文本")],
   ["O special quote summary", fileQuote.includes("[文件]") && mediaQuote.includes("[媒体内容]")],
-  ["P typing position", rendered.indexOf("typing-anchor") < rendered.indexOf("bottom-anchor")],
-  ["Q sender layout data remains available", rendered.includes("message-user") && rendered.includes("message-character")],
-  ["R avatar fallback remains renderer-owned", renderedIds.length === messages.length],
-  ["S callback is called once per message", renderedIds.join(",") === originalIds],
-  ["T regenerate callback remains renderer-owned", renderedIds.includes("character")],
-  ["U delete callback remains renderer-owned", renderedIds.includes("user")],
-  ["V key classes", rendered.includes("cv-messages-list chat-message-list") && normalQuote.includes("animate-fade-in")],
-  ["W order is unchanged", renderedIds.join(",") === originalIds],
-  ["X input array is unchanged", messages.map((message) => message.id).join(",") === originalIds],
-  ["Y render window keeps latest messages", renderedWindowIds.join(",") === "packet,transfer,call"],
-  ["Z render window preserves absolute indexes", renderedWindowIndexes.join(",") === "7,8,9"],
-  ["AA window supports a header and content wrapper", rendered.includes("message-header") && rendered.includes("message-content")],
+  ["P sticker quote hides internal protocol", stickerQuote.includes("[表情包] 兔兔") && !stickerQuote.includes("sticker://")],
+  ["Q typing position", rendered.indexOf("typing-anchor") < rendered.indexOf("bottom-anchor")],
+  ["R sender layout data remains available", rendered.includes("message-user") && rendered.includes("message-character")],
+  ["S avatar fallback remains renderer-owned", renderedIds.length === messages.length],
+  ["T callback is called once per message", renderedIds.join(",") === originalIds],
+  ["U regenerate callback remains renderer-owned", renderedIds.includes("character")],
+  ["V delete callback remains renderer-owned", renderedIds.includes("user")],
+  ["W key classes", rendered.includes("cv-messages-list chat-message-list") && normalQuote.includes("animate-fade-in")],
+  ["X order is unchanged", renderedIds.join(",") === originalIds],
+  ["Y input array is unchanged", messages.map((message) => message.id).join(",") === originalIds],
+  ["Z render window keeps latest messages", renderedWindowIds.join(",") === "packet,transfer,call"],
+  ["AA render window preserves absolute indexes", renderedWindowIndexes.join(",") === "7,8,9"],
+  ["AB window supports a header and content wrapper", rendered.includes("message-header") && rendered.includes("message-content")],
 ];
 
 for (const [name, passed] of checks) {

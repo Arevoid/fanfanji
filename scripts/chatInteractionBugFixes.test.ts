@@ -14,7 +14,7 @@ assert.equal(isExplicitCharacterAvatarChangeRequest("你换一个头像吧"), tr
 assert.equal(isExplicitCharacterAvatarChangeRequest("我们用情侣头像"), true);
 assert.equal(isExplicitCharacterAvatarChangeRequest("这张照片好看吗"), false);
 assert.equal(isExplicitCharacterAvatarChangeRequest("我换个话题"), false);
-assert.deepEqual(resolveCharacterAvatarChangeTiming("温柔、爽快", ""), { delayMs: 900, waitForReply: false });
+assert.deepEqual(resolveCharacterAvatarChangeTiming("温柔、爽快", ""), { delayMs: 900, waitForReply: true });
 assert.deepEqual(resolveCharacterAvatarChangeTiming("嘴硬又傲娇", ""), { delayMs: 12_000, waitForReply: true });
 assert.equal(characterAvatarReplyRefusesChange("才不换呢"), true);
 assert.equal(characterAvatarReplyRefusesChange("好呀，这就换上"), false);

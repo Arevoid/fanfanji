@@ -35,6 +35,8 @@ export type DirectChatPromptBuilderInput = {
   onlineChatSpatialBoundary: string;
   voiceCallPrompts?: readonly string[];
   stickerPrompt?: string;
+  /** Private, validated client-action capabilities available to this turn. */
+  characterActionPrompt?: string;
   extraInstructions?: readonly string[];
   worldBookContextPriority?: boolean;
   characterProjection: CharacterPromptProjection;
@@ -106,6 +108,7 @@ export function buildDirectChatSystemInstruction(input: DirectChatPromptBuilderI
   );
   if (input.voiceCallPrompts?.length) instructions.push(...input.voiceCallPrompts);
   if (input.stickerPrompt) instructions.push(input.stickerPrompt);
+  if (input.characterActionPrompt) instructions.push(input.characterActionPrompt);
   if (input.extraInstructions?.length) instructions.push(...input.extraInstructions.filter(Boolean));
   if (input.worldBookContextPriority) instructions.push(WORLD_BOOK_CONTEXT_PRIORITY);
 

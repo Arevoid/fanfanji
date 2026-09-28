@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Message } from "../../../types";
-import { parseTextImageDescription } from "../services/messageParser";
+import { formatMessageContentForQuote } from "../services/messageParser";
 
 interface QuotedMessagePreviewProps {
   message: Message;
@@ -23,14 +23,7 @@ export function parseQuoteReply(content: string): ParsedQuoteReply | null {
 }
 
 export function QuotedMessagePreview({ message, senderName, onClear, closeIcon }: QuotedMessagePreviewProps) {
-  const summary = parseTextImageDescription(message.content) ? "[文字图]"
-    : message.content.startsWith("data:image/") ? "[图片]"
-    : message.content.startsWith("[文件]") ? "[文件]"
-    : message.content.startsWith("[语音]") ? "[语音]"
-    : message.content.startsWith("[红包]") ? "[红包]"
-    : message.content.startsWith("[转账]") ? "[转账]"
-    : message.content.startsWith("[") ? "[媒体内容]"
-    : message.content.trim() || "[消息]";
+  const summary = formatMessageContentForQuote(message.content);
 
   return (
     <div className="composer-quote-preview message-quote px-3 py-1.5 border-b border-stone-100 flex items-center justify-between text-[11px] shrink-0 animate-fade-in">

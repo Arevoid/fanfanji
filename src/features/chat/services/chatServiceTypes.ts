@@ -24,6 +24,8 @@ export interface ReplyCandidateContext {
   transformBubble?: (bubbleText: string, index: number) => string;
   /** Defaults to false: character emoji/stickers require a deliberate per-turn allowance. */
   allowEmoji?: boolean;
+  /** User input used to turn an explicit quoted-sticker agreement into a real sticker event. */
+  requestedStickerMessage?: string;
 }
 
 export interface ReplyCandidatesResult {

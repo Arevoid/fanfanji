@@ -39,6 +39,7 @@ const prompt = buildDirectChatSystemInstruction({
   onlineChatSpatialBoundary: "SPATIAL",
   voiceCallPrompts: ["CALL"],
   stickerPrompt: "STICKER",
+  characterActionPrompt: "CHARACTER_ACTION",
   extraInstructions: ["EXTRA"],
   worldBookContextPriority: true,
   characterProjection: projection,
@@ -52,7 +53,7 @@ const orderedMarkers = [
   "VOICE_INTERVAL", "WB_AFTER_MAIN", "WB_BEFORE_CHARACTER", "RELATIONSHIP",
   "BEHAVIOR", "CONTEXT", "COGNITIVE", "WB_AFTER_CHARACTER", "PROFILE", "ALIAS",
   "BLOCK_USER_KNOWLEDGE", "DIRECT CHAT TURN COMPLETENESS", "BLOCK_INNER_VOICE", "MOMENTS", "OFFLINE", "BLOCK_KNOWLEDGE", "SPATIAL",
-  "CALL", "STICKER", "EXTRA",
+  "CALL", "STICKER", "CHARACTER_ACTION", "EXTRA",
 ];
 let previousIndex = -1;
 for (const marker of orderedMarkers) {

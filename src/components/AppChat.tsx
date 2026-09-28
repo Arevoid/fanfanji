@@ -16,7 +16,7 @@ import { getCurrentAppointmentProposal } from "../domain/schedule/appointmentPol
 import { startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
-import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseRedPacketClaimNotice, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
+import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, formatMessageContentForQuote, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseRedPacketClaimNotice, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import type { CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import {
@@ -140,6 +140,7 @@ import { INLINE_INNER_VOICE_INSTRUCTION, isChatResponseFormatError } from "../fe
 import { generateCharacterImageForDelivery } from "../features/chat/services/characterImageDeliveryService";
 import { imageDataUrlToBlob, parseCharacterSaveUserImageDirective } from "../features/chat/services/userImageMemoryService";
 import { characterAvatarReplyRefusesChange, isExplicitCharacterAvatarChangeRequest, resolveCharacterAvatarChangeTiming, type CharacterAvatarChangeTiming } from "../features/chat/services/characterAvatarChangeIntent";
+import { formatCharacterActionPrompt, parseCharacterActionDirective, type CharacterActionDirective } from "../features/chat/services/characterActionProtocol";
 import { resolveRecentUserImageForTurn } from "../features/chat/services/recentUserImageContext";
 import { resolveChatMessageAvatar } from "../features/chat/services/messageAvatarResolver";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
@@ -584,6 +585,7 @@ export default function AppChat({
   } = useChatNavigationState();
   const diaryShareReplyInFlightRef = useRef<Set<string>>(new Set());
   const momentImageGenerationInFlightRef = useRef<Set<string>>(new Set());
+  const characterActionInFlightRef = useRef<Set<string>>(new Set());
   const [momentImageGenerationIds, setMomentImageGenerationIds] = useState<Record<string, boolean>>({});
   const latestMomentsRef = useRef(moments);
   latestMomentsRef.current = moments;
@@ -3260,6 +3262,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           ? voiceCallPromptBlocks
           : undefined,
         stickerPrompt,
+        characterActionPrompt: activeAttachModal !== "calling"
+          ? formatCharacterActionPrompt([
+            "publish_moment",
+            ...(stickerGroups.some((group) => group.stickers.length > 0) ? ["send_sticker" as const] : []),
+          ])
+          : undefined,
         extraInstructions: [
           ...(proactiveOfflineAllowedModes.length > 0
             ? [buildProactiveOfflineInvitationPrompt({
@@ -3396,18 +3404,57 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         longTermMemoryLimit: topK,
       });
 
+      const executeCharacterAction = async (directive: CharacterActionDirective): Promise<{
+        status: "success" | "rejected" | "failed";
+        stickerMarkup?: string;
+      }> => {
+        if (directive.actor !== "character") return { status: "rejected" };
+        if (directive.type === "send_sticker") {
+          const sticker = directive.stickerId
+            ? stickerGroups.flatMap((group) => group.stickers).find((candidate) => candidate.id === directive.stickerId)
+            : undefined;
+          if (!sticker || (directive.stickerName && sticker.name !== directive.stickerName)) return { status: "failed" };
+          const semanticDescription = sticker.semanticDescription || `这是名为“${sticker.name}”的聊天表情包`;
+          return {
+            status: "success",
+            stickerMarkup: `[表情]|${sticker.name}|sticker://${sticker.id}|${encodeURIComponent(semanticDescription)}`,
+          };
+        }
+        if (directive.type !== "publish_moment") return { status: "rejected" };
+        if (!turnRelationship || turnRelationship.characterId !== activeCharacter.id || activeCharacter.isGroupChat) {
+          return { status: "rejected" };
+        }
+        const actionKey = `${replyContext.userIdentityId}:${turnRelationship.id}:${directive.id || replyBatchId}:publish_moment`;
+        if (characterActionInFlightRef.current.has(actionKey)) return { status: "rejected" };
+        characterActionInFlightRef.current.add(actionKey);
+        try {
+          const generated = await generateCharacterMoment(turnRelationship, Date.now(), {
+            allowProfileDrivenPost: true,
+            momentPromptHint: directive.contentHint || "用户刚刚明确要求你发布一条朋友圈",
+          });
+          return { status: generated ? "success" : "failed" };
+        } catch (error) {
+          console.warn("Character action publish_moment failed:", error);
+          return { status: "failed" };
+        } finally {
+          characterActionInFlightRef.current.delete(actionKey);
+        }
+      };
+
       type PreparedDirectReplyResponse = {
         data: Awaited<ReturnType<typeof requestDirectChatTurn>>;
         innerVoiceRecord?: InnerVoiceRecord;
         proactiveOfflineResponseParse?: ReturnType<typeof parseProactiveOfflineResponseDirective>;
         proactiveOfflineParse?: ReturnType<typeof parseProactiveOfflineInvitationDirective>;
         callAction?: ReturnType<typeof parseCallActionDirective>;
+        characterAction?: ReturnType<typeof parseCharacterActionDirective>;
       };
       const normalizeDirectReplyResponse = async (rawData: Awaited<ReturnType<typeof requestDirectChatTurn>>): Promise<PreparedDirectReplyResponse> => {
         const data = { ...rawData };
         let proactiveOfflineResponseParse: PreparedDirectReplyResponse["proactiveOfflineResponseParse"];
         let proactiveOfflineParse: PreparedDirectReplyResponse["proactiveOfflineParse"];
         let callAction: PreparedDirectReplyResponse["callAction"];
+        let characterAction: PreparedDirectReplyResponse["characterAction"];
         if (data.text) {
           const hadPhonePasswordActionMarker = /\[\[\s*CHARACTER_PHONE_PASSWORD_CHANGE\s*\]\]/u.test(data.text);
           data.text = applyCharacterPhonePasswordAction(data.text);
@@ -3459,6 +3506,20 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             now: Date.now(),
           });
           data.text = proactiveOfflineParse.visibleText;
+          characterAction = parseCharacterActionDirective({ text: data.text });
+          data.text = characterAction.visibleText;
+          if (characterAction.directive && !isOfflineModeActive) {
+            const actionResult = await executeCharacterAction(characterAction.directive);
+            if (actionResult.status === "success" && actionResult.stickerMarkup && !/\[表情\]\|/u.test(data.text)) {
+              data.text = `${data.text}\n\n${actionResult.stickerMarkup}`.trim();
+            }
+            if (actionResult.status !== "success" && characterAction.directive.type === "publish_moment") {
+              data.text = `${data.text}\n\n朋友圈暂时没有发出去，我先不把它当作已经发布。`.trim();
+            }
+            if (actionResult.status !== "success" && characterAction.directive.type === "send_sticker") {
+              data.text = `${data.text}\n\n这个表情包暂时没有发出去，我不把它当作已经发送。`.trim();
+            }
+          }
           callAction = parseCallActionDirective({ text: data.text });
           data.text = callAction.visibleText;
           // Clean any accidental "[发送时间: ...]" prefixes
@@ -3470,7 +3531,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           settings,
           translate: apiTranslate,
         });
-        return { data: translatedData, proactiveOfflineResponseParse, proactiveOfflineParse, callAction };
+        return { data: translatedData, proactiveOfflineResponseParse, proactiveOfflineParse, callAction, characterAction };
       };
       const directTurnRequest = preparedDirectReply.request;
 
@@ -3559,17 +3620,19 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
             return {
               rawText: data.text,
+              requestedStickerMessage: userMsg?.content,
               disableBracketActions: turnSettings.disableBracketActions,
               keepPeriods,
               context: replyContext,
               characterName: activeCharacter?.name,
               userName: activeIdentityName,
-              allowEmoji: mayCharacterUseEmoji({
-                latestUserMessage: userMsg?.content,
-                recentCharacterMessages: currentChatMessages
-                  .filter((message) => message.sender === "character" && message.characterId === activeChatCharId)
-                  .map((message) => message.content),
-              }),
+              allowEmoji: prepared.characterAction?.directive?.type === "send_sticker"
+                || mayCharacterUseEmoji({
+                  latestUserMessage: userMsg?.content,
+                  recentCharacterMessages: currentChatMessages
+                    .filter((message) => message.sender === "character" && message.characterId === activeChatCharId)
+                    .map((message) => message.content),
+                }),
               replyBatchId,
               createId: () => createId("online"),
               currentTime: () => Date.now(),
@@ -4066,9 +4129,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       .filter((message) => message.sender === "character")
       .map((message) => message.content)
       .join("\n");
-    // A guarded persona gets a visible beat after saying no; an accepting
-    // reply changes the profile shortly after the reply has been delivered.
-    schedulePendingCharacterAvatarChange(scopeKey, characterAvatarReplyRefusesChange(replyText) ? 4_500 : 1_200);
+    // A clear refusal is a terminal decision for this request. Do not mutate
+    // the profile later just because a stale timer was already scheduled.
+    if (characterAvatarReplyRefusesChange(replyText)) {
+      clearCharacterAvatarChangeTimer(scopeKey);
+      delete pendingCharacterAvatarChangesRef.current[scopeKey];
+      return;
+    }
+    // An accepting or non-committal reply changes the profile shortly after
+    // the response has been delivered, preserving the visible conversation
+    // beat for guarded personas.
+    schedulePendingCharacterAvatarChange(scopeKey, pending.timing.waitForReply ? 1_200 : 900);
   };
 
   const handleExplicitCharacterAvatarChangeRequest = (
@@ -6163,7 +6234,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     });
   }, [moments]);
 
-  const generateCharacterMoment = async (relationship: CharacterRelationship, occurredAt: number): Promise<boolean> => {
+  const generateCharacterMoment = async (
+    relationship: CharacterRelationship,
+    occurredAt: number,
+    options: { allowProfileDrivenPost?: boolean; momentPromptHint?: string } = {},
+  ): Promise<boolean> => {
     const friend = findMomentRelationshipCharacter(characters, relationship);
     if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return false;
     try {
@@ -6182,6 +6257,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         requestAi: apiChat,
         cleanAndExtractMoment,
         characterExpressionPrompt: MOMENT_CHARACTER_EXPRESSION_PROMPT,
+        allowProfileDrivenPost: options.allowProfileDrivenPost,
+        momentPromptHint: options.momentPromptHint,
       });
       if (generated.blockedReason === "prohibited-content") {
         // Automatic Moments are optional background content. A provider safety
@@ -9105,7 +9182,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                                   <span className="message-quote__prefix">↩ {isSelf ? "你回复了" : "回复了"}</span>{" "}
                                   <span className="message-quote__author">{quoteAuthor}</span>
                                   <span className="message-quote__separator" aria-hidden="true">：</span>
-                                  <span className="message-quote__content px-3 py-2">{quoteReply.content}</span>
+                                  <span className="message-quote__content px-3 py-2">{formatMessageContentForQuote(quoteReply.content)}</span>
                                 </div>
                               </>
                             ) : <div className="text-left" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}><ChatTextWithLinks text={msg.content} /></div>;

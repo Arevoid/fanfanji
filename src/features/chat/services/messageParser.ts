@@ -219,6 +219,27 @@ export const parseTextImageDescription = (content: string): string | null => {
   }
 };
 
+/**
+ * Convert persisted attachment markup into a short, user-facing quote label.
+ * Quote previews must never expose internal sticker:// identifiers or encoded
+ * semantic descriptions as if they were ordinary chat text.
+ */
+export function formatMessageContentForQuote(content: string): string {
+  const normalized = content.trim();
+  if (parseTextImageDescription(normalized) !== null) return "[文字图]";
+  if (normalized.startsWith("data:image/")) return "[图片]";
+  if (normalized.startsWith("[表情]|")) {
+    const stickerName = normalized.split("|")[1]?.trim();
+    return stickerName ? `[表情包] ${stickerName}` : "[表情包]";
+  }
+  if (normalized.startsWith("[文件]")) return "[文件]";
+  if (normalized.startsWith("[语音]")) return "[语音]";
+  if (normalized.startsWith("[红包]")) return "[红包]";
+  if (normalized.startsWith("[转账]")) return "[转账]";
+  if (normalized.startsWith("[")) return "[媒体内容]";
+  return normalized || "[消息]";
+}
+
 export function getChatMessageVisualType(content: string): ChatMessageVisualType {
   if (content.startsWith("data:image/")) return "image";
   if (content.startsWith(TEXT_IMAGE_PREFIX)) return "text-image";

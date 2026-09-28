@@ -32,7 +32,10 @@ export function resolveCharacterAvatarChangeTiming(personality = "", backstory =
   const waitsForReply = /(?:傲娇|嘴硬|口是心非|别扭|不坦率|高冷|傲慢|毒舌|傲气)/iu.test(persona);
   return waitsForReply
     ? { delayMs: 12_000, waitForReply: true }
-    : { delayMs: 900, waitForReply: false };
+    // Every persona gets one reply boundary before a profile mutation. A
+    // normal character may answer quickly, but a clear refusal must still be
+    // able to prevent the avatar write.
+    : { delayMs: 900, waitForReply: true };
 }
 
 /** Detect an explicit refusal so a guarded persona can change a little later. */

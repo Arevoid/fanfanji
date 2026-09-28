@@ -15,6 +15,11 @@ const candidateContext = (rawText: string) => ({
   currentTime: (index: number) => 100 + index,
 });
 
+const quotedStickerRequest = {
+  requestedStickerMessage: "「引用 我：[表情]|兔兔|sticker://sticker-local-1|语义」\n等会你发这个表情",
+  allowEmoji: true,
+};
+
 let requestCount = 0;
 const request: AiChatRequest = { message: "hello", history: [], systemInstruction: "worldbook memory time moments boundary", apiKey: "test", model: "test-model" };
 const response = await requestAiReply(async (input) => {
@@ -47,6 +52,16 @@ assert.equal(request.systemInstruction.includes("boundary"), true);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("")).messages, []);
 await assert.rejects(() => requestAiReply(async () => { throw new Error("network"); }, request), /network/);
 assert.deepEqual(createDirectReplyCandidates(candidateContext("[红包]|8.88|恭喜发财")).messages.map((message) => message.content), ["[红包]|8.88|恭喜发财"]);
+assert.deepEqual(
+  createDirectReplyCandidates({ ...candidateContext("好，我发过去了"), ...quotedStickerRequest }).messages.map((message) => message.content),
+  ["好，我发过去了", "[表情]|兔兔|sticker://sticker-local-1|语义"],
+  "an agreed quoted-sticker request becomes a real sticker message",
+);
+assert.deepEqual(
+  createDirectReplyCandidates({ ...candidateContext("“好，我发过去了”"), ...quotedStickerRequest }).messages.map((message) => message.content),
+  ["好，我发过去了", "[表情]|兔兔|sticker://sticker-local-1|语义"],
+  "the sticker event survives quoted-dialogue normalization",
+);
 
 // M-R: regeneration retains its legacy parse path and only returns candidates for AppChat to send/save.
 const regenerated = createRegeneratedReplyCandidates(candidateContext("第一句。第二句。"));
@@ -61,4 +76,4 @@ assert.deepEqual(createRegeneratedReplyCandidates(candidateContext("[消息发�
 assert.deepEqual(createDirectReplyCandidates(candidateContext("[第2秒]")).messages, []);
 assert.equal(requestCount, 1);
 
-console.log("Direct chat reply services: 20 fixed acceptance checks passed");
+console.log("Direct chat reply services: 22 fixed acceptance checks passed");

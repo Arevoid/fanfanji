@@ -4,6 +4,7 @@ import { buildAliasIdentityBoundaryPrompt, buildAliasIdentityFinalGuardPrompt } 
 import { resolveRecentUserImageForTurn } from "../services/recentUserImageContext";
 import { resolveRegenerationTurnScope } from "../services/regenerationTurnScope";
 import { buildWorldBookScanText } from "../../../domain/worldbook/worldBookTriggerScan";
+import { mayCharacterUseEmoji } from "../services/characterEmojiPolicy";
 
 /** Mechanical extraction of the existing regeneration path; dependencies stay explicit in the page context. */
 export function useChatRegenerationAction(context: Record<string, any>) {
@@ -428,7 +429,13 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           characterId: activeChatCharId,
           characterName: activeCharacter?.name,
           userName: promptUserName,
-          allowEmoji: false,
+          allowEmoji: mayCharacterUseEmoji({
+            latestUserMessage: lastUserMsg.content,
+            recentCharacterMessages: previousMessages
+              .filter((message: Message) => message.sender === "character")
+              .map((message: Message) => message.content),
+          }),
+          requestedStickerMessage: lastUserMsg.content,
           replyBatchId: createId("regen-batch"),
           createId: () => createId("regen"),
           currentTime: (idx) => Date.now() + idx,
