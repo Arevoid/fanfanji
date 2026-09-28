@@ -43,28 +43,47 @@ const belongsToIdentity = (character: Character, ownerIdentityId: string): boole
 /**
  * A social-link record is only actionable while its backing relationship edge
  * still exists. Older records did not persist networkEdgeId, so those remain
- * valid for backwards compatibility; newly-created links are tied to the
- * current canvas and cannot survive removing that edge or either endpoint.
+ * valid for backwards compatibility. Newer records can outlive a canvas edge
+ * when a user edits/recreates a line, so endpoint matching is also used as a
+ * compatibility fallback. Character endpoints are compared by canonical ID so
+ * legacy contact copies do not make an otherwise valid permission disappear.
  */
-function hasActiveNetworkEdge(link: RelationshipNetworkSocialLink, ownerIdentityId: string): boolean {
+function hasActiveNetworkEdge(
+  link: RelationshipNetworkSocialLink,
+  ownerIdentityId: string,
+  characters: readonly Character[] = [],
+): boolean {
+  const networks = listRelationshipNetworkMapsForIdentity(ownerIdentityId);
+  // Legacy social links without an edge ID predate the canvas binding. They
+  // remain actionable exactly as before; only links carrying an edge ID need
+  // to be reconciled against the current map.
   if (!link.networkEdgeId) return true;
-  return listRelationshipNetworkMapsForIdentity(ownerIdentityId).some((network) =>
-    network.edges.some((edge) => {
-      if (edge.id !== link.networkEdgeId) return false;
-      const sourceNode = network.nodes.find((node) => node.id === edge.sourceNodeId);
-      const targetNode = network.nodes.find((node) => node.id === edge.targetNodeId);
-      if (!sourceNode || !targetNode) return false;
-      const sameDirection = sourceNode.entityType === link.sourceEntityType
-        && sourceNode.entityId === link.sourceEntityId
-        && targetNode.entityType === link.targetEntityType
-        && targetNode.entityId === link.targetEntityId;
-      const reverseDirection = sourceNode.entityType === link.targetEntityType
-        && sourceNode.entityId === link.targetEntityId
-        && targetNode.entityType === link.sourceEntityType
-        && targetNode.entityId === link.sourceEntityId;
-      return sameDirection || reverseDirection;
-    }),
-  );
+
+  const resolveEntityId = (entityType: string, entityId: string): string =>
+    entityType === "character" ? resolveCanonicalCharacterId(entityId, characters) : entityId;
+  const sameEntity = (node: { entityType: string; entityId: string }, entityType: string, entityId: string): boolean =>
+    node.entityType === entityType
+    && resolveEntityId(node.entityType, node.entityId) === resolveEntityId(entityType, entityId);
+
+  const edgeMatchesLink = (network: typeof networks[number], edge: typeof network.edges[number]): boolean => {
+    const sourceNode = network.nodes.find((node) => node.id === edge.sourceNodeId);
+    const targetNode = network.nodes.find((node) => node.id === edge.targetNodeId);
+    if (!sourceNode || !targetNode) return false;
+    const forwardMatch = sameEntity(sourceNode, link.sourceEntityType, link.sourceEntityId)
+      && sameEntity(targetNode, link.targetEntityType, link.targetEntityId);
+    const reverseMatch = sameEntity(sourceNode, link.targetEntityType, link.targetEntityId)
+      && sameEntity(targetNode, link.sourceEntityType, link.sourceEntityId);
+    if (!forwardMatch && !reverseMatch) return false;
+    if (edge.direction === "both") return true;
+    return edge.direction === "forward" ? forwardMatch : reverseMatch;
+  };
+
+  // Prefer the persisted edge ID, but recover a recreated edge with the same
+  // canonical endpoints instead of silently dropping the interaction.
+  if (link.networkEdgeId && networks.some((network) =>
+    network.edges.some((edge) => edge.id === link.networkEdgeId && edgeMatchesLink(network, edge)),
+  )) return true;
+  return networks.some((network) => network.edges.some((edge) => edgeMatchesLink(network, edge)));
 }
 
 export interface RelationshipNetworkMomentCommentCandidate {
@@ -136,7 +155,7 @@ export function listRelationshipNetworkCharacterToCharacterMomentCommentCandidat
 
   return listRelationshipNetworkSocialLinksForIdentity(input.ownerIdentityId)
     .filter((socialLink) =>
-      hasActiveNetworkEdge(socialLink, input.ownerIdentityId)
+      hasActiveNetworkEdge(socialLink, input.ownerIdentityId, input.characters)
       && socialLink.enabled
       && socialLink.canViewMoments
       && socialLink.canCommentMoments
@@ -213,7 +232,7 @@ function buildCharacterMomentCommentCandidate(input: {
     || !input.socialLink.enabled
     || !input.socialLink.canViewMoments
     || !input.socialLink.canCommentMoments
-    || !hasActiveNetworkEdge(input.socialLink, input.ownerIdentityId)) return undefined;
+    || !hasActiveNetworkEdge(input.socialLink, input.ownerIdentityId, input.characters)) return undefined;
   const isNpcToCharacter = input.socialLink.sourceEntityType === "npc"
     && input.socialLink.sourceEntityId === input.npc.id
     && input.socialLink.targetEntityType === "character";
@@ -253,7 +272,7 @@ export function findRelationshipNetworkCharacterMomentCommentCandidate(input: {
   const npc = listRelationshipNetworkNpcsForIdentity(input.ownerIdentityId).find((candidate) => candidate.id === input.npcId);
   if (!npc) return undefined;
   const socialLink = listRelationshipNetworkSocialLinksForIdentity(input.ownerIdentityId).find((candidate) =>
-    hasActiveNetworkEdge(candidate, input.ownerIdentityId)
+    hasActiveNetworkEdge(candidate, input.ownerIdentityId, input.characters)
       && ((candidate.sourceEntityType === "npc"
         && candidate.sourceEntityId === input.npcId
         && candidate.targetEntityType === "character"
@@ -282,7 +301,7 @@ export function listRelationshipNetworkCharacterMomentCommentCandidates(input: {
   if (!npc) return [];
   const seenTargetCharacterIds = new Set<string>();
   return listRelationshipNetworkSocialLinksForIdentity(input.ownerIdentityId)
-    .filter((socialLink) => hasActiveNetworkEdge(socialLink, input.ownerIdentityId)
+    .filter((socialLink) => hasActiveNetworkEdge(socialLink, input.ownerIdentityId, input.characters)
       && ((socialLink.sourceEntityType === "npc"
         && socialLink.sourceEntityId === npc.id
         && socialLink.targetEntityType === "character")
@@ -395,7 +414,7 @@ export function listRelationshipNetworkMomentCommentCandidates(input: {
 
   return listRelationshipNetworkSocialLinksForIdentity(input.ownerIdentityId)
     .filter((socialLink) =>
-      hasActiveNetworkEdge(socialLink, input.ownerIdentityId)
+      hasActiveNetworkEdge(socialLink, input.ownerIdentityId, input.characters)
       &&
       socialLink.enabled
       && socialLink.canViewMoments

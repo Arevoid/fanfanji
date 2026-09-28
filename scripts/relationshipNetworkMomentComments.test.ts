@@ -11,7 +11,7 @@ import {
 } from "../src/features/moments/services/relationshipNetworkMomentCommentService";
 import { upsertRelationshipNetworkChatLink } from "../src/core/storage/repositories/relationshipNetworkChatLinkRepository";
 import { createRelationshipNetworkNpc } from "../src/domain/relationshipNetwork/relationshipNetworkTypes";
-import { upsertRelationshipNetworkNpc } from "../src/core/storage/repositories/relationshipNetworkRepository";
+import { upsertRelationshipNetworkMap, upsertRelationshipNetworkNpc } from "../src/core/storage/repositories/relationshipNetworkRepository";
 import { upsertRelationshipNetworkSocialLink } from "../src/core/storage/repositories/relationshipNetworkSocialLinkRepository";
 
 class MemoryStorage implements Storage {
@@ -303,6 +303,58 @@ assert.ok(legacyCharacterCandidates.some((candidate) =>
   candidate.sourceCharacter.id === legacySourceCharacter.id
   && candidate.targetCharacter.id === legacyTargetCharacter.id,
 ), "contact-copy IDs should still resolve relationship-network candidates");
+
+// A relationship line may be recreated after a legacy contact copy was
+// migrated. The UI can still show the saved permission, so the runtime must
+// recover by canonical endpoints instead of requiring the obsolete edge ID.
+assert.equal(upsertRelationshipNetworkMap({
+  id: "network-map-recreated-edge",
+  ownerIdentityId,
+  name: "我的关系网",
+  nodes: [
+    { id: "node-recreated-source", entityType: "character", entityId: targetCharacter.id, x: 0, y: 0 },
+    { id: "node-recreated-target", entityType: "character", entityId: sourceCharacter.id, x: 1, y: 1 },
+  ],
+  edges: [{
+    id: "edge-recreated",
+    sourceNodeId: "node-recreated-source",
+    targetNodeId: "node-recreated-target",
+    direction: "forward",
+    forwardLabel: "同事",
+    createdAt: 4,
+    updatedAt: 4,
+  }],
+  createdAt: 4,
+  updatedAt: 4,
+  schemaVersion: 1,
+}).success, true);
+assert.equal(upsertRelationshipNetworkSocialLink({
+  id: "social-character-to-character-recreated-edge",
+  ownerIdentityId,
+  sourceEntityType: "character",
+  sourceEntityId: legacySourceCharacter.id,
+  targetEntityType: "character",
+  targetEntityId: legacyTargetCharacter.id,
+  relationshipLabel: "同事",
+  enabled: true,
+  canViewMoments: true,
+  canCommentMoments: true,
+  commentFrequency: "high",
+  networkEdgeId: "edge-before-recreated",
+  createdAt: 4,
+  updatedAt: 4,
+}).success, true);
+const recreatedEdgeCandidates = listRelationshipNetworkCharacterToCharacterMomentCommentCandidates({
+  ownerIdentityId,
+  moment: { ...sourceCharacterMoment, id: "moment-source-character-recreated-edge", characterId: legacyTargetCharacter.id },
+  characters: [legacySourceCharacter, legacyTargetCharacter],
+  relationships: [sourceRelationship, targetRelationship],
+  existingMoments: [],
+  force: true,
+});
+assert.ok(recreatedEdgeCandidates.some((candidate) =>
+  candidate.socialLink.id === "social-character-to-character-recreated-edge"
+), "recreated relationship edges should be matched by canonical endpoints");
 
 assert.equal(upsertRelationshipNetworkSocialLink({
   id: "social-identity-a",
