@@ -138,6 +138,88 @@ const characterCommentCandidates = listRelationshipNetworkCharacterMomentComment
 });
 assert.equal(characterCommentCandidates.length, 1, "a linked character can be selected to comment on an NPC Moment");
 assert.equal(characterCommentCandidates[0]?.targetCharacter.id, targetCharacter.id);
+
+// The UI defines the arrow's left side as the interaction initiator. A
+// character -> NPC edge must therefore also allow that character to comment
+// on the NPC's public Moment (the legacy NPC -> character shape remains
+// readable for older saved links).
+const directionalCharacter: Character = {
+  id: "character-directional-a",
+  ownerIdentityId,
+  name: "顾言",
+  avatar: "🪴",
+  personality: "谨慎",
+  backstory: "",
+};
+const directionalRelationship = createRelationship({
+  id: "relation-directional-a",
+  characterId: directionalCharacter.id,
+  userIdentityId: ownerIdentityId,
+  now: 2,
+  relationship: "friend",
+});
+assert.equal(upsertRelationshipNetworkSocialLink({
+  id: "social-character-to-npc-a",
+  ownerIdentityId,
+  sourceEntityType: "character",
+  sourceEntityId: directionalCharacter.id,
+  targetEntityType: "npc",
+  targetEntityId: npc.id,
+  relationshipLabel: "同事",
+  enabled: true,
+  canViewMoments: true,
+  canCommentMoments: true,
+  canReplyMoments: true,
+  commentFrequency: "high",
+  createdAt: 2,
+  updatedAt: 2,
+}).success, true);
+assert.ok(listRelationshipNetworkCharacterMomentCommentCandidates({
+  ownerIdentityId,
+  moment: npcMoment,
+  characters: [sourceCharacter, targetCharacter, directionalCharacter],
+  relationships: [sourceRelationship, targetRelationship, directionalRelationship],
+}).some((candidate) => candidate.targetCharacter.id === directionalCharacter.id),
+"a character -> NPC edge should select that character for the NPC Moment");
+
+const staleCharacter: Character = {
+  id: "character-stale-a",
+  ownerIdentityId,
+  name: "失效连线角色",
+  avatar: "🫥",
+  personality: "安静",
+  backstory: "",
+};
+const staleRelationship = createRelationship({
+  id: "relation-stale-a",
+  characterId: staleCharacter.id,
+  userIdentityId: ownerIdentityId,
+  now: 2,
+  relationship: "friend",
+});
+assert.equal(upsertRelationshipNetworkSocialLink({
+  id: "social-stale-a",
+  ownerIdentityId,
+  sourceEntityType: "character",
+  sourceEntityId: staleCharacter.id,
+  targetEntityType: "npc",
+  targetEntityId: npc.id,
+  relationshipLabel: "旧关系",
+  enabled: true,
+  canViewMoments: true,
+  canCommentMoments: true,
+  commentFrequency: "high",
+  networkEdgeId: "edge-that-was-removed",
+  createdAt: 2,
+  updatedAt: 2,
+}).success, true);
+assert.equal(listRelationshipNetworkCharacterMomentCommentCandidates({
+  ownerIdentityId,
+  moment: npcMoment,
+  characters: [sourceCharacter, targetCharacter, directionalCharacter, staleCharacter],
+  relationships: [sourceRelationship, targetRelationship, directionalRelationship, staleRelationship],
+}).some((candidate) => candidate.targetCharacter.id === staleCharacter.id), false,
+"a social link whose canvas edge was removed must not keep an off-canvas character active");
 assert.equal(findRelationshipNetworkCharacterMomentCommentCandidate({
   ownerIdentityId,
   npcId: npc.id,
@@ -233,6 +315,7 @@ assert.equal(upsertRelationshipNetworkSocialLink({
   enabled: true,
   canViewMoments: true,
   canCommentMoments: true,
+  canReplyMoments: true,
   commentFrequency: "high",
   createdAt: 2,
   updatedAt: 2,
@@ -446,6 +529,18 @@ const npcPostReplyCandidates = listRelationshipNetworkMomentCommentCandidates({
 });
 assert.equal(npcPostReplyCandidates.length, 1, "an NPC can reply after a character comments on the NPC's Moment");
 assert.equal(npcPostReplyCandidates[0]?.replyingTo?.id, characterComment.id);
+const npcOwnMomentUserReplyCandidates = listRelationshipNetworkMomentCommentCandidates({
+  ownerIdentityId,
+  targetIdentityId: ownerIdentityId,
+  targetIdentityName: "饭饭",
+  characters: [sourceCharacter, targetCharacter],
+  relationships: [sourceRelationship, targetRelationship],
+  existingMoments: [],
+  currentMoment: { ...npcMoment, comments: [userComment] },
+  force: true,
+  action: "reply",
+});
+assert.equal(npcOwnMomentUserReplyCandidates.length, 1, "the NPC can reply to the user's comment on its own Moment when identity permission is enabled");
 assert.equal(listRelationshipNetworkMomentCommentCandidates({
   ownerIdentityId,
   targetCharacterId: targetCharacter.id,

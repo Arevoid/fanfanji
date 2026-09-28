@@ -368,10 +368,15 @@ export default function AppRelationshipNetwork({
   const targetName = edgeDraft ? nodeModels.find((model) => model.node.id === edgeDraft.targetNodeId)?.name || "人物 B" : "人物 B";
   const socialSourceName = socialDraft ? nodeModels.find((model) => model.type === socialDraft.sourceEntityType && model.node.entityId === socialDraft.sourceEntityId)?.name || "人物" : "人物";
   const socialTargetName = socialDraft ? nodeModels.find((model) => model.type === socialDraft.targetEntityType && model.node.entityId === socialDraft.targetEntityId)?.name || "人物" : "人物";
-  const socialTargetTypeLabel = socialDraft?.targetEntityType === "identity" ? "身份" : "角色";
+  const socialTargetTypeLabel = socialDraft?.targetEntityType === "identity"
+    ? "身份"
+    : socialDraft?.targetEntityType === "npc" ? "NPC" : "角色";
   const isCharacterToCharacterSocialDraft = socialDraft?.sourceEntityType === "character" && socialDraft.targetEntityType === "character";
+  const isCharacterToNpcSocialDraft = socialDraft?.sourceEntityType === "character" && socialDraft.targetEntityType === "npc";
   const socialDraftNpc = socialDraft?.sourceEntityType === "npc"
     ? npcs.find((npc) => npc.id === socialDraft.sourceEntityId)
+    : socialDraft?.targetEntityType === "npc"
+      ? npcs.find((npc) => npc.id === socialDraft.targetEntityId)
     : undefined;
   // A lightweight NPC can participate in network interactions directly.
   // Promotion to a full character profile is optional enrichment, not a
@@ -475,22 +480,20 @@ export default function AppRelationshipNetwork({
     const isCharacterPair = source.entityType === "character" && target.entityType === "character";
     if (!isCharacterPair && (!npc || !recipient || !["character", "identity"].includes(recipient.entityType))) return null;
     const storedLinks = networkEdgeId ? listRelationshipNetworkSocialLinksForEdge(activeIdentity.id, networkEdgeId) : [];
-    const directedSource = isCharacterPair && edge?.direction === "reverse" ? target : source;
-    const directedTarget = isCharacterPair && edge?.direction === "reverse" ? source : target;
+    const directedSource = edge?.direction === "reverse" ? target : source;
+    const directedTarget = edge?.direction === "reverse" ? source : target;
     const stored = storedLinks.find((link) =>
-      link.sourceEntityType === (isCharacterPair ? directedSource.entityType : "npc")
-      && link.sourceEntityId === (isCharacterPair ? directedSource.entityId : npc?.entityId)
-      && link.targetEntityType === (isCharacterPair ? directedTarget.entityType : recipient?.entityType)
-      && link.targetEntityId === (isCharacterPair ? directedTarget.entityId : recipient?.entityId),
+      link.sourceEntityType === directedSource.entityType
+      && link.sourceEntityId === directedSource.entityId
+      && link.targetEntityType === directedTarget.entityType
+      && link.targetEntityId === directedTarget.entityId,
     ) || storedLinks[0];
-    const draftSource = isCharacterPair ? directedSource : npc!;
-    const draftTarget = isCharacterPair ? directedTarget : recipient!;
     return {
       id: stored?.id,
-      sourceEntityType: draftSource.entityType,
-      sourceEntityId: draftSource.entityId,
-      targetEntityType: draftTarget.entityType,
-      targetEntityId: draftTarget.entityId,
+      sourceEntityType: directedSource.entityType,
+      sourceEntityId: directedSource.entityId,
+      targetEntityType: directedTarget.entityType,
+      targetEntityId: directedTarget.entityId,
       relationshipLabel: stored?.relationshipLabel || "认识",
       enabled: stored?.enabled ?? false,
       canViewMoments: stored?.canViewMoments ?? false,
@@ -602,19 +605,9 @@ export default function AppRelationshipNetwork({
         const sourceNode = networkRef.current.nodes.find((node) => node.id === edge.sourceNodeId);
         const targetNode = networkRef.current.nodes.find((node) => node.id === edge.targetNodeId);
         const isCharacterPair = sourceNode?.entityType === "character" && targetNode?.entityType === "character";
-        const desiredDirections = isCharacterPair
-          ? edge.direction === "both"
-            ? [[sourceNode, targetNode], [targetNode, sourceNode]]
-            : edge.direction === "reverse" ? [[targetNode, sourceNode]] : [[sourceNode, targetNode]]
-          : [[{
-            id: "social-draft-source",
-            entityType: socialDraft.sourceEntityType,
-            entityId: socialDraft.sourceEntityId,
-          }, {
-            id: "social-draft-target",
-            entityType: socialDraft.targetEntityType,
-            entityId: socialDraft.targetEntityId,
-          }]];
+        const desiredDirections = edge.direction === "both"
+          ? [[sourceNode, targetNode], [targetNode, sourceNode]]
+          : edge.direction === "reverse" ? [[targetNode, sourceNode]] : [[sourceNode, targetNode]];
         let failed = false;
         const desiredKeys = new Set<string>();
         desiredDirections.forEach(([sourceDirection, targetDirection], index) => {
@@ -705,12 +698,30 @@ export default function AppRelationshipNetwork({
       return;
     }
     const nodeIds = new Set(networkRef.current.nodes.filter((item) => item.id !== node.id).map((item) => item.id));
+    const removedEdges = networkRef.current.edges.filter((edge) =>
+      !nodeIds.has(edge.sourceNodeId) || !nodeIds.has(edge.targetNodeId));
     const next = {
       ...networkRef.current,
       nodes: networkRef.current.nodes.filter((item) => item.id !== node.id),
       edges: networkRef.current.edges.filter((edge) => nodeIds.has(edge.sourceNodeId) && nodeIds.has(edge.targetNodeId)),
     };
-    if (commitNetwork(next, "已从画布移除人物。")) setSelectedNodeId(null);
+    if (commitNetwork(next, "已从画布移除人物。")) {
+      // Removing a node also removes the edges that made its social links
+      // actionable. Clean those records up so a character that is no longer
+      // on the canvas cannot keep replying to NPC Moments through stale data.
+      const removedSocialLinks = removedEdges
+        .flatMap((edge) => listRelationshipNetworkSocialLinksForEdge(activeIdentity.id, edge.id))
+        .filter((link, index, links) => links.findIndex((candidate) => candidate.id === link.id) === index);
+      removedSocialLinks.forEach((link) => {
+        removeRelationshipNetworkSocialLink(activeIdentity.id, link.id);
+        removeRelationshipNetworkInteractionRecordsForSocialLink(activeIdentity.id, link.id);
+      });
+      if (removedSocialLinks.length > 0) {
+        setSocialLinks(listRelationshipNetworkSocialLinksForIdentity(activeIdentity.id));
+        setInteractionRecords(listRelationshipNetworkInteractionRecordsForIdentity(activeIdentity.id));
+      }
+      setSelectedNodeId(null);
+    }
   };
 
   const openNpcComposer = (npc?: RelationshipNetworkNpc) => {
@@ -1370,8 +1381,8 @@ export default function AppRelationshipNetwork({
               <label className="block text-[10px] font-bold text-[#746c61]">关系分类（可选）<input value={edgeDraft.category} onChange={(event) => setEdgeDraft({ ...edgeDraft, category: event.target.value })} placeholder="例如：现实、过去、故事线" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
               <label className="block text-[10px] font-bold text-[#746c61]">备注（可选）<textarea value={edgeDraft.note} onChange={(event) => setEdgeDraft({ ...edgeDraft, note: event.target.value })} placeholder="补充这段关系的背景" className="mt-1.5 min-h-16 w-full resize-none rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs leading-5 outline-none focus:border-[#a99a87]" /></label>
               {socialDraft && <div className="rounded-2xl border border-[#e5ddd0] bg-[#faf7f1] p-3">
-                <div className="flex items-center justify-between"><div><p className="text-[10px] font-black text-[#62594f]">朋友圈互动关系</p><p className="mt-0.5 text-[9px] text-[#958c80]">{isCharacterToCharacterSocialDraft ? `角色「${socialSourceName}」→ 角色「${socialTargetName}」` : `NPC「${socialSourceName}」→ ${socialTargetTypeLabel}「${socialTargetName}」`}</p><p className="mt-0.5 text-[9px] text-[#a1988c]">箭头左侧是互动发起者，右侧是它会查看和回应的对象；双向关系会分别保存两条互动权限。</p></div><span className="rounded-full bg-[#eeeae2] px-2 py-1 text-[8px] font-bold text-[#8d8377]">基础配置</span></div>
-                <p className="mt-2 text-[9px] leading-4 text-[#958c80]">{isCharacterToCharacterSocialDraft ? "角色会使用各自的人设、关系和世界书浏览对方的公开朋友圈；允许查看只提供读取，想让“关系网”按钮产生互动还需开启评论、点赞或回复。" : (socialDraftNpcReady ? "NPC 会直接使用自己的设定参与目标朋友圈；允许查看只提供读取，想让“关系网”按钮产生互动还需开启评论、点赞或回复。提升为完整角色后，会额外使用完整档案和世界书。" : "当前 NPC 已不存在，无法启用这条朋友圈互动关系。")}</p>
+                <div className="flex items-center justify-between"><div><p className="text-[10px] font-black text-[#62594f]">朋友圈互动关系</p><p className="mt-0.5 text-[9px] text-[#958c80]">{isCharacterToCharacterSocialDraft ? `角色「${socialSourceName}」→ 角色「${socialTargetName}」` : `${socialDraft?.sourceEntityType === "npc" ? "NPC" : socialDraft?.sourceEntityType === "identity" ? "身份" : "角色"}「${socialSourceName}」→ ${socialTargetTypeLabel}「${socialTargetName}」`}</p><p className="mt-0.5 text-[9px] text-[#a1988c]">箭头左侧是互动发起者，右侧是它会查看和回应的对象；双向关系会分别保存两条互动权限。</p></div><span className="rounded-full bg-[#eeeae2] px-2 py-1 text-[8px] font-bold text-[#8d8377]">基础配置</span></div>
+                <p className="mt-2 text-[9px] leading-4 text-[#958c80]">{isCharacterToCharacterSocialDraft || isCharacterToNpcSocialDraft ? "角色会使用自己的人设、关系和世界书浏览目标的公开朋友圈；允许查看只提供读取，想让“关系网”按钮产生互动还需开启评论、点赞或回复。" : (socialDraftNpcReady ? "NPC 会直接使用自己的设定参与目标朋友圈；允许查看只提供读取，想让“关系网”按钮产生互动还需开启评论、点赞或回复。提升为完整角色后，会额外使用完整档案和世界书。" : "当前 NPC 已不存在，无法启用这条朋友圈互动关系。")}</p>
                 <label className="mt-2 flex items-center gap-2 text-[10px] font-bold text-[#6d6459]"><input type="checkbox" checked={socialDraft.enabled} onChange={(event) => setSocialDraft({ ...socialDraft, enabled: event.target.checked })} />启用朋友圈互动</label>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={socialDraft.canViewMoments} disabled={!socialDraft.enabled || socialDraft.canCommentMoments} onChange={(event) => setSocialDraft({ ...socialDraft, canViewMoments: event.target.checked })} />允许查看朋友圈</label>

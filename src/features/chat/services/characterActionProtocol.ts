@@ -50,6 +50,12 @@ export interface ParsedCharacterAction {
 export const CHARACTER_ACTION_START = "[[CHAR_ACTION]]";
 export const CHARACTER_ACTION_END = "[[/CHAR_ACTION]]";
 
+// Some providers occasionally drop one of the closing brackets while
+// streaming a private action envelope (for example
+// `[[CHAR_ACTION]{...}`). Keep the recovery deliberately narrow so ordinary
+// prose containing the word CHAR_ACTION is never treated as a command.
+const CHARACTER_ACTION_START_PATTERN = /\[\[\s*CHAR_ACTION\s*(?:\]\]|\])/gu;
+
 const ACTION_TYPES = new Set<CharacterActionType>([
   "publish_moment",
   "send_sticker",
@@ -105,25 +111,90 @@ function validateDirective(value: unknown): CharacterActionDirective | undefined
  * blocks are removed from visible chat so protocol details never leak.
  */
 export function parseCharacterActionDirective(input: { text: string }): ParsedCharacterAction {
-  let visible = input.text;
+  const source = input.text;
+  let cursor = 0;
   const bodies: string[] = [];
-  let startIndex = visible.indexOf(CHARACTER_ACTION_START);
-  while (startIndex >= 0) {
-    const endIndex = visible.indexOf(CHARACTER_ACTION_END, startIndex + CHARACTER_ACTION_START.length);
-    if (endIndex < 0) {
-      visible = `${visible.slice(0, startIndex)}${visible.slice(startIndex + CHARACTER_ACTION_START.length)}`;
-      break;
+  const visibleParts: string[] = [];
+  let firstError: CharacterActionParseError | undefined;
+
+  const findBalancedJsonEnd = (text: string, start: number): number | undefined => {
+    if (text[start] !== "{") return undefined;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+      } else if (char === "{") {
+        depth += 1;
+      } else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) return index + 1;
+      }
     }
-    bodies.push(visible.slice(startIndex + CHARACTER_ACTION_START.length, endIndex));
-    visible = `${visible.slice(0, startIndex)}${visible.slice(endIndex + CHARACTER_ACTION_END.length)}`;
-    startIndex = visible.indexOf(CHARACTER_ACTION_START);
+    return undefined;
+  };
+
+  const parseBody = (body: string) => {
+    const normalized = body.trim();
+    try {
+      const directive = validateDirective(JSON.parse(normalized));
+      if (directive) bodies.push(normalized);
+      else if (!firstError) firstError = "invalid_directive";
+    } catch {
+      if (!firstError) firstError = "malformed_json";
+    }
+  };
+
+  while (true) {
+    CHARACTER_ACTION_START_PATTERN.lastIndex = cursor;
+    const match = CHARACTER_ACTION_START_PATTERN.exec(source);
+    if (!match || match.index < cursor) break;
+    const startIndex = match.index;
+    visibleParts.push(source.slice(cursor, startIndex));
+    const markerEnd = startIndex + match[0].length;
+    const endIndex = source.indexOf(CHARACTER_ACTION_END, markerEnd);
+    if (endIndex >= 0) {
+      parseBody(source.slice(markerEnd, endIndex));
+      cursor = endIndex + CHARACTER_ACTION_END.length;
+      continue;
+    }
+
+    // Recovery path for a truncated closing marker. If the remainder starts
+    // with a complete JSON object, execute it and remove only that object;
+    // otherwise discard the rest of the line so protocol text cannot leak.
+    const remainder = source.slice(markerEnd);
+    const leadingWhitespace = remainder.match(/^\s*/u)?.[0].length || 0;
+    const jsonStart = markerEnd + leadingWhitespace;
+    const jsonEnd = findBalancedJsonEnd(source, jsonStart);
+    if (jsonEnd !== undefined) {
+      parseBody(source.slice(jsonStart, jsonEnd));
+      cursor = jsonEnd;
+      continue;
+    }
+    const nextLine = remainder.search(/\r?\n/u);
+    cursor = nextLine >= 0 ? markerEnd + nextLine : source.length;
+    if (!firstError) firstError = "malformed_json";
+    break;
   }
-  visible = visible.replaceAll(CHARACTER_ACTION_END, "");
-  const visibleText = cleanVisibleText(visible);
-  if (bodies.length === 0) return { visibleText };
+
+  visibleParts.push(source.slice(cursor).replaceAll(CHARACTER_ACTION_END, ""));
+  const visibleText = cleanVisibleText(visibleParts.join(""));
+  if (bodies.length === 0) return { visibleText, ...(firstError ? { error: firstError } : {}) };
   if (bodies.length > 1) return { visibleText, error: "multiple_directives" };
   try {
-    const directive = validateDirective(JSON.parse(bodies[0].trim()));
+    const directive = validateDirective(JSON.parse(bodies[0]));
     return directive ? { visibleText, directive } : { visibleText, error: "invalid_directive" };
   } catch {
     return { visibleText, error: "malformed_json" };

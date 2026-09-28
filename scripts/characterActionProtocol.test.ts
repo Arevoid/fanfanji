@@ -21,6 +21,13 @@ assert.equal(malformed.directive, undefined);
 assert.equal(malformed.error, "malformed_json");
 assert.equal(malformed.visibleText, "我先问清楚");
 
+const truncatedMarker = parseCharacterActionDirective({
+  text: `好啦，已经发出去了。\n[[CHAR_ACTION]{"type":"publish_moment","actor":"character","contentHint":"根据刚才的话发一条"}`,
+});
+assert.equal(truncatedMarker.visibleText, "好啦，已经发出去了。");
+assert.equal(truncatedMarker.directive?.type, "publish_moment");
+assert.equal(truncatedMarker.error, undefined);
+
 const quoted = parseCharacterActionDirective({
   text: `你是在引用那句话，不是现在要做。${CHARACTER_ACTION_START}{"type":"not_supported","actor":"character"}${CHARACTER_ACTION_END}`,
 });

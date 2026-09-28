@@ -10,7 +10,7 @@ import type {
   RelationshipNetworkSocialLink,
 } from "../../../domain/relationshipNetwork/relationshipNetworkTypes";
 import { listRelationshipNetworkChatLinksForIdentity } from "../../../core/storage/repositories/relationshipNetworkChatLinkRepository";
-import { listRelationshipNetworkNpcsForIdentity } from "../../../core/storage/repositories/relationshipNetworkRepository";
+import { listRelationshipNetworkMapsForIdentity, listRelationshipNetworkNpcsForIdentity } from "../../../core/storage/repositories/relationshipNetworkRepository";
 import { listRelationshipNetworkSocialLinksForIdentity } from "../../../core/storage/repositories/relationshipNetworkSocialLinkRepository";
 import { getMomentComments } from "./momentContent";
 import { hasReachedMomentCommentLimit } from "./momentCommentLimit";
@@ -39,6 +39,33 @@ export function formatRelationshipBehaviorBoundary(label?: string): string {
 
 const belongsToIdentity = (character: Character, ownerIdentityId: string): boolean =>
   (character.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId;
+
+/**
+ * A social-link record is only actionable while its backing relationship edge
+ * still exists. Older records did not persist networkEdgeId, so those remain
+ * valid for backwards compatibility; newly-created links are tied to the
+ * current canvas and cannot survive removing that edge or either endpoint.
+ */
+function hasActiveNetworkEdge(link: RelationshipNetworkSocialLink, ownerIdentityId: string): boolean {
+  if (!link.networkEdgeId) return true;
+  return listRelationshipNetworkMapsForIdentity(ownerIdentityId).some((network) =>
+    network.edges.some((edge) => {
+      if (edge.id !== link.networkEdgeId) return false;
+      const sourceNode = network.nodes.find((node) => node.id === edge.sourceNodeId);
+      const targetNode = network.nodes.find((node) => node.id === edge.targetNodeId);
+      if (!sourceNode || !targetNode) return false;
+      const sameDirection = sourceNode.entityType === link.sourceEntityType
+        && sourceNode.entityId === link.sourceEntityId
+        && targetNode.entityType === link.targetEntityType
+        && targetNode.entityId === link.targetEntityId;
+      const reverseDirection = sourceNode.entityType === link.targetEntityType
+        && sourceNode.entityId === link.targetEntityId
+        && targetNode.entityType === link.sourceEntityType
+        && targetNode.entityId === link.sourceEntityId;
+      return sameDirection || reverseDirection;
+    }),
+  );
+}
 
 export interface RelationshipNetworkMomentCommentCandidate {
   socialLink: RelationshipNetworkSocialLink;
@@ -109,7 +136,8 @@ export function listRelationshipNetworkCharacterToCharacterMomentCommentCandidat
 
   return listRelationshipNetworkSocialLinksForIdentity(input.ownerIdentityId)
     .filter((socialLink) =>
-      socialLink.enabled
+      hasActiveNetworkEdge(socialLink, input.ownerIdentityId)
+      && socialLink.enabled
       && socialLink.canViewMoments
       && socialLink.canCommentMoments
       && socialLink.sourceEntityType === "character"
@@ -182,12 +210,21 @@ function buildCharacterMomentCommentCandidate(input: {
   relationships: readonly CharacterRelationship[];
 }): RelationshipNetworkCharacterMomentCommentCandidate | undefined {
   if (input.socialLink.ownerIdentityId !== input.ownerIdentityId
-    || input.socialLink.sourceEntityType !== "npc"
-    || input.socialLink.sourceEntityId !== input.npc.id
-    || input.socialLink.targetEntityType !== "character"
     || !input.socialLink.enabled
-    || !input.socialLink.canViewMoments) return undefined;
-  const linkedTargetCanonicalId = resolveCanonicalCharacterId(input.socialLink.targetEntityId, input.characters);
+    || !input.socialLink.canViewMoments
+    || !input.socialLink.canCommentMoments
+    || !hasActiveNetworkEdge(input.socialLink, input.ownerIdentityId)) return undefined;
+  const isNpcToCharacter = input.socialLink.sourceEntityType === "npc"
+    && input.socialLink.sourceEntityId === input.npc.id
+    && input.socialLink.targetEntityType === "character";
+  const isCharacterToNpc = input.socialLink.sourceEntityType === "character"
+    && input.socialLink.targetEntityType === "npc"
+    && input.socialLink.targetEntityId === input.npc.id;
+  if (!isNpcToCharacter && !isCharacterToNpc) return undefined;
+  const linkedCharacterId = isCharacterToNpc
+    ? input.socialLink.sourceEntityId
+    : input.socialLink.targetEntityId;
+  const linkedTargetCanonicalId = resolveCanonicalCharacterId(linkedCharacterId, input.characters);
   const requestedTargetCanonicalId = resolveCanonicalCharacterId(input.targetCharacterId, input.characters);
   const targetCharacter = input.characters.find((character) =>
     resolveCanonicalCharacterId(character.id, input.characters) === linkedTargetCanonicalId
@@ -216,11 +253,17 @@ export function findRelationshipNetworkCharacterMomentCommentCandidate(input: {
   const npc = listRelationshipNetworkNpcsForIdentity(input.ownerIdentityId).find((candidate) => candidate.id === input.npcId);
   if (!npc) return undefined;
   const socialLink = listRelationshipNetworkSocialLinksForIdentity(input.ownerIdentityId).find((candidate) =>
-    candidate.sourceEntityType === "npc"
-    && candidate.sourceEntityId === input.npcId
-    && candidate.targetEntityType === "character"
-    && resolveCanonicalCharacterId(candidate.targetEntityId, input.characters)
-      === resolveCanonicalCharacterId(input.targetCharacterId, input.characters),
+    hasActiveNetworkEdge(candidate, input.ownerIdentityId)
+      && ((candidate.sourceEntityType === "npc"
+        && candidate.sourceEntityId === input.npcId
+        && candidate.targetEntityType === "character"
+        && resolveCanonicalCharacterId(candidate.targetEntityId, input.characters)
+          === resolveCanonicalCharacterId(input.targetCharacterId, input.characters))
+        || (candidate.sourceEntityType === "character"
+          && candidate.targetEntityType === "npc"
+          && candidate.targetEntityId === input.npcId
+          && resolveCanonicalCharacterId(candidate.sourceEntityId, input.characters)
+            === resolveCanonicalCharacterId(input.targetCharacterId, input.characters))),
   );
   return socialLink
     ? buildCharacterMomentCommentCandidate({ ...input, npc, socialLink })
@@ -239,12 +282,20 @@ export function listRelationshipNetworkCharacterMomentCommentCandidates(input: {
   if (!npc) return [];
   const seenTargetCharacterIds = new Set<string>();
   return listRelationshipNetworkSocialLinksForIdentity(input.ownerIdentityId)
-    .filter((socialLink) => socialLink.sourceEntityType === "npc" && socialLink.sourceEntityId === npc.id)
+    .filter((socialLink) => hasActiveNetworkEdge(socialLink, input.ownerIdentityId)
+      && ((socialLink.sourceEntityType === "npc"
+        && socialLink.sourceEntityId === npc.id
+        && socialLink.targetEntityType === "character")
+        || (socialLink.sourceEntityType === "character"
+          && socialLink.targetEntityType === "npc"
+          && socialLink.targetEntityId === npc.id)))
     .map((socialLink) => buildCharacterMomentCommentCandidate({
       ownerIdentityId: input.ownerIdentityId,
       npc,
       socialLink,
-      targetCharacterId: socialLink.targetEntityId,
+      targetCharacterId: socialLink.sourceEntityType === "character"
+        ? socialLink.sourceEntityId
+        : socialLink.targetEntityId,
       characters: input.characters,
       relationships: input.relationships,
     }))
@@ -344,6 +395,8 @@ export function listRelationshipNetworkMomentCommentCandidates(input: {
 
   return listRelationshipNetworkSocialLinksForIdentity(input.ownerIdentityId)
     .filter((socialLink) =>
+      hasActiveNetworkEdge(socialLink, input.ownerIdentityId)
+      &&
       socialLink.enabled
       && socialLink.canViewMoments
       && (action === "comment"
@@ -380,7 +433,9 @@ export function listRelationshipNetworkMomentCommentCandidates(input: {
         && Boolean(replyingTo?.characterId && targetCharacter
           && resolveCanonicalCharacterId(replyingTo.characterId, input.characters)
             === resolveCanonicalCharacterId(targetCharacter.id, input.characters));
-      if (isNpcOwnMoment && !isReplyToLinkedCharacter) return null;
+      const isReplyToOwnNpcMoment = action === "reply"
+        && Boolean(input.currentMoment?.relationshipNetworkNpcId === npc.id && !targetCharacter);
+      if (isNpcOwnMoment && !isReplyToLinkedCharacter && !isReplyToOwnNpcMoment) return null;
       if (!sourceRelationship || seenSourceCharacterIds.has(sourceCharacter.id)) return null;
       if (input.currentMoment && (action === "comment" || action === "reply")
         && hasReachedMomentCommentLimit(getMomentComments(input.currentMoment), {

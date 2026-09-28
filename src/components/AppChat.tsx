@@ -5757,6 +5757,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     // Find the moment
     const targetMoment = moments.find(m => m.id === momentId);
     if (!targetMoment) return;
+    // NPC Moments are handled by the relationship-network permission graph.
+    // Falling through to the legacy friend fallback here could make an
+    // unrelated character reply just because the user commented on the NPC's
+    // post, even when that character is not connected in the network.
+    if (targetMoment.relationshipNetworkNpcId) return;
 
     // Identify which character should reply
     let targetChar: Character | undefined;
