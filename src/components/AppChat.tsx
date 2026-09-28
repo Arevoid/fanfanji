@@ -704,11 +704,24 @@ export default function AppChat({
     name: momentsProfileIdentity?.name?.trim() || settings.name || "用户",
     avatar: momentsProfileIdentity?.avatar || settings.avatar,
   };
+  // The main Moments feed is intentionally owned by the primary identity,
+  // even while the user is chatting as an alias. Relationship-network
+  // interactions must follow the Moment's owner scope instead of the
+  // currently selected chat identity, otherwise enabled permissions appear
+  // to be missing whenever an alias is active.
+  const getMomentNetworkOwnerIdentityId = (moment: Moment): string =>
+    moment.ownerIdentityId || momentsFeedIdentityId || activeIdentityId;
+  const getMomentNetworkOwnerName = (moment: Moment): string => {
+    const ownerIdentityId = getMomentNetworkOwnerIdentityId(moment);
+    return settings.identities?.find((identity) => identity.id === ownerIdentityId)?.name?.trim()
+      || (ownerIdentityId === momentsFeedIdentityId ? momentsFeedProfile.name : activeIdentityName);
+  };
   const loadPendingRelationshipNetworkInteractions = (): RelationshipNetworkPendingInteraction[] => {
-    const stored = listRelationshipNetworkPendingInteractionsForIdentity(activeIdentityId);
+    const scopeIdentityIds = Array.from(new Set([activeIdentityId, momentsFeedIdentityId]));
+    const stored = scopeIdentityIds.flatMap((identityId) => listRelationshipNetworkPendingInteractionsForIdentity(identityId));
     const storedIds = new Set(stored.map((interaction) => interaction.id));
-    const npcs = new Map(listRelationshipNetworkNpcsForIdentity(activeIdentityId).map((npc) => [npc.id, npc]));
-    const recovered = listRelationshipNetworkInteractionRecordsForIdentity(activeIdentityId)
+    const npcs = new Map(scopeIdentityIds.flatMap((identityId) => listRelationshipNetworkNpcsForIdentity(identityId)).map((npc) => [npc.id, npc]));
+    const recovered = scopeIdentityIds.flatMap((ownerIdentityId) => listRelationshipNetworkInteractionRecordsForIdentity(ownerIdentityId)
       .filter((record) => record.status === "pending" && (record.action === "comment" || record.action === "reply") && Boolean(record.content))
       .map((record): RelationshipNetworkPendingInteraction | null => {
         const pendingId = record.id.endsWith(":interaction") ? record.id.slice(0, -":interaction".length) : record.id;
@@ -718,14 +731,14 @@ export default function AppChat({
         if (!record.targetCharacterId && !record.targetIdentityId) return null;
         const sourceRelationId = record.sourceRelationId || (sourceCharacter
           ? relationships.find((relation) =>
-            relation.userIdentityId === activeIdentityId
+            relation.userIdentityId === ownerIdentityId
             && resolveCanonicalCharacterId(relation.characterId, characters) === resolveCanonicalCharacterId(sourceCharacter.id, characters),
           )?.id
           : undefined);
         const action = record.action === "reply" ? "reply" : "comment";
         return {
           id: pendingId,
-          ownerIdentityId: activeIdentityId,
+          ownerIdentityId,
           socialLinkId: record.socialLinkId,
           ...(record.sourceNpcId ? { sourceNpcId: record.sourceNpcId } : {}),
           sourceCharacterId: record.sourceCharacterId,
@@ -740,14 +753,14 @@ export default function AppChat({
           createdAt: record.occurredAt,
         };
       })
-      .filter((interaction): interaction is RelationshipNetworkPendingInteraction => Boolean(interaction));
+      .filter((interaction): interaction is RelationshipNetworkPendingInteraction => Boolean(interaction)));
     return [...stored, ...recovered].sort((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id));
   };
   const [relationshipNetworkPendingInteractions, setRelationshipNetworkPendingInteractions] = useState<RelationshipNetworkPendingInteraction[]>(() =>
     loadPendingRelationshipNetworkInteractions());
   useEffect(() => {
     setRelationshipNetworkPendingInteractions(loadPendingRelationshipNetworkInteractions());
-  }, [activeIdentityId]);
+  }, [activeIdentityId, momentsFeedIdentityId]);
   const activeRelationship = activeChatRelationId
     ? relationships.find((relation) => relation.id === activeChatRelationId && relation.userIdentityId === activeIdentityId)
     : undefined;
@@ -5391,7 +5404,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         id: `${baseId}:${input.sourceCharacter.id}`,
         characterId: input.sourceCharacter.id,
         relationId: input.sourceRelationship.id,
-        userIdentityId: activeIdentityId,
+        userIdentityId: getMomentNetworkOwnerIdentityId(input.moment),
         sourceMomentId: input.moment.id,
         content: `【朋友圈互动】${sourceName}评论了${targetName}发布的朋友圈${postPreview ? `「${postPreview}」` : ""}：${content}`,
         timestamp: input.comment.timestamp,
@@ -5402,7 +5415,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         id: `${baseId}:${input.targetCharacter.id}`,
         characterId: input.targetCharacter.id,
         relationId: input.targetRelationship.id,
-        userIdentityId: activeIdentityId,
+        userIdentityId: getMomentNetworkOwnerIdentityId(input.moment),
         sourceMomentId: input.moment.id,
         content: `【朋友圈互动】${sourceName}在${targetName}的朋友圈留下评论：${content}`,
         timestamp: input.comment.timestamp,
@@ -5426,7 +5439,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   ) => {
     const pending: RelationshipNetworkPendingInteraction = {
       id: requestKey,
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId: getMomentNetworkOwnerIdentityId(moment),
       socialLinkId: candidate.socialLink.id,
       sourceNpcId: candidate.npc.id,
       sourceCharacterId: candidate.sourceCharacter.id,
@@ -5449,7 +5462,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     }
     const auditResult = upsertRelationshipNetworkInteractionRecord({
       id: `${requestKey}:interaction`,
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId: getMomentNetworkOwnerIdentityId(moment),
       socialLinkId: candidate.socialLink.id,
       sourceNpcId: candidate.npc.id,
       sourceCharacterId: candidate.sourceCharacter.id,
@@ -5480,7 +5493,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   ) => {
     const pending: RelationshipNetworkPendingInteraction = {
       id: requestKey,
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId: getMomentNetworkOwnerIdentityId(moment),
       socialLinkId: candidate.socialLink.id,
       sourceCharacterId: candidate.sourceCharacter.id,
       sourceRelationId: candidate.sourceRelationship.id,
@@ -5499,7 +5512,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     }
     const auditResult = upsertRelationshipNetworkInteractionRecord({
       id: `${requestKey}:interaction`,
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId: getMomentNetworkOwnerIdentityId(moment),
       socialLinkId: candidate.socialLink.id,
       sourceCharacterId: candidate.sourceCharacter.id,
       sourceRelationId: candidate.sourceRelationship.id,
@@ -5519,7 +5532,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   };
 
   const approveRelationshipNetworkInteraction = (pending: RelationshipNetworkPendingInteraction) => {
-    if (pending.ownerIdentityId !== activeIdentityId) return;
+    if (![activeIdentityId, momentsFeedIdentityId].includes(pending.ownerIdentityId)) return;
     const targetMoment = moments.find((moment) => moment.id === pending.targetMomentId);
     if (!targetMoment || (pending.targetCommentId && !getMomentComments(targetMoment).some((comment) => comment.id === pending.targetCommentId))) {
       rejectRelationshipNetworkInteraction(pending, "目标朋友圈或评论已不存在");
@@ -5568,7 +5581,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     }
     if (pending.targetCharacterId) {
       const characterCandidate = findRelationshipNetworkCharacterMomentCommentCandidate({
-        ownerIdentityId: activeIdentityId,
+        ownerIdentityId: pending.ownerIdentityId,
         npcId: pending.sourceNpcId,
         targetCharacterId: pending.targetCharacterId,
         characters,
@@ -5583,7 +5596,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     }
     const auditResult = upsertRelationshipNetworkInteractionRecord({
       id: `${pending.id}:interaction`,
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId: pending.ownerIdentityId,
       socialLinkId: pending.socialLinkId,
       sourceNpcId: pending.sourceNpcId,
       sourceCharacterId: pending.sourceCharacterId,
@@ -5597,16 +5610,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       occurredAt: Date.now(),
     });
     if (!auditResult.success) console.error("Failed to finalize relationship-network interaction:", auditResult.error);
-    removeRelationshipNetworkPendingInteraction(activeIdentityId, pending.id);
+    removeRelationshipNetworkPendingInteraction(pending.ownerIdentityId, pending.id);
     setRelationshipNetworkPendingInteractions((current) => current.filter((item) => item.id !== pending.id));
     showToast(`已发布 ${pending.authorName} 的${pending.action === "reply" ? "回复" : "评论"}`);
   };
 
   const rejectRelationshipNetworkInteraction = (pending: RelationshipNetworkPendingInteraction, reason = "用户拒绝发布") => {
-    if (pending.ownerIdentityId !== activeIdentityId) return;
+    if (![activeIdentityId, momentsFeedIdentityId].includes(pending.ownerIdentityId)) return;
     const auditResult = upsertRelationshipNetworkInteractionRecord({
       id: `${pending.id}:interaction`,
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId: pending.ownerIdentityId,
       socialLinkId: pending.socialLinkId,
       sourceNpcId: pending.sourceNpcId,
       sourceCharacterId: pending.sourceCharacterId,
@@ -5621,7 +5634,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       occurredAt: Date.now(),
     });
     if (!auditResult.success) console.error("Failed to record rejected relationship-network interaction:", auditResult.error);
-    removeRelationshipNetworkPendingInteraction(activeIdentityId, pending.id);
+    removeRelationshipNetworkPendingInteraction(pending.ownerIdentityId, pending.id);
     setRelationshipNetworkPendingInteractions((current) => current.filter((item) => item.id !== pending.id));
     if (reason === "用户拒绝发布") showToast("已拒绝这条待确认互动");
   };
@@ -5847,8 +5860,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
   const handleRelationshipNetworkCharacterCommentsOnMoment = async (newMo: Moment) => {
     if (relationshipNetworkCommentBlockedRef.current || !newMo.relationshipNetworkNpcId) return;
+    const ownerIdentityId = getMomentNetworkOwnerIdentityId(newMo);
     const candidates = listRelationshipNetworkCharacterMomentCommentCandidates({
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId,
       moment: newMo,
       characters,
       relationships,
@@ -5912,8 +5926,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     options: { force?: boolean; showEmptyToast?: boolean } = {},
   ): Promise<number> => {
     if (relationshipNetworkCommentBlockedRef.current) return 0;
+    const ownerIdentityId = getMomentNetworkOwnerIdentityId(newMo);
     const candidates = listRelationshipNetworkCharacterToCharacterMomentCommentCandidates({
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId,
       moment: newMo,
       characters,
       relationships,
@@ -5938,7 +5953,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const recordInteraction = (status: RelationshipNetworkInteractionStatus, details: { content?: string; reason?: string } = {}) => {
         const result = appendRelationshipNetworkInteractionRecord({
           id: `${requestKey}:${status}`,
-          ownerIdentityId: activeIdentityId,
+          ownerIdentityId,
           socialLinkId: candidate.socialLink.id,
           sourceCharacterId: candidate.sourceCharacter.id,
           sourceRelationId: candidate.sourceRelationship.id,
@@ -6015,13 +6030,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
   const handleRelationshipNetworkCommentsOnMoment = async (newMo: Moment, options: { force?: boolean; showEmptyToast?: boolean } = {}): Promise<number> => {
     if (!isMomentPublic(newMo)) return 0;
-    if (relationshipNetworkCommentBlockedRef.current
-      || (newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
+    if (relationshipNetworkCommentBlockedRef.current) return 0;
+    const ownerIdentityId = getMomentNetworkOwnerIdentityId(newMo);
     const candidates = listRelationshipNetworkMomentCommentCandidates({
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId,
       ...(newMo.characterId
         ? { targetCharacterId: newMo.characterId }
-        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: activeIdentityName }),
+        : { targetIdentityId: ownerIdentityId, targetIdentityName: getMomentNetworkOwnerName(newMo) }),
       characters,
       relationships,
       existingMoments: moments,
@@ -6048,7 +6063,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const recordInteraction = (status: RelationshipNetworkInteractionStatus, details: { content?: string; reason?: string } = {}) => {
         const result = appendRelationshipNetworkInteractionRecord({
           id: `${requestKey}:${status}`,
-          ownerIdentityId: activeIdentityId,
+          ownerIdentityId,
           socialLinkId: candidate.socialLink.id,
           sourceNpcId: candidate.npc.id,
           sourceCharacterId: candidate.sourceCharacter.id,
@@ -6144,12 +6159,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   };
 
   const handleRelationshipNetworkLikesOnMoment = async (newMo: Moment, options: { force?: boolean } = {}): Promise<number> => {
-    if (!isMomentPublic(newMo) || (newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
+    if (!isMomentPublic(newMo)) return 0;
+    const ownerIdentityId = getMomentNetworkOwnerIdentityId(newMo);
     const candidates = listRelationshipNetworkMomentCommentCandidates({
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId,
       ...(newMo.characterId
         ? { targetCharacterId: newMo.characterId }
-        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: activeIdentityName }),
+        : { targetIdentityId: ownerIdentityId, targetIdentityName: getMomentNetworkOwnerName(newMo) }),
       characters,
       relationships,
       existingMoments: moments,
@@ -6166,7 +6182,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         onLikeMoment(newMo.id, candidate.npc.name);
         const result = appendRelationshipNetworkInteractionRecord({
           id: `${requestKey}:completed`,
-          ownerIdentityId: activeIdentityId,
+          ownerIdentityId,
           socialLinkId: candidate.socialLink.id,
           sourceNpcId: candidate.npc.id,
           sourceCharacterId: candidate.sourceCharacter.id,
@@ -6195,8 +6211,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   };
 
   const handleRelationshipNetworkRepliesOnMoment = async (newMo: Moment, options: { force?: boolean } = {}): Promise<number> => {
-    if (!isMomentPublic(newMo) || relationshipNetworkCommentBlockedRef.current
-      || (newMo.ownerIdentityId || "identity-1") !== activeIdentityId) return 0;
+    if (!isMomentPublic(newMo) || relationshipNetworkCommentBlockedRef.current) return 0;
+    const ownerIdentityId = getMomentNetworkOwnerIdentityId(newMo);
     const npcAuthorCanonicalId = newMo.characterId
       ? resolveCanonicalCharacterId(newMo.characterId, characters)
       : undefined;
@@ -6210,10 +6226,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       : newMo.characterId;
     if (newMo.relationshipNetworkNpcId && !replyTargetCharacterId) return 0;
     const candidates = listRelationshipNetworkMomentCommentCandidates({
-      ownerIdentityId: activeIdentityId,
+      ownerIdentityId,
       ...(replyTargetCharacterId
         ? { targetCharacterId: replyTargetCharacterId }
-        : { targetIdentityId: newMo.ownerIdentityId || activeIdentityId, targetIdentityName: activeIdentityName }),
+        : { targetIdentityId: ownerIdentityId, targetIdentityName: getMomentNetworkOwnerName(newMo) }),
       characters,
       relationships,
       existingMoments: moments,
@@ -6239,7 +6255,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       const recordInteraction = (status: RelationshipNetworkInteractionStatus, details: { content?: string; reason?: string } = {}) => {
         const result = appendRelationshipNetworkInteractionRecord({
           id: `${requestKey}:${status}`,
-          ownerIdentityId: activeIdentityId,
+          ownerIdentityId,
           socialLinkId: candidate.socialLink.id,
           sourceNpcId: candidate.npc.id,
           sourceCharacterId: candidate.sourceCharacter.id,
@@ -6348,7 +6364,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       handleRelationshipNetworkCharacterToCharacterCommentsOnMoment(newMo, { ...options, showEmptyToast: false }),
     ]);
     if (options.force && commentCandidates + likeCandidates + replyCandidates + characterCommentCandidates === 0) {
-      showToast("当前没有符合权限和关系条件的角色或 NPC 可参与这条朋友圈");
+      showToast("未找到可执行的关系网互动：请确认动态为公开、箭头指向发帖人，并至少开启评论、点赞或回复权限。");
     }
   };
 

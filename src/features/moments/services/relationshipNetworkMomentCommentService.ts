@@ -96,8 +96,11 @@ export function listRelationshipNetworkCharacterToCharacterMomentCommentCandidat
   force?: boolean;
 }): RelationshipNetworkCharacterToCharacterMomentCommentCandidate[] {
   if (!isPublicCharacterMoment(input.moment, input.ownerIdentityId)) return [];
+  const momentCharacterCanonicalId = input.moment.characterId
+    ? resolveCanonicalCharacterId(input.moment.characterId, input.characters)
+    : undefined;
   const targetCharacter = input.characters.find((character) =>
-    character.id === input.moment.characterId
+    (!momentCharacterCanonicalId || resolveCanonicalCharacterId(character.id, input.characters) === momentCharacterCanonicalId)
     && belongsToIdentity(character, input.ownerIdentityId)
     && !character.isGroupChat,
   );
@@ -114,8 +117,9 @@ export function listRelationshipNetworkCharacterToCharacterMomentCommentCandidat
       && resolveCanonicalCharacterId(socialLink.targetEntityId, input.characters) === targetCanonicalId,
     )
     .map((socialLink) => {
+      const sourceCanonicalId = resolveCanonicalCharacterId(socialLink.sourceEntityId, input.characters);
       const sourceCharacter = input.characters.find((character) =>
-        character.id === socialLink.sourceEntityId
+        resolveCanonicalCharacterId(character.id, input.characters) === sourceCanonicalId
         && belongsToIdentity(character, input.ownerIdentityId)
         && !character.isGroupChat,
       );

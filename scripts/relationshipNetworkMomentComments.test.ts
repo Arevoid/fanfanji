@@ -181,6 +181,47 @@ assert.equal(characterToCharacterCandidates.length, 1, "a character can comment 
 assert.equal(characterToCharacterCandidates[0]?.sourceCharacter.id, targetCharacter.id);
 assert.equal(characterToCharacterCandidates[0]?.targetCharacter.id, sourceCharacter.id);
 
+// Legacy contact-copy IDs must resolve to the same directed permission. The
+// Moment and social link can still point at a historical copy while the
+// relationship itself is stored against the canonical profile ID.
+const legacySourceCharacter: Character = {
+  ...targetCharacter,
+  id: "character-target-contact-copy",
+  profileSourceId: targetCharacter.id,
+};
+const legacyTargetCharacter: Character = {
+  ...sourceCharacter,
+  id: "character-source-contact-copy",
+  profileSourceId: sourceCharacter.id,
+};
+assert.equal(upsertRelationshipNetworkSocialLink({
+  id: "social-character-to-character-contact-copy",
+  ownerIdentityId,
+  sourceEntityType: "character",
+  sourceEntityId: legacySourceCharacter.id,
+  targetEntityType: "character",
+  targetEntityId: legacyTargetCharacter.id,
+  relationshipLabel: "同事",
+  enabled: true,
+  canViewMoments: true,
+  canCommentMoments: true,
+  commentFrequency: "high",
+  createdAt: 3,
+  updatedAt: 3,
+}).success, true);
+const legacyCharacterCandidates = listRelationshipNetworkCharacterToCharacterMomentCommentCandidates({
+  ownerIdentityId,
+  moment: { ...sourceCharacterMoment, id: "moment-source-character-contact-copy", characterId: legacyTargetCharacter.id },
+  characters: [legacySourceCharacter, legacyTargetCharacter],
+  relationships: [sourceRelationship, targetRelationship],
+  existingMoments: [],
+  force: true,
+});
+assert.ok(legacyCharacterCandidates.some((candidate) =>
+  candidate.sourceCharacter.id === legacySourceCharacter.id
+  && candidate.targetCharacter.id === legacyTargetCharacter.id,
+), "contact-copy IDs should still resolve relationship-network candidates");
+
 assert.equal(upsertRelationshipNetworkSocialLink({
   id: "social-identity-a",
   ownerIdentityId,
