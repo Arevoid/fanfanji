@@ -59,6 +59,7 @@ import {
   CHARACTER_PHONE_DATA_VERSION,
   createCharacterPhone,
   deriveCharacterPhonePasscode,
+  flushCharacterPhoneRepository,
   getCharacterPhoneUnlockPasscode,
   getCharacterPhone,
   normalizeCharacterPhonePasscode,
@@ -1073,6 +1074,7 @@ export default function AppCharacterPhone({
   const [postVisibility, setPostVisibility] = useState<MomentVisibility>("public");
   const [postVisibilityTargetIds, setPostVisibilityTargetIds] = useState<string[]>([]);
   const [phoneMomentComposerOpen, setPhoneMomentComposerOpen] = useState(false);
+  const [isPublishingPost, setIsPublishingPost] = useState(false);
   const [selectedDiaryId, setSelectedDiaryId] = useState<string | null>(null);
   const [diaryEditing, setDiaryEditing] = useState(false);
   const [diaryDraft, setDiaryDraft] = useState({ title: "", body: "" });
@@ -1108,6 +1110,7 @@ export default function AppCharacterPhone({
   const generationRequestRef = useRef(0);
   const phoneReplyQueuesRef = useRef<Record<string, Promise<void>>>({});
   const initialGenerationPhoneIdRef = useRef<string | null>(null);
+  const publishingPostRef = useRef(false);
   const threadMessagePressTimerRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const phoneScopeRef = useRef({ ownerIdentityId: userIdentityId, characterId: selectedCharacterId });
@@ -1126,14 +1129,27 @@ export default function AppCharacterPhone({
   }, [threadVisibleCount, selectedContactId]);
   useEffect(() => {
     if (!phone || !selectedCharacter) return;
-    const persisted = getCharacterPhone(userIdentityId, selectedCharacter.id);
-    const isCurrentVersionPersisted = persisted
-      && persisted.id === phone.id
-      && persisted.updatedAt === phone.updatedAt
-      && persisted.contentSeededAt === phone.contentSeededAt;
-    if (!isCurrentVersionPersisted) {
-      setPhoneNotice("角色手机内容暂未成功保存，本次显示的是临时数据；请到设置→数据管理清理空间后重试");
-    }
+    let cancelled = false;
+    const verifyPersistence = async () => {
+      // IndexedDB writes are queued deliberately so role-phone edits never
+      // block the UI. Wait for that queue before comparing versions; checking
+      // synchronously here used to report a false "temporary data" warning
+      // while the same record was still being flushed.
+      await flushCharacterPhoneRepository();
+      if (cancelled) return;
+      const persisted = getCharacterPhone(userIdentityId, selectedCharacter.id);
+      const isCurrentVersionPersisted = persisted
+        && persisted.id === phone.id
+        && persisted.updatedAt === phone.updatedAt
+        && persisted.contentSeededAt === phone.contentSeededAt;
+      if (!isCurrentVersionPersisted) {
+        setPhoneNotice("角色手机内容暂未成功保存，本次显示的是临时数据；请到设置→数据管理清理空间后重试");
+      } else {
+        setPhoneNotice((current) => current.startsWith("角色手机内容暂未成功保存") ? "" : current);
+      }
+    };
+    void verifyPersistence();
+    return () => { cancelled = true; };
   }, [phone?.id, phone?.updatedAt, phone?.contentSeededAt, selectedCharacter?.id, userIdentityId]);
   useEffect(() => {
     // React StrictMode mounts effects twice in development. Reset this flag
@@ -1820,8 +1836,10 @@ export default function AppCharacterPhone({
     }
     setDraft("");
   };
-  const publishPost = () => {
-    if (!currentPhone || !selectedCharacter || !postDraft.trim()) return;
+  const publishPost = async () => {
+    if (!currentPhone || !selectedCharacter || !postDraft.trim() || publishingPostRef.current) return;
+    publishingPostRef.current = true;
+    setIsPublishingPost(true);
     const now = Date.now();
     const next = withPhoneAction({
       ...currentPhone,
@@ -1858,12 +1876,23 @@ export default function AppCharacterPhone({
       detail: "以角色身份发布朋友圈",
       ...getCharacterPhoneMutationPolicy("moments", selectedCharacter),
     }, now);
-    saveCharacterPhone(next);
-    setPhone(next);
-    syncCharacterPhonePost(next.posts[next.posts.length - 1]);
-    setPostDraft("");
-    setPostVisibility("public");
-    setPostVisibilityTargetIds([]);
+    try {
+      // A post is mirrored to the main Moments feed only after the role-phone
+      // record has been durably written. The previous fire-and-forget save
+      // could mirror a post that failed to persist and then show a misleading
+      // temporary-data warning on the next render.
+      const saved = await saveCharacterPhoneWithCacheRecovery(next);
+      if (!saved) return;
+      setPhone(next);
+      setPhoneNotice("");
+      syncCharacterPhonePost(next.posts[next.posts.length - 1]);
+      setPostDraft("");
+      setPostVisibility("public");
+      setPostVisibilityTargetIds([]);
+    } finally {
+      publishingPostRef.current = false;
+      setIsPublishingPost(false);
+    }
   };
 
   const selectCharacter = (characterId: string) => {
@@ -3053,7 +3082,7 @@ export default function AppCharacterPhone({
             <div className="flex items-center justify-between"><span className="text-xs font-bold">分享新鲜事…</span><button type="button" onClick={() => setPhoneMomentComposerOpen(false)} className="text-xs text-[var(--text-tertiary)]">收起</button></div>
             <textarea value={postDraft} onChange={(event) => setPostDraft(event.target.value)} placeholder="写下角色会发布的内容…" className="mt-2 min-h-20 w-full resize-none rounded-xl bg-[var(--surface-muted)] p-2 text-xs outline-none" />
             {renderPostVisibilitySelect()}
-            <button type="button" onClick={() => { publishPost(); setPhoneMomentComposerOpen(false); }} className="mt-2 rounded-xl bg-neutral-950 px-3 py-2 text-xs font-bold text-white">发布动态</button>
+            <button type="button" disabled={isPublishingPost} onClick={() => { void publishPost(); setPhoneMomentComposerOpen(false); }} className="mt-2 rounded-xl bg-neutral-950 px-3 py-2 text-xs font-bold text-white disabled:cursor-wait disabled:opacity-60">{isPublishingPost ? "保存中…" : "发布动态"}</button>
           </div>
         )}
         <div className="max-w-md mx-auto px-4 divide-y divide-slate-100">
@@ -3702,10 +3731,11 @@ export default function AppCharacterPhone({
           {renderPostVisibilitySelect()}
           <button
             type="button"
-            onClick={publishPost}
-            className="mt-2 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-bold text-white"
+            disabled={isPublishingPost}
+            onClick={() => { void publishPost(); }}
+            className="mt-2 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-bold text-white disabled:cursor-wait disabled:opacity-60"
           >
-            发布朋友圈
+            {isPublishingPost ? "保存中…" : "发布朋友圈"}
           </button>
         </div>
       </>

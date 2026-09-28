@@ -584,6 +584,63 @@ export async function generateRelationshipNetworkCharacterToCharacterMomentComme
   });
 }
 
+/** Generate a reply from the character who owns a Moment to another character's comment. */
+export async function generateRelationshipNetworkCharacterToCharacterMomentReply(input: {
+  candidate: RelationshipNetworkCharacterToCharacterMomentCommentCandidate;
+  moment: Moment;
+  targetDescription: string;
+  replyingTo: MomentComment;
+  worldBookEntries: readonly WorldBookEntry[];
+  topicHistory: Parameters<typeof generateAutomaticMomentComment>[0]["topicHistory"];
+  knowledgeClaims: readonly KnowledgeClaim[];
+  memories: readonly MemoryItem[];
+  events: readonly CharacterEvent[];
+  settings: UserSettings;
+  requestAi: typeof apiChat;
+  cleanText: (text: string) => string;
+  characterExpressionPrompt: string;
+}): Promise<Awaited<ReturnType<typeof generateAutomaticMomentReply>>> {
+  const { candidate } = input;
+  const sourceName = candidate.sourceCharacter.remark || candidate.sourceCharacter.name;
+  const targetName = candidate.targetCharacter.remark || candidate.targetCharacter.name;
+  const targetDescription = [
+    input.targetDescription,
+    `发帖人：${targetName}`,
+    `你是${targetName}，正在回复${sourceName}在这条公开朋友圈下的评论。`,
+    `你与${sourceName}的关系是「${candidate.socialLink.relationshipLabel || "认识"}」。`,
+    formatRelationshipBehaviorBoundary(candidate.socialLink.relationshipLabel),
+    `评论作者：${sourceName}`,
+    `评论内容：${input.replyingTo.content}`,
+    "这是角色之间的公开朋友圈互动；只回应这条动态和评论中明确出现的内容，没有合适的回应请输出 [SKIP]。",
+  ].join("\n");
+  const targetWorldKnowledge = buildWorldBookSystemBlocks(
+    [...input.worldBookEntries],
+    candidate.targetCharacter.id,
+    targetDescription,
+    { scenario: "public", characterId: candidate.targetCharacter.id },
+  ).allTriggered.map((entry) => ({ title: entry.title, content: entry.content }));
+  return generateAutomaticMomentReply({
+    targetMoment: input.moment,
+    targetDescription,
+    userCommentText: input.replyingTo.content,
+    replyingToContent: input.replyingTo.content,
+    replyTargetName: sourceName,
+    character: candidate.targetCharacter,
+    relationship: candidate.targetRelationship,
+    worldBookEntries: input.worldBookEntries,
+    topicHistory: input.topicHistory,
+    knowledgeClaims: input.knowledgeClaims,
+    memories: input.memories,
+    events: input.events,
+    settings: input.settings,
+    requestAi: input.requestAi,
+    cleanText: input.cleanText,
+    characterExpressionPrompt: input.characterExpressionPrompt,
+    additionalWorldKnowledge: targetWorldKnowledge,
+    allowSkip: true,
+  });
+}
+
 export async function generateRelationshipNetworkCharacterMomentReply(input: {
   candidate: RelationshipNetworkCharacterMomentCommentCandidate;
   moment: Moment;
