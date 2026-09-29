@@ -130,6 +130,48 @@ const findScopedCharacterRelationship = (
 };
 
 /**
+ * Relationship records are the authoritative scope for a direct character
+ * conversation.  Older character profiles may not have ownerIdentityId yet,
+ * while their relationship was already migrated into the correct identity
+ * scope.  Requiring both fields made those profiles look connected in the
+ * canvas but silently removed them from Moment interaction candidates.
+ */
+const findScopedCharacter = (
+  characterId: string,
+  ownerIdentityId: string,
+  characters: readonly Character[],
+  relationships: readonly CharacterRelationship[],
+): Character | undefined => {
+  const canonicalId = resolveCanonicalCharacterId(characterId, characters);
+  return characters.find((character) =>
+    resolveCanonicalCharacterId(character.id, characters) === canonicalId
+      && !character.isGroupChat
+      && Boolean(findScopedCharacterRelationship(character.id, ownerIdentityId, characters, relationships)),
+  );
+};
+
+/**
+ * Legacy character Moments sometimes predate ownerIdentityId.  If the post
+ * carries a scoped relationId, that relation is enough to prove which
+ * identity owns the post; explicit ownerIdentityId still wins when present.
+ */
+const isPublicCharacterMomentForIdentity = (
+  moment: Moment,
+  ownerIdentityId: string,
+  characters: readonly Character[],
+  relationships: readonly CharacterRelationship[],
+): boolean => {
+  if (!moment.characterId || (moment.visibility || "public") !== "public") return false;
+  if ((moment.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId) return true;
+  if (moment.ownerIdentityId || !moment.relationId) return false;
+  const relation = relationships.find((candidate) => candidate.id === moment.relationId);
+  return Boolean(relation
+    && relation.userIdentityId === ownerIdentityId
+    && resolveCanonicalCharacterId(relation.characterId, characters)
+      === resolveCanonicalCharacterId(moment.characterId, characters));
+};
+
+/**
  * Lists directed character-to-character Moment interactions. A relationship
  * line remains presentation-only until a matching social link is enabled.
  */
@@ -141,13 +183,13 @@ export function listRelationshipNetworkCharacterToCharacterMomentCommentCandidat
   existingMoments: readonly Moment[];
   force?: boolean;
 }): RelationshipNetworkCharacterToCharacterMomentCommentCandidate[] {
-  if (!isPublicCharacterMoment(input.moment, input.ownerIdentityId)) return [];
+  if (!isPublicCharacterMomentForIdentity(input.moment, input.ownerIdentityId, input.characters, input.relationships)) return [];
   const momentCharacterCanonicalId = input.moment.characterId
     ? resolveCanonicalCharacterId(input.moment.characterId, input.characters)
     : undefined;
   const targetCharacter = input.characters.find((character) =>
     (!momentCharacterCanonicalId || resolveCanonicalCharacterId(character.id, input.characters) === momentCharacterCanonicalId)
-    && belongsToIdentity(character, input.ownerIdentityId)
+    && Boolean(findScopedCharacterRelationship(character.id, input.ownerIdentityId, input.characters, input.relationships))
     && !character.isGroupChat,
   );
   if (!targetCharacter) return [];
@@ -165,11 +207,7 @@ export function listRelationshipNetworkCharacterToCharacterMomentCommentCandidat
     )
     .map((socialLink) => {
       const sourceCanonicalId = resolveCanonicalCharacterId(socialLink.sourceEntityId, input.characters);
-      const sourceCharacter = input.characters.find((character) =>
-        resolveCanonicalCharacterId(character.id, input.characters) === sourceCanonicalId
-        && belongsToIdentity(character, input.ownerIdentityId)
-        && !character.isGroupChat,
-      );
+      const sourceCharacter = findScopedCharacter(sourceCanonicalId, input.ownerIdentityId, input.characters, input.relationships);
       if (!sourceCharacter || resolveCanonicalCharacterId(sourceCharacter.id, input.characters) === targetCanonicalId) return undefined;
       const sourceRelationship = findScopedCharacterRelationship(sourceCharacter.id, input.ownerIdentityId, input.characters, input.relationships);
       const targetRelationship = findScopedCharacterRelationship(targetCharacter.id, input.ownerIdentityId, input.characters, input.relationships);
@@ -186,12 +224,6 @@ export function listRelationshipNetworkCharacterToCharacterMomentCommentCandidat
       return { socialLink, sourceCharacter, sourceRelationship, targetCharacter, targetRelationship };
     })
     .filter((candidate): candidate is RelationshipNetworkCharacterToCharacterMomentCommentCandidate => Boolean(candidate));
-}
-
-function isPublicCharacterMoment(moment: Moment, ownerIdentityId: string): boolean {
-  return Boolean(moment.characterId)
-    && (moment.visibility || "public") === "public"
-    && (moment.ownerIdentityId || DEFAULT_IDENTITY_ID) === ownerIdentityId;
 }
 
 function hasSourceCommented(

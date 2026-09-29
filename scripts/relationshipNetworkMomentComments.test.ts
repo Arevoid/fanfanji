@@ -263,6 +263,71 @@ assert.equal(characterToCharacterCandidates.length, 1, "a character can comment 
 assert.equal(characterToCharacterCandidates[0]?.sourceCharacter.id, targetCharacter.id);
 assert.equal(characterToCharacterCandidates[0]?.targetCharacter.id, sourceCharacter.id);
 
+// Legacy characters can be missing ownerIdentityId even though their direct
+// relationships are already scoped correctly.  The relationship scope must
+// remain sufficient for a connected character pair to participate.
+const legacyUnownedSource: Character = { ...sourceCharacter, id: "character-unowned-source", ownerIdentityId: undefined };
+const legacyUnownedTarget: Character = { ...targetCharacter, id: "character-unowned-target", ownerIdentityId: undefined };
+const legacyUnownedSourceRelationship = createRelationship({
+  id: "relation-unowned-source",
+  characterId: legacyUnownedSource.id,
+  userIdentityId: ownerIdentityId,
+  now: 5,
+  relationship: "friend",
+});
+const legacyUnownedTargetRelationship = createRelationship({
+  id: "relation-unowned-target",
+  characterId: legacyUnownedTarget.id,
+  userIdentityId: ownerIdentityId,
+  now: 5,
+  relationship: "friend",
+});
+const legacyUnownedMoment: Moment = {
+  ...sourceCharacterMoment,
+  id: "moment-unowned-character-1",
+  characterId: legacyUnownedTarget.id,
+  relationId: legacyUnownedTargetRelationship.id,
+};
+assert.equal(upsertRelationshipNetworkSocialLink({
+  id: "social-character-to-character-unowned",
+  ownerIdentityId,
+  sourceEntityType: "character",
+  sourceEntityId: legacyUnownedSource.id,
+  targetEntityType: "character",
+  targetEntityId: legacyUnownedTarget.id,
+  relationshipLabel: "colleague",
+  enabled: true,
+  canViewMoments: true,
+  canCommentMoments: true,
+  commentFrequency: "high",
+  createdAt: 5,
+  updatedAt: 5,
+}).success, true);
+const legacyUnownedCandidates = listRelationshipNetworkCharacterToCharacterMomentCommentCandidates({
+  ownerIdentityId,
+  moment: legacyUnownedMoment,
+  characters: [legacyUnownedSource, legacyUnownedTarget],
+  relationships: [legacyUnownedSourceRelationship, legacyUnownedTargetRelationship],
+  existingMoments: [],
+  force: true,
+});
+assert.ok(legacyUnownedCandidates.some((candidate) =>
+  candidate.sourceCharacter.id === legacyUnownedSource.id
+  && candidate.targetCharacter.id === legacyUnownedTarget.id,
+), "scoped relationships should activate legacy characters without ownerIdentityId");
+
+// The same relation-backed fallback also accepts a legacy Moment that has no
+// ownerIdentityId but still carries its direct relation scope.
+const legacyMomentWithoutOwner = { ...legacyUnownedMoment, id: "moment-unowned-character-legacy" };
+assert.ok(listRelationshipNetworkCharacterToCharacterMomentCommentCandidates({
+  ownerIdentityId,
+  moment: legacyMomentWithoutOwner,
+  characters: [legacyUnownedSource, legacyUnownedTarget],
+  relationships: [legacyUnownedSourceRelationship, legacyUnownedTargetRelationship],
+  existingMoments: [],
+  force: true,
+}).length > 0, "relationId should recover the owner scope for legacy character Moments");
+
 // Legacy contact-copy IDs must resolve to the same directed permission. The
 // Moment and social link can still point at a historical copy while the
 // relationship itself is stored against the canonical profile ID.
