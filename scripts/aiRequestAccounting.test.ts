@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { apiChat, apiExtractMemories } from "../src/utils/apiHelper";
-import { AI_REQUEST_LEDGER_KEY, clearInMemoryAiRequestLedgerForTests, loadAiRequestLedger } from "../src/core/monitoring/aiRequestLedger";
+import { AI_REQUEST_LEDGER_KEY, clearInMemoryAiRequestLedgerForTests, loadAiRequestLedger, withAiRequestLedger } from "../src/core/monitoring/aiRequestLedger";
 import { requestDirectChatTurn } from "../src/features/chat/controllers/chatGenerationController";
 import type { UserSettings } from "../src/types";
 
@@ -32,6 +32,10 @@ function records() {
 }
 
 try {
+  resetLedger();
+  await withAiRequestLedger({ purpose: "chat_reply" }, async () => ({ text: "预检结果，不代表真实 API 调用" }));
+  assert.equal(records().length, 0, "a flow without a provider attempt must not create a fake call detail");
+
   resetLedger();
   globalThis.fetch = (async () => Response.json({ text: "正常回复" })) as typeof fetch;
   await apiChat({ message: "你好", history: [], apiKey: "key", model: "model", parentActionId: "action-normal", characterId: "character-1", relationId: "relation-1", conversationId: "conversation-1" });

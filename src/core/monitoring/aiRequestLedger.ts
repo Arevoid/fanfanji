@@ -236,6 +236,10 @@ function normalizeRecord(value: unknown): AiRequestEnvelope | null {
   const candidate = value as Partial<AiRequestEnvelope>;
   if (typeof candidate.requestId !== "string" || typeof candidate.purpose !== "string" || !AI_PURPOSES.includes(candidate.purpose as AiPurpose)) return null;
   if (candidate.status !== "success" && candidate.status !== "failure") return null;
+  const providerRequestCount = Math.max(0, Math.floor(Number(candidate.providerRequestCount) || 0));
+  // A ledger row represents a real provider request. Preflight/short-circuit
+  // flows that never reached a provider must not create a fake call detail.
+  if (providerRequestCount === 0) return null;
   return {
     requestId: candidate.requestId,
     ...(typeof candidate.logicalActionId === "string" ? { logicalActionId: candidate.logicalActionId } : {}),
@@ -256,7 +260,7 @@ function normalizeRecord(value: unknown): AiRequestEnvelope | null {
     ...(finiteNonNegative(candidate.estimatedOutputTokens) !== undefined ? { estimatedOutputTokens: finiteNonNegative(candidate.estimatedOutputTokens) } : {}),
     ...(finiteNonNegative(candidate.actualInputTokens) !== undefined ? { actualInputTokens: finiteNonNegative(candidate.actualInputTokens) } : {}),
     ...(finiteNonNegative(candidate.actualOutputTokens) !== undefined ? { actualOutputTokens: finiteNonNegative(candidate.actualOutputTokens) } : {}),
-    providerRequestCount: Math.max(0, Math.floor(Number(candidate.providerRequestCount) || 0)),
+    providerRequestCount,
     ...(finiteNonNegative(candidate.inputCharacters) !== undefined ? { inputCharacters: finiteNonNegative(candidate.inputCharacters) } : {}),
     ...(finiteNonNegative(candidate.outputCharacters) !== undefined ? { outputCharacters: finiteNonNegative(candidate.outputCharacters) } : {}),
     ...(Array.isArray(candidate.contextItems) && boundedContextItems(candidate.contextItems).length > 0 ? { contextItems: boundedContextItems(candidate.contextItems) } : {}),
