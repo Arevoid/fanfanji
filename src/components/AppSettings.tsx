@@ -84,6 +84,7 @@ import { useSettingsCssTemplateCopy } from "../features/settings/hooks/useSettin
 import { getSettingsPreviewBubbleBackground, getSettingsPreviewBubbleStyle } from "../features/settings/settingsPreviewStyle";
 import { McpSettingsPanel } from "../features/mcp/components/McpSettingsPanel";
 import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
+import { DetectionLogsPanel } from "../features/settings/components/DetectionLogsPanel";
 import { sortIdentitiesForDisplay } from "../domain/relationship/characterRelationship";
 import {
   WELCOME_WIDGET_ID,
@@ -711,6 +712,8 @@ export default function AppSettings({
             <div className="bg-white rounded-[16px] border border-[#F0F0F0] shadow-[0_2px_12px_rgba(0,0,0,0.06)] overflow-hidden divide-y divide-[#F0F0F0]">
               {/* API Settings */}
               <button
+                key="api"
+                type="button"
                 onClick={() => setActiveTab("api")}
                 className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
@@ -725,6 +728,8 @@ export default function AppSettings({
 
               {/* Voice and image settings */}
               <button
+                key="minimax"
+                type="button"
                 onClick={() => setActiveTab("minimax")}
                 className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
@@ -739,6 +744,8 @@ export default function AppSettings({
 
               {/* External MCP tools */}
               <button
+                key="mcp"
+                type="button"
                 onClick={() => setActiveTab("mcp")}
                 className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
@@ -753,6 +760,8 @@ export default function AppSettings({
 
               {/* Aesthetics Settings */}
               <button
+                key="beauty"
+                type="button"
                 onClick={() => setActiveTab("beauty")}
                 className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
@@ -767,6 +776,8 @@ export default function AppSettings({
 
               {/* 4. System Config */}
               <button
+                key="system_config"
+                type="button"
                 onClick={() => setActiveTab("system_config")}
                 className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
@@ -779,8 +790,10 @@ export default function AppSettings({
                 <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
 
-              {/* System Backup */}
+              {/* Detection logs (the internal tab key remains `system` for compatibility) */}
               <button
+                key="system"
+                type="button"
                 onClick={() => setActiveTab("system")}
                 className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
@@ -788,13 +801,15 @@ export default function AppSettings({
                   <div className="w-5 h-5 flex items-center justify-center text-slate-800 shrink-0">
                     <RefreshCw className="w-5 h-5" />
                   </div>
-                  <span className="text-base font-medium text-slate-800">系统备份</span>
+                  <span className="text-base font-medium text-slate-800">检测日志</span>
                 </div>
                 <ChevronRight className="w-4 h-4 text-[#C7C7CC] shrink-0" />
               </button>
 
               {/* Data Management */}
               <button
+                key="data"
+                type="button"
                 onClick={() => setActiveTab("data")}
                 className="w-full h-[52px] flex items-center justify-between px-4 hover:bg-slate-50 transition-colors text-left"
               >
@@ -814,7 +829,7 @@ export default function AppSettings({
           </div>
         ) : (
           /* Independent sub-pages */
-          <div className={`min-h-0 flex-1 overflow-y-auto ${activeTab === "data" ? "bg-white p-0 pb-0" : "p-4 pb-[34px] bg-[var(--app-bg)]"}`}>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-[34px] bg-[var(--app-bg)]">
             <div className="max-w-md mx-auto space-y-3">
           
           {/* PROFILE SETTINGS TAB */}
@@ -855,7 +870,88 @@ export default function AppSettings({
           )}
 
           {activeTab === "data" && (
-            <StorageCachePanel mode="user" />
+            <div className="space-y-4 text-left">
+              <SystemBackupPanel
+                showExportOptions={showBackupExportOptions}
+                onOpenExportOptions={() => setShowBackupExportOptions(true)}
+                onCloseExportOptions={() => setShowBackupExportOptions(false)}
+                onExportFull={async () => {
+                  try {
+                    await handleExportFull();
+                    setShowBackupExportOptions(false);
+                  } catch (error: any) {
+                    alert("导出备份失败: " + error.message);
+                  }
+                }}
+                onExportLight={async () => {
+                  try {
+                    await handleExportLight();
+                    setShowBackupExportOptions(false);
+                  } catch (error: any) {
+                    alert("导出备份失败: " + error.message);
+                  }
+                }}
+                onImport={handleSystemBackupImport}
+                onInspect={handleSystemBackupInspect}
+              />
+
+              <StorageDiagnosticsCard
+                diagnostics={storageDiagnostics}
+                preflight={storagePreflight}
+                appVersion={APP_VERSION}
+                backupVersion={SYSTEM_BACKUP_VERSION}
+                lastBackupAt={lastBackupAt}
+                onRefresh={() => void refreshStorageDiagnostics()}
+                onRunPreflight={() => void runStorageMigrationPreflight()}
+                onRunContentMigration={() => void runContentStorageMigration()}
+                onResumeInterruptedMigration={() => void runContentStorageMigration(true)}
+                contentMigrationRunning={isContentStorageMigrationRunning}
+                onRequestPersistence={() => void requestStoragePersistence()}
+                onDownloadDiagnosticReport={downloadStorageDiagnosticReport}
+                onCleanOrphanedResources={cleanOrphanedResources}
+                onCleanMigratedCopies={cleanMigratedCopies}
+              />
+
+              <StorageCachePanel mode="user" />
+
+              <div className="settings-section-header">桌面模块</div>
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">桌面模块备份</h3>
+                  <p className="mt-2 text-[10px] leading-relaxed text-slate-400">单独备份和恢复所有桌面美化，如壁纸、桌面布局、小组件设置与自定义应用图标等。</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button type="button" onClick={downloadDesktopModuleBackup} className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group">
+                    <Download className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-bold text-slate-700">导出桌面模块</span>
+                    <span className="text-[8px] text-slate-400 mt-1">下载桌面 JSON</span>
+                  </button>
+                  <label className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group cursor-pointer">
+                    <Upload className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-bold text-slate-700">导入桌面模块</span>
+                    <span className="text-[8px] text-slate-400 mt-1">恢复桌面 JSON</span>
+                    <input type="file" accept="application/json" onChange={importDesktopModuleBackup} className="hidden" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="settings-section-header">危险操作</div>
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
+                <h3 className="text-xs font-bold text-rose-500 uppercase tracking-wider">危险区域</h3>
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                  清除缓存将删除此设备上的所有自定义角色、历史对话、世界书、日程、备忘录和朋友圈，系统也将恢复为最干净的初始设置。请注意此操作无法撤销。
+                </p>
+                <button
+                  type="button"
+                  onClick={handleClearApplicationData}
+                  disabled={isClearingApplicationData}
+                  className="w-full py-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 text-rose-600 rounded-[16px] font-bold text-xs transition-all flex items-center justify-center gap-1.5 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isClearingApplicationData ? "animate-spin" : ""}`} />
+                  <span>{isClearingApplicationData ? "正在清除…" : "清除缓存并恢复为默认"}</span>
+                </button>
+              </div>
+            </div>
           )}
 
           {activeTab === "profile" && (
@@ -2702,89 +2798,9 @@ export default function AppSettings({
 
           {activeTab === "mcp" && <McpSettingsPanel />}
 
-          {/* SYSTEM SETTINGS & BACKUP TAB */}
+          {/* DETECTION LOGS TAB (internal `system` key retained for compatibility) */}
           {activeTab === "system" && (
-            <div className="space-y-4 text-left">
-              <SystemBackupPanel
-                showExportOptions={showBackupExportOptions}
-                onOpenExportOptions={() => setShowBackupExportOptions(true)}
-                onCloseExportOptions={() => setShowBackupExportOptions(false)}
-                onExportFull={async () => {
-                  try {
-                    await handleExportFull();
-                    setShowBackupExportOptions(false);
-                  } catch (error: any) {
-                    alert("导出备份失败: " + error.message);
-                  }
-                }}
-                onExportLight={async () => {
-                  try {
-                    await handleExportLight();
-                    setShowBackupExportOptions(false);
-                  } catch (error: any) {
-                    alert("导出备份失败: " + error.message);
-                  }
-                }}
-                onImport={handleSystemBackupImport}
-                onInspect={handleSystemBackupInspect}
-              />
-
-              <StorageDiagnosticsCard
-                diagnostics={storageDiagnostics}
-                preflight={storagePreflight}
-                appVersion={APP_VERSION}
-                backupVersion={SYSTEM_BACKUP_VERSION}
-                lastBackupAt={lastBackupAt}
-                onRefresh={() => void refreshStorageDiagnostics()}
-                onRunPreflight={() => void runStorageMigrationPreflight()}
-                onRunContentMigration={() => void runContentStorageMigration()}
-                onResumeInterruptedMigration={() => void runContentStorageMigration(true)}
-                contentMigrationRunning={isContentStorageMigrationRunning}
-                onRequestPersistence={() => void requestStoragePersistence()}
-                onDownloadDiagnosticReport={downloadStorageDiagnosticReport}
-                onCleanOrphanedResources={cleanOrphanedResources}
-                onCleanMigratedCopies={cleanMigratedCopies}
-              />
-
-              <div className="settings-section-header">桌面模块</div>
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
-                <div>
-                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">桌面模块备份</h3>
-                  <p className="mt-2 text-[10px] leading-relaxed text-slate-400">单独备份和恢复所有桌面美化，如壁纸、桌面布局、小组件设置与自定义应用图标等。</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <button type="button" onClick={downloadDesktopModuleBackup} className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group">
-                    <Download className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-bold text-slate-700">导出桌面模块</span>
-                    <span className="text-[8px] text-slate-400 mt-1">下载桌面 JSON</span>
-                  </button>
-                  <label className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group cursor-pointer">
-                    <Upload className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-bold text-slate-700">导入桌面模块</span>
-                    <span className="text-[8px] text-slate-400 mt-1">恢复桌面 JSON</span>
-                    <input type="file" accept="application/json" onChange={importDesktopModuleBackup} className="hidden" />
-                  </label>
-                </div>
-              </div>
-
-              <div className="settings-section-header">危险操作</div>
-              {/* Reset Cache and Return to Default */}
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xs font-bold text-rose-500 uppercase tracking-wider">危险区域</h3>
-                <p className="text-[10px] text-slate-400 leading-relaxed">
-                  清除缓存将删除此设备上的所有自定义角色、历史对话、世界书、日程、备忘录和朋友圈，系统也将恢复为最干净的初始设置。请注意此操作无法撤销。
-                </p>
-                <button
-                  type="button"
-                  onClick={handleClearApplicationData}
-                  disabled={isClearingApplicationData}
-                  className="w-full py-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 hover:border-rose-300 text-rose-600 rounded-[16px] font-bold text-xs transition-all flex items-center justify-center gap-1.5 disabled:cursor-wait disabled:opacity-60"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isClearingApplicationData ? "animate-spin" : ""}`} />
-                  <span>{isClearingApplicationData ? "正在清除…" : "清除缓存并恢复为默认"}</span>
-                </button>
-              </div>
-            </div>
+            <DetectionLogsPanel />
           )}
 
           {/* VOICE SYNTHESIS SETTINGS TAB */}

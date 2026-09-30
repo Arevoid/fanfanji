@@ -428,6 +428,14 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
         apiTemperature: settings.apiTemperature || 0.8,
         streamCompatible: settings.streamCompatible,
         maxOutputTokens: segmentOutputTokens,
+        purpose: "offline_story_generate",
+        contextItems: [
+          `角色人设 ${storyCharsList.length} 位`,
+          ...(msgsForHistory.length > 0 ? [`剧情历史 ${msgsForHistory.length} 条`] : []),
+          ...(triggeredWorldBook.size > 0 ? [`世界书 ${triggeredWorldBook.size} 条`] : []),
+          ...(allMemoriesParts.length > 0 ? [`线上记忆 ${allMemoriesParts.length} 组`] : []),
+          ...(handoffFacts.length > 0 ? [`剧情交接事实 ${handoffFacts.length} 条`] : []),
+        ],
       });
 
       if (response && response.text) {

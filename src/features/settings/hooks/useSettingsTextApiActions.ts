@@ -116,7 +116,7 @@ export function useSettingsTextApiActions({ settings, onSaveSettings, apiState, 
       streamCompatible,
     }));
     if (!saved) {
-      alert("API 配置尚未保存到浏览器；草稿只保留在当前页面，刷新或离开后可能丢失。请先导出系统备份，再到“设置 > 系统备份 > 本地存储诊断”检查空间；不要直接清除应用数据。");
+      alert("API 配置尚未保存到浏览器；草稿只保留在当前页面，刷新或离开后可能丢失。请先导出数据备份，再到“设置 > 数据管理 > 存储空间与迁移”检查空间；不要直接清除应用数据。");
       return;
     }
     alert("API 配置保存成功！");

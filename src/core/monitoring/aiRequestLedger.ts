@@ -1,7 +1,8 @@
 import { createId } from "../id/createId";
-import { readJson, writeJson } from "../storage/storageAdapter";
+import { readJson, remove, writeJson } from "../storage/storageAdapter";
 
 export const AI_REQUEST_LEDGER_KEY = "fanfan_ai_request_ledger_v1";
+export const AI_REQUEST_LEDGER_UPDATED_EVENT = "fanfan-ai-request-ledger-updated";
 export const AI_REQUEST_LEDGER_RETENTION_DAYS = 30;
 export const AI_REQUEST_LEDGER_MAX_RECORDS = 300;
 const AI_REQUEST_LEDGER_FLUSH_DELAY_MS = 25;
@@ -9,6 +10,7 @@ const AI_REQUEST_LEDGER_FLUSH_DELAY_MS = 25;
 export const AI_PURPOSES = [
   "chat_reply",
   "group_chat_reply",
+  "offline_story_generate",
   "regenerate",
   "proactive_message",
   "memory_extract",
@@ -71,6 +73,10 @@ export interface AiRequestEnvelope {
   providerRequestCount: number;
   inputCharacters?: number;
   outputCharacters?: number;
+  /** Short, user-facing labels for the context blocks used by this request. */
+  contextItems?: string[];
+  /** A short, redacted preview of the system/built-in prompt used by this request. */
+  systemPromptPreview?: string;
   retryCount: number;
   retryReasons: string[];
   fallbackCount: number;
@@ -94,6 +100,10 @@ export interface AiRequestLedgerInput {
   inputCharacters?: number;
   estimatedInputTokens?: number;
   estimatedOutputTokens?: number;
+  /** Short, user-facing labels for the context blocks used by this request. */
+  contextItems?: readonly string[];
+  /** A short, redacted preview of the system/built-in prompt used by this request. */
+  systemPromptPreview?: string;
   retryReasons?: readonly string[];
   fallbackReasons?: readonly string[];
 }
@@ -172,6 +182,20 @@ function boundedReasons(reasons: readonly unknown[], kind: "retry" | "fallback")
   return reasons.map((reason) => normalizeReason(reason, kind)).slice(0, 12);
 }
 
+function boundedContextItems(items: readonly unknown[]): string[] {
+  const normalized = items
+    .map((item) => typeof item === "string" ? item.trim().replace(/\s+/gu, " ") : "")
+    .filter(Boolean)
+    .map((item) => item.slice(0, 120));
+  return [...new Set(normalized)].slice(0, 12);
+}
+
+function boundedPromptPreview(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized ? normalized.slice(0, 180) : undefined;
+}
+
 export function redactAiEndpoint(value?: string): string | undefined {
   if (!value) return undefined;
   const raw = String(value).trim();
@@ -235,6 +259,8 @@ function normalizeRecord(value: unknown): AiRequestEnvelope | null {
     providerRequestCount: Math.max(0, Math.floor(Number(candidate.providerRequestCount) || 0)),
     ...(finiteNonNegative(candidate.inputCharacters) !== undefined ? { inputCharacters: finiteNonNegative(candidate.inputCharacters) } : {}),
     ...(finiteNonNegative(candidate.outputCharacters) !== undefined ? { outputCharacters: finiteNonNegative(candidate.outputCharacters) } : {}),
+    ...(Array.isArray(candidate.contextItems) && boundedContextItems(candidate.contextItems).length > 0 ? { contextItems: boundedContextItems(candidate.contextItems) } : {}),
+    ...(boundedPromptPreview(candidate.systemPromptPreview) ? { systemPromptPreview: boundedPromptPreview(candidate.systemPromptPreview) } : {}),
     retryCount: Math.max(0, Math.floor(Number(candidate.retryCount) || 0)),
     retryReasons: boundedReasons(Array.isArray(candidate.retryReasons) ? candidate.retryReasons : [], "retry"),
     fallbackCount: Math.max(0, Math.floor(Number(candidate.fallbackCount) || 0)),
@@ -291,6 +317,9 @@ export function recordAiRequest(record: AiRequestEnvelope): void {
     memoryLedger = retainLedgerRecords(mergeLedgerRecords(memoryLedger, [normalized]), normalized.recordedAt);
     pendingLedgerRecords = retainLedgerRecords(mergeLedgerRecords(pendingLedgerRecords, [normalized]), normalized.recordedAt);
     scheduleLedgerFlush();
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent !== "undefined") {
+      window.dispatchEvent(new CustomEvent(AI_REQUEST_LEDGER_UPDATED_EVENT));
+    }
   } catch (error) {
     console.warn("[monitoring] AI request ledger recording failed; continuing without persistence.", error);
   }
@@ -327,6 +356,23 @@ export function clearInMemoryAiRequestLedgerForTests(): void {
   if (ledgerFlushTimer !== null) {
     clearTimeout(ledgerFlushTimer);
     ledgerFlushTimer = null;
+  }
+}
+
+/** Clear only diagnostic request metadata; business data is intentionally untouched. */
+export function clearAiRequestLedger(): void {
+  memoryLedger = [];
+  pendingLedgerRecords = [];
+  if (ledgerFlushTimer !== null) {
+    clearTimeout(ledgerFlushTimer);
+    ledgerFlushTimer = null;
+  }
+  const result = remove(AI_REQUEST_LEDGER_KEY);
+  if (!result.success && result.error !== "unavailable") {
+    console.warn("[monitoring] AI request ledger could not be cleared.", result.error);
+  }
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent !== "undefined") {
+    window.dispatchEvent(new CustomEvent(AI_REQUEST_LEDGER_UPDATED_EVENT));
   }
 }
 
@@ -371,6 +417,8 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
           status: result.succeeded ? "success" : "failure",
           errorCategory: result.succeeded ? "none" : errorCategory(result.error),
           providerRequestCount,
+          ...(boundedContextItems(input.contextItems || []).length > 0 ? { contextItems: boundedContextItems(input.contextItems || []) } : {}),
+          ...(boundedPromptPreview(input.systemPromptPreview) ? { systemPromptPreview: boundedPromptPreview(input.systemPromptPreview) } : {}),
           retryCount: retryReasons.length,
           retryReasons: boundedReasons(retryReasons, "retry"),
           fallbackCount: fallbackReasons.length,
@@ -402,6 +450,8 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
         ...(finiteNonNegative(result.actualInputTokens) !== undefined ? { actualInputTokens: finiteNonNegative(result.actualInputTokens) } : {}),
         ...(finiteNonNegative(result.actualOutputTokens) !== undefined ? { actualOutputTokens: finiteNonNegative(result.actualOutputTokens) } : {}),
         providerRequestCount,
+        ...(boundedContextItems(input.contextItems || []).length > 0 ? { contextItems: boundedContextItems(input.contextItems || []) } : {}),
+        ...(boundedPromptPreview(input.systemPromptPreview) ? { systemPromptPreview: boundedPromptPreview(input.systemPromptPreview) } : {}),
         ...(finiteNonNegative(input.inputCharacters) !== undefined ? { inputCharacters: finiteNonNegative(input.inputCharacters) } : {}),
         ...(finiteNonNegative(result.outputCharacters) !== undefined ? { outputCharacters: finiteNonNegative(result.outputCharacters) } : {}),
         retryCount: retryReasons.length,

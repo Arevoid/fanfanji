@@ -1,7 +1,8 @@
-import { readJson, writeJson } from "../storage/storageAdapter";
+import { readJson, remove, writeJson } from "../storage/storageAdapter";
 import { storageKeys } from "../storage/storageKeys";
 
 export const RUNTIME_ERROR_RETENTION_DAYS = 30;
+export const RUNTIME_ERROR_METRICS_UPDATED_EVENT = "fanfan-runtime-error-metrics-updated";
 const MAX_ERROR_BUCKETS = 40;
 
 export type RuntimeErrorSource = "window-error" | "unhandled-rejection" | "manual";
@@ -67,8 +68,22 @@ export function recordRuntimeError(input: { source: RuntimeErrorSource; name?: s
   };
   const write = writeJson(storageKeys.runtimeErrorMetrics, next);
   if (!write.success && write.error !== "unavailable") console.warn("[monitoring] Runtime error metrics could not be persisted.", write.error);
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent !== "undefined") {
+    window.dispatchEvent(new CustomEvent(RUNTIME_ERROR_METRICS_UPDATED_EVENT));
+  }
 }
 
 export function summarizeRuntimeErrors(metrics = loadRuntimeErrorMetrics()): { total: number; buckets: number } {
   return { total: metrics.total, buckets: metrics.buckets.length };
+}
+
+/** Clear only runtime diagnostics; chats, roles and memories are not affected. */
+export function clearRuntimeErrorMetrics(): void {
+  const result = remove(storageKeys.runtimeErrorMetrics);
+  if (!result.success && result.error !== "unavailable") {
+    console.warn("[monitoring] Runtime error metrics could not be cleared.", result.error);
+  }
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent !== "undefined") {
+    window.dispatchEvent(new CustomEvent(RUNTIME_ERROR_METRICS_UPDATED_EVENT));
+  }
 }

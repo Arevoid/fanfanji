@@ -24,6 +24,7 @@ import { isStructuredOutputTelemetry, withStructuredOutputTelemetry, type Struct
 
 type AiRequestMetadata = {
   purpose?: AiPurpose;
+  scenario?: string;
   logicalActionId?: string;
   parentActionId?: string;
   characterId?: string;
@@ -32,6 +33,8 @@ type AiRequestMetadata = {
   retryReasons?: readonly string[];
   fallbackReasons?: readonly string[];
   estimatedOutputTokens?: number;
+  contextItems?: readonly string[];
+  systemPromptPreview?: string;
 };
 
 function buildLedgerInput(defaultPurpose: AiPurpose, inputCharacters: number, metadata?: AiRequestMetadata): AiRequestLedgerInput {
@@ -45,6 +48,8 @@ function buildLedgerInput(defaultPurpose: AiPurpose, inputCharacters: number, me
     inputCharacters,
     estimatedInputTokens: Math.ceil(Math.max(0, inputCharacters) / 4),
     estimatedOutputTokens: metadata?.estimatedOutputTokens,
+    contextItems: metadata?.contextItems,
+    systemPromptPreview: metadata?.systemPromptPreview,
     retryReasons: metadata?.retryReasons,
     fallbackReasons: metadata?.fallbackReasons,
   };
@@ -387,6 +392,8 @@ export type ApiChatParams = {
   maxOutputTokens?: number;
   imageDataUrl?: string;
   signal?: AbortSignal;
+  /** Prompt-builder scenario used to classify calls that do not provide an explicit purpose. */
+  scenario?: string;
   purpose?: AiPurpose;
   parentActionId?: string;
   characterId?: string;
@@ -395,11 +402,12 @@ export type ApiChatParams = {
   retryReasons?: readonly string[];
   fallbackReasons?: readonly string[];
   estimatedOutputTokens?: number;
+  contextItems?: readonly string[];
 };
 
 // chat wrapper
 async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSession }): Promise<{ text: string }> {
-  const { signal, timeoutMs, ledger, purpose, parentActionId, characterId, relationId, conversationId, retryReasons, fallbackReasons, estimatedOutputTokens, ...requestBody } = params;
+  const { signal, timeoutMs, ledger, scenario: _scenario, contextItems: _contextItems, purpose, parentActionId, characterId, relationId, conversationId, retryReasons, fallbackReasons, estimatedOutputTokens, ...requestBody } = params;
   const providerHistory = Array.isArray(requestBody.history)
     ? requestBody.history.map((entry) => {
       if (!entry || typeof entry !== "object") return entry;
@@ -475,9 +483,11 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
 
 export async function apiChat(params: ApiChatParams): Promise<{ text: string }> {
   const inputCharacters = params.message.length + params.history.reduce((total, entry) => total + String(entry?.text || entry?.content || "").length, 0);
-  return trackApiUsage("chat", inputCharacters, buildLedgerInput("chat_reply", inputCharacters, {
+  const defaultPurpose: AiPurpose = params.scenario === "offline-story" ? "offline_story_generate" : "chat_reply";
+  return trackApiUsage("chat", inputCharacters, buildLedgerInput(defaultPurpose, inputCharacters, {
     ...params,
     estimatedOutputTokens: typeof params.maxOutputTokens === "number" ? params.maxOutputTokens : undefined,
+    systemPromptPreview: params.systemInstruction,
   }), (ledger) => apiChatImpl({ ...params, ledger }));
 }
 

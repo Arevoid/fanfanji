@@ -53,6 +53,7 @@ export interface PromptContext {
 }
 
 export interface ComposedPrompt {
+  scenario: PromptScenario;
   message: string;
   history: PromptHistoryEntry[];
   systemInstruction: string;

@@ -36,8 +36,9 @@ const injectHistory = (context: PromptContext) => {
 export class PromptComposer {
   static compose(context: PromptContext): ComposedPrompt {
     const injected = injectHistory(context);
-    const composed = {
-      message: context.message,
+  const composed = {
+    scenario: context.scenario,
+    message: context.message,
       history: injected.history,
       systemInstruction: context.systemInstruction,
       ...(context.imageDataUrl ? { imageDataUrl: context.imageDataUrl } : {}),

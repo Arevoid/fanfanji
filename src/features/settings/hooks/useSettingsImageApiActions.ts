@@ -166,7 +166,7 @@ export function useSettingsImageApiActions({
     setImageApiPresets(next);
     const saved = onSaveSettings((previous) => ({ ...previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
     if (!saved) {
-      setImageTestResult({ success: false, message: "图片 API 设置保存失败：草稿仍保留。请到“设置 > 系统备份 > 本地存储诊断”检查空间，必要时清理已迁移副本后重试。" });
+      setImageTestResult({ success: false, message: "图片 API 设置保存失败：草稿仍保留。请到“设置 > 数据管理 > 存储空间与迁移”检查空间，必要时清理已迁移副本后重试。" });
       return;
     }
     alert("图片 API 设置已保存。");

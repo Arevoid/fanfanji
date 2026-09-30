@@ -19,7 +19,7 @@ const SETTINGS_TAB_TITLES: Record<Exclude<SettingsTab, null>, string> = {
   beauty: "美化样式",
   data: "数据管理",
   system_config: "系统设置",
-  system: "系统备份",
+  system: "检测日志",
   minimax: "语音图片",
   mcp: "MCP 工具",
 };

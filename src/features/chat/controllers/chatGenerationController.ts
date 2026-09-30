@@ -103,7 +103,14 @@ export function buildContextRecoveryRequests(request: AiChatRequest): AiChatRequ
 }
 
 export function buildComposedAiChatRequest(prompt: PromptInput, settings: UserSettings): AiChatRequest {
-  return { ...PromptComposer.compose(prompt), ...buildTextAiRuntimeConfig(settings) };
+  const composed = PromptComposer.compose(prompt);
+  const contextItems = [
+    prompt.scenario === "group-chat" ? "群聊成员人设" : "角色人设",
+    prompt.scenario === "group-chat" ? "群聊关系" : "关系上下文",
+    ...(prompt.history.length > 0 ? [`聊天历史 ${prompt.history.length} 条`] : []),
+    ...(prompt.historyInjections && prompt.historyInjections.length > 0 ? [`世界书 ${prompt.historyInjections.length} 条`] : []),
+  ];
+  return { ...composed, ...buildTextAiRuntimeConfig(settings), contextItems };
 }
 
 type NormalizedDirectChatResponse = ParsedAiChatResponse & { formatIssue?: "invalid-structured-response" };
