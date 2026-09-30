@@ -34,6 +34,29 @@ export const AI_PURPOSES = [
 ] as const;
 
 export type AiPurpose = typeof AI_PURPOSES[number];
+
+/** Stable, user-facing names for the built-in prompt used by each AI flow. */
+export const AI_PURPOSE_PROMPT_LABELS: Partial<Record<AiPurpose, string>> = {
+  chat_reply: "线上对话提示词",
+  group_chat_reply: "群聊对话提示词",
+  offline_story_generate: "线下剧情提示词",
+  regenerate: "重新生成提示词",
+  proactive_message: "主动消息提示词",
+  memory_extract: "记忆提取提示词",
+  translation: "翻译提示词",
+  personality_summary: "人设总结提示词",
+  inner_voice: "心声提示词",
+  moment_generate: "朋友圈发布提示词",
+  moment_comment: "朋友圈评论提示词",
+  moment_reply: "朋友圈回复提示词",
+  diary_generate: "日记提示词",
+  character_phone_generate: "角色手机提示词",
+  forum_generate: "论坛提示词",
+  forum_story_generate: "论坛剧情提示词",
+  reading_generate: "阅读提示词",
+  cinema_generate: "观影提示词",
+};
+
 export type AiRequestTransport = "backend_proxy" | "browser_direct" | "server_provider" | "unknown";
 export type AiRequestStatus = "success" | "failure";
 export type AiRequestErrorCategory =
@@ -75,8 +98,6 @@ export interface AiRequestEnvelope {
   outputCharacters?: number;
   /** Short, user-facing labels for the context blocks used by this request. */
   contextItems?: string[];
-  /** A short, redacted preview of the system/built-in prompt used by this request. */
-  systemPromptPreview?: string;
   retryCount: number;
   retryReasons: string[];
   fallbackCount: number;
@@ -102,8 +123,6 @@ export interface AiRequestLedgerInput {
   estimatedOutputTokens?: number;
   /** Short, user-facing labels for the context blocks used by this request. */
   contextItems?: readonly string[];
-  /** A short, redacted preview of the system/built-in prompt used by this request. */
-  systemPromptPreview?: string;
   retryReasons?: readonly string[];
   fallbackReasons?: readonly string[];
 }
@@ -190,10 +209,9 @@ function boundedContextItems(items: readonly unknown[]): string[] {
   return [...new Set(normalized)].slice(0, 12);
 }
 
-function boundedPromptPreview(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  return normalized ? normalized.slice(0, 180) : undefined;
+function contextItemsWithPromptLabel(purpose: AiPurpose, items: readonly unknown[]): string[] {
+  const promptLabel = AI_PURPOSE_PROMPT_LABELS[purpose];
+  return boundedContextItems(promptLabel ? [promptLabel, ...items] : items);
 }
 
 export function redactAiEndpoint(value?: string): string | undefined {
@@ -240,11 +258,13 @@ function normalizeRecord(value: unknown): AiRequestEnvelope | null {
   // A ledger row represents a real provider request. Preflight/short-circuit
   // flows that never reached a provider must not create a fake call detail.
   if (providerRequestCount === 0) return null;
+  const purpose = candidate.purpose as AiPurpose;
+  const contextItems = contextItemsWithPromptLabel(purpose, Array.isArray(candidate.contextItems) ? candidate.contextItems : []);
   return {
     requestId: candidate.requestId,
     ...(typeof candidate.logicalActionId === "string" ? { logicalActionId: candidate.logicalActionId } : {}),
     ...(typeof candidate.parentActionId === "string" ? { parentActionId: candidate.parentActionId } : {}),
-    purpose: candidate.purpose as AiPurpose,
+    purpose,
     ...(typeof candidate.characterId === "string" ? { characterId: candidate.characterId } : {}),
     ...(typeof candidate.relationId === "string" ? { relationId: candidate.relationId } : {}),
     ...(typeof candidate.conversationId === "string" ? { conversationId: candidate.conversationId } : {}),
@@ -263,8 +283,7 @@ function normalizeRecord(value: unknown): AiRequestEnvelope | null {
     providerRequestCount,
     ...(finiteNonNegative(candidate.inputCharacters) !== undefined ? { inputCharacters: finiteNonNegative(candidate.inputCharacters) } : {}),
     ...(finiteNonNegative(candidate.outputCharacters) !== undefined ? { outputCharacters: finiteNonNegative(candidate.outputCharacters) } : {}),
-    ...(Array.isArray(candidate.contextItems) && boundedContextItems(candidate.contextItems).length > 0 ? { contextItems: boundedContextItems(candidate.contextItems) } : {}),
-    ...(boundedPromptPreview(candidate.systemPromptPreview) ? { systemPromptPreview: boundedPromptPreview(candidate.systemPromptPreview) } : {}),
+    ...(contextItems.length > 0 ? { contextItems } : {}),
     retryCount: Math.max(0, Math.floor(Number(candidate.retryCount) || 0)),
     retryReasons: boundedReasons(Array.isArray(candidate.retryReasons) ? candidate.retryReasons : [], "retry"),
     fallbackCount: Math.max(0, Math.floor(Number(candidate.fallbackCount) || 0)),
@@ -409,6 +428,7 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
       if (!completed) fallbackReasons.push(String(reason));
     },
     complete(result) {
+      const contextItems = contextItemsWithPromptLabel(input.purpose, input.contextItems || []);
       if (completed) {
         return {
           requestId,
@@ -421,8 +441,7 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
           status: result.succeeded ? "success" : "failure",
           errorCategory: result.succeeded ? "none" : errorCategory(result.error),
           providerRequestCount,
-          ...(boundedContextItems(input.contextItems || []).length > 0 ? { contextItems: boundedContextItems(input.contextItems || []) } : {}),
-          ...(boundedPromptPreview(input.systemPromptPreview) ? { systemPromptPreview: boundedPromptPreview(input.systemPromptPreview) } : {}),
+          ...(contextItems.length > 0 ? { contextItems } : {}),
           retryCount: retryReasons.length,
           retryReasons: boundedReasons(retryReasons, "retry"),
           fallbackCount: fallbackReasons.length,
@@ -454,8 +473,7 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
         ...(finiteNonNegative(result.actualInputTokens) !== undefined ? { actualInputTokens: finiteNonNegative(result.actualInputTokens) } : {}),
         ...(finiteNonNegative(result.actualOutputTokens) !== undefined ? { actualOutputTokens: finiteNonNegative(result.actualOutputTokens) } : {}),
         providerRequestCount,
-        ...(boundedContextItems(input.contextItems || []).length > 0 ? { contextItems: boundedContextItems(input.contextItems || []) } : {}),
-        ...(boundedPromptPreview(input.systemPromptPreview) ? { systemPromptPreview: boundedPromptPreview(input.systemPromptPreview) } : {}),
+        ...(contextItems.length > 0 ? { contextItems } : {}),
         ...(finiteNonNegative(input.inputCharacters) !== undefined ? { inputCharacters: finiteNonNegative(input.inputCharacters) } : {}),
         ...(finiteNonNegative(result.outputCharacters) !== undefined ? { outputCharacters: finiteNonNegative(result.outputCharacters) } : {}),
         retryCount: retryReasons.length,

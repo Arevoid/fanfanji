@@ -34,7 +34,6 @@ type AiRequestMetadata = {
   fallbackReasons?: readonly string[];
   estimatedOutputTokens?: number;
   contextItems?: readonly string[];
-  systemPromptPreview?: string;
 };
 
 function buildLedgerInput(defaultPurpose: AiPurpose, inputCharacters: number, metadata?: AiRequestMetadata): AiRequestLedgerInput {
@@ -49,7 +48,6 @@ function buildLedgerInput(defaultPurpose: AiPurpose, inputCharacters: number, me
     estimatedInputTokens: Math.ceil(Math.max(0, inputCharacters) / 4),
     estimatedOutputTokens: metadata?.estimatedOutputTokens,
     contextItems: metadata?.contextItems,
-    systemPromptPreview: metadata?.systemPromptPreview,
     retryReasons: metadata?.retryReasons,
     fallbackReasons: metadata?.fallbackReasons,
   };
@@ -487,7 +485,6 @@ export async function apiChat(params: ApiChatParams): Promise<{ text: string }> 
   return trackApiUsage("chat", inputCharacters, buildLedgerInput(defaultPurpose, inputCharacters, {
     ...params,
     estimatedOutputTokens: typeof params.maxOutputTokens === "number" ? params.maxOutputTokens : undefined,
-    systemPromptPreview: params.systemInstruction,
   }), (ledger) => apiChatImpl({ ...params, ledger }));
 }
 
