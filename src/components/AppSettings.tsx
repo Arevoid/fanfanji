@@ -895,25 +895,6 @@ export default function AppSettings({
                 onInspect={handleSystemBackupInspect}
               />
 
-              <StorageDiagnosticsCard
-                diagnostics={storageDiagnostics}
-                preflight={storagePreflight}
-                appVersion={APP_VERSION}
-                backupVersion={SYSTEM_BACKUP_VERSION}
-                lastBackupAt={lastBackupAt}
-                onRefresh={() => void refreshStorageDiagnostics()}
-                onRunPreflight={() => void runStorageMigrationPreflight()}
-                onRunContentMigration={() => void runContentStorageMigration()}
-                onResumeInterruptedMigration={() => void runContentStorageMigration(true)}
-                contentMigrationRunning={isContentStorageMigrationRunning}
-                onRequestPersistence={() => void requestStoragePersistence()}
-                onDownloadDiagnosticReport={downloadStorageDiagnosticReport}
-                onCleanOrphanedResources={cleanOrphanedResources}
-                onCleanMigratedCopies={cleanMigratedCopies}
-              />
-
-              <StorageCachePanel mode="user" />
-
               <div className="settings-section-header">桌面模块</div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
                 <div>
@@ -934,6 +915,25 @@ export default function AppSettings({
                   </label>
                 </div>
               </div>
+
+              <StorageDiagnosticsCard
+                diagnostics={storageDiagnostics}
+                preflight={storagePreflight}
+                appVersion={APP_VERSION}
+                backupVersion={SYSTEM_BACKUP_VERSION}
+                lastBackupAt={lastBackupAt}
+                onRefresh={() => void refreshStorageDiagnostics()}
+                onRunPreflight={() => void runStorageMigrationPreflight()}
+                onRunContentMigration={() => void runContentStorageMigration()}
+                onResumeInterruptedMigration={() => void runContentStorageMigration(true)}
+                contentMigrationRunning={isContentStorageMigrationRunning}
+                onRequestPersistence={() => void requestStoragePersistence()}
+                onDownloadDiagnosticReport={downloadStorageDiagnosticReport}
+                onCleanOrphanedResources={cleanOrphanedResources}
+                onCleanMigratedCopies={cleanMigratedCopies}
+              />
+
+              <StorageCachePanel mode="user" />
 
               <div className="settings-section-header">危险操作</div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">

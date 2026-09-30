@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Database, Loader2, Trash2 } from "lucide-react";
+import { Database, Loader2, Trash2 } from "lucide-react";
 import {
   CHARACTER_PHONE_CACHE_OPTIONS,
   clearRebuildableCache,
@@ -198,7 +198,8 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
     : "显示每个应用的缓存占用，统一清理所有可重新生成的临时文件，不会删除应用中的正式记录。";
 
   return (
-    <section aria-label={title} className={`${mode === "user" ? "min-h-full" : ""} rounded-[24px] bg-white p-5 shadow-sm`}>
+    <>
+    <section aria-label={title} className={`${mode === "user" ? "min-h-full" : ""} rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -228,7 +229,7 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
       )}
 
       <div className={mode === "user"
-        ? "mt-4 grid grid-cols-3 gap-2 rounded-2xl border border-slate-100 bg-slate-50/50 p-2 sm:grid-cols-4"
+        ? "mt-4 grid grid-cols-4 gap-1.5"
         : "mt-4 divide-y divide-slate-100 rounded-2xl border border-slate-100 bg-slate-50/50"}>
         {options.map((option) => {
           const itemUsage = usageFor(option.id);
@@ -238,7 +239,7 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
               key={option.id}
               title={option.description}
               className={mode === "user"
-                ? "min-w-0 rounded-xl border border-slate-100 bg-white px-2 py-2.5 text-center"
+                ? "min-w-0 rounded-xl border border-slate-200 bg-white px-1 py-2 text-center"
                 : "flex items-center gap-3 px-3 py-3"}
             >
               <div className={mode === "user" ? "min-w-0" : "min-w-0 flex-1"}>
@@ -248,7 +249,7 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
                 )}
               </div>
               <span className={mode === "user"
-                ? "mt-1 block truncate text-[10px] font-semibold text-slate-400"
+                ? "mt-0.5 block truncate text-[9px] font-semibold text-slate-400"
                 : "shrink-0 text-[10px] font-semibold text-slate-400"}>
                 {formatStorageBytes(itemUsage?.bytes ?? 0)}
               </span>
@@ -323,56 +324,7 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
         </div>
       )}
 
-      {mode === "user" && (
-        <section aria-label="数据删除" className="mt-5 rounded-2xl bg-rose-50/40 p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-xs font-extrabold text-slate-800">数据删除</h3>
-              <p className="mt-1 text-[10px] leading-4 text-slate-600">按应用选择后彻底删除，选中的应用会恢复为初始状态；未选择的应用、API、外观和其他设置不会被改动。</p>
-            </div>
-            <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-slate-700">不可撤销</span>
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-rose-100 bg-rose-50/30 p-2 sm:grid-cols-4">
-            {USER_DATA_APP_OPTIONS.map((option) => {
-              const selected = selectedDataApps.includes(option.id);
-              const itemUsage = dataUsage.find((entry) => entry.appId === option.id);
-              return (
-                <label
-                  key={option.id}
-                  title={option.description}
-                  className={`min-w-0 cursor-pointer rounded-xl border px-2 py-2.5 text-center transition-colors ${selected ? "border-rose-300 bg-rose-50" : "border-rose-100 bg-white/80 hover:bg-rose-50/60"}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    onChange={() => setSelectedDataApps((current) => selected ? current.filter((id) => id !== option.id) : [...current, option.id])}
-                    className="sr-only"
-                  />
-                  <span className="flex min-w-0 items-center justify-center">
-                    <span className="truncate text-xs font-bold text-slate-700">{option.label}</span>
-                  </span>
-                  <span className="mt-1 block truncate text-[10px] font-semibold text-slate-400">{formatStorageBytes(itemUsage?.bytes ?? 0)}</span>
-                </label>
-              );
-            })}
-          </div>
-          <button
-            type="button"
-            onClick={() => void handleDeleteSelectedData()}
-            disabled={Boolean(busyTarget || compressionBusy)}
-            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-3 py-2.5 text-[11px] font-bold text-white transition-colors hover:bg-rose-700 disabled:cursor-wait disabled:opacity-50"
-          >
-            {compressionBusy === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-            删除所选应用数据
-          </button>
-        </section>
-      )}
-
-      {notice && <p role="status" className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-[10px] leading-4 text-slate-600">{notice}</p>}
-      <div className="mt-3 flex items-start gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-[10px] leading-4 text-emerald-700">
-        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span>安全保障：清理白名单之外的正式数据不会被触碰。</span>
-      </div>
+      {mode !== "user" && notice && <p role="status" className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-[10px] leading-4 text-slate-600">{notice}</p>}
       {(browserStorage.usage !== undefined || browserStorage.quota !== undefined) && (
         <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[10px] leading-4 text-slate-500">
           浏览器存储：{browserStorage.usage === undefined ? "未知" : formatStorageBytes(browserStorage.usage)}
@@ -383,5 +335,52 @@ export function StorageCachePanel({ mode, ownerIdentityId, characterId, characte
         </div>
       )}
     </section>
+
+      {mode === "user" && (
+        <section aria-label="数据删除" className="rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-extrabold text-slate-800">数据删除</h3>
+              <p className="mt-1 text-[10px] leading-4 text-slate-600">按应用选择后彻底删除，选中的应用会恢复为初始状态；未选择的应用、API、外观和其他设置不会被改动。</p>
+            </div>
+            <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-slate-700">不可撤销</span>
+          </div>
+          <div className="mt-4 grid grid-cols-4 gap-1.5">
+            {USER_DATA_APP_OPTIONS.map((option) => {
+              const selected = selectedDataApps.includes(option.id);
+              const itemUsage = dataUsage.find((entry) => entry.appId === option.id);
+              return (
+                <label
+                  key={option.id}
+                  title={option.description}
+                  className={`min-w-0 cursor-pointer rounded-xl border px-1 py-2 text-center transition-colors ${selected ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-white hover:bg-rose-50/60"}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => setSelectedDataApps((current) => selected ? current.filter((id) => id !== option.id) : [...current, option.id])}
+                    className="sr-only"
+                  />
+                  <span className="flex min-w-0 items-center justify-center">
+                    <span className="truncate text-[11px] font-bold text-slate-700">{option.label}</span>
+                  </span>
+                  <span className="mt-0.5 block truncate text-[9px] font-semibold text-slate-400">{formatStorageBytes(itemUsage?.bytes ?? 0)}</span>
+                </label>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleDeleteSelectedData()}
+            disabled={Boolean(busyTarget || compressionBusy)}
+            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-3 py-2.5 text-[11px] font-bold text-white transition-colors hover:bg-slate-700 disabled:cursor-wait disabled:opacity-50"
+          >
+            {compressionBusy === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            删除所选应用数据
+          </button>
+          {notice && <p role="status" className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-[10px] leading-4 text-slate-600">{notice}</p>}
+        </section>
+      )}
+    </>
   );
 }
