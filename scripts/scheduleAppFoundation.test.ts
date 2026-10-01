@@ -34,7 +34,6 @@ assert.match(appSource, /reviewState: "confirmed"/);
 assert.match(dashboardSource, /const characterCalendarItems/);
 assert.match(dashboardSource, /取消经期/);
 assert.match(dashboardSource, /删除周期记录/);
-assert.match(dashboardSource, /卵泡期/);
 assert.match(dashboardSource, /排卵期/);
 assert.match(dashboardSource, /黄体期/);
 assert.match(dashboardSource, /const userCalendarItems/);

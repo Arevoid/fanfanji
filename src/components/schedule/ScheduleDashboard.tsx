@@ -202,7 +202,7 @@ export default function ScheduleDashboard({
     return {
       menstrual: "bg-rose-500 text-white",
       predicted_menstrual: "bg-rose-100 text-rose-600",
-      follicular: "bg-amber-50 text-amber-700",
+      follicular: "text-[var(--text-secondary)]",
       ovulation: "bg-violet-100 text-violet-700",
       luteal: "bg-indigo-100 text-indigo-700",
     }[kind];
@@ -334,10 +334,10 @@ export default function ScheduleDashboard({
         })}
       </div>
       {showPeriod && <>
-        <div className="mt-4 grid grid-cols-2 gap-x-2 gap-y-2 text-[10px] text-[var(--text-secondary)]">
-          {[{ kind: "menstrual" as const, label: "月经期" }, { kind: "predicted_menstrual" as const, label: "预测经期" }, { kind: "follicular" as const, label: "卵泡期" }, { kind: "ovulation" as const, label: "排卵期" }, { kind: "luteal" as const, label: "黄体期" }].map((item) => <span key={item.kind} className="flex items-center gap-1.5"><i className={`h-2.5 w-2.5 rounded-full ${phaseClass(item.kind, false).split(" ")[0]}`} />{item.label}</span>)}
+        <div className="mt-4 flex w-full flex-nowrap items-center justify-between gap-1 text-[9px] text-[var(--text-secondary)]">
+          {[{ kind: "menstrual" as const, label: "月经期" }, { kind: "predicted_menstrual" as const, label: "预测经期" }, { kind: "ovulation" as const, label: "排卵期" }, { kind: "luteal" as const, label: "黄体期" }].map((item) => <span key={item.kind} className="flex shrink-0 items-center gap-1"><i className={`h-2 w-2 rounded-full ${phaseClass(item.kind, false).split(" ")[0]}`} />{item.label}</span>)}
         </div>
-        <p className="mt-3 text-[10px] leading-4 text-[var(--text-tertiary)]">{periodRecordsForUser.length > 0 ? `根据近期开始记录估算：周期约 ${periodStats.cycleLength} 天，经期约 ${periodStats.periodLength} 天。预测仅供参考。` : "记录一次经期后，这里会显示卵泡期、排卵期和黄体期预测。"}</p>
+        <p className="mt-3 text-[10px] leading-4 text-[var(--text-tertiary)]">{periodRecordsForUser.length > 0 ? `根据近期开始记录估算：周期约 ${periodStats.cycleLength} 天，经期约 ${periodStats.periodLength} 天。预测仅供参考。` : "记录一次经期后，这里会显示预测经期、排卵期和黄体期。"}</p>
       </>}
     </section>
   );
@@ -378,7 +378,7 @@ export default function ScheduleDashboard({
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <h2 className="text-base font-extrabold">{formatDate(selectedDate)}</h2>
-            <p className="mt-1 text-xs text-[var(--text-secondary)]">{selectedPeriodRecord ? `经期第 ${selectedDayNumber} 天` : selectedPhase?.label || "选择日期记录经期"}</p>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">{selectedPeriodRecord ? `经期第 ${selectedDayNumber} 天` : selectedPhase && selectedPhase.kind !== "follicular" ? selectedPhase.label : "选择日期记录经期"}</p>
           </div>
           <HeartPulse className={`h-6 w-6 shrink-0 ${selectedPeriodRecord ? "text-rose-500" : "text-[var(--text-tertiary)]"}`} />
         </div>
