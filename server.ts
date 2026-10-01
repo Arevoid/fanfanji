@@ -301,7 +301,7 @@ async function startServer() {
   app.post("/api/chat", async (req, res) => {
     try {
       const body = req.body && typeof req.body === "object" ? req.body : {};
-      const text = await callTextProvider({
+      const result = await callTextProviderWithDiagnostics({
         message: String(body.message || ""),
         history: Array.isArray(body.history) ? body.history : [],
         systemInstruction: typeof body.systemInstruction === "string" ? body.systemInstruction : undefined,
@@ -314,7 +314,7 @@ async function startServer() {
         maxOutputTokens: typeof body.maxOutputTokens === "number" ? body.maxOutputTokens : undefined,
         imageDataUrl: typeof body.imageDataUrl === "string" && body.imageDataUrl.startsWith("data:image/") ? body.imageDataUrl : undefined,
       });
-      return res.json({ text });
+      return res.json({ text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
     } catch (error: any) {
       const normalized = normalizeTextApiError(error, "聊天 API 请求失败。");
       console.error("Chat API Error:", { code: normalized.code, status: normalized.status, reason: normalized.reason, message: normalized.message });
@@ -386,7 +386,7 @@ ${referencesText}
 
         const dataFetch = await responseFetch.json();
         const aiText = dataFetch.choices?.[0]?.message?.content || "";
-        return res.json({ text: aiText });
+        return res.json({ text: aiText, ...(dataFetch.usage ? { usage: dataFetch.usage } : {}) });
       }
 
       // 2. Default Gemini API
@@ -407,7 +407,7 @@ ${referencesText}
         },
       });
 
-      res.json({ text: response.text });
+      res.json({ text: response.text, ...(response.usageMetadata ? { usage: response.usageMetadata } : {}) });
     } catch (error: any) {
       console.error("Summarize Personality Error:", error);
       res.status(500).json({ error: error.message || "AI 总结发生异常，请检查配置或稍后再试。" });
@@ -479,7 +479,7 @@ ${historyText}
 
         const dataFetch = await responseFetch.json();
         const aiText = dataFetch.choices?.[0]?.message?.content || "";
-        return res.json({ text: aiText });
+        return res.json({ text: aiText, ...(dataFetch.usage ? { usage: dataFetch.usage } : {}) });
       }
 
       // 2. Default Gemini API
@@ -500,7 +500,7 @@ ${historyText}
         },
       });
 
-      res.json({ text: response.text });
+      res.json({ text: response.text, ...(response.usageMetadata ? { usage: response.usageMetadata } : {}) });
     } catch (error: any) {
       console.error("Compress Memory Error:", error);
       res.status(500).json({ error: error.message || "记忆压缩发生异常，请稍后再试。" });
@@ -539,6 +539,15 @@ ${historyText}
       });
 
       let latestProviderTelemetry: StructuredOutputTelemetry | undefined;
+      let providerUsage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
+      const mergeProviderUsage = (usage: typeof providerUsage) => {
+        if (!usage) return;
+        providerUsage = {
+          ...(usage.inputTokens !== undefined ? { inputTokens: (providerUsage?.inputTokens || 0) + usage.inputTokens } : {}),
+          ...(usage.outputTokens !== undefined ? { outputTokens: (providerUsage?.outputTokens || 0) + usage.outputTokens } : {}),
+          ...(usage.totalTokens !== undefined ? { totalTokens: (providerUsage?.totalTokens || 0) + usage.totalTokens } : {}),
+        };
+      };
       const generateExtractionText = async (promptText: string, temperature: number): Promise<string> => {
         const result = await callTextProviderWithDiagnostics({
           message: promptText,
@@ -551,6 +560,7 @@ ${historyText}
           allowEmptyText: true,
         });
         latestProviderTelemetry = result.structuredOutputTelemetry;
+        mergeProviderUsage(result.usage);
         return result.text;
       };
 
@@ -581,6 +591,7 @@ ${historyText}
         v2MetadataPresent: repaired.v2MetadataPresent,
         runtimeLineageTransport: repaired.runtimeLineageTransport,
         repaired: repaired.repaired,
+        ...(providerUsage ? { usage: providerUsage } : {}),
         ...(process.env.NODE_ENV !== "production" ? { structuredOutputTelemetry: boundaryTelemetry } : {}),
       });
     } catch (error: any) {
@@ -654,7 +665,7 @@ ${text}
 
         const dataFetch = await responseFetch.json();
         const aiText = dataFetch.choices?.[0]?.message?.content || "";
-        return res.json({ text: aiText });
+        return res.json({ text: aiText, ...(dataFetch.usage ? { usage: dataFetch.usage } : {}) });
       }
 
       // 2. Default Gemini API
@@ -675,7 +686,7 @@ ${text}
         },
       });
 
-      res.json({ text: response.text });
+      res.json({ text: response.text, ...(response.usageMetadata ? { usage: response.usageMetadata } : {}) });
     } catch (error: any) {
       console.error("Translate Error:", error);
       res.status(500).json({ error: error.message || "翻译发生异常，请检查配置或稍后再试。" });
@@ -716,7 +727,7 @@ ${text}
           const dataFetch = await responseFetch.json();
           const message = dataFetch.choices?.[0]?.message;
           if (message) {
-            return res.json({ success: true, message: "自定义API接口连通成功！有效握手。" });
+            return res.json({ success: true, message: "自定义API接口连通成功！有效握手。", ...(dataFetch.usage ? { usage: dataFetch.usage } : {}) });
           } else {
             return res.json({ success: false, error: `自定义API接口握手成功，但返回的响应格式不符合标准 OpenAI 规范。完整响应：${JSON.stringify(dataFetch)}` });
           }
@@ -742,7 +753,7 @@ ${text}
       });
 
       if (response && response.text) {
-        res.json({ success: true, message: "连接成功！您的 Gemini API Key 有效且畅通。" });
+        res.json({ success: true, message: "连接成功！您的 Gemini API Key 有效且畅通。", ...(response.usageMetadata ? { usage: response.usageMetadata } : {}) });
       } else {
         res.json({ success: false, error: "未收到回复，请重试。" });
       }

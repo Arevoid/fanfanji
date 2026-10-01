@@ -10,7 +10,7 @@ try {
   let providerPayload: any;
   globalThis.fetch = async (_input, init) => {
     providerPayload = JSON.parse(String(init?.body));
-    return Response.json({ choices: [{ message: { content: "译文" } }] });
+    return Response.json({ choices: [{ message: { content: "译文" } }], usage: { prompt_tokens: 11, completion_tokens: 2, total_tokens: 13 } });
   };
   assert.equal(await callTextProvider({ message: "translate", apiKey: "key", model: selectedModel, apiEndpoint: "https://provider.example/v1" }), "译文");
   assert.equal(providerPayload.model, selectedModel, "text helpers must preserve the selected custom-endpoint model");
@@ -42,7 +42,7 @@ try {
   let assetCalls = 0;
   globalThis.fetch = async (_input, init) => {
     providerPayload = JSON.parse(String(init?.body));
-    return Response.json({ choices: [{ message: { content: "Worker 译文" } }] });
+    return Response.json({ choices: [{ message: { content: "Worker 译文" } }], usage: { prompt_tokens: 9, completion_tokens: 3, total_tokens: 12 } });
   };
   const translationResponse = await worker.fetch(new Request("https://app.example/api/translate", {
     method: "POST",
@@ -50,7 +50,9 @@ try {
     body: JSON.stringify({ text: "안녕", apiKey: "key", model: selectedModel, apiEndpoint: "https://provider.example/v1" }),
   }), { ASSETS: { fetch: async () => { assetCalls += 1; return new Response("asset"); } } });
   assert.equal(translationResponse.status, 200);
-  assert.equal((await translationResponse.json() as any).text, "Worker 译文");
+  const translationPayload = await translationResponse.json() as any;
+  assert.equal(translationPayload.text, "Worker 译文");
+  assert.deepEqual(translationPayload.usage, { inputTokens: 9, outputTokens: 3, totalTokens: 12 });
   assert.equal(providerPayload.model, selectedModel);
   assert.equal(assetCalls, 0, "Cloudflare must handle translation instead of sending it to static assets");
 

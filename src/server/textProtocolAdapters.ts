@@ -55,6 +55,40 @@ export interface TextProviderInput {
   allowEmptyText?: boolean;
 }
 
+/** Usage reported by the upstream model provider.  Values are deliberately
+ * optional: some compatible gateways omit usage, and those calls must remain
+ * distinguishable from an estimate rather than receiving fabricated values. */
+export interface TextProviderUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
+export interface TextProviderDiagnosticResult {
+  text: string;
+  structuredOutputTelemetry: StructuredOutputTelemetry;
+  usage?: TextProviderUsage;
+}
+
+const finiteTokenCount = (value: unknown): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.floor(value));
+};
+
+function normalizeProviderUsage(value: unknown): TextProviderUsage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Record<string, unknown>;
+  const inputTokens = finiteTokenCount(candidate.inputTokens ?? candidate.prompt_tokens ?? candidate.promptTokenCount);
+  const outputTokens = finiteTokenCount(candidate.outputTokens ?? candidate.completion_tokens ?? candidate.candidatesTokenCount);
+  const totalTokens = finiteTokenCount(candidate.totalTokens ?? candidate.total_tokens ?? candidate.totalTokenCount);
+  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) return undefined;
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+  };
+}
+
 function resolveTextGenerationTimeout(timeoutMs?: number): number {
   if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs)) return API_REQUEST_TIMEOUTS.textGeneration;
   return Math.min(180_000, Math.max(10_000, Math.floor(timeoutMs)));
@@ -91,7 +125,7 @@ const contentKind = (value: unknown): { kind: StructuredOutputContentKind; count
   };
 };
 
-export function parseOpenAiTextWithTelemetry(raw: string): { text: string; structuredOutputTelemetry: StructuredOutputTelemetry } {
+export function parseOpenAiTextWithTelemetry(raw: string): TextProviderDiagnosticResult {
   const trimmed = raw.trim();
   let result = "";
   let observedContent: StructuredOutputContentKind = "missing";
@@ -99,6 +133,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): { text: string; struc
   let choiceCount = 0;
   let finishReason: StructuredOutputFinishReasonKind = "missing";
   let observedEnvelope: "openai_choices" | "unknown" = "unknown";
+  let usage: TextProviderUsage | undefined;
   if (trimmed.startsWith("data:") || trimmed.includes("\ndata:")) {
     for (const sourceLine of trimmed.split("\n")) {
       const line = sourceLine.trim();
@@ -107,6 +142,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): { text: string; struc
       if (!payload || payload === "[DONE]") continue;
       try {
         const chunk = JSON.parse(payload);
+        usage = normalizeProviderUsage(chunk.usage) || usage;
         if (Array.isArray(chunk.choices)) {
           observedEnvelope = "openai_choices";
           choiceCount = Math.min(64, choiceCount + chunk.choices.length);
@@ -124,6 +160,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): { text: string; struc
     }
     return {
       text: result,
+      ...(usage ? { usage } : {}),
       structuredOutputTelemetry: emptyStructuredOutputTelemetry({
         protocolFamily: "openai_compatible", transportOk: true, responseEnvelopeKind: observedEnvelope,
         choiceCount, messageContentKind: observedContent, contentPartCount, textPresent: Boolean(result.trim()),
@@ -134,6 +171,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): { text: string; struc
   try {
     const parsed = JSON.parse(trimmed);
     const hasChoices = Array.isArray(parsed.choices);
+    usage = normalizeProviderUsage(parsed.usage);
     if (hasChoices) observedEnvelope = "openai_choices";
     choiceCount = hasChoices ? Math.min(64, parsed.choices.length) : 0;
     const choice = parsed.choices?.[0];
@@ -152,6 +190,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): { text: string; struc
   }
   return {
     text: result,
+    ...(usage ? { usage } : {}),
     structuredOutputTelemetry: emptyStructuredOutputTelemetry({
       protocolFamily: "openai_compatible", transportOk: true,
       responseEnvelopeKind: observedEnvelope,
@@ -161,7 +200,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): { text: string; struc
   };
 }
 
-export function parseGeminiTextWithTelemetry(raw: string): { text: string; structuredOutputTelemetry: StructuredOutputTelemetry } {
+export function parseGeminiTextWithTelemetry(raw: string): TextProviderDiagnosticResult {
   let parsed: any;
   try { parsed = JSON.parse(raw); } catch {
     return {
@@ -177,9 +216,11 @@ export function parseGeminiTextWithTelemetry(raw: string): { text: string; struc
   const parts = candidates[0]?.content?.parts;
   const summary = contentKind(parts);
   const text = Array.isArray(parts) ? parts.map((part: any) => part?.text || "").join("") : "";
+  const usage = normalizeProviderUsage(parsed.usageMetadata || parsed.usage);
   const finishReason = finishReasonKind(candidates[0]?.finishReason || parsed?.promptFeedback?.blockReason);
   return {
     text,
+    ...(usage ? { usage } : {}),
     structuredOutputTelemetry: emptyStructuredOutputTelemetry({
       protocolFamily: "gemini_native", transportOk: true,
       responseEnvelopeKind: hasCandidates ? "gemini_candidates" : "unknown",
@@ -190,7 +231,7 @@ export function parseGeminiTextWithTelemetry(raw: string): { text: string; struc
   };
 }
 
-export async function callTextProviderWithDiagnostics(input: TextProviderInput): Promise<{ text: string; structuredOutputTelemetry: StructuredOutputTelemetry }> {
+export async function callTextProviderWithDiagnostics(input: TextProviderInput): Promise<TextProviderDiagnosticResult> {
   const apiKey = input.apiKey?.trim();
   const model = input.model?.trim();
   const requestTimeoutMs = resolveTextGenerationTimeout(input.timeoutMs);
@@ -215,6 +256,7 @@ export async function callTextProviderWithDiagnostics(input: TextProviderInput):
         messages,
         temperature: input.temperature ?? 0.7,
         stream: input.streamCompatible === true,
+        ...(input.streamCompatible === true ? { stream_options: { include_usage: true } } : {}),
         ...(typeof input.maxOutputTokens === "number"
           ? { max_tokens: Math.max(128, Math.floor(input.maxOutputTokens)) }
           : {}),

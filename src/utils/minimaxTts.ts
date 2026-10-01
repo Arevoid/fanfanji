@@ -229,7 +229,6 @@ export async function fetchSingleTtsSegment(
     endpoint: options.forceDirectTts ? "https://api.minimax.chat/v1/t2a_v2" : (options.proxyUrl || "/api/minimax-tts"),
     transport: options.forceDirectTts ? "browser_direct" : "backend_proxy",
     inputCharacters: text.length,
-    estimatedInputTokens: Math.ceil(text.length / 4),
   }, async (ledger) => {
     ledger.markAttempt({
       provider: options.provider === "mossland" ? "mossland" : "minimax",

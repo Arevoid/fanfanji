@@ -59,6 +59,16 @@ export const AI_PURPOSE_PROMPT_LABELS: Partial<Record<AiPurpose, string>> = {
 
 export type AiRequestTransport = "backend_proxy" | "browser_direct" | "server_provider" | "unknown";
 export type AiRequestStatus = "success" | "failure";
+export type AiRequestUsageSource = "provider" | "estimated" | "unavailable";
+
+/** Provider-reported usage for one physical upstream request.  It is kept
+ * separate from estimates so the UI never presents a guess as a billable
+ * provider value. */
+export interface AiRequestUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
 export type AiRequestErrorCategory =
   | "none"
   | "configuration"
@@ -93,6 +103,8 @@ export interface AiRequestEnvelope {
   estimatedOutputTokens?: number;
   actualInputTokens?: number;
   actualOutputTokens?: number;
+  actualTotalTokens?: number;
+  usageSource?: AiRequestUsageSource;
   providerRequestCount: number;
   inputCharacters?: number;
   outputCharacters?: number;
@@ -138,6 +150,7 @@ export interface AiRequestLedgerSession {
   readonly parentActionId?: string;
   readonly logicalActionId?: string;
   markAttempt(attempt?: AiRequestAttempt): void;
+  recordUsage(usage?: AiRequestUsage): void;
   markRetry(reason: string): void;
   markFallback(reason: string): void;
   complete(input: {
@@ -146,6 +159,7 @@ export interface AiRequestLedgerSession {
     outputCharacters?: number;
     actualInputTokens?: number;
     actualOutputTokens?: number;
+    actualTotalTokens?: number;
   }): AiRequestEnvelope;
 }
 
@@ -214,6 +228,12 @@ function contextItemsWithPromptLabel(purpose: AiPurpose, items: readonly unknown
   return boundedContextItems(promptLabel ? [promptLabel, ...items] : items);
 }
 
+function sumUsageValue(left: number | undefined, right: unknown): number | undefined {
+  const value = finiteNonNegative(right);
+  if (value === undefined) return left;
+  return (left || 0) + value;
+}
+
 export function redactAiEndpoint(value?: string): string | undefined {
   if (!value) return undefined;
   const raw = String(value).trim();
@@ -280,6 +300,10 @@ function normalizeRecord(value: unknown): AiRequestEnvelope | null {
     ...(finiteNonNegative(candidate.estimatedOutputTokens) !== undefined ? { estimatedOutputTokens: finiteNonNegative(candidate.estimatedOutputTokens) } : {}),
     ...(finiteNonNegative(candidate.actualInputTokens) !== undefined ? { actualInputTokens: finiteNonNegative(candidate.actualInputTokens) } : {}),
     ...(finiteNonNegative(candidate.actualOutputTokens) !== undefined ? { actualOutputTokens: finiteNonNegative(candidate.actualOutputTokens) } : {}),
+    ...(finiteNonNegative(candidate.actualTotalTokens) !== undefined ? { actualTotalTokens: finiteNonNegative(candidate.actualTotalTokens) } : {}),
+    ...(candidate.usageSource === "provider" || candidate.usageSource === "estimated" || candidate.usageSource === "unavailable"
+      ? { usageSource: candidate.usageSource }
+      : {}),
     providerRequestCount,
     ...(finiteNonNegative(candidate.inputCharacters) !== undefined ? { inputCharacters: finiteNonNegative(candidate.inputCharacters) } : {}),
     ...(finiteNonNegative(candidate.outputCharacters) !== undefined ? { outputCharacters: finiteNonNegative(candidate.outputCharacters) } : {}),
@@ -411,6 +435,10 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
     endpoint: input.endpoint,
     transport: input.transport,
   };
+  let actualInputTokens: number | undefined;
+  let actualOutputTokens: number | undefined;
+  let actualTotalTokens: number | undefined;
+  let hasProviderUsage = false;
   let completed = false;
 
   return {
@@ -420,6 +448,17 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
       if (completed) return;
       providerRequestCount += 1;
       latestAttempt = { ...latestAttempt, ...attempt };
+    },
+    recordUsage(usage) {
+      if (completed || !usage) return;
+      const input = finiteNonNegative(usage.inputTokens);
+      const output = finiteNonNegative(usage.outputTokens);
+      const total = finiteNonNegative(usage.totalTokens);
+      if (input === undefined && output === undefined && total === undefined) return;
+      hasProviderUsage = true;
+      actualInputTokens = sumUsageValue(actualInputTokens, input);
+      actualOutputTokens = sumUsageValue(actualOutputTokens, output);
+      actualTotalTokens = sumUsageValue(actualTotalTokens, total ?? (input !== undefined && output !== undefined ? input + output : undefined));
     },
     markRetry(reason) {
       if (!completed) retryReasons.push(String(reason));
@@ -441,6 +480,10 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
           status: result.succeeded ? "success" : "failure",
           errorCategory: result.succeeded ? "none" : errorCategory(result.error),
           providerRequestCount,
+          ...(actualInputTokens !== undefined ? { actualInputTokens } : {}),
+          ...(actualOutputTokens !== undefined ? { actualOutputTokens } : {}),
+          ...(actualTotalTokens !== undefined ? { actualTotalTokens } : {}),
+          usageSource: hasProviderUsage ? "provider" : (input.estimatedInputTokens !== undefined || input.estimatedOutputTokens !== undefined ? "estimated" : "unavailable"),
           ...(contextItems.length > 0 ? { contextItems } : {}),
           retryCount: retryReasons.length,
           retryReasons: boundedReasons(retryReasons, "retry"),
@@ -470,8 +513,21 @@ export function createAiRequestLedgerSession(input: AiRequestLedgerInput): AiReq
         errorCategory: category,
         ...(finiteNonNegative(input.estimatedInputTokens) !== undefined ? { estimatedInputTokens: finiteNonNegative(input.estimatedInputTokens) } : {}),
         ...(finiteNonNegative(input.estimatedOutputTokens) !== undefined ? { estimatedOutputTokens: finiteNonNegative(input.estimatedOutputTokens) } : {}),
-        ...(finiteNonNegative(result.actualInputTokens) !== undefined ? { actualInputTokens: finiteNonNegative(result.actualInputTokens) } : {}),
-        ...(finiteNonNegative(result.actualOutputTokens) !== undefined ? { actualOutputTokens: finiteNonNegative(result.actualOutputTokens) } : {}),
+        ...(finiteNonNegative(result.actualInputTokens) !== undefined || actualInputTokens !== undefined
+          ? { actualInputTokens: (actualInputTokens || 0) + (finiteNonNegative(result.actualInputTokens) || 0) }
+          : {}),
+        ...(finiteNonNegative(result.actualOutputTokens) !== undefined || actualOutputTokens !== undefined
+          ? { actualOutputTokens: (actualOutputTokens || 0) + (finiteNonNegative(result.actualOutputTokens) || 0) }
+          : {}),
+        ...(finiteNonNegative(result.actualTotalTokens) !== undefined || actualTotalTokens !== undefined
+          ? { actualTotalTokens: (actualTotalTokens || 0) + (finiteNonNegative(result.actualTotalTokens) || 0) }
+          : {}),
+        usageSource: hasProviderUsage
+          || finiteNonNegative(result.actualInputTokens) !== undefined
+          || finiteNonNegative(result.actualOutputTokens) !== undefined
+          || finiteNonNegative(result.actualTotalTokens) !== undefined
+          ? "provider"
+          : (input.estimatedInputTokens !== undefined || input.estimatedOutputTokens !== undefined ? "estimated" : "unavailable"),
         providerRequestCount,
         ...(contextItems.length > 0 ? { contextItems } : {}),
         ...(finiteNonNegative(input.inputCharacters) !== undefined ? { inputCharacters: finiteNonNegative(input.inputCharacters) } : {}),

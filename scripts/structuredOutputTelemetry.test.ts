@@ -4,11 +4,12 @@ import {
   parseKnowledgeExtractionOutputWithV2WithTelemetry,
   parseOrRepairKnowledgeExtractionOutputWithDiagnostics,
 } from "../src/features/characterKnowledge/services/knowledgeExtractionProtocol";
-import { parseOpenAiTextWithTelemetry } from "../src/server/textProtocolAdapters";
-import { apiExtractMemories } from "../src/utils/apiHelper";
+import { parseGeminiTextWithTelemetry, parseOpenAiTextWithTelemetry } from "../src/server/textProtocolAdapters";
+import { apiChat, apiExtractMemories } from "../src/utils/apiHelper";
 import {
   aggregateAiRequestLedgerAccounting,
   clearInMemoryAiRequestLedgerForTests,
+  createAiRequestLedgerSession,
   loadAiRequestLedger,
 } from "../src/core/monitoring/aiRequestLedger";
 
@@ -70,11 +71,27 @@ assert.equal(validEmpty.structuredOutputTelemetry.failureReasonCode, "valid_empt
 
 const openAiString = parseOpenAiTextWithTelemetry(JSON.stringify({
   choices: [{ message: { content: "[]" }, finish_reason: "stop" }],
+  usage: { prompt_tokens: 12, completion_tokens: 5, total_tokens: 17 },
 }));
 assert.equal(openAiString.text, "[]");
 assert.equal(openAiString.structuredOutputTelemetry.responseEnvelopeKind, "openai_choices");
 assert.equal(openAiString.structuredOutputTelemetry.messageContentKind, "string");
 assert.equal(openAiString.structuredOutputTelemetry.finishReasonKind, "stop");
+assert.deepEqual(openAiString.usage, { inputTokens: 12, outputTokens: 5, totalTokens: 17 });
+
+const openAiStreamUsage = parseOpenAiTextWithTelemetry([
+  'data: {"choices":[{"delta":{"content":"ok"}}]}',
+  'data: {"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}',
+  "data: [DONE]",
+].join("\n"));
+assert.equal(openAiStreamUsage.text, "ok");
+assert.deepEqual(openAiStreamUsage.usage, { inputTokens: 8, outputTokens: 2, totalTokens: 10 });
+
+const geminiUsage = parseGeminiTextWithTelemetry(JSON.stringify({
+  candidates: [{ content: { parts: [{ text: "ok" }] } }],
+  usageMetadata: { promptTokenCount: 21, candidatesTokenCount: 4, totalTokenCount: 25 },
+}));
+assert.deepEqual(geminiUsage.usage, { inputTokens: 21, outputTokens: 4, totalTokens: 25 });
 
 const openAiParts = parseOpenAiTextWithTelemetry(JSON.stringify({
   choices: [{ message: { content: [{ type: "text", text: "[]" }] } }],
@@ -149,6 +166,33 @@ assert.equal(failureLedger.length, 1);
 assert.equal(failureLedger[0].status, "failure");
 assert.equal(failureLedger[0].providerRequestCount, 1);
 assert.equal(aggregateAiRequestLedgerAccounting(failureLedger).logicalActionCount, 1);
+
+clearInMemoryAiRequestLedgerForTests();
+const aggregatedSession = createAiRequestLedgerSession({
+  purpose: "chat_reply",
+  estimatedInputTokens: 99,
+});
+aggregatedSession.markAttempt({ provider: "fixture", model: "fixture-model" });
+aggregatedSession.recordUsage({ inputTokens: 10, outputTokens: 3, totalTokens: 13 });
+aggregatedSession.markAttempt({ provider: "fixture-fallback", model: "fixture-model" });
+aggregatedSession.recordUsage({ inputTokens: 4, outputTokens: 2, totalTokens: 6 });
+const aggregatedRecord = aggregatedSession.complete({ succeeded: true, outputCharacters: 4 });
+assert.equal(aggregatedRecord.providerRequestCount, 2);
+assert.equal(aggregatedRecord.actualInputTokens, 14);
+assert.equal(aggregatedRecord.actualOutputTokens, 5);
+assert.equal(aggregatedRecord.actualTotalTokens, 19);
+assert.equal(aggregatedRecord.usageSource, "provider");
+
+clearInMemoryAiRequestLedgerForTests();
+globalThis.fetch = (async () => Response.json({
+  text: "provider-backed reply",
+  usage: { inputTokens: 31, outputTokens: 7, totalTokens: 38 },
+})) as typeof fetch;
+await apiChat({ message: "usage fixture", history: [], apiKey: "fixture-key", model: "fixture-model" });
+const providerLedger = loadAiRequestLedger(Date.now() + 1_000);
+assert.equal(providerLedger.length, 1);
+assert.equal(providerLedger[0].actualTotalTokens, 38);
+assert.equal(providerLedger[0].usageSource, "provider");
 globalThis.fetch = originalFetch;
 
 console.log("Structured output telemetry fixtures passed (cases 1-11 + repair + compatibility).");

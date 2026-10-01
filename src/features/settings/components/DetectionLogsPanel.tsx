@@ -82,11 +82,16 @@ function tokenFor(record: AiRequestEnvelope, kind: "input" | "output"): { value?
 }
 
 function tokenTotal(record: AiRequestEnvelope): { value?: number; source: "actual" | "estimated" | "mixed" | "unavailable" } {
+  if (record.actualTotalTokens !== undefined) return { value: record.actualTotalTokens, source: "actual" };
   const input = tokenFor(record, "input");
   const output = tokenFor(record, "output");
-  if (input.value === undefined && output.value === undefined) return { source: "unavailable" };
-  const source = input.source === output.source ? input.source : "mixed";
-  return { value: (input.value || 0) + (output.value || 0), source };
+  if (input.value !== undefined && output.value !== undefined && input.source === "actual" && output.source === "actual") {
+    return { value: input.value + output.value, source: "actual" };
+  }
+  if (input.value !== undefined && output.value !== undefined && input.source === "estimated" && output.source === "estimated") {
+    return { value: input.value + output.value, source: "estimated" };
+  }
+  return { source: "unavailable" };
 }
 
 function tokenSourceLabel(source: "actual" | "estimated" | "mixed" | "unavailable"): string {

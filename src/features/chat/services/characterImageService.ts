@@ -156,7 +156,6 @@ export async function requestCharacterImageData(input: {
     characterId: input.character.id,
     ...(input.scope?.kind === "direct" ? { relationId: input.scope.relationId, conversationId: input.scope.conversationId } : input.scope?.kind === "group" ? { conversationId: input.scope.conversationId } : {}),
     inputCharacters: input.prompt.length + input.userText.length,
-    estimatedInputTokens: Math.ceil((input.prompt.length + input.userText.length) / 4),
   }, async (ledger) => {
     ledger.markAttempt({
       provider: "server-proxy",

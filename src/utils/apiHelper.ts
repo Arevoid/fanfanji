@@ -16,11 +16,32 @@ import {
   createAiActionId,
   withAiRequestLedger,
   type AiPurpose,
+  type AiRequestUsage,
   type AiRequestLedgerInput,
   type AiRequestLedgerSession,
 } from "../core/monitoring/aiRequestLedger";
 import { emptyTextApiErrorDetails, parseTextApiErrorPayload, type TextApiErrorCode } from "./textApiError";
 import { isStructuredOutputTelemetry, withStructuredOutputTelemetry, type StructuredOutputTelemetry } from "../features/characterKnowledge/services/structuredOutputTelemetry";
+
+type ApiProviderUsage = AiRequestUsage;
+
+function normalizeProviderUsage(value: unknown): ApiProviderUsage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Record<string, unknown>;
+  const normalize = (entry: unknown): number | undefined => {
+    if (typeof entry !== "number" || !Number.isFinite(entry)) return undefined;
+    return Math.max(0, Math.floor(entry));
+  };
+  const inputTokens = normalize(candidate.inputTokens ?? candidate.prompt_tokens ?? candidate.promptTokenCount);
+  const outputTokens = normalize(candidate.outputTokens ?? candidate.completion_tokens ?? candidate.candidatesTokenCount);
+  const totalTokens = normalize(candidate.totalTokens ?? candidate.total_tokens ?? candidate.totalTokenCount);
+  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) return undefined;
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+  };
+}
 
 type AiRequestMetadata = {
   purpose?: AiPurpose;
@@ -142,7 +163,7 @@ async function directClientChatImpl(params: {
   maxOutputTokens?: number;
   imageDataUrl?: string;
   signal?: AbortSignal;
-}): Promise<{ text: string }> {
+}): Promise<{ text: string; usage?: ApiProviderUsage }> {
   const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible, timeoutMs, maxOutputTokens, imageDataUrl, signal } = params;
   const requestTimeoutMs = typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
     ? timeoutMs
@@ -184,6 +205,7 @@ async function directClientChatImpl(params: {
         messages: messagesPayload,
         temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
         stream: streamCompatible || false,
+        ...(streamCompatible === true ? { stream_options: { include_usage: true } } : {}),
         ...(typeof maxOutputTokens === "number" ? { max_tokens: Math.max(128, Math.floor(maxOutputTokens)) } : {})
       }),
       signal,
@@ -196,6 +218,7 @@ async function directClientChatImpl(params: {
 
     const responseText = await readResponseTextWithTimeout(responseFetch, requestTimeoutMs);
     let aiText = "";
+    let usage: ApiProviderUsage | undefined;
     const trimmedText = responseText.trim();
     if (trimmedText.startsWith("data:") || trimmedText.includes("\ndata:")) {
       // It is a Server-Sent Events (SSE) stream
@@ -209,6 +232,7 @@ async function directClientChatImpl(params: {
           }
           try {
             const parsedChunk = JSON.parse(dataStr);
+            usage = normalizeProviderUsage(parsedChunk.usage) || usage;
             const content = parsedChunk.choices?.[0]?.delta?.content || 
                             parsedChunk.choices?.[0]?.message?.content || 
                             parsedChunk.choices?.[0]?.text || "";
@@ -221,17 +245,18 @@ async function directClientChatImpl(params: {
     } else {
       try {
         const dataFetch = JSON.parse(trimmedText);
-            const content = dataFetch.choices?.[0]?.message?.content ?? dataFetch.choices?.[0]?.text;
-            aiText = Array.isArray(content)
-              ? content.map((part: any) => typeof part === "string" ? part : part?.text || "").join("")
-              : typeof content === "string" ? content : "";
+        usage = normalizeProviderUsage(dataFetch.usage);
+        const content = dataFetch.choices?.[0]?.message?.content ?? dataFetch.choices?.[0]?.text;
+        aiText = Array.isArray(content)
+          ? content.map((part: any) => typeof part === "string" ? part : part?.text || "").join("")
+          : typeof content === "string" ? content : "";
       } catch (jsonErr) {
         aiText = trimmedText;
       }
     }
 
     if (aiText.trim()) {
-      return { text: aiText };
+      return { text: aiText, ...(usage ? { usage } : {}) };
     }
     const details = emptyTextApiErrorDetails();
     throw new ApiChatError(details.message, { status: 502, code: details.code, reason: details.reason });
@@ -319,8 +344,9 @@ async function directClientChatImpl(params: {
       throw new ApiChatError("Gemini 返回了无法解析的响应。", { status: 502, code: "provider_invalid_response" });
     }
     const aiText = dataFetch.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || "").join("") || "";
+    const usage = normalizeProviderUsage(dataFetch.usageMetadata || dataFetch.usage);
     if (aiText.trim()) {
-      return { text: aiText };
+      return { text: aiText, ...(usage ? { usage } : {}) };
     }
     const reason = dataFetch.candidates?.[0]?.finishReason || dataFetch.promptFeedback?.blockReason || "";
     const details = emptyTextApiErrorDetails(502, reason);
@@ -328,7 +354,7 @@ async function directClientChatImpl(params: {
   }
 }
 
-async function directClientChat(params: Parameters<typeof directClientChatImpl>[0] & { ledger?: AiRequestLedgerSession }): Promise<{ text: string }> {
+async function directClientChat(params: Parameters<typeof directClientChatImpl>[0] & { ledger?: AiRequestLedgerSession }): Promise<{ text: string; usage?: ApiProviderUsage }> {
   const { ledger, ...request } = params;
   ledger?.markAttempt({
     provider: request.apiEndpoint?.trim() ? "custom-openai-compatible" : "google-gemini",
@@ -336,7 +362,9 @@ async function directClientChat(params: Parameters<typeof directClientChatImpl>[
     endpoint: request.apiEndpoint?.trim() || "https://generativelanguage.googleapis.com/v1beta",
     transport: "browser_direct",
   });
-  return directClientChatImpl(request);
+  const result = await directClientChatImpl(request);
+  ledger?.recordUsage(result.usage);
+  return result;
 }
 
 // Direct Models list fetch
@@ -404,7 +432,7 @@ export type ApiChatParams = {
 };
 
 // chat wrapper
-async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSession }): Promise<{ text: string }> {
+async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSession }): Promise<{ text: string; usage?: ApiProviderUsage }> {
   const { signal, timeoutMs, ledger, scenario: _scenario, contextItems: _contextItems, purpose, parentActionId, characterId, relationId, conversationId, retryReasons, fallbackReasons, estimatedOutputTokens, ...requestBody } = params;
   const providerHistory = Array.isArray(requestBody.history)
     ? requestBody.history.map((entry) => {
@@ -471,7 +499,11 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
     // A successful non-JSON response is not a valid chat backend response.
     throw new ApiChatError("聊天 API 返回成功状态，但没有有效的文本响应。", { status: 502, code: "provider_invalid_response" });
   }
-  if (data && typeof data.text === "string" && data.text.trim()) return { text: data.text };
+  if (data && typeof data.text === "string" && data.text.trim()) {
+    const usage = normalizeProviderUsage(data.usage);
+    ledger?.recordUsage(usage);
+    return { text: data.text, ...(usage ? { usage } : {}) };
+  }
   if (data?.error) {
     const details = parseTextApiErrorPayload(responseText, res.status || 502);
     throw new ApiChatError(details.message, { status: res.status || 502, code: details.code, reason: details.reason });
@@ -480,7 +512,9 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
 }
 
 export async function apiChat(params: ApiChatParams): Promise<{ text: string }> {
-  const inputCharacters = params.message.length + params.history.reduce((total, entry) => total + String(entry?.text || entry?.content || "").length, 0);
+  const inputCharacters = params.message.length
+    + String(params.systemInstruction || "").length
+    + params.history.reduce((total, entry) => total + String(entry?.text || entry?.content || "").length, 0);
   const defaultPurpose: AiPurpose = params.scenario === "offline-story" ? "offline_story_generate" : "chat_reply";
   return trackApiUsage("chat", inputCharacters, buildLedgerInput(defaultPurpose, inputCharacters, {
     ...params,
@@ -510,6 +544,7 @@ export async function apiTestKey(params: {
     if (res.ok) {
       const data = await res.json();
       if (data.success) {
+        ledger.recordUsage(normalizeProviderUsage(data.usage));
         return { success: true, message: data.message || "连接成功" };
       } else {
         return { success: false, message: data.error || "未收到回复，请重试。" };
@@ -740,6 +775,7 @@ async function apiExtractMemoriesImpl(params: {
       }, runtimeLineageTransport);
     }
     if (res.ok && (Array.isArray(data?.candidates) || structuredCandidatesV2?.length || data?.v2MetadataPresent === true)) {
+      ledger?.recordUsage(normalizeProviderUsage(data?.usage));
       return {
         text: typeof data.text === "string" ? data.text : "",
         items: Array.isArray(data.candidates) ? data.candidates : [],
@@ -871,6 +907,7 @@ async function apiSummarizePersonalityImpl(params: {
     if (res.ok) {
       const data = await res.json();
       if (data && typeof data.text === "string") {
+        ledger?.recordUsage(normalizeProviderUsage(data.usage));
         return { text: data.text };
       }
     }
@@ -970,7 +1007,10 @@ async function apiTranslateImpl(params: {
     if (res.ok && !staticFallback) {
       try {
         const data = JSON.parse(raw);
-        if (data && typeof data.text === "string" && data.text.trim()) return { text: data.text };
+        if (data && typeof data.text === "string" && data.text.trim()) {
+          ledger?.recordUsage(normalizeProviderUsage(data.usage));
+          return { text: data.text };
+        }
       } catch {
         throw new Error("翻译服务返回了无法解析的响应。");
       }

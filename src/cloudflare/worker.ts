@@ -2,7 +2,7 @@ import { assertImageGenerationTrigger } from "../features/chat/services/imageGen
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "../server/imageProtocolAdapters";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "../server/mosslandTts";
 import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
-import { buildTranslationPrompt, callTextProvider, fetchTextModels, normalizeTextApiError } from "../server/textProtocolAdapters";
+import { buildTranslationPrompt, callTextProvider, callTextProviderWithDiagnostics, fetchTextModels, normalizeTextApiError } from "../server/textProtocolAdapters";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 import { CONTENT_SECURITY_POLICY } from "../core/security/contentSecurityPolicy";
 import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "../server/neteaseMusicAdapter";
@@ -213,23 +213,23 @@ export default {
 
     if (url.pathname === "/api/chat") {
       try {
-        const text = await callTextProvider(textInput(body, String(body.message || ""), typeof body.systemInstruction === "string" ? body.systemInstruction : undefined, typeof body.apiTemperature === "number" ? body.apiTemperature : 0.7));
-        return json({ text });
+        const result = await callTextProviderWithDiagnostics(textInput(body, String(body.message || ""), typeof body.systemInstruction === "string" ? body.systemInstruction : undefined, typeof body.apiTemperature === "number" ? body.apiTemperature : 0.7));
+        return json({ text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
       } catch (error) { return textErrorResponse(error, "聊天 API 请求失败。"); }
     }
 
     if (url.pathname === "/api/translate") {
       try {
         const targetLanguage = typeof body.targetLanguage === "string" && body.targetLanguage.trim() ? body.targetLanguage : "zh-CN";
-        const text = await callTextProvider(textInput(body, buildTranslationPrompt(String(body.text || ""), targetLanguage), `你是翻译助手，只输出目标语言 ${targetLanguage} 的译文。`, 0.3));
-        return json({ text });
+        const result = await callTextProviderWithDiagnostics(textInput(body, buildTranslationPrompt(String(body.text || ""), targetLanguage), `你是翻译助手，只输出目标语言 ${targetLanguage} 的译文。`, 0.3));
+        return json({ text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
       } catch (error) { return textErrorResponse(error, "翻译 API 请求失败。"); }
     }
 
     if (url.pathname === "/api/test-key") {
       try {
-        await callTextProvider(textInput(body, "Reply with OK only.", undefined, 0.1));
-        return json({ success: true, message: "连接成功，所选模型可正常生成文本。" });
+        const result = await callTextProviderWithDiagnostics(textInput(body, "Reply with OK only.", undefined, 0.1));
+        return json({ success: true, message: "连接成功，所选模型可正常生成文本。", ...(result.usage ? { usage: result.usage } : {}) });
       } catch (error) { return textErrorResponse(error, "连接测试失败。"); }
     }
 
@@ -252,18 +252,32 @@ export default {
           templateType: body.templateType === "delicate" ? "delicate" : "refined", scenario: body.scenario === "offline" ? "offline" : undefined,
           includeV2Shadow: enableV2Shadow,
         });
-        const text = await callTextProvider({
+        let providerUsage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
+        const mergeProviderUsage = (usage: typeof providerUsage) => {
+          if (!usage) return;
+          providerUsage = {
+            ...(usage.inputTokens !== undefined ? { inputTokens: (providerUsage?.inputTokens || 0) + usage.inputTokens } : {}),
+            ...(usage.outputTokens !== undefined ? { outputTokens: (providerUsage?.outputTokens || 0) + usage.outputTokens } : {}),
+            ...(usage.totalTokens !== undefined ? { totalTokens: (providerUsage?.totalTokens || 0) + usage.totalTokens } : {}),
+          };
+        };
+        const firstResult = await callTextProviderWithDiagnostics({
           ...textInput(body, prompt, "你是长期记忆提取器，严格按要求输出结构化候选。", 0.5),
           allowEmptyText: true,
         });
+        mergeProviderUsage(firstResult.usage);
         const repaired = await parseOrRepairKnowledgeExtractionOutput({
-          rawText: text,
+          rawText: firstResult.text,
           allowedMessageIds: new Set(history.map((item) => String(item.id))),
           originalPrompt: prompt,
           preserveUnvalidatedSourceHints: body.sourceReferenceMode === "local" || enableV2Shadow,
-          repair: (repairPrompt) => callTextProvider({ ...textInput(body, repairPrompt, body.sourceReferenceMode === "local" || enableV2Shadow
+          repair: async (repairPrompt) => {
+            const repairResult = await callTextProviderWithDiagnostics({ ...textInput(body, repairPrompt, body.sourceReferenceMode === "local" || enableV2Shadow
             ? "你是结构化记忆修复器。只输出使用本次 M# source refs 且可验证的 JSONL，不要解释。"
-            : "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。", 0.2), allowEmptyText: true }),
+            : "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。", 0.2), allowEmptyText: true });
+            mergeProviderUsage(repairResult.usage);
+            return repairResult.text;
+          },
         });
         return json({
           text: repaired.text,
@@ -273,6 +287,7 @@ export default {
           v2MetadataPresent: repaired.v2MetadataPresent,
           runtimeLineageTransport: repaired.runtimeLineageTransport,
           repaired: repaired.repaired,
+          ...(providerUsage ? { usage: providerUsage } : {}),
         });
       } catch (error) { return textErrorResponse(error, "记忆提取失败。"); }
     }
@@ -282,8 +297,8 @@ export default {
         const references = Array.isArray(body.references) ? body.references as Array<Record<string, unknown>> : [];
         if (!references.length) return json({ error: "请至少添加一条参考内容。" }, 400);
         const source = references.map((item, index) => `[参考 ${index + 1}：${String(item.title || "未命名")}]\n${String(item.content || "")}`).join("\n\n");
-        const text = await callTextProvider(textInput(body, `根据以下参考资料提炼可直接作为角色系统设定的人设与说话特征。只输出设定正文。\n\n${source}`, "你是角色设定提炼专家。", 0.5));
-        return json({ text });
+        const result = await callTextProviderWithDiagnostics(textInput(body, `根据以下参考资料提炼可直接作为角色系统设定的人设与说话特征。只输出设定正文。\n\n${source}`, "你是角色设定提炼专家。", 0.5));
+        return json({ text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
       } catch (error) { return textErrorResponse(error, "人设总结失败。"); }
     }
 
