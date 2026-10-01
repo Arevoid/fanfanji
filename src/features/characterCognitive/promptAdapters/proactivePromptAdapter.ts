@@ -111,6 +111,14 @@ export const buildProactivePromptContext = (
   ...projectProactiveRelationshipContext(context),
   ...projectProactiveRoutineContext(context),
   ...projectProactiveTopicContext(context),
+  scheduleItems: context.scheduleItems.map(({ title, detail, dateKey, startAt, endAt, status }) => ({
+    title,
+    ...(detail ? { detail } : {}),
+    ...(dateKey ? { dateKey } : {}),
+    ...(startAt === undefined ? {} : { startAt }),
+    ...(endAt === undefined ? {} : { endAt }),
+    status,
+  })),
   ...((context as ProactiveContextWithRoutine).timeAwareness === undefined
     ? {}
     : { timeAwareness: (context as ProactiveContextWithRoutine).timeAwareness }),
@@ -135,6 +143,12 @@ export function formatProactivePromptContext(context: ProactivePromptContextWith
   const recentTopics = topicContext?.recentTopics.map((topic) => `- ${topic}`) ?? [];
   const repeatedTopics = topicContext?.repeatedTopics.map((topic) => `- ${topic}`) ?? [];
   const cooldownTopics = topicContext?.cooldownTopics.map((topic) => `- ${topic}`) ?? [];
+  const scheduleItems = context.scheduleItems.map((item) => {
+    const time = item.startAt === undefined
+      ? item.dateKey ? `${item.dateKey} 全天` : "时间待定"
+      : new Date(item.startAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    return `- ${time}｜${item.title}${item.detail ? `：${item.detail}` : ""}｜状态=${item.status}`;
+  });
   const topicGuidance = topicContext && (recentTopics.length > 0 || repeatedTopics.length > 0 || cooldownTopics.length > 0)
     ? [
       "Topic diversity guidance (hints only; not facts or hard bans):",
@@ -159,6 +173,7 @@ export function formatProactivePromptContext(context: ProactivePromptContextWith
     ...(relationshipEvents.length > 0 ? ["Recent safe relationship events:", ...relationshipEvents] : []),
     ...(openLoops.length > 0 ? ["Open relationship loops (candidate topics only):", ...openLoops] : []),
     ...(relationshipBoundaries.length > 0 ? ["Relationship boundaries:", ...relationshipBoundaries] : []),
+    ...(scheduleItems.length > 0 ? ["已确认日程（用于判断角色当前或即将进行的安排）：", ...scheduleItems] : []),
     ...topicGuidance,
     ...(lastMeaningfulEvent === undefined ? [] : [`- Last meaningful relationship event at: ${lastMeaningfulEvent}`]),
     ...(timeAwareness ? [`Time context: ${context.time.date} ${context.time.time}${context.time.period ? ` (${context.time.period})` : ""}`] : []),

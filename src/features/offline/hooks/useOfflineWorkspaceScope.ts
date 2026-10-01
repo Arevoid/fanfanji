@@ -85,7 +85,18 @@ export function useOfflineWorkspaceScope({
   }, [characters, selectedCharId, selectedRelationId, activeStory?.id, relationChoices]);
 
   const handleOpenStory = (story: OfflineStory): boolean => {
-    if (!canAccessStoryFromCurrentRelation(story)) {
+    // A story opened from the chat carries its relation id. Resolve that
+    // relation before checking the directory's currently selected identity;
+    // otherwise the offline app can briefly land on the directory when its
+    // previous character/persona selection has not caught up yet.
+    const directRelation = story.relationId
+      ? relationships.find((relation) => relation.id === story.relationId
+        && relation.userIdentityId === activeIdentityId
+        && resolveCharacterId(relation.characterId) === resolveCharacterId(story.characterId))
+      : undefined;
+    const directStoryAccess = Boolean(directRelation
+      && (!story.ownerIdentityId || story.ownerIdentityId === activeIdentityId));
+    if (!directStoryAccess && !canAccessStoryFromCurrentRelation(story)) {
       showToast("此线下剧情属于另一个人设关系，不能跨身份进入。");
       return false;
     }
@@ -94,6 +105,7 @@ export function useOfflineWorkspaceScope({
       setSelectedCharId(storyContainer.id);
       if (isGroupOfflineStory(story)) setSelectedRelationId("");
     }
+    if (directRelation) setSelectedRelationId(directRelation.id);
     activeStoryRef.current = story;
     setActiveStory(story);
     if (story.relationId) {

@@ -13,6 +13,8 @@ assert.doesNotMatch(appChat, /const clearFriendScopedMemory = \(friendId: string
 assert.match(hook, /removeCharacterLifeEventsForRelations/);
 assert.match(hook, /removeCharacterTruthForRelations/);
 assert.match(hook, /removeProactiveTopicsForRelations/);
+assert.match(hook, /onClearScheduleForRelation/);
+assert.match(hook, /removeCharacterScheduleForRelations/);
 assert.match(hook, /cleanupDiaryForRelations/);
 assert.match(hook, /commitForumMutation/);
 assert.match(hook, /onClearMomentState\(relationMomentIds, relationCommentIds\)/);

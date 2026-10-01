@@ -94,3 +94,15 @@ export const removeAppointmentsByRelations = (
     appointments: store.appointments.filter((appointment) => !removed.has(appointment.relationId)),
   };
 };
+
+/** Removes only appointments explicitly linked to deleted source records. */
+export const removeAppointmentsByIds = (
+  appointmentIds: readonly string[],
+  store: ScheduleStore = loadScheduleStore().value,
+): ScheduleStore => {
+  const removed = new Set(appointmentIds.filter(Boolean));
+  return {
+    schemaVersion: SCHEDULE_SCHEMA_VERSION,
+    appointments: store.appointments.filter((appointment) => !removed.has(appointment.id)),
+  };
+};

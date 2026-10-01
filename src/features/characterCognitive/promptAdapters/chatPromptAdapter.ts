@@ -58,6 +58,15 @@ export const buildChatPromptContext: CognitivePromptAdapter<ChatPromptContext> =
       state: context.routineContext.state,
     },
   } : {}),
+  scheduleItems: context.scheduleItems.map(({ title, detail, dateKey, startAt, endAt, status }) => ({
+    title,
+    ...(detail ? { detail } : {}),
+    ...(dateKey ? { dateKey } : {}),
+    ...(startAt === undefined ? {} : { startAt }),
+    ...(endAt === undefined ? {} : { endAt }),
+    status,
+    reviewState: "confirmed",
+  })),
 });
 
 /**
@@ -90,6 +99,12 @@ export function formatChatPromptContext(context: ChatPromptContext | undefined):
     `- Current time period: ${routine.period}`,
     `- Current routine state: ${routine.state}`,
   ] : [];
+  const scheduleItems = context.scheduleItems.map((item) => {
+    const time = item.startAt === undefined
+      ? item.dateKey ? `${item.dateKey} 全天` : "时间待定"
+      : new Date(item.startAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    return `- ${time}｜${item.title}${item.detail ? `：${item.detail}` : ""}｜状态=${item.status}`;
+  });
   if (
     facts.length === 0 &&
     events.length === 0 &&
@@ -99,7 +114,8 @@ export function formatChatPromptContext(context: ChatPromptContext | undefined):
     openLoops.length === 0 &&
     relationshipBoundaries.length === 0 &&
     legacySummary.length === 0 &&
-    routineContext.length === 0
+    routineContext.length === 0 &&
+    scheduleItems.length === 0
   ) return "";
 
   return [
@@ -113,6 +129,7 @@ export function formatChatPromptContext(context: ChatPromptContext | undefined):
     ...(relationshipBoundaries.length > 0 ? ["Relationship boundaries:", ...relationshipBoundaries] : []),
     ...(legacySummary.length > 0 ? ["Legacy summary (source=legacy-unverified; weak reference, never an authoritative fact):", ...legacySummary] : []),
     ...routineContext,
+    ...(scheduleItems.length > 0 ? ["已确认日程（用于判断角色当前或即将进行的安排）：", ...scheduleItems] : []),
     ...(boundaries.length > 0 ? ["Knowledge boundaries:", ...boundaries] : []),
   ].join("\n");
 }

@@ -31,6 +31,80 @@ const optionalText = (value: unknown): string | undefined => {
   return normalized && normalized.length <= MAX_FIELD_LENGTH ? normalized : undefined;
 };
 
+/**
+ * A model can occasionally omit the private invitation block while its
+ * visible reply still confirms an explicit user-requested invitation.  The
+ * fallback below is deliberately narrow: it requires an explicit request,
+ * concrete user-supplied timing, and confirmation language from the reply.
+ * It must never turn an unsolicited or vague sentence into a calendar fact.
+ */
+const deriveExplicitRequestFallback = (input: {
+  text: string;
+  userText?: string;
+  allowedModes: readonly AppointmentMode[];
+  now: number;
+}): ProactiveOfflineInvitationDirective | undefined => {
+  const userText = input.userText?.trim();
+  if (!userText || !input.allowedModes.length) return undefined;
+  const hasInvitationRequest = /(?:发起|提出|安排|约|邀请).{0,24}(?:线下|见面|碰面|会面)|(?:线下|见面|碰面|会面).{0,24}(?:邀请|邀约|约一下)/iu.test(userText);
+  if (!hasInvitationRequest) return undefined;
+  const hasAssistantConfirmation = /(?:邀约|邀请).{0,24}(?:已|已经|重新)?(?:发出|发起|确认|安排好)|(?:明天|后天|今晚|今天).{0,32}(?:见面|碰面|会面)|(?:见一面|碰个面|见面吧)/iu.test(input.text);
+  if (!hasAssistantConfirmation) return undefined;
+
+  const immediate = /(?:立马|立即|马上|现在|就现在|当下|此刻)/u.test(userText);
+  const scheduled = /(?:明天|后天|今晚|明晚|今天晚上|下周|周[一二三四五六日天]|\d{1,2}\s*(?:月|\/|-|日)|\d{1,2}\s*(?::|：|点))/u.test(userText);
+  const mode: AppointmentMode = immediate && input.allowedModes.includes("immediate")
+    ? "immediate"
+    : scheduled && input.allowedModes.includes("scheduled")
+      ? "scheduled"
+      : input.allowedModes.includes("scheduled")
+        ? "scheduled"
+        : input.allowedModes.includes("immediate")
+          ? "immediate"
+          : input.allowedModes[0];
+
+  const relativeMatch = userText.match(/(今天|今晚|明天|明晚|后天|后晚)/u);
+  const dayOffset = relativeMatch
+    ? /后/u.test(relativeMatch[1]) ? 2 : /明/u.test(relativeMatch[1]) ? 1 : 0
+    : 0;
+  const timeMatch = userText.match(/(?:早上|上午|中午|下午|傍晚|晚上|晚间)?\s*(\d{1,2})(?::|：|点)(\d{0,2})?/u);
+  let startAt: number | undefined;
+  let timePrecision: AppointmentTimePrecision = "undetermined";
+  if (timeMatch) {
+    let hour = Number(timeMatch[1]);
+    const minute = Number(timeMatch[2] || 0);
+    if (/(?:下午|傍晚|晚上|晚间)/u.test(timeMatch[0]) && hour < 12) hour += 12;
+    const date = new Date(input.now);
+    date.setDate(date.getDate() + dayOffset);
+    date.setHours(hour, minute, 0, 0);
+    startAt = date.getTime();
+    timePrecision = "exact";
+  } else if (/(?:早上|上午)/u.test(userText)) {
+    timePrecision = "morning";
+  } else if (/(?:下午|傍晚)/u.test(userText)) {
+    timePrecision = "afternoon";
+  } else if (/(?:晚上|晚间|今晚|明晚|后晚)/u.test(userText)) {
+    timePrecision = "evening";
+  } else if (relativeMatch) {
+    timePrecision = "date_only";
+  }
+
+  if (mode === "scheduled" && startAt !== undefined && startAt < input.now) return undefined;
+  if (mode === "immediate" && startAt !== undefined && startAt < input.now - 10 * 60 * 1000) return undefined;
+  const locationMatch = userText.match(/(?:在|去|到)\s*([^，。！？!?\n]{1,48}?)\s*(?:见面|碰面|会面|集合|见(?:一面)?)/u);
+  const activity = /(?:吃饭|用餐|看电影|逛街|散步|喝咖啡|咖啡厅)/u.test(userText)
+    ? userText.match(/(?:吃饭|用餐|看电影|逛街|散步|喝咖啡|咖啡厅)/u)?.[0]
+    : "线下见面";
+  return {
+    mode,
+    ...(startAt === undefined ? {} : { startAt }),
+    timePrecision,
+    activity,
+    ...(locationMatch?.[1] ? { location: locationMatch[1].trim() } : {}),
+    traveler: "character",
+  };
+};
+
 const parseStartAt = (value: unknown): number | undefined => {
   if (value === null || value === undefined || value === "") return undefined;
   if (typeof value !== "string") return undefined;
@@ -78,6 +152,8 @@ export function parseProactiveOfflineInvitationDirective(input: {
   text: string;
   allowedModes: readonly AppointmentMode[];
   now?: number;
+  /** User-authored request used only for the narrow missing-block fallback. */
+  userText?: string;
 }): ProactiveOfflineDirectiveParseResult {
   const completePattern = /\[\[OFFLINE_INVITATION\]\]([\s\S]*?)\[\[\/OFFLINE_INVITATION\]\]/g;
   const matches = [...input.text.matchAll(completePattern)];
@@ -86,13 +162,34 @@ export function parseProactiveOfflineInvitationDirective(input: {
   const withoutResidual = unmatchedStart >= 0 ? withoutComplete.slice(0, unmatchedStart) : withoutComplete;
   const visibleText = cleanVisibleText(withoutResidual.replaceAll(PROACTIVE_OFFLINE_DIRECTIVE_END, ""));
 
-  if (matches.length === 0) return { visibleText };
+  if (matches.length === 0) {
+    const fallback = deriveExplicitRequestFallback({
+      text: visibleText,
+      userText: input.userText,
+      allowedModes: input.allowedModes,
+      now: input.now ?? Date.now(),
+    });
+    return fallback ? { visibleText, directive: fallback } : { visibleText };
+  }
   if (matches.length > 1) return { visibleText, error: "multiple_directives" };
   try {
     const parsed = JSON.parse(matches[0][1].trim());
     const directive = validateDirective(parsed, input.allowedModes, input.now ?? Date.now());
-    return directive ? { visibleText, directive } : { visibleText, error: "invalid_directive" };
+    if (directive) return { visibleText, directive };
+    const fallback = deriveExplicitRequestFallback({
+      text: visibleText,
+      userText: input.userText,
+      allowedModes: input.allowedModes,
+      now: input.now ?? Date.now(),
+    });
+    return fallback ? { visibleText, directive: fallback } : { visibleText, error: "invalid_directive" };
   } catch {
-    return { visibleText, error: "malformed_json" };
+    const fallback = deriveExplicitRequestFallback({
+      text: visibleText,
+      userText: input.userText,
+      allowedModes: input.allowedModes,
+      now: input.now ?? Date.now(),
+    });
+    return fallback ? { visibleText, directive: fallback } : { visibleText, error: "malformed_json" };
   }
 }

@@ -26,6 +26,7 @@ import type {
 import type { CharacterEvent } from "../../../domain/characterLife/characterEventTypes";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { Character, MemoryItem } from "../../../types";
+import type { ScheduleEntry } from "../../../domain/schedule/scheduleTypes";
 
 const getProactiveEventVisibility = (event: CharacterEvent): CharacterCognitiveEventCandidate["promptVisibility"] =>
   event.status === "active"
@@ -126,6 +127,8 @@ export function buildProactiveCognitiveContext(input: {
   routine?: CharacterRoutine;
   /** Optional relation-scoped history used only for generation diversity hints. */
   topicHistory?: readonly ProactiveTopicRecord[];
+  /** Confirmed shared appointments available to the character during proactive generation. */
+  appointmentEntries?: readonly ScheduleEntry[];
   /** Legacy characters default to enabled; false suppresses all derived time context. */
   timeAwareness?: boolean;
 }): ProactiveCognitiveContext | undefined {
@@ -149,6 +152,7 @@ export function buildProactiveCognitiveContext(input: {
       knowledgeBoundary: createDirectChatKnowledgeBoundary(),
       conversationId: input.relationship.conversationId,
       relationshipTimeline: relationshipProjection.timeline,
+      appointmentEntries: input.appointmentEntries,
     });
     const topicContext = projectProactiveTopicContext(
       input.topicHistory,

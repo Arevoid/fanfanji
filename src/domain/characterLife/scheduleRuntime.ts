@@ -5,16 +5,24 @@ export const CHARACTER_SCHEDULE_SCHEMA_VERSION = 1 as const;
 export type CharacterScheduleKind = "recurring_routine" | "one_off" | "flexible_block";
 export type CharacterScheduleStatus = "scheduled" | "completed" | "cancelled" | "missed" | "postponed";
 export type ScheduleRecurrence = "daily" | "weekly" | "weekdays";
+export type CharacterScheduleSource = "character" | "worldbook" | "chat" | "phone" | "ai_generated";
+export type CharacterScheduleReviewState = "confirmed" | "suggested";
 
 export interface CharacterScheduleEntry extends CharacterLifeScope {
   id: string;
   schemaVersion: typeof CHARACTER_SCHEDULE_SCHEMA_VERSION;
   kind: CharacterScheduleKind;
   title: string;
+  detail?: string;
+  /** Local calendar day for all-day or time-uncertain entries. */
+  dateKey?: string;
   startAt?: number;
   endAt?: number;
   recurrence?: ScheduleRecurrence;
   status: CharacterScheduleStatus;
+  source?: CharacterScheduleSource;
+  reviewState?: CharacterScheduleReviewState;
+  sourceRefs?: readonly string[];
   postponedUntil?: number;
   linkedOpenLoopId?: string;
   sourceEventRefs: readonly string[];
@@ -39,6 +47,7 @@ const RECURRENCES = new Set<ScheduleRecurrence>(["daily", "weekly", "weekdays"])
 const isFiniteTimestamp = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0;
 const isText = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+const isDateKey = (value: unknown): value is string => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value);
 const boundedRefs = (value: unknown): string[] => Array.from(new Set(
   Array.isArray(value) ? value.filter(isText).map((item) => item.trim()) : [],
 )).slice(0, 24);
@@ -51,6 +60,7 @@ export const normalizeCharacterScheduleEntry = (value: unknown): CharacterSchedu
     || !isText(candidate.title) || !KINDS.has(candidate.kind as CharacterScheduleKind)
     || !STATUSES.has(candidate.status as CharacterScheduleStatus)
     || (candidate.recurrence !== undefined && !RECURRENCES.has(candidate.recurrence as ScheduleRecurrence))
+    || (candidate.dateKey !== undefined && !isDateKey(candidate.dateKey))
     || !isFiniteTimestamp(candidate.createdAt) || !isFiniteTimestamp(candidate.updatedAt)
     || (candidate.startAt !== undefined && !isFiniteTimestamp(candidate.startAt))
     || (candidate.endAt !== undefined && !isFiniteTimestamp(candidate.endAt))
@@ -64,10 +74,15 @@ export const normalizeCharacterScheduleEntry = (value: unknown): CharacterSchedu
     schemaVersion: CHARACTER_SCHEDULE_SCHEMA_VERSION,
     kind: candidate.kind as CharacterScheduleKind,
     title: candidate.title!.trim().slice(0, 240),
+    ...(isText(candidate.detail) ? { detail: candidate.detail.trim().slice(0, 1000) } : {}),
+    ...(isDateKey(candidate.dateKey) ? { dateKey: candidate.dateKey } : {}),
     ...(candidate.startAt === undefined ? {} : { startAt: candidate.startAt }),
     ...(candidate.endAt === undefined ? {} : { endAt: candidate.endAt }),
     ...(candidate.recurrence ? { recurrence: candidate.recurrence } : {}),
     status: candidate.status as CharacterScheduleStatus,
+    ...(candidate.source && ["character", "worldbook", "chat", "phone", "ai_generated"].includes(candidate.source as string) ? { source: candidate.source as CharacterScheduleSource } : {}),
+    ...(candidate.reviewState && ["confirmed", "suggested"].includes(candidate.reviewState as string) ? { reviewState: candidate.reviewState as CharacterScheduleReviewState } : {}),
+    ...(Array.isArray(candidate.sourceRefs) ? { sourceRefs: boundedRefs(candidate.sourceRefs) } : {}),
     ...(candidate.postponedUntil === undefined ? {} : { postponedUntil: candidate.postponedUntil }),
     ...(isText(candidate.linkedOpenLoopId) ? { linkedOpenLoopId: candidate.linkedOpenLoopId!.trim() } : {}),
     sourceEventRefs: boundedRefs(candidate.sourceEventRefs),

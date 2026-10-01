@@ -130,8 +130,11 @@ export const appendAppointmentProposal = (
   appointment: Appointment,
   input: AppointmentProposal,
   now = Date.now(),
+  options: { allowConfirmed?: boolean } = {},
 ): AppointmentProposalMutationResult => {
-  if (appointment.status !== "draft" && appointment.status !== "awaiting_user" && appointment.status !== "negotiating") {
+  const canReopenConfirmed = options.allowConfirmed
+    && (appointment.status === "confirmed" || appointment.status === "preparing" || appointment.status === "ready");
+  if (appointment.status !== "draft" && appointment.status !== "awaiting_user" && appointment.status !== "negotiating" && !canReopenConfirmed) {
     return { success: false, appointment, reason: "appointment_locked" };
   }
   const proposal = normalizeAppointmentProposal(input);
@@ -153,16 +156,19 @@ export const appendAppointmentProposal = (
       currentProposalId: proposal.id,
       sourceMessageIds: [...new Set([...appointment.sourceMessageIds, ...proposal.sourceMessageIds])],
       updatedAt: now,
+      ...(canReopenConfirmed ? { confirmedAt: undefined } : {}),
     },
   };
 };
 
 export const canConfirmAppointment = (appointment: Appointment): boolean => {
   const proposal = getCurrentAppointmentProposal(appointment);
-  return Boolean(proposal
-    && proposal.startAt !== undefined
-    && proposal.timePrecision !== "undetermined"
-    && (appointment.status === "awaiting_user" || appointment.status === "negotiating"));
+  if (!proposal || (appointment.status !== "awaiting_user" && appointment.status !== "negotiating")) return false;
+  // An immediate invitation is allowed to be accepted without a precise
+  // clock time. The confirmation itself becomes the canonical “now” moment;
+  // scheduled invitations still require a concrete, non-undetermined time.
+  if (appointment.mode === "immediate") return true;
+  return proposal.startAt !== undefined && proposal.timePrecision !== "undetermined";
 };
 
 const ALLOWED_TRANSITIONS: Record<AppointmentStatus, readonly AppointmentStatus[]> = {
@@ -196,11 +202,25 @@ export const transitionAppointment = (
   if (nextStatus === "confirmed" && !canConfirmAppointment(appointment)) {
     return { success: false, appointment, reason: "confirmation_incomplete" };
   }
+  const currentProposal = getCurrentAppointmentProposal(appointment);
+  const proposals = nextStatus === "confirmed"
+    && appointment.mode === "immediate"
+    && currentProposal
+    && (currentProposal.startAt === undefined || currentProposal.timePrecision === "undetermined")
+    ? appointment.proposals.map((proposal) => proposal.id === currentProposal.id
+      ? {
+        ...proposal,
+        startAt: proposal.startAt ?? now,
+        timePrecision: proposal.timePrecision === "undetermined" ? "exact" as const : proposal.timePrecision,
+      }
+      : proposal)
+    : appointment.proposals;
   return {
     success: true,
     appointment: {
       ...appointment,
       status: nextStatus,
+      proposals,
       updatedAt: now,
       ...(nextStatus === "confirmed" ? { confirmedAt: now } : {}),
     },

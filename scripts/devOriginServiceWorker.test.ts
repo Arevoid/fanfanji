@@ -25,7 +25,7 @@ assert.equal(isDevLoopbackOrigin("example.com", true), false);
 
 assert.match(mainSource, /isDevLoopbackOrigin\(\s*window\.location\.hostname,\s*\n?\s*Boolean\(typeof import\.meta\.env/);
 assert.match(mainSource, /registration\.unregister\(\)/);
-assert.doesNotMatch(mainSource, /caches\.delete\(/);
+assert.match(mainSource, /caches\.delete\(/);
 assert.match(mainSource, /navigator\.serviceWorker\.register\("\/sw\.js"/);
 
 console.log("PASS dev-origin Service Worker policy: loopback unregister is dev-only and production registration remains");

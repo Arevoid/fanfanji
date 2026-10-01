@@ -34,9 +34,12 @@ import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySour
 import { loadConversationSummaries, retractConversationSummariesBySourceMessageIds, conversationSummaryRepository } from "./core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
 import { initializeInnerVoiceRepository, loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
-import { loadScheduleStore, saveScheduleStore, upsertAppointment } from "./core/storage/repositories/scheduleRepository";
+import { loadScheduleStore, removeAppointmentsByIds, removeAppointmentsByRelations, saveScheduleStore, upsertAppointment } from "./core/storage/repositories/scheduleRepository";
+import { loadCharacterScheduleStore, removeCharacterScheduleByIds, removeCharacterScheduleForRelations, saveCharacterScheduleEntry, loadUserScheduleStore, removeUserScheduleEntry, saveUserScheduleEntry, loadPeriodStore, savePeriodRecord } from "./features/schedule/scheduleDataService";
 import { projectAppointmentsToScheduleEntries } from "./domain/schedule/scheduleProjection";
 import type { Appointment } from "./domain/schedule/scheduleTypes";
+import { createCharacterScheduleEntry, type CharacterScheduleEntry } from "./domain/characterLife/scheduleRuntime";
+import type { CalendarViewItem, PeriodRecord, UserScheduleEntry } from "./domain/schedule/calendarTypes";
 import { loadPresets, savePresets } from "./core/storage/repositories/presetRepository";
 import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, loadForumGenerationTasks, loadForumReplies, loadForumShares, loadForumThreads } from "./core/storage/repositories/forumRepository";
 import { MemoryService, formatDelicateMemoryDiary, formatExtractedMemorySummary } from "./domain/memory/MemoryService";
@@ -104,6 +107,8 @@ import {
   WelcomeWidget,
   AddWidgetSheet 
 } from "./components/HomeScreenWidgets";
+
+const scheduleDateKey = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 import {
   HOME_GRID_COLUMNS,
   MAX_HOME_GRID_ROWS,
@@ -145,6 +150,7 @@ import { runLegacyCharacterKnowledgeMigration } from "./features/characterKnowle
 import { createConversationSummaryRecord } from "./features/characterKnowledge/services/conversationSummaryService";
 import { isInternalDeliveryMarkerOnly } from "./features/chat/services/messageParser";
 import { getNotificationChatTarget, isNotificationForActiveChat } from "./features/chat/services/chatNotificationScope";
+import { claimAppointmentReminder, getAppointmentReminder } from "./features/schedule/appointmentReminderService";
 import { MOMENT_CHARACTER_EXPRESSION_PROMPT } from "./utils/livingPrompt";
 import { USER_DATA_RESET_EVENT, type UserDataAppId } from "./features/settings/userDataDeletion";
 import { createIdentityScope } from "./domain/identity/identityScope";
@@ -924,6 +930,89 @@ export default function App() {
     [scheduleStore.appointments],
   );
 
+  const [characterScheduleStore, setCharacterScheduleStore] = useState(() => loadCharacterScheduleStore().value);
+  const characterScheduleStoreRef = useRef(characterScheduleStore);
+  characterScheduleStoreRef.current = characterScheduleStore;
+  const [userScheduleStore, setUserScheduleStore] = useState(() => loadUserScheduleStore().value);
+  const userScheduleStoreRef = useRef(userScheduleStore);
+  userScheduleStoreRef.current = userScheduleStore;
+  const [periodStore, setPeriodStore] = useState(() => loadPeriodStore().value);
+  const periodStoreRef = useRef(periodStore);
+  periodStoreRef.current = periodStore;
+
+  const handleSaveCharacterSchedule = (entry: CharacterScheduleEntry): boolean => {
+    const persisted = saveCharacterScheduleEntry(entry);
+    if (!persisted.success) return false;
+    const next = loadCharacterScheduleStore().value;
+    characterScheduleStoreRef.current = next;
+    setCharacterScheduleStore(next);
+    return true;
+  };
+
+  const handleClearScheduleForRelation = (relationId: string): void => {
+    const nextAppointments = removeAppointmentsByRelations([relationId], scheduleStoreRef.current);
+    const appointmentsSaved = saveScheduleStore(nextAppointments).success;
+    if (appointmentsSaved) {
+      scheduleStoreRef.current = nextAppointments;
+      setScheduleStore(nextAppointments);
+    }
+    const characterScheduleSaved = removeCharacterScheduleForRelations([relationId]).success;
+    if (characterScheduleSaved) {
+      const nextCharacterSchedule = loadCharacterScheduleStore().value;
+      characterScheduleStoreRef.current = nextCharacterSchedule;
+      setCharacterScheduleStore(nextCharacterSchedule);
+    }
+    if (!appointmentsSaved || !characterScheduleSaved) {
+      console.warn("Unable to clear all schedule records for relation", relationId);
+    }
+  };
+
+  const handleSaveUserSchedule = (entry: UserScheduleEntry): boolean => {
+    const persisted = saveUserScheduleEntry(entry);
+    if (!persisted.success) return false;
+    const next = loadUserScheduleStore().value;
+    userScheduleStoreRef.current = next;
+    setUserScheduleStore(next);
+    return true;
+  };
+
+  const handleDeleteCalendarItem = (item: CalendarViewItem): boolean => {
+    if (item.category === "appointment") {
+      const next = removeAppointmentsByIds([item.sourceId || item.id.replace(/^schedule:/u, "")], scheduleStoreRef.current);
+      const persisted = saveScheduleStore(next);
+      if (!persisted.success) return false;
+      scheduleStoreRef.current = next;
+      setScheduleStore(next);
+      return true;
+    }
+    if (item.category === "character_schedule") {
+      const persisted = removeCharacterScheduleByIds([item.sourceId || item.id]);
+      if (!persisted.success) return false;
+      const next = loadCharacterScheduleStore().value;
+      characterScheduleStoreRef.current = next;
+      setCharacterScheduleStore(next);
+      return true;
+    }
+    if (item.category === "user_schedule") {
+      const persisted = removeUserScheduleEntry(item.sourceId || item.id, item.userIdentityId || activeIdentityId);
+      if (!persisted.success) return false;
+      const next = loadUserScheduleStore().value;
+      userScheduleStoreRef.current = next;
+      setUserScheduleStore(next);
+      return true;
+    }
+    return false;
+  };
+
+  const handleSavePeriodRecord = (record: PeriodRecord): boolean => {
+    const persisted = savePeriodRecord(record);
+    if (!persisted.success) return false;
+    const next = loadPeriodStore().value;
+    periodStoreRef.current = next;
+    setPeriodStore(next);
+    return true;
+  };
+
   const [worldBookEntries, setWorldBookEntries] = useState<WorldBookEntry[]>(() => loadWorldBookEntries(DEFAULT_WORLDBOOK_ENTRIES).value);
 
   // Navigation State
@@ -959,6 +1048,102 @@ export default function App() {
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => hydrateRelationshipNetworkRelationships(loadRelationships([]).value));
   const relationshipsRef = useRef<CharacterRelationship[]>(relationships);
   relationshipsRef.current = relationships;
+
+  const handleGenerateCharacterSchedule = async ({ characterId, range }: { characterId: string; relationId?: string; range: "day" | "week" }): Promise<{ dateKey?: string; count: number }> => {
+    const ownerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    const relationship = relationshipsRef.current.find((candidate) =>
+      candidate.userIdentityId === ownerIdentityId && candidate.characterId === characterId && candidate.communicationStatus !== "blocked",
+    );
+    if (!relationship) throw new Error("当前身份没有找到这个角色的有效关系，无法生成角色日程。");
+    const character = characters.find((candidate) => candidate.id === characterId);
+    if (!character) throw new Error("角色不存在。");
+
+    const relevantWorldBook = worldBookEntries
+      .filter((entry) => entry.isActive !== false && (!entry.characterId || entry.characterId === "global" || entry.characterId === characterId || entry.characterIds?.includes(characterId)))
+      .slice(0, 18)
+      .map((entry) => `【${entry.title}】${entry.content}`)
+      .join("\n");
+    const recentContext = messages
+      .filter((message) => message.characterId === characterId && (!message.relationId || message.relationId === relationship.id))
+      .slice(-20)
+      .map((message) => `${message.sender === "user" ? "用户" : character.name}：${message.content}`)
+      .join("\n");
+    const today = new Date();
+    const todayKey = scheduleDateKey(today);
+    const weekEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 6);
+    const weekEndKey = scheduleDateKey(weekEnd);
+    const rangeHint = range === "day"
+      ? "只生成今天 0-5 条安排；如果没有足够依据可以生成 0-1 条，不要为了凑数编造"
+      : "生成未来 7 天每天 0-5 条安排，按早晨、白天、傍晚、夜间等时间段分布；如果某天没有足够依据可以少于 2 条或为空，不要为了凑数编造";
+    const schedulePlanningRules = "每条安排尽量对应不同时间段，优先使用明确的 startTime/endTime；同一天最多 5 条。只能依据角色人设、世界书和最近对话，无法确认的安排省略。";
+    const response = await apiChat({
+      message: `请根据角色资料、可见世界书和最近对话，${rangeHint}。${schedulePlanningRules}只返回 JSON，不要 Markdown。格式：{"items":[{"title":"课程或事项","detail":"简短说明","dateKey":"YYYY-MM-DD","startTime":"HH:mm","endTime":"HH:mm","kind":"one_off或recurring_routine"}]}。没有证据的内容不要编造，时间不确定就省略时间。`,
+      history: [],
+      systemInstruction: `你是角色日程生成器。角色：${character.name}\n人设：${character.personality}\n背景：${character.backstory}\n世界书：${relevantWorldBook || "暂无"}\n最近对话：${recentContext || "暂无"}\n只生成角色本人日程，不生成用户日程、见面约定或隐私内容。${schedulePlanningRules}`,
+      apiKey: settingsRef.current.apiKey,
+      model: settingsRef.current.selectedModel || "gemini-3.5-flash",
+      apiEndpoint: settingsRef.current.apiEndpoint,
+      purpose: "schedule_generate",
+      characterId,
+      relationId: relationship.id,
+      conversationId: relationship.conversationId,
+      contextItems: ["人设", "世界书", "最近对话"],
+      estimatedOutputTokens: 1800,
+      maxOutputTokens: 1800,
+    });
+
+    const cleaned = response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    const parsed = JSON.parse(cleaned) as { items?: unknown };
+    const items = Array.isArray(parsed.items) ? parsed.items : [];
+    const now = Date.now();
+    const generatedDateCounts = new Map<string, number>();
+    const generated = items.slice(0, range === "day" ? 5 : 35).map((raw, index) => {
+      if (!raw || typeof raw !== "object") return undefined;
+      const candidate = raw as Record<string, unknown>;
+      const title = typeof candidate.title === "string" ? candidate.title.trim().slice(0, 160) : "";
+      if (!title) return undefined;
+      const fallbackDateKey = scheduleDateKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() + (range === "day" ? 0 : index % 7)));
+      const modelDateKey = typeof candidate.dateKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(candidate.dateKey)
+        ? candidate.dateKey
+        : undefined;
+      // Keep model output inside the requested window. A free-form date from the
+      // model must not make a freshly generated schedule disappear from today's
+      // view (for example, returning an unrelated historical date).
+      const dateKey = range === "day"
+        ? todayKey
+        : modelDateKey && modelDateKey >= todayKey && modelDateKey <= weekEndKey
+          ? modelDateKey
+          : fallbackDateKey;
+      const dateCount = generatedDateCounts.get(dateKey) || 0;
+      if (dateCount >= 5) return undefined;
+      generatedDateCounts.set(dateKey, dateCount + 1);
+      const startTime = typeof candidate.startTime === "string" && /^\d{2}:\d{2}$/.test(candidate.startTime) ? candidate.startTime : undefined;
+      const endTime = typeof candidate.endTime === "string" && /^\d{2}:\d{2}$/.test(candidate.endTime) ? candidate.endTime : undefined;
+      const startAt = startTime ? new Date(`${dateKey}T${startTime}:00`).getTime() : undefined;
+      const endAt = endTime ? new Date(`${dateKey}T${endTime}:00`).getTime() : undefined;
+      return createCharacterScheduleEntry({
+        id: `character-schedule-ai-${now}-${index}`,
+        relationId: relationship.id,
+        characterId,
+        userIdentityId: ownerIdentityId,
+        kind: candidate.kind === "recurring_routine" ? "recurring_routine" : "one_off",
+        title,
+        ...(typeof candidate.detail === "string" && candidate.detail.trim() ? { detail: candidate.detail.trim().slice(0, 500) } : {}),
+        dateKey,
+        ...(startAt !== undefined && Number.isFinite(startAt) ? { startAt } : {}),
+        ...(endAt !== undefined && Number.isFinite(endAt) && (startAt === undefined || endAt >= startAt) ? { endAt } : {}),
+        source: "ai_generated",
+        reviewState: "confirmed",
+        sourceRefs: ["character-profile", ...(relevantWorldBook ? ["world-book"] : []), ...(recentContext ? ["recent-chat"] : [])],
+        sourceEventRefs: [],
+        createdAt: now,
+      });
+    }).filter((entry): entry is CharacterScheduleEntry => Boolean(entry));
+    if (generated.length === 0) return { count: 0 };
+    const failed = generated.some((entry) => !handleSaveCharacterSchedule(entry));
+    if (failed) throw new Error("部分角色日程保存失败。");
+    return { dateKey: generated[0]?.dateKey, count: generated.length };
+  };
 
   useEffect(() => {
     if (!charactersRepositoryHydrated.current || characterPhoneOwnershipRepairRunRef.current) return;
@@ -1124,7 +1309,7 @@ export default function App() {
   const handleDeleteOfflineStory = (storyId: string) => {
     deletedOfflineStoryIdsRef.current.add(storyId);
     void offlineStoryDb.delete(storyId).catch((error) => console.warn("Unable to delete the durable offline story.", error));
-    const deletedStory = offlineStories.find((story) => story.id === storyId);
+    const deletedStory = offlineStoriesRef.current.find((story) => story.id === storyId);
     retractBySourceStoryIds([storyId]);
     retractByOfflineStoryIds([storyId]);
     if (deletedStory) {
@@ -1132,6 +1317,18 @@ export default function App() {
       const marker = `offline-story:${deletedStory.id}:`;
       setMemories((previous) => previous.filter((memory) =>
         !archivedMemoryIds.has(memory.id) && !memory.content.includes(marker)));
+      if (deletedStory.sourceAppointmentId) {
+        const nextAppointments = removeAppointmentsByIds([deletedStory.sourceAppointmentId], scheduleStoreRef.current);
+        if (nextAppointments.appointments.length !== scheduleStoreRef.current.appointments.length) {
+          const persisted = saveScheduleStore(nextAppointments);
+          if (persisted.success) {
+            scheduleStoreRef.current = nextAppointments;
+            setScheduleStore(nextAppointments);
+          } else {
+            console.warn("Unable to remove the appointment linked to deleted offline story.");
+          }
+        }
+      }
     }
     replaceOfflineStories(offlineStoriesRef.current.filter((story) => story.id !== storyId));
   };
@@ -1223,6 +1420,40 @@ export default function App() {
     setGlobalToast(notification);
     window.setTimeout(() => setGlobalToast((current) => current?.message === notification.message ? null : current), 3200);
   }), []);
+  useEffect(() => {
+    if (!globalToast) return;
+    const timer = window.setTimeout(() => setGlobalToast(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [globalToast]);
+
+  // A small deterministic sweep keeps accepted appointments useful even when
+  // the chat is not open. It catches up on page restore and emits the same
+  // in-app toast used by other background events; browser notifications are
+  // opt-in and are only used when permission already exists.
+  useEffect(() => {
+    const sweep = () => {
+      const now = Date.now();
+      for (const appointment of scheduleStore.appointments) {
+        const reminder = getAppointmentReminder(appointment, now);
+        if (!reminder || !claimAppointmentReminder(reminder)) continue;
+        const character = characters.find((candidate) => candidate.id === reminder.characterId);
+        const when = reminder.kind === "due" ? "现在" : "15 分钟后";
+        const message = `日程提醒：${character?.remark || character?.name || "对方"} · ${reminder.title} · ${when}`;
+        setGlobalToast({ message });
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+          try { new Notification("日程提醒", { body: message, tag: reminder.key }); } catch { /* browser notification is best effort */ }
+        }
+        break;
+      }
+    };
+    sweep();
+    const timer = window.setInterval(sweep, 30_000);
+    window.addEventListener("pageshow", sweep);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("pageshow", sweep);
+    };
+  }, [characters, scheduleStore.appointments]);
 
   const [isStandaloneMode, setIsStandaloneMode] = useState(isStandalonePwa);
 
@@ -1715,7 +1946,12 @@ export default function App() {
       if (selected.has("worldbook")) setWorldBookEntries(DEFAULT_WORLDBOOK_ENTRIES);
       if (selected.has("moments")) setMoments([]);
       if (selected.has("diary")) setPendingDiaryShareMessageId(null);
-      if (selected.has("schedule")) setScheduleStore(loadScheduleStore().value);
+      if (selected.has("schedule")) {
+        setScheduleStore(loadScheduleStore().value);
+        setCharacterScheduleStore(loadCharacterScheduleStore().value);
+        setUserScheduleStore(loadUserScheduleStore().value);
+        setPeriodStore(loadPeriodStore().value);
+      }
       if (selected.has("music")) {
         setTracks([]);
         setPlaylists([]);
@@ -5124,6 +5360,7 @@ export default function App() {
                     activeChatRelationId={activeChatRelationId}
                     setActiveChatRelationId={setActiveChatRelationId}
                     onSaveRelationships={setRelationships}
+                    onClearScheduleForRelation={handleClearScheduleForRelation}
                     appointments={scheduleStore.appointments}
                     onSaveAppointment={handleSaveAppointment}
                     offlineStories={offlineStories}
@@ -5249,6 +5486,13 @@ export default function App() {
                       userIdentityId={activeIdentityId}
                       appointments={scheduleStore.appointments}
                       characters={characters}
+                      characterScheduleEntries={characterScheduleStore.entries}
+                      userScheduleEntries={userScheduleStore.entries}
+                      periodRecords={periodStore.records}
+                      onSaveUserSchedule={handleSaveUserSchedule}
+                      onDeleteCalendarItem={handleDeleteCalendarItem}
+                      onSavePeriodRecord={handleSavePeriodRecord}
+                      onGenerateCharacterSchedule={handleGenerateCharacterSchedule}
                       onOpenChat={(characterId, relationId) => {
                         openChatForCurrentIdentity(characterId, relationId);
                       }}
@@ -5315,6 +5559,8 @@ export default function App() {
                       worldBookEntries={worldBookEntries}
                       relationshipNetworkNpcs={listRelationshipNetworkNpcsForIdentity(characterPhoneIdentity.id)}
                       relationshipNetworkMaps={listRelationshipNetworkMapsForIdentity(characterPhoneIdentity.id)}
+                      characterScheduleEntries={characterScheduleStore.entries}
+                      appointments={scheduleStore.appointments}
                       musicTracks={tracks}
                       settings={settings}
                       resolvedTheme={resolvedTheme}
@@ -5600,11 +5846,20 @@ export default function App() {
 
         {/* Global Toast Warning Overlay */}
         {globalToast && (
-          <div className={`absolute top-24 left-1/2 -translate-x-1/2 z-[9999] px-4 py-3 rounded-2xl shadow-xl border text-xs font-medium max-w-[90%] text-center flex items-center gap-2 backdrop-blur-md transition-all duration-300 ${
+          <div className={`absolute left-1/2 -translate-x-1/2 z-[9999] px-4 py-3 rounded-2xl shadow-xl border text-xs font-medium max-w-[90%] text-center flex items-center gap-2 backdrop-blur-md transition-all duration-300 ${
             globalToast.isError 
               ? "border-rose-200 bg-rose-50 text-rose-800" 
               : "border-emerald-200 bg-emerald-50 text-emerald-800"
-          }`}>
+          }`} style={{
+            top: activeApp === "offline"
+              ? "auto"
+              : globalNotification
+                ? "calc(env(safe-area-inset-top, 0px) + 132px)"
+                : "calc(env(safe-area-inset-top, 0px) + 96px)",
+            bottom: activeApp === "offline"
+              ? "calc(env(safe-area-inset-bottom, 0px) + 96px)"
+              : "auto",
+          }}>
             <span>{globalToast.message}</span>
           </div>
         )}

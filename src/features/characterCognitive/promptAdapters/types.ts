@@ -106,6 +106,15 @@ export interface ChatPromptContext {
   boundaries: CognitivePromptBoundary;
   time: CognitivePromptTimeContext;
   routineContext?: CharacterCognitiveRoutineContext;
+  scheduleItems: readonly {
+    title: string;
+    detail?: string;
+    dateKey?: string;
+    startAt?: number;
+    endAt?: number;
+    status: string;
+    reviewState: string;
+  }[];
 }
 
 export interface MomentPromptContext {
@@ -148,6 +157,14 @@ export interface ProactivePromptContext {
     lastMeaningfulEventAt?: number;
   };
   recentMeaningfulEvents: readonly CognitivePromptEvent[];
+  scheduleItems: readonly {
+    title: string;
+    detail?: string;
+    dateKey?: string;
+    startAt?: number;
+    endAt?: number;
+    status: string;
+  }[];
   openContext: readonly string[];
   boundaries: CognitivePromptBoundary;
   time: CognitivePromptTimeContext;

@@ -83,6 +83,8 @@ import type {
 } from "../domain/characterPhone/types";
 import { CHARACTER_PHONE_GENERATABLE_APPS } from "../domain/characterPhone/types";
 import type { Appointment, ScheduleEntry } from "../domain/schedule/scheduleTypes";
+import { projectAppointmentToScheduleEntry } from "../domain/schedule/scheduleProjection";
+import type { CharacterScheduleEntry } from "../domain/characterLife/scheduleRuntime";
 import AppSchedule from "./AppSchedule";
 import { createCharacterTextMessage } from "../features/chat/services/messageFactory";
 import {
@@ -173,6 +175,10 @@ interface AppCharacterPhoneProps {
   onSyncCharacterPhonePost?: (input: { post: CharacterPhonePost; character: Character; ownerIdentityId: string }) => void;
   onDeleteCharacterPhonePost?: (input: { post: CharacterPhonePost; character: Character; ownerIdentityId: string }) => void;
   onOpenChat?: (characterId: string, relationId: string | null) => void;
+  /** Canonical character schedule projection shared with the main 日程 app. */
+  characterScheduleEntries?: CharacterScheduleEntry[];
+  /** Confirmed shared appointments are mirrored read-only into the role phone. */
+  appointments?: Appointment[];
   onClose: () => void;
 }
 type GalleryMode = "main" | "hidden" | "deleted";
@@ -882,6 +888,8 @@ export default function AppCharacterPhone({
   onSyncCharacterPhonePost,
   onDeleteCharacterPhonePost,
   onOpenChat,
+  characterScheduleEntries = [],
+  appointments = [],
   onClose,
 }: AppCharacterPhoneProps) {
   const [phoneStorageRevision, setPhoneStorageRevision] = useState(0);
@@ -2931,9 +2939,44 @@ export default function AppCharacterPhone({
         `${selectedCharacter.personality || ""}\n${selectedCharacter.backstory || ""}`,
       )
     : null;
+  const canonicalPhoneScheduleEntries = useMemo<ScheduleEntry[]>(
+    () => {
+      const characterEntries = characterScheduleEntries
+      .filter((entry) => entry.userIdentityId === userIdentityId && entry.characterId === selectedCharacter.id && (entry.startAt !== undefined || entry.dateKey))
+      .map((entry): ScheduleEntry | undefined => {
+        const timestamp = entry.startAt ?? (entry.dateKey ? new Date(`${entry.dateKey}T12:00:00`).getTime() : undefined);
+        if (timestamp === undefined || Number.isNaN(timestamp)) return undefined;
+        return {
+        id: entry.id,
+        schemaVersion: 1,
+        relationId: entry.relationId,
+        characterId: entry.characterId,
+        userIdentityId,
+        category: "appointment" as const,
+        appointmentId: `${entry.id}-appointment`,
+        title: entry.title,
+        status: entry.status === "completed" ? "completed" as const : entry.status === "cancelled" ? "cancelled" as const : "confirmed" as const,
+        dateKey: entry.dateKey || characterPhoneGalleryDayKey(timestamp),
+        startAt: timestamp,
+        endAt: entry.endAt,
+        timePrecision: "exact" as const,
+        activity: entry.detail,
+        traveler: "undetermined" as const,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        };
+      }).filter((entry): entry is ScheduleEntry => Boolean(entry));
+      const appointmentEntries = appointments
+        .filter((appointment) => appointment.userIdentityId === userIdentityId && appointment.characterId === selectedCharacter.id)
+        .map(projectAppointmentToScheduleEntry)
+        .filter((entry): entry is ScheduleEntry => Boolean(entry));
+      return [...characterEntries, ...appointmentEntries];
+    },
+    [appointments, characterScheduleEntries, selectedCharacter.id, userIdentityId],
+  );
   const phoneScheduleEntries = useMemo<ScheduleEntry[]>(
-    () =>
-      currentPhone.scheduleItems.map((item) => {
+    () => {
+      const localEntries = currentPhone.scheduleItems.map((item) => {
         const date = new Date(item.timestamp);
         return {
           id: item.id,
@@ -2941,20 +2984,24 @@ export default function AppCharacterPhone({
           relationId: `phone:${currentPhone.id}`,
           characterId: selectedCharacter.id,
           userIdentityId,
-          category: "appointment",
+          category: "appointment" as const,
           appointmentId: `${item.id}-appointment`,
           title: item.title,
-          status: item.timestamp >= Date.now() ? "confirmed" : "completed",
+          status: item.timestamp >= Date.now() ? "confirmed" as const : "completed" as const,
           dateKey: characterPhoneGalleryDayKey(date.getTime()),
           startAt: item.timestamp,
-          timePrecision: "exact",
+          timePrecision: "exact" as const,
           activity: item.detail,
-          traveler: "undetermined",
+          traveler: "undetermined" as const,
           createdAt: item.timestamp,
           updatedAt: item.timestamp,
         };
-      }),
-    [currentPhone.scheduleItems, currentPhone.id, selectedCharacter.id, userIdentityId],
+      });
+      const merged = new Map(canonicalPhoneScheduleEntries.map((entry) => [entry.id, entry]));
+      localEntries.forEach((entry) => merged.set(entry.id, entry));
+      return [...merged.values()];
+    },
+    [canonicalPhoneScheduleEntries, currentPhone.scheduleItems, currentPhone.id, selectedCharacter.id, userIdentityId],
   );
   const phoneAppointments = useMemo<Appointment[]>(
     () =>

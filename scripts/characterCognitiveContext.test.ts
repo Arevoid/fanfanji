@@ -5,6 +5,7 @@ import type { CharacterEvent } from "../src/domain/characterLife/characterEventT
 import { buildRelationshipTimeline } from "../src/domain/characterLife/relationshipTimelineQuery";
 import type { RelationshipState } from "../src/domain/characterLife/relationshipStateTypes";
 import { createRelationship } from "../src/domain/relationship/characterRelationship";
+import type { ScheduleEntry } from "../src/domain/schedule/scheduleTypes";
 import type { Character, MemoryItem } from "../src/types";
 
 const character: Character = {
@@ -100,6 +101,37 @@ const contextA = buildCharacterCognitiveContext({
   },
   relationshipTimeline: timelineA,
 });
+
+const confirmedAppointment: ScheduleEntry = {
+  id: "schedule:appointment-a",
+  schemaVersion: 1,
+  category: "appointment",
+  appointmentId: "appointment-a",
+  relationId: relationA.id,
+  characterId: character.id,
+  userIdentityId: relationA.userIdentityId,
+  title: "一起吃晚饭",
+  status: "confirmed",
+  dateKey: "2026-08-01",
+  startAt: Date.UTC(2026, 7, 1, 18, 0),
+  timePrecision: "exact",
+  activity: "吃晚饭",
+  location: "市中心",
+  traveler: "both",
+  createdAt: 70,
+  updatedAt: 70,
+};
+const contextWithAppointment = buildCharacterCognitiveContext({
+  character,
+  relation: relationA,
+  memories: [],
+  events: [],
+  timeContext: { now: Date.UTC(2026, 7, 1, 12, 0) },
+  knowledgeBoundary: { known: [], unknown: [] },
+  appointmentEntries: [confirmedAppointment],
+});
+assert.equal(contextWithAppointment.scheduleItems[0]?.title, "见面安排：一起吃晚饭");
+assert.match(contextWithAppointment.scheduleItems[0]?.detail || "", /市中心/);
 
 // A/B relation isolation: neither scoped nor legacy data may cross into A.
 assert.deepEqual(contextA.knownFacts.map((fact) => fact.id), ["memory-a"]);

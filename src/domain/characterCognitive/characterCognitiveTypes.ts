@@ -8,6 +8,8 @@ import type {
 import type { RelationshipTimeline } from "../characterLife/relationshipTimelineTypes";
 import type { RelationshipState } from "../characterLife/relationshipStateTypes";
 import type { CharacterRelationship, CharacterRelationshipState } from "../relationship/characterRelationship";
+import type { CharacterScheduleEntry } from "../characterLife/scheduleRuntime";
+import type { ScheduleEntry } from "../schedule/scheduleTypes";
 import type { LegacySummaryProjection } from "./legacySummaryPolicy";
 
 export const CHARACTER_COGNITIVE_CONTEXT_SCHEMA_VERSION = 1;
@@ -114,6 +116,17 @@ export interface CharacterCognitiveRoutineContext {
   state: CharacterRoutineState;
 }
 
+/** A relation-scoped schedule projection safe for direct-chat prompt adapters. */
+export interface CharacterCognitiveScheduleItem {
+  title: string;
+  detail?: string;
+  dateKey?: string;
+  startAt?: number;
+  endAt?: number;
+  status: string;
+  reviewState: NonNullable<CharacterScheduleEntry["reviewState"]>;
+}
+
 /** Metadata only. Phase 1 never derives or adds behavior constraints. */
 export interface CharacterCognitiveBehaviorConstraint {
   id: string;
@@ -135,6 +148,7 @@ export interface CharacterCognitiveContext {
   recentEvents: readonly CharacterCognitiveRecentEvent[];
   temporalContext: CharacterCognitiveTemporalContext;
   routineContext?: CharacterCognitiveRoutineContext;
+  scheduleItems: readonly CharacterCognitiveScheduleItem[];
   knowledgeBoundary: CharacterCognitiveKnowledgeBoundary;
   behaviorConstraints: readonly CharacterCognitiveBehaviorConstraint[];
 }
@@ -150,4 +164,7 @@ export interface BuildCharacterCognitiveContextInput {
   behaviorConstraints?: readonly CharacterCognitiveBehaviorConstraint[];
   relationshipTimeline?: RelationshipTimeline;
   routine?: CharacterRoutine;
+  scheduleEntries?: readonly CharacterScheduleEntry[];
+  /** Confirmed shared appointments are part of the same relation-scoped schedule context. */
+  appointmentEntries?: readonly ScheduleEntry[];
 }

@@ -17,6 +17,7 @@ assert.deepEqual(loadScheduleStore().value, EMPTY_SCHEDULE_STORE);
 const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const storeSource = readFileSync(new URL("../src/components/AppStore.tsx", import.meta.url), "utf8");
 const scheduleSource = readFileSync(new URL("../src/components/AppSchedule.tsx", import.meta.url), "utf8");
+const dashboardSource = readFileSync(new URL("../src/components/schedule/ScheduleDashboard.tsx", import.meta.url), "utf8");
 const settingsSource = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 
 assert.match(appSource, /const loadAppSchedule = \(\) => import\("\.\/components\/AppSchedule"\)/);
@@ -24,10 +25,15 @@ assert.match(appSource, /activeApp === "schedule"/);
 assert.match(appSource, /id: "schedule",\s+name: "日程"/);
 assert.match(appSource, /seedFreshDesktopDefaults \|\| !FRESH_DESKTOP_DEFAULT_APP_IDS\.includes/, "new default apps are seeded only for untouched installs");
 assert.match(storeSource, /id: "schedule",\s+name: "日程"/);
-assert.match(scheduleSource, /暂时没有线下约定/);
+assert.match(scheduleSource, /ScheduleDashboard/);
 assert.match(scheduleSource, /variant === "characterPhone"/);
 assert.match(scheduleSource, /onCharacterPhoneScheduleAdd/);
-assert.doesNotMatch(scheduleSource, /经期/);
+assert.match(scheduleSource, /characterScheduleEntries/);
+assert.match(scheduleSource, /periodRecords/);
+assert.match(appSource, /reviewState: "confirmed"/);
+assert.match(dashboardSource, /const characterCalendarItems/);
+assert.match(dashboardSource, /const userCalendarItems/);
+assert.doesNotMatch(dashboardSource, /AI 建议 · 确认后才会作为角色确定日程/);
 assert.match(settingsSource, /"phone_schedule_v1"/);
 assert.doesNotMatch(settingsSource, /"phone_calendar_events"/);
 

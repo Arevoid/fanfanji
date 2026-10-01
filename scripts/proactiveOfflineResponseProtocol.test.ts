@@ -4,6 +4,7 @@ import { SCHEDULE_SCHEMA_VERSION, type Appointment } from "../src/domain/schedul
 import { buildProactiveOfflineResponsePrompt } from "../src/features/chat/prompts/proactiveOfflineResponsePrompt";
 import {
   applyProactiveOfflineResponse,
+  isProactiveOfflineCounterRequest,
   parseProactiveOfflineResponseDirective,
 } from "../src/features/chat/services/proactiveOfflineResponseProtocol";
 
@@ -39,6 +40,9 @@ const appointment: Appointment = {
   updatedAt: now - 1_000,
 };
 
+assert.equal(isProactiveOfflineCounterRequest("我们改为周日见面吧"), true);
+assert.equal(isProactiveOfflineCounterRequest("这个周末天气怎么样"), false);
+
 const counterText = `好，那就改周日上午。\n[[OFFLINE_RESPONSE]]\n{"appointmentId":"appointment-a","action":"counter","startAt":"2026-08-16T10:00:00+08:00","timePrecision":"morning","activity":"一起吃饭","location":"市中心","traveler":"character","transport":"坐车","characterAccepts":true}\n[[/OFFLINE_RESPONSE]]`;
 const counter = parseProactiveOfflineResponseDirective({
   text: counterText,
@@ -61,6 +65,83 @@ assert.equal(rescheduled?.proposals[0].status, "superseded");
 assert.equal(rescheduled?.proposals[1].proposedBy, "user");
 assert.equal(rescheduled?.proposals[1].startAt, sunday);
 assert.equal(projectAppointmentToScheduleEntry(rescheduled!)?.dateKey, "2026-08-16");
+
+const fallback = parseProactiveOfflineResponseDirective({
+  text: "收到，邀约参数已更新为明天晚上 20:00，地点变更为附近咖啡厅。未来时间邀约已发出。",
+  appointment,
+  latestUserText: "请改成明天晚上 20:00，在附近咖啡厅见面",
+  now,
+});
+assert.equal(fallback.directive?.action, "counter", "a confirmed visible response can recover a missing internal counter block");
+assert.equal(fallback.directive?.startAt, new Date("2026-08-14T20:00:00+08:00").getTime());
+assert.equal(fallback.directive?.location, "附近咖啡厅");
+const fallbackConfirmed = applyProactiveOfflineResponse({
+  appointment,
+  directive: fallback.directive!,
+  userMessageId: "user-fallback-counter",
+  characterMessageId: "character-fallback-counter",
+  now,
+});
+assert.equal(fallbackConfirmed?.status, "confirmed");
+assert.equal(projectAppointmentToScheduleEntry(fallbackConfirmed!)?.dateKey, "2026-08-14");
+
+const confirmedAppointment = fallbackConfirmed!;
+const spokenWeekdayChange = parseProactiveOfflineResponseDirective({
+  text: "好，那就改到周日见面吧。",
+  appointment: confirmedAppointment,
+  latestUserText: "我们改为周日见面吧",
+  now,
+});
+assert.equal(spokenWeekdayChange.directive?.action, "counter");
+assert.equal(spokenWeekdayChange.directive?.characterAccepts, true);
+const weekdayRescheduled = applyProactiveOfflineResponse({
+  appointment: confirmedAppointment,
+  directive: spokenWeekdayChange.directive!,
+  userMessageId: "user-spoken-weekday",
+  characterMessageId: "character-spoken-weekday",
+  now,
+  latestUserText: "我们改为周日见面吧",
+});
+assert.equal(weekdayRescheduled?.status, "confirmed", "an accepted spoken date change re-confirms the appointment");
+assert.equal(projectAppointmentToScheduleEntry(weekdayRescheduled!)?.dateKey, "2026-08-16");
+assert.equal(projectAppointmentToScheduleEntry(weekdayRescheduled!)?.startAt, new Date("2026-08-16T20:00:00+08:00").getTime());
+
+const locationOnly = parseProactiveOfflineResponseDirective({
+  text: "可以，改到公园见面。",
+  appointment: confirmedAppointment,
+  latestUserText: "我们换到公园见面吧",
+  now,
+});
+assert.equal(isProactiveOfflineCounterRequest("我们换到公园见面吧"), true);
+assert.equal(locationOnly.directive?.location, "公园");
+const locationRescheduled = applyProactiveOfflineResponse({
+  appointment: confirmedAppointment,
+  directive: locationOnly.directive!,
+  userMessageId: "user-location-only",
+  characterMessageId: "character-location-only",
+  now,
+  latestUserText: "我们换到公园见面吧",
+});
+assert.equal(locationRescheduled?.status, "confirmed");
+assert.equal(projectAppointmentToScheduleEntry(locationRescheduled!)?.startAt, confirmedAppointment.proposals[1].startAt);
+assert.equal(projectAppointmentToScheduleEntry(locationRescheduled!)?.location, "公园");
+
+const rejectedChange = parseProactiveOfflineResponseDirective({
+  text: "这周日不方便，还是按原来的安排吧。",
+  appointment: confirmedAppointment,
+  latestUserText: "我们改为周日见面吧",
+  now,
+});
+const unchangedAfterRejection = applyProactiveOfflineResponse({
+  appointment: confirmedAppointment,
+  directive: { ...spokenWeekdayChange.directive!, characterAccepts: false },
+  userMessageId: "user-rejected-weekday",
+  characterMessageId: "character-rejected-weekday",
+  now,
+  latestUserText: "我们改为周日见面吧",
+});
+assert.equal(rejectedChange.visibleText, "这周日不方便，还是按原来的安排吧。");
+assert.deepEqual(unchangedAfterRejection, confirmedAppointment, "a rejected spoken change leaves the confirmed appointment untouched");
 
 const accepted = parseProactiveOfflineResponseDirective({
   text: `行，那周六见。\n[[OFFLINE_RESPONSE]]{"appointmentId":"appointment-a","action":"accept"}[[/OFFLINE_RESPONSE]]`,
@@ -98,5 +179,6 @@ assert.equal(fabricatedAcceptance.visibleText, "在听。", "invalid internal st
 const prompt = buildProactiveOfflineResponsePrompt({ appointment, now, timeZone: "Asia/Shanghai" });
 assert.match(prompt, /不要替用户作决定/);
 assert.match(prompt, /characterAccepts/);
+assert.match(prompt, /不得在可见文字中声称/);
 
 console.log("PASS proactive offline responses handle acceptance, rejection, and user counter-proposals without fabricating consent");

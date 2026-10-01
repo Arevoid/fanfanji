@@ -136,7 +136,7 @@ const USER_DATA_MANIFEST: Record<UserDataAppId, DataManifest> = {
     keys: ["phone_memo_notes", "phone_memo_todos", "phone_memo_chat_mention_ledger_v1", "phone_notes"],
   },
   schedule: {
-    keys: [storageKeys.scheduleStore],
+    keys: [storageKeys.scheduleStore, storageKeys.characterSchedule, storageKeys.userSchedule, storageKeys.periodRecords],
   },
   music: {
     keys: [

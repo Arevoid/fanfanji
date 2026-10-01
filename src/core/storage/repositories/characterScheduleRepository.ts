@@ -46,10 +46,21 @@ export const removeCharacterScheduleForRelations = (relationIds: readonly string
   });
 };
 
+export const removeCharacterScheduleByIds = (entryIds: readonly string[]): StorageWriteResult => {
+  const ids = new Set(entryIds.filter(Boolean));
+  if (ids.size === 0) return { success: true };
+  const current = loadCharacterScheduleStore().value;
+  return saveCharacterScheduleStore({
+    ...current,
+    entries: current.entries.filter((entry) => !ids.has(entry.id)),
+  });
+};
+
 export const characterScheduleRepository = {
   load: loadCharacterScheduleStore,
   save: saveCharacterScheduleStore,
   saveEntry: saveCharacterScheduleEntry,
   listByScope: listCharacterScheduleByScope,
   removeForRelations: removeCharacterScheduleForRelations,
+  removeByIds: removeCharacterScheduleByIds,
 };

@@ -10,12 +10,42 @@ assert.match(prompt, /不是要求你必须邀请/);
 assert.match(prompt, /不得声称用户已答应/);
 assert.match(prompt, /本轮通过事实校验的邀请类型仅有：未来约定/);
 assert.doesNotMatch(prompt, /本轮通过事实校验的邀请类型仅有：.*立即见面/);
+const explicitPrompt = buildProactiveOfflineInvitationPrompt({ allowedModes: ["immediate", "scheduled"], now, explicitUserRequest: true });
+assert.match(explicitPrompt, /用户本轮明确要求发起线下邀约/);
+assert.match(explicitPrompt, /不要在可见聊天里复述“测试坐标”/);
 
 const raw = `我周日上午坐车过去找你，要不要一起吃饭？\n[[OFFLINE_INVITATION]]\n{"mode":"scheduled","startAt":"2026-08-16T10:00:00+08:00","timePrecision":"morning","activity":"一起吃饭","location":"市中心","traveler":"character","transport":"坐车"}\n[[/OFFLINE_INVITATION]]`;
 const parsed = parseProactiveOfflineInvitationDirective({ text: raw, allowedModes: ["scheduled"], now });
 assert.equal(parsed.visibleText, "我周日上午坐车过去找你，要不要一起吃饭？");
 assert.equal(parsed.directive?.mode, "scheduled");
 assert.equal(parsed.directive?.startAt, new Date("2026-08-16T10:00:00+08:00").getTime());
+
+const missingBlock = parseProactiveOfflineInvitationDirective({
+  text: "收到，明天晚上 20:00 在附近咖啡厅见面吧？未来时间线下邀约已发出，等待你的确认。",
+  userText: "请发起一次明天晚上 20:00、在附近咖啡厅见面的未来时间线下邀约。",
+  allowedModes: ["scheduled"],
+  now,
+});
+assert.equal(missingBlock.directive?.mode, "scheduled");
+assert.equal(missingBlock.directive?.timePrecision, "exact");
+assert.equal(missingBlock.directive?.startAt, new Date("2026-08-14T20:00:00+08:00").getTime());
+assert.equal(missingBlock.directive?.location, "附近咖啡厅");
+
+const malformedButConfirmed = parseProactiveOfflineInvitationDirective({
+  text: "收到，明天晚上 20:00 在附近咖啡厅见面吧？未来时间线下邀约已发出。\n[[OFFLINE_INVITATION]]{bad}[[/OFFLINE_INVITATION]]",
+  userText: "请发起一次明天晚上 20:00、在附近咖啡厅见面的未来时间线下邀约。",
+  allowedModes: ["scheduled"],
+  now,
+});
+assert.equal(malformedButConfirmed.directive?.mode, "scheduled");
+
+const unsolicited = parseProactiveOfflineInvitationDirective({
+  text: "我今天也在想你。",
+  userText: "我今天也在想你。",
+  allowedModes: ["scheduled"],
+  now,
+});
+assert.equal(unsolicited.directive, undefined);
 
 const appointment = createProactiveAppointment({
   id: "appointment-a",

@@ -30,6 +30,7 @@ interface UseChatRelationshipCleanupActionsOptions {
   onSaveRelationships: (relationships: CharacterRelationship[]) => void;
   onDeleteMomentsByRelation?: (relationId: string) => void;
   onSaveMemories: (memories: MemoryItem[]) => void;
+  onClearScheduleForRelation?: (relationId: string) => void;
   onDeleteRelationshipMusic?: (relationId: string) => void;
   onDeleteOfflineStory?: (storyId: string) => void;
   onClearMomentState: (momentIds: ReadonlySet<string>, commentIds: ReadonlySet<string>) => void;
@@ -49,6 +50,7 @@ export function useChatRelationshipCleanupActions({
   onSaveRelationships,
   onDeleteMomentsByRelation,
   onSaveMemories,
+  onClearScheduleForRelation,
   onDeleteRelationshipMusic,
   onDeleteOfflineStory,
   onClearMomentState,
@@ -72,7 +74,8 @@ export function useChatRelationshipCleanupActions({
     removeProactiveTopicsForRelations([relationId]);
     removeContinuityRuntimeForRelations([relationId]);
     removeCharacterLifeRuntimeForRelations([relationId]);
-    removeCharacterScheduleForRelations([relationId]);
+    if (onClearScheduleForRelation) onClearScheduleForRelation(relationId);
+    else removeCharacterScheduleForRelations([relationId]);
     onSaveRelationships(relationships.map((relation) => relation.id === relationId
       ? { ...relation, compressedMemory: undefined, lastImmediateSummaryMsgId: undefined, lastActiveTime: undefined, updatedAt: Date.now() }
       : relation));
@@ -151,7 +154,7 @@ export function useChatRelationshipCleanupActions({
       delete next[relationId];
       return next;
     });
-  }, [clearMessagesAndLinkedArtifacts, memories, moments, offlineStories, onClearMomentState, onDeleteMomentsByRelation, onDeleteOfflineStory, onDeleteRelationshipMusic, onSaveMemories, onSaveRelationships, proactiveMessageInFlightRef, relationships, setInitiatedChatIds, setLastReadTimestamps, setRedPacketStatuses]);
+  }, [clearMessagesAndLinkedArtifacts, memories, moments, offlineStories, onClearMomentState, onClearScheduleForRelation, onDeleteMomentsByRelation, onDeleteOfflineStory, onDeleteRelationshipMusic, onSaveMemories, onSaveRelationships, proactiveMessageInFlightRef, relationships, setInitiatedChatIds, setLastReadTimestamps, setRedPacketStatuses]);
 
   return { clearFriendScopedMemory };
 }

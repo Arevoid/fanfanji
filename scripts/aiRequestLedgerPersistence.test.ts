@@ -68,6 +68,7 @@ function makeEnvelope(requestId: string, recordedAt: number): AiRequestEnvelope 
 
 function completeRecord(): AiRequestEnvelope {
   const session = createAiRequestLedgerSession({ purpose: "chat_reply" });
+  session.markAttempt({ provider: "test-provider", model: "test-model", endpoint: "/api/chat", transport: "backend_proxy" });
   return session.complete({ succeeded: true, outputCharacters: 2 });
 }
 

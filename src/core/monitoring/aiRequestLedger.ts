@@ -26,6 +26,7 @@ export const AI_PURPOSES = [
   "forum_story_generate",
   "reading_generate",
   "cinema_generate",
+  "schedule_generate",
   "image_generate",
   "image_analyze",
   "tts",
@@ -55,6 +56,7 @@ export const AI_PURPOSE_PROMPT_LABELS: Partial<Record<AiPurpose, string>> = {
   forum_story_generate: "论坛剧情提示词",
   reading_generate: "阅读提示词",
   cinema_generate: "观影提示词",
+  schedule_generate: "角色日程提示词",
 };
 
 export type AiRequestTransport = "backend_proxy" | "browser_direct" | "server_provider" | "unknown";

@@ -20,6 +20,10 @@ export const projectAppointmentToScheduleEntry = (appointment: Appointment): Sch
   if (appointment.confirmedAt === undefined || !PROJECTED_STATUSES.has(appointment.status as ScheduleEntryStatus)) return undefined;
   const proposal = getCurrentAppointmentProposal(appointment);
   if (!proposal) return undefined;
+  // Immediate invitations can be confirmed without a clock time. Treat the
+  // confirmation moment as their completed/active calendar anchor so the
+  // accepted visit appears in both linked schedule views.
+  const effectiveStartAt = proposal.startAt ?? (appointment.mode === "immediate" ? appointment.confirmedAt : undefined);
   return {
     id: `schedule:${appointment.id}`,
     schemaVersion: appointment.schemaVersion,
@@ -27,8 +31,8 @@ export const projectAppointmentToScheduleEntry = (appointment: Appointment): Sch
     appointmentId: appointment.id,
     title: appointment.title,
     status: appointment.status as ScheduleEntryStatus,
-    ...(toLocalDateKey(proposal.startAt) ? { dateKey: toLocalDateKey(proposal.startAt) } : {}),
-    ...(proposal.startAt === undefined ? {} : { startAt: proposal.startAt }),
+    ...(toLocalDateKey(effectiveStartAt) ? { dateKey: toLocalDateKey(effectiveStartAt) } : {}),
+    ...(effectiveStartAt === undefined ? {} : { startAt: effectiveStartAt }),
     ...(proposal.endAt === undefined ? {} : { endAt: proposal.endAt }),
     timePrecision: proposal.timePrecision,
     ...(proposal.activity ? { activity: proposal.activity } : {}),

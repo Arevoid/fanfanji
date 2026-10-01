@@ -14,6 +14,7 @@ const USER_SAME_AREA = /(?:我(?:就)?在你(?:家|公司|学校)?(?:楼下|门�
 const HYPOTHETICAL_OR_FUTURE = /(?:如果|要是|下次|以后|改天|有空再|想象|梦里|会来|要来|准备来|打算来|有机会|when i can|someday|next time)/iu;
 const USER_PRESENT_NOW = /(?:我(?:已经|刚刚|现在)?(?:到了|到(?:你|你家|家里|门口|楼下|公司|学校)|在(?:你家|你那|门口|楼下|附近|外面|这里|你身边))|我就在(?:门口|楼下|附近|外面|你身边)|我到了|我在门口|我开门了|门我开了|进来吧|过来吧|到我家来|你来我家)/iu;
 const USER_OFFLINE_HANDOFF_INTENT = /(?:发起(?:线下|线下见面)|开启线下|进入线下|转入线下|切换到线下|线下模式)/iu;
+const USER_OFFLINE_INVITATION_REQUEST = /(?:(?:(?:重新|再次|再)?(?:发起|提出|安排|创建|给我|向我|跟我|和我|请)).{0,80}(?:线下邀约|线下邀请|线下见面|见面邀约|未来时间线下邀约|约会)|(?:(?:线下邀约|线下邀请|见面邀约|未来时间线下邀约|约会)).{0,80}(?:(?:重新|再次|再)?(?:发起|提出|安排|创建|来一个|给我|向我))|(?:重新|再次|再)发起(?:一个|一条)?(?:线下)?(?:邀约|邀请)|(?:重新|再次|再)?测试(?:一下)?(?:线下)?(?:邀约|邀请|见面))/iu;
 // Include natural Chinese arrival phrases used in ordinary chat. In
 // particular, “哥下来了/我下楼了” is a concrete present-tense commitment,
 // not a future plan; omitting it leaves an already co-located conversation in
@@ -31,6 +32,12 @@ export interface ProactiveOfflinePresenceEvidence {
   /** The user explicitly authorized switching this chat into the offline scene. */
   userRequestedOffline: boolean;
   characterClaimedArrival: boolean;
+}
+
+/** Explicit user command for an invitation, distinct from entering an
+ * already-started offline scene. */
+export function isExplicitOfflineInvitationRequest(text: string): boolean {
+  return Boolean(text && USER_OFFLINE_INVITATION_REQUEST.test(text));
 }
 
 const visibleText = (message: Message) => message.content?.trim() || "";

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   loadScheduleStore,
   listAppointmentsByScope,
+  removeAppointmentsByIds,
   removeAppointmentsByRelations,
   saveScheduleStore,
   upsertAppointment,
@@ -95,6 +96,7 @@ assert.equal(withOther.success, true);
 if (!withOther.success) throw new Error("expected appointment insert");
 assert.deepEqual(listAppointmentsByScope({ relationId: "relation-a", characterId: "character-a", userIdentityId: "identity-a" }, withOther.store).map((item) => item.id), ["appointment-a"]);
 assert.deepEqual(listAppointmentsByScope({ relationId: "relation-b", characterId: "character-b", userIdentityId: "identity-b" }, withOther.store).map((item) => item.id), ["appointment-b"]);
+assert.deepEqual(removeAppointmentsByIds(["appointment-a"], withOther.store).appointments.map((item) => item.id), ["appointment-b"]);
 
 const conflictingOverwrite = upsertAppointment(store, appointment({ relationId: "relation-b" }));
 assert.equal(conflictingOverwrite.success, false);

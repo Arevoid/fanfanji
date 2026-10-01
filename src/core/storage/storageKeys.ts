@@ -74,6 +74,8 @@ export const storageKeys = {
   /** Character Life state and proactive intent metadata; bounded and relation scoped. */
   characterLifeRuntime: "phone_character_life_runtime_v1",
   characterSchedule: "phone_character_schedule_v1",
+  userSchedule: "phone_user_schedule_v1",
+  periodRecords: "phone_period_records_v1",
   offlineStories: "phone_offline_stories",
   memoryVaultSettings: "phone_memory_vault_settings",
   scheduleStore: "phone_schedule_v1",
@@ -97,9 +99,10 @@ export const storageKeys = {
   runtimeErrorMetrics: "phone_runtime_error_metrics_v1",
   /** Dev-only manifest for a portable synthetic Direct Chat fixture. */
   devPortableFixtureManifest: "fanfanji_dev_portable_fixture_manifest_v1",
-    backgroundSchedulerTasks: "phone_background_scheduler_tasks",
-    backgroundSchedulerLeases: "phone_background_scheduler_leases",
-    backgroundSchedulerClock: "phone_background_scheduler_clock",
+  backgroundSchedulerTasks: "phone_background_scheduler_tasks",
+  backgroundSchedulerLeases: "phone_background_scheduler_leases",
+  backgroundSchedulerClock: "phone_background_scheduler_clock",
+  scheduleAppointmentReminders: "phone_schedule_appointment_reminders",
   offlineModeActive: (relationId: string) => `offline_mode_active_${relationId}`,
   offlineStoryId: (relationId: string) => `offline_story_id_${relationId}`,
   albumWidgetPhotos: (id: string) => `album_widget_photos_${id}`,

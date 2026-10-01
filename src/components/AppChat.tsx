@@ -12,7 +12,8 @@ import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proact
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
 import type { Appointment, AppointmentMode } from "../domain/schedule/scheduleTypes";
-import { getCurrentAppointmentProposal } from "../domain/schedule/appointmentPolicy";
+import { canConfirmAppointment, getCurrentAppointmentProposal } from "../domain/schedule/appointmentPolicy";
+import { decideAppointmentInvitation } from "../domain/schedule/appointmentInvitation";
 import { startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
@@ -99,8 +100,8 @@ import { buildDirectChatSystemInstruction } from "../features/chat/prompts/direc
 import { buildProactiveOfflineInvitationPrompt } from "../features/chat/prompts/proactiveOfflineInvitationPrompt";
 import { buildProactiveOfflineResponsePrompt } from "../features/chat/prompts/proactiveOfflineResponsePrompt";
 import { parseProactiveOfflineInvitationDirective } from "../features/chat/services/proactiveOfflineInvitationProtocol";
-import { applyProactiveOfflineResponse, parseProactiveOfflineResponseDirective } from "../features/chat/services/proactiveOfflineResponseProtocol";
-import { deriveProactiveOfflineContextEvidence, deriveProactiveOfflinePresenceEvidence } from "../features/chat/services/proactiveOfflineContext";
+import { applyProactiveOfflineResponse, isProactiveOfflineCounterRequest, parseProactiveOfflineResponseDirective } from "../features/chat/services/proactiveOfflineResponseProtocol";
+import { deriveProactiveOfflineContextEvidence, deriveProactiveOfflinePresenceEvidence, isExplicitOfflineInvitationRequest } from "../features/chat/services/proactiveOfflineContext";
 import { formatLocalTimeContext } from "../domain/prompt/timeContext";
 import { describeHistoricalRelativeTime, formatHistoricalMessageForPrompt } from "../domain/prompt/historyTimeContext";
 import { analyzeRecentConversation, formatProactiveConversationGuidance } from "../domain/prompt/proactiveConversationContext";
@@ -201,6 +202,8 @@ import { isMessageInDirectScope, resolveDirectInteractionScope, toDirectChatRunt
 import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations } from "../features/characterLife/services/characterEventCaptureService";
 import { removeCharacterTruthForRelations } from "../features/characterKnowledge/services/characterTruthCleanupService";
 import { listByRelation as listCharacterEventsByRelation } from "../core/storage/repositories/characterEventRepository";
+import { listCharacterScheduleByScope } from "../features/schedule/scheduleDataService";
+import { projectAppointmentsToScheduleEntries } from "../domain/schedule/scheduleProjection";
 import { append as appendKnowledgeClaim, appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { loadKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, saveConversationSummaries } from "../core/storage/repositories/conversationSummaryRepository";
@@ -446,6 +449,7 @@ interface AppChatProps {
   activeChatRelationId: string | null;
   setActiveChatRelationId: (id: string | null) => void;
   onSaveRelationships: Dispatch<SetStateAction<CharacterRelationship[]>>;
+  onClearScheduleForRelation?: (relationId: string) => void;
   appointments?: Appointment[];
   onSaveAppointment?: (appointment: Appointment) => boolean;
   offlineStories?: OfflineStory[];
@@ -557,6 +561,7 @@ export default function AppChat({
   activeChatRelationId,
   setActiveChatRelationId,
   onSaveRelationships,
+  onClearScheduleForRelation,
   appointments = [],
   onSaveAppointment,
   offlineStories = [],
@@ -1077,6 +1082,15 @@ export default function AppChat({
     onPersistMessage(message);
   };
   const readyOfflineAppointment = useChatAppointment({ activeRelationship, appointments });
+  const pendingOfflineAppointment = useMemo(() => {
+    if (!activeRelationship) return undefined;
+    return appointments
+      .filter((appointment) => appointment.relationId === activeRelationship.id
+        && appointment.characterId === activeRelationship.characterId
+        && appointment.userIdentityId === activeRelationship.userIdentityId
+        && (appointment.status === "awaiting_user" || appointment.status === "negotiating"))
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  }, [activeRelationship, appointments]);
   const characterCustomChatCss = activeCharacter?.customChatCSS || activeCharacter?.customCss || "";
   // bubbleCss remains a scoped legacy compatibility source.
   const userCustomChatCssSources = [settings.bubbleCss, settings.chatGlobalCSS, characterCustomChatCss];
@@ -1648,6 +1662,16 @@ export default function AppChat({
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 1500);
+  };
+
+  const decidePendingOfflineInvitation = (decision: "accept" | "decline") => {
+    if (!pendingOfflineAppointment || !onSaveAppointment) return;
+    const updated = decideAppointmentInvitation(pendingOfflineAppointment, decision, Date.now());
+    if (!updated || !onSaveAppointment(updated)) {
+      showToast("这条线下邀约暂时无法更新，请重试");
+      return;
+    }
+    showToast(decision === "accept" ? "已接受线下邀约，双方日程已同步" : "已拒绝这条线下邀约");
   };
 
   const { handleTranslateMessage } = useChatMessageTranslation({ settings, onUpdateMessage, showToast });
@@ -2919,7 +2943,19 @@ export default function AppChat({
         && appointment.userIdentityId === turnRelationship.userIdentityId
         && (appointment.status === "awaiting_user" || appointment.status === "negotiating"))
       : undefined;
+    const negotiableProactiveOfflineAppointment = turnRelationship && userMsg?.sender === "user"
+      && isProactiveOfflineCounterRequest(userMsg.content)
+      ? appointments
+        .filter((appointment) => appointment.relationId === turnRelationship.id
+          && appointment.characterId === turnRelationship.characterId
+          && appointment.userIdentityId === turnRelationship.userIdentityId
+          && ["awaiting_user", "negotiating", "confirmed", "preparing", "ready"].includes(appointment.status))
+        .sort((left, right) => right.updatedAt - left.updatedAt)[0]
+      : undefined;
     let proactiveOfflineAllowedModes: AppointmentMode[] = [];
+    const explicitOfflineInvitationRequest = Boolean(
+      userMsg?.sender === "user" && isExplicitOfflineInvitationRequest(userMsg.content),
+    );
     if (turnRelationship
       && !replyContext.isGroup
       && replyContext.relationId === turnRelationship.id
@@ -2938,6 +2974,9 @@ export default function AppChat({
         context: deriveProactiveOfflineContextEvidence({ messages: sourceMessages, source: "direct_reply" }),
       });
       if (eligibility.eligible) proactiveOfflineAllowedModes = eligibility.allowedModes;
+      if (explicitOfflineInvitationRequest && !pendingProactiveOfflineAppointment) {
+        proactiveOfflineAllowedModes = ["immediate", "scheduled"];
+      }
     }
     let pendingOfflineHandoffForReply: OfflineStory | undefined;
     const isRedPacket = userMsg && isRedPacketMarkup(userMsg.content);
@@ -3331,11 +3370,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               allowedModes: proactiveOfflineAllowedModes,
               now: Date.now(),
               timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              explicitUserRequest: explicitOfflineInvitationRequest,
             })]
             : []),
-          ...(pendingProactiveOfflineAppointment
+          ...(pendingProactiveOfflineAppointment || negotiableProactiveOfflineAppointment
             ? [buildProactiveOfflineResponsePrompt({
-              appointment: pendingProactiveOfflineAppointment,
+              appointment: pendingProactiveOfflineAppointment || negotiableProactiveOfflineAppointment,
               now: Date.now(),
               timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             })]
@@ -3522,8 +3562,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           data.text = proactiveOfflineResponseParse.visibleText;
           proactiveOfflineParse = parseProactiveOfflineInvitationDirective({
             text: data.text,
-            allowedModes: proactiveOfflineAllowedModes,
+            // An explicit user request is allowed to create a fresh proposal
+            // even when a previous confirmed appointment is still in the
+            // schedule. The appointment itself remains pending until the
+            // user accepts it; unsolicited proactive invitations still use
+            // the conservative eligibility result above.
+            allowedModes: explicitOfflineInvitationRequest
+              ? ["immediate", "scheduled"]
+              : proactiveOfflineAllowedModes,
             now: Date.now(),
+            userText: userMsg?.sender === "user" ? userMsg.content : undefined,
           });
           data.text = proactiveOfflineParse.visibleText;
           characterAction = parseCharacterActionDirective({ text: data.text });
@@ -3760,20 +3808,40 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             }
           }
           recordPendingOfflineHandoffDelivery(pendingOfflineHandoffForReply);
-          if (prepared.proactiveOfflineResponseParse?.directive && pendingProactiveOfflineAppointment && userMsg) {
+          if (prepared.proactiveOfflineResponseParse?.directive && (pendingProactiveOfflineAppointment || negotiableProactiveOfflineAppointment) && userMsg) {
             const updatedAppointment = applyProactiveOfflineResponse({
-              appointment: pendingProactiveOfflineAppointment,
+              appointment: pendingProactiveOfflineAppointment || negotiableProactiveOfflineAppointment!,
               directive: prepared.proactiveOfflineResponseParse.directive,
               userMessageId: userMsg.id,
               characterMessageId: createdMessages[0].id,
               now: createdMessages[0].timestamp,
+              latestUserText: userMsg.content,
             });
             if (!updatedAppointment || !onSaveAppointment?.(updatedAppointment)) console.warn("Proactive offline response could not be persisted.");
           }
-          if (prepared.proactiveOfflineParse?.directive && turnRelationship) {
+          // Keep one last persistence guard at the delivery boundary. The
+          // normalizer parses the model response before the bubbles are
+          // created, but a long/streamed response can occasionally lose the
+          // parsed result while the visible confirmation is still delivered.
+          // Re-parse the exact delivered text with the narrow user-requested
+          // fallback so an explicit future invitation cannot appear to work
+          // without creating the pending appointment card.
+          const deliveryInvitationParse = !prepared.proactiveOfflineParse?.directive
+            && turnRelationship
+            && userMsg?.sender === "user"
+            ? parseProactiveOfflineInvitationDirective({
+              text: createdMessages.map((message) => message.content).join("\n"),
+              allowedModes: ["immediate", "scheduled"],
+              now: createdMessages[0]?.timestamp ?? Date.now(),
+              userText: userMsg.content,
+            })
+            : undefined;
+          const deliveredInvitationDirective = prepared.proactiveOfflineParse?.directive
+            || deliveryInvitationParse?.directive;
+          if (deliveredInvitationDirective && turnRelationship) {
             const saved = persistProactiveOfflineInvitation({
               relationship: turnRelationship,
-              directive: prepared.proactiveOfflineParse.directive,
+              directive: deliveredInvitationDirective,
               sourceMessageId: createdMessages[0].id,
               now: createdMessages[0].timestamp,
             });
@@ -3960,6 +4028,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             buildCharacterRoutine(currentCharacter.routine),
             resolveChatTurnSettings(currentCharacter).enableTimeAwareness,
           ),
+          scheduleEntries: listCharacterScheduleByScope({
+            relationId: currentRelationship.id,
+            characterId: currentRelationship.characterId,
+            userIdentityId: currentRelationship.userIdentityId,
+          }),
+          appointmentEntries: projectAppointmentsToScheduleEntries(appointments),
         });
       } catch {
         // Cognitive context is read-only and must never block the legacy reply
@@ -4456,6 +4530,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     onSaveRelationships,
     onDeleteMomentsByRelation,
     onSaveMemories,
+    onClearScheduleForRelation,
     onDeleteRelationshipMusic,
     onDeleteOfflineStory,
     onClearMomentState: (relationMomentIds, relationCommentIds) => {
@@ -5155,6 +5230,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         ),
         timeAwareness: friend.enableTimeAwareness !== false,
         topicHistory: loadProactiveTopicRecords().value,
+        appointmentEntries: projectAppointmentsToScheduleEntries(appointments),
       });
       const proactiveCharacterProjection = projectCharacterPrompt(friend, relationship.relationship);
 
@@ -9766,6 +9842,32 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
            <div ref={chatEndRef} />
           </MessageList>
+
+          {pendingOfflineAppointment && !isMultiSelectDeleteMode && (
+            <div className="chat-appointment-invitation mx-3 mb-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">线下邀约 · 待你确认</div>
+                  <div className="mt-1 truncate text-sm font-bold text-[var(--text-primary)]">
+                    {getCurrentAppointmentProposal(pendingOfflineAppointment)?.activity || pendingOfflineAppointment.title}
+                  </div>
+                  <div className="mt-1 text-[10px] leading-5 text-[var(--text-secondary)]">
+                    {(() => {
+                      const proposal = getCurrentAppointmentProposal(pendingOfflineAppointment);
+                      if (!proposal?.startAt) return pendingOfflineAppointment.mode === "immediate" ? "现在见面 · 等你选择" : "时间待确认";
+                      const date = new Date(proposal.startAt);
+                      return `${date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })} ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}${proposal.location ? ` · ${proposal.location}` : ""}`;
+                    })()}
+                  </div>
+                </div>
+                <span className="shrink-0 rounded-full bg-[var(--surface-raised)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">可拒绝</span>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <button type="button" onClick={() => decidePendingOfflineInvitation("decline")} className="flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-[11px] font-bold text-[var(--text-secondary)]">拒绝</button>
+                <button type="button" disabled={!canConfirmAppointment(pendingOfflineAppointment)} onClick={() => decidePendingOfflineInvitation("accept")} className="flex-1 rounded-xl bg-[var(--button-primary-bg)] px-3 py-2 text-[11px] font-bold text-[var(--button-primary-text)] disabled:cursor-not-allowed disabled:opacity-40">接受</button>
+              </div>
+            </div>
+          )}
 
           {readyOfflineAppointment && !isMultiSelectDeleteMode && (
             <div className="chat-appointment-entry mx-3 mb-2 flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 shadow-sm">

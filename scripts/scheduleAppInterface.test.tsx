@@ -83,19 +83,16 @@ const scheduleSource = readFileSync(new URL("../src/components/AppSchedule.tsx",
 assert.match(appSource, /appointments=\{scheduleStore\.appointments\}/);
 assert.match(appSource, /<AppSchedule[\s\S]*?userIdentityId=\{activeIdentityId\}/);
 assert.match(appSource, /setActiveChatRelationId\(relationship\?\.id \|\| null\)[\s\S]*setActiveApp\("chat"\)/);
-assert.match(scheduleSource, /SCHEDULE_STATUS_META\[entry\.status\]\.dotClass/);
-assert.match(scheduleSource, /aria-label="日程状态筛选"/);
-assert.match(scheduleSource, /schedule-filter-control/);
-assert.doesNotMatch(scheduleSource, /经期/);
+assert.match(scheduleSource, /ScheduleDashboard/);
+assert.match(scheduleSource, /characterScheduleEntries/);
+assert.match(scheduleSource, /periodRecords/);
 assert.match(scheduleSource, /type="checkbox"/);
-assert.doesNotMatch(scheduleSource, /整理今天的待办/);
 assert.match(scheduleSource, /formatScheduleTime\(entry\)/);
 assert.match(scheduleSource, /添加日程/);
 assert.match(scheduleSource, /onCharacterPhoneScheduleAdd/);
 assert.match(scheduleSource, /absolute bottom-5 right-5/);
-assert.match(scheduleSource, /characterPhoneAddAllDay/);
-assert.match(scheduleSource, /handleCharacterPhoneScheduleScroll/);
-assert.match(scheduleSource, /CHARACTER_PHONE_EVENT_COLORS/);
-assert.doesNotMatch(scheduleSource, /space-y-3 border-t border-neutral-200/);
+assert.match(scheduleSource, /addAllDay/);
+assert.match(scheduleSource, /previousScrollTop/);
+assert.match(scheduleSource, /PHONE_EVENT_COLORS/);
 
 console.log("PASS schedule V1 filters, status visuals, appointment details, negotiation history, and chat navigation");

@@ -95,6 +95,38 @@ export function buildCharacterCognitiveContext(
   const { relation } = input;
   const relationshipProjection = projectRelationshipTimeline(input.relationshipTimeline, scope);
   const routineContext = projectRoutineContext(input);
+  const scheduleItems = [
+    ...(input.scheduleEntries || [])
+      .filter((entry) => entry.relationId === scope.relationId
+        && entry.characterId === scope.characterId
+        && entry.userIdentityId === scope.userIdentityId)
+      .filter((entry) => entry.status !== "cancelled")
+      .map((entry) => ({
+        title: entry.title,
+        ...(entry.detail ? { detail: entry.detail } : {}),
+        ...(entry.dateKey ? { dateKey: entry.dateKey } : {}),
+        ...(entry.startAt === undefined ? {} : { startAt: entry.startAt }),
+        ...(entry.endAt === undefined ? {} : { endAt: entry.endAt }),
+        status: entry.status,
+        reviewState: "confirmed" as const,
+      })),
+    ...(input.appointmentEntries || [])
+      .filter((entry) => entry.relationId === scope.relationId
+        && entry.characterId === scope.characterId
+        && entry.userIdentityId === scope.userIdentityId)
+      .filter((entry) => entry.status !== "cancelled" && entry.status !== "expired")
+      .map((entry) => ({
+        title: `见面安排：${entry.title}`,
+        detail: [entry.activity, entry.location].filter(Boolean).join(" · ") || "已确认的见面约定",
+        ...(entry.dateKey ? { dateKey: entry.dateKey } : {}),
+        ...(entry.startAt === undefined ? {} : { startAt: entry.startAt }),
+        ...(entry.endAt === undefined ? {} : { endAt: entry.endAt }),
+        status: entry.status,
+        reviewState: "confirmed" as const,
+      })),
+  ]
+    .sort((left, right) => (left.startAt ?? Number.MAX_SAFE_INTEGER) - (right.startAt ?? Number.MAX_SAFE_INTEGER))
+    .slice(0, 16);
 
   return {
     schemaVersion: CHARACTER_COGNITIVE_CONTEXT_SCHEMA_VERSION,
@@ -125,6 +157,7 @@ export function buildCharacterCognitiveContext(
     recentEvents: selectRecentEvents(input.events, scope),
     temporalContext: projectTimeContext(input),
     ...(routineContext ? { routineContext } : {}),
+    scheduleItems,
     knowledgeBoundary: {
       known: [...input.knowledgeBoundary.known],
       unknown: [...input.knowledgeBoundary.unknown],
