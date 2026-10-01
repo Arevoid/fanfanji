@@ -20,6 +20,37 @@ createRoot(document.getElementById('root')!).render(
 
 // Register service worker for PWA capability and listen to beforeinstallprompt
 if (typeof window !== "undefined") {
+  // A deployment can leave an already-open PWA pointing at a removed hashed
+  // chunk. Vite exposes this as `vite:preloadError`; older browsers often
+  // surface the same condition as an unhandled dynamic-import rejection.
+  // Recover once per short window so a stale client refreshes onto the new
+  // asset graph without entering an infinite reload loop.
+  const staleModuleRecoveryKey = "fanfan-stale-module-recovery-at";
+  const recoverFromStaleModule = () => {
+    try {
+      const previousAttempt = Number(window.sessionStorage.getItem(staleModuleRecoveryKey) || 0);
+      const now = Date.now();
+      if (Number.isFinite(previousAttempt) && previousAttempt > 0 && now - previousAttempt < 30_000) return;
+      window.sessionStorage.setItem(staleModuleRecoveryKey, String(now));
+    } catch {
+      // A restricted storage context should still receive the normal reload.
+    }
+    window.location.reload();
+  };
+
+  window.addEventListener("vite:preloadError", (event) => {
+    event.preventDefault();
+    recoverFromStaleModule();
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    const message = reason instanceof Error ? reason.message : String(reason || "");
+    if (/dynamically imported module|importing a module script failed|loading chunk/i.test(message)) {
+      event.preventDefault();
+      recoverFromStaleModule();
+    }
+  });
+
   // A previously installed PWA worker can keep controlling a local Vite page
   // even after its source has changed. Remove that controller once on dev-only
   // loopback hosts so lazy-loaded Chat chunks always come from the dev server
@@ -44,6 +75,13 @@ if (typeof window !== "undefined") {
   });
 
   if (!isLocalDevelopmentHost && "serviceWorker" in navigator) {
+    let reloadedForControllerChange = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloadedForControllerChange) return;
+      reloadedForControllerChange = true;
+      window.location.reload();
+    });
+
     const registerSW = () => {
       navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" })
         .then((registration) => {

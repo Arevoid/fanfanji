@@ -1,4 +1,4 @@
-const CACHE_NAME = "fanfan-phone-0.0.0-3cf2234e7f66";
+const CACHE_NAME = "fanfan-phone-0.0.0-402b0cdc7c39";
 const ASSETS_TO_CACHE = [
   "/",
   "/index.html",
@@ -69,6 +69,25 @@ self.addEventListener("fetch", (event) => {
           return networkResponse;
         })
         .catch(() => caches.match(event.request).then((response) => response || caches.match("/")))
+    );
+    return;
+  }
+
+  // Hashed JavaScript/CSS files are part of one release graph. Returning an
+  // older cached chunk before checking the network can mix that graph with a
+  // newer index.html and make a lazy app fail to import after deployment.
+  // Prefer the current asset and keep the cached copy only as an offline
+  // fallback.
+  if (url.pathname.startsWith("/assets/")) {
+    event.respondWith(
+      fetch(event.request, { cache: "no-store" })
+        .then((networkResponse) => {
+          if (networkResponse.ok) {
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse.clone()));
+          }
+          return networkResponse;
+        })
+        .catch(async () => (await caches.match(event.request)) || Response.error())
     );
     return;
   }

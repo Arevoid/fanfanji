@@ -293,14 +293,24 @@ class LazyAppErrorBoundary extends React.Component<
     return { error };
   }
 
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("[LazyAppBoundary] 应用模块加载或渲染失败", error, info);
+  }
+
   render() {
     const currentProps = (this as unknown as { props: React.PropsWithChildren<{ visible?: boolean }> }).props;
     if (!this.state.error) return currentProps.children;
+    const message = this.state.error.message || "未知错误";
+    const isModuleError = /dynamically imported module|importing a module script failed|loading chunk|failed to fetch/i.test(message);
     return (
       <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-[var(--app-bg)] px-6 text-center text-[var(--text-secondary)]" role="alert">
-        <span className="text-sm font-semibold text-[var(--text-primary)]">应用加载失败</span>
-        <span className="text-xs">请重试后继续。</span>
-        <button type="button" className="rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white" onClick={() => window.location.reload()}>重试</button>
+        <span className="text-sm font-semibold text-[var(--text-primary)]">{isModuleError ? "应用版本正在更新" : "应用加载失败"}</span>
+        <span className="max-w-[18rem] text-xs leading-5">{isModuleError ? "检测到旧版资源缓存，刷新后会重新加载最新模块。" : "请刷新后继续；如果反复出现，可把错误信息提供给我们。"}</span>
+        <button type="button" className="rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white" onClick={() => window.location.reload()}>刷新并重试</button>
+        <details className="max-w-[18rem] text-left text-[10px] text-[var(--text-tertiary)]">
+          <summary className="cursor-pointer text-center">查看诊断信息</summary>
+          <code className="mt-2 block break-words rounded-lg bg-[var(--surface-muted)] p-2">{message}</code>
+        </details>
       </div>
     );
   }
