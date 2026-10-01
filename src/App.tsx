@@ -124,7 +124,7 @@ import {
 } from "./features/home/homeGrid";
 import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./features/music/services/dualMusicRecommendationService";
 import { isNeteaseMusicTrack, normalizeMusicTrack } from "./features/music/services/musicTrackModel";
-import { getNeteaseTrackStreamUrl } from "./features/music/services/neteaseMusicApi";
+import { getNeteaseTrackStreamUrl, preloadNeteaseMusicLibrary } from "./features/music/services/neteaseMusicApi";
 import { loadMusicPlaybackHistory, recordMusicPlayback } from "./core/storage/repositories/musicPlaybackHistoryRepository";
 import type { MusicPlaybackHistoryItem } from "./types";
 import type { NeteaseMusicQuality } from "./features/music/neteaseTypes";
@@ -630,7 +630,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const preloadIdleApps = () => IDLE_PRELOAD_APP_IDS.forEach((appId) => preloadApp(appId));
+    const preloadIdleApps = () => {
+      IDLE_PRELOAD_APP_IDS.forEach((appId) => preloadApp(appId));
+      // Warm the authenticated cloud library while the user is still on the
+      // desktop so the music home screen can render without a second wait.
+      void preloadNeteaseMusicLibrary().catch(() => undefined);
+    };
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       cancelIdleCallback?: (handle: number) => void;

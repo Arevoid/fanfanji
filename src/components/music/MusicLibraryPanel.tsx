@@ -23,12 +23,13 @@ import type { MusicPlaybackHistoryItem, MusicTrack } from "../../types";
 import {
   checkNeteaseQrSession,
   createNeteaseQrSession,
-  getNeteaseAccount,
-  getNeteaseDailyRecommendations,
   getNeteasePlaylistTracks,
   getNeteasePlaylists,
+  clearNeteaseMusicLibraryCache,
+  getNeteaseMusicLibraryCache,
   isNeteaseAuthenticationError,
   logoutNetease,
+  preloadNeteaseMusicLibrary,
   searchNeteaseTracks,
 } from "../../features/music/services/neteaseMusicApi";
 import { createNeteaseMusicTrack } from "../../features/music/services/musicTrackModel";
@@ -66,7 +67,6 @@ export default function MusicLibraryPanel({
 }: MusicLibraryPanelProps) {
   const [tab, setTab] = useState<MusicLibraryTab>("home-reference");
   const [query, setQuery] = useState("");
-  const [searchSource, setSearchSource] = useState<"local" | "netease">("local");
   const [remoteResults, setRemoteResults] = useState<NeteaseTrack[]>([]);
   const [searchSubmitted, setSearchSubmitted] = useState(false);
   const [account, setAccount] = useState<NeteaseAccount | null>(null);
@@ -99,6 +99,7 @@ export default function MusicLibraryPanel({
   };
 
   const markUnauthenticated = () => {
+    clearNeteaseMusicLibraryCache();
     clearAccountState();
     setQrSession(null);
     setAuthState("unauthenticated");
@@ -126,30 +127,23 @@ export default function MusicLibraryPanel({
   };
 
   const loadAccount = async () => {
+    const cachedLibrary = getNeteaseMusicLibraryCache();
+    if (cachedLibrary) {
+      setAccount(cachedLibrary.account);
+      setPlaylists(cachedLibrary.playlists);
+      setDailyRemoteTracks(cachedLibrary.dailyTracks);
+      setAuthState("authenticated");
+    }
     setLoading(true);
     setError(null);
     setLibraryError(null);
     setAuthState("checking");
     try {
-      // Validate the persisted session independently. A temporary playlist
-      // failure must never make a valid account look logged out.
-      const nextAccount = await getNeteaseAccount();
-      setAccount(nextAccount);
+      const nextLibrary = await preloadNeteaseMusicLibrary();
+      setAccount(nextLibrary.account);
+      setPlaylists(nextLibrary.playlists);
+      setDailyRemoteTracks(nextLibrary.dailyTracks);
       setAuthState("authenticated");
-      const libraryLoaded = await loadPlaylists();
-      if (!libraryLoaded) return;
-      try {
-        setDailyRemoteTracks(await getNeteaseDailyRecommendations());
-      } catch (nextError) {
-        if (isNeteaseAuthenticationError(nextError)) {
-          markUnauthenticated();
-          setError("网易云登录已失效，请重新扫码连接。");
-          return;
-        }
-        // Daily recommendations are optional and should not invalidate the
-        // account or the playlists that were already loaded.
-        setDailyRemoteTracks([]);
-      }
     } catch (nextError) {
       if (isNeteaseAuthenticationError(nextError)) {
         markUnauthenticated();
@@ -238,12 +232,14 @@ export default function MusicLibraryPanel({
 
   const handleSearch = async (event: React.FormEvent) => {
     event.preventDefault();
-    setSearchSubmitted(Boolean(query.trim()));
-    if (searchSource !== "netease" || !query.trim() || !account) return;
+    const normalizedQuery = query.trim();
+    setSearchSubmitted(Boolean(normalizedQuery));
+    setRemoteResults([]);
+    if (!normalizedQuery || !account) return;
     setLoading(true);
     setError(null);
     try {
-      setRemoteResults(await searchNeteaseTracks(query.trim()));
+      setRemoteResults(await searchNeteaseTracks(normalizedQuery));
     } catch (nextError) {
       if (isNeteaseAuthenticationError(nextError)) {
         markUnauthenticated();
@@ -349,10 +345,16 @@ export default function MusicLibraryPanel({
     <div className="mb-4 space-y-2">
       <form onSubmit={handleSearch} className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2.5">
         <Search className="h-4 w-4 text-[var(--text-tertiary)]" />
-        <input value={query} onChange={(event) => { setQuery(event.target.value); if (!event.target.value.trim()) setSearchSubmitted(false); }} placeholder={searchSource === "local" ? "搜索本地音乐" : "搜索网易云音乐"} className="min-w-0 flex-1 !bg-transparent text-xs text-[var(--text-primary)] outline-none" style={{ backgroundColor: "transparent" }} />
+        <input value={query} onChange={(event) => { setQuery(event.target.value); setSearchSubmitted(false); }} placeholder="搜索本地音乐和网易云歌曲" className="min-w-0 flex-1 !bg-transparent text-xs text-[var(--text-primary)] outline-none" style={{ backgroundColor: "transparent" }} />
         <button type="submit" className="rounded-xl bg-[var(--text-primary)] px-3 py-1.5 text-[10px] font-bold text-[var(--surface)]">搜索</button>
       </form>
-      {searchSubmitted && (searchSource === "local" ? (filteredLocalTracks.length ? <div className="space-y-2">{filteredLocalTracks.map(renderTrack)}</div> : <p className="py-3 text-center text-xs text-[var(--text-secondary)]">暂无匹配的本地歌曲。</p>) : (loading ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : remoteResults.length ? <div className="space-y-2">{remoteResults.map((track, index) => renderTrack(createNeteaseMusicTrack({ accountUserId: account?.userId || "unknown", track }), index, true))}</div> : <p className="py-3 text-center text-xs text-[var(--text-secondary)]">暂无网易云搜索结果。</p>))}
+      {searchSubmitted && <div className="space-y-4">
+        {filteredLocalTracks.length > 0 && <section className="space-y-2"><h2 className="text-[11px] font-extrabold text-[var(--text-secondary)]">本地音乐</h2>{filteredLocalTracks.map(renderTrack)}</section>}
+        {loading && <Loader2 className="mx-auto h-5 w-5 animate-spin" />}
+        {!loading && remoteResults.length > 0 && <section className="space-y-2"><h2 className="text-[11px] font-extrabold text-[var(--text-secondary)]">网易云音乐</h2>{remoteResults.map((track, index) => renderTrack(createNeteaseMusicTrack({ accountUserId: account?.userId || "unknown", track }), index, true))}</section>}
+        {!loading && filteredLocalTracks.length === 0 && remoteResults.length === 0 && <p className="py-3 text-center text-xs text-[var(--text-secondary)]">暂无匹配的本地或网易云歌曲。</p>}
+        {!account && filteredLocalTracks.length > 0 && <p className="text-center text-[10px] text-[var(--text-tertiary)]">连接网易云后，可继续搜索云端歌曲</p>}
+      </div>}
     </div>
   );
 
@@ -386,7 +388,7 @@ export default function MusicLibraryPanel({
         {tab === "home" && <div className="space-y-4"><button type="button" onClick={onOpenPlayer} className="w-full rounded-3xl bg-gradient-to-br from-neutral-950 to-stone-700 p-5 text-left text-white shadow-lg"><div className="flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/60">Now playing</span><Play className="h-4 w-4" /></div><p className="mt-8 truncate text-lg font-black">{currentTrack?.title || "还没有开始播放"}</p><p className="mt-1 truncate text-xs text-white/65">{currentTrack?.artist || "从本地音乐或网易云歌单开始"}</p><div className="mt-5 h-1 rounded-full bg-white/20"><div className="h-full w-1/3 rounded-full bg-white/80" /></div></button><div className="grid grid-cols-2 gap-3"><button type="button" onClick={() => setTab("local")} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-left"><Upload className="h-5 w-5 text-[var(--text-secondary)]" /><p className="mt-5 text-xs font-extrabold text-[var(--text-primary)]">本地音乐</p><p className="mt-1 text-[10px] text-[var(--text-secondary)]">{formatCount(localTracks.length)}</p></button><button type="button" onClick={() => setTab("netease")} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-left"><Heart className="h-5 w-5 text-red-400" /><p className="mt-5 text-xs font-extrabold text-[var(--text-primary)]">网易云收藏</p><p className="mt-1 text-[10px] text-[var(--text-secondary)]">{account ? `${playlists.length} 个歌单` : "未连接"}</p></button></div>{playbackHistory.length > 0 && <div><div className="mb-2 flex items-center gap-1.5 text-xs font-extrabold text-[var(--text-primary)]"><ListMusic className="h-3.5 w-3.5" />最近播放</div><div className="space-y-1.5">{playbackHistory.slice(0, 5).map((item) => <div key={item.id} className="flex items-center gap-2 rounded-xl bg-[var(--surface-raised)] px-3 py-2"><span className="min-w-0 flex-1 truncate text-[11px] font-bold text-[var(--text-primary)]">{item.title}<span className="ml-1 font-normal text-[var(--text-secondary)]">· {item.artist}</span></span><span className="text-[9px] text-[var(--text-tertiary)]">{item.source === "netease" ? "网易云" : "本地"}</span></div>)}</div></div>}</div>}
         {tab === "local" && <div className="space-y-3"><div className="flex items-center justify-between"><div><h2 className="text-base font-extrabold text-[var(--text-primary)]">本地音乐</h2><p className="mt-1 text-[10px] text-[var(--text-secondary)]">音频文件继续保存在本机 IndexedDB</p></div><button type="button" onClick={onOpenImport} className="flex items-center gap-1 rounded-xl bg-[var(--surface-muted)] px-3 py-2 text-[10px] font-bold text-[var(--text-primary)]"><Upload className="h-3.5 w-3.5" />上传</button></div>{filteredLocalTracks.length ? filteredLocalTracks.map(renderTrack) : <div className="rounded-3xl border border-dashed border-[var(--border)] p-8 text-center"><Download className="mx-auto h-7 w-7 text-[var(--text-tertiary)]" /><p className="mt-3 text-xs font-bold text-[var(--text-primary)]">还没有本地音乐</p><button type="button" onClick={onOpenImport} className="mt-3 text-xs font-bold text-[var(--text-secondary)]">上传第一首歌</button></div>}</div>}
         {tab === "netease" && renderNetease()}
-        {tab === "search" && <div className="space-y-3"><div className="flex gap-1 rounded-2xl bg-[var(--surface-muted)] p-1"><button type="button" onClick={() => setSearchSource("local")} className={`flex-1 rounded-xl py-2 text-[10px] font-bold ${searchSource === "local" ? "bg-[var(--surface)] text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>本地音乐</button><button type="button" onClick={() => setSearchSource("netease")} className={`flex-1 rounded-xl py-2 text-[10px] font-bold ${searchSource === "netease" ? "bg-[var(--surface)] text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>网易云</button></div><form onSubmit={handleSearch} className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2.5"><Search className="h-4 w-4 text-[var(--text-tertiary)]" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchSource === "local" ? "搜索本地歌曲" : "搜索网易云歌曲"} className="min-w-0 flex-1 bg-transparent text-xs text-[var(--text-primary)] outline-none" /><button type="submit" className="rounded-xl bg-[var(--text-primary)] px-3 py-1.5 text-[10px] font-bold text-[var(--surface)]">搜索</button></form>{searchSource === "local" ? (filteredLocalTracks.length ? filteredLocalTracks.map(renderTrack) : <p className="py-10 text-center text-xs text-[var(--text-secondary)]">暂无匹配的本地歌曲。</p>) : (loading ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : remoteResults.length ? remoteResults.map((track, index) => renderTrack(createNeteaseMusicTrack({ accountUserId: account?.userId || "unknown", track }), index, true)) : <p className="py-10 text-center text-xs text-[var(--text-secondary)]">输入关键词搜索网易云歌曲。</p>)}</div>}
+        {tab === "search" && renderHomeSearch()}
       </div>
       {currentTrack && <button type="button" onClick={onOpenPlayer} className="flex shrink-0 items-center gap-3 border-t border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left shadow-[0_-6px_20px_rgba(0,0,0,0.06)]"><span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--surface-muted)] text-[var(--text-secondary)]">{currentTrack.coverUrl ? <img src={currentTrack.coverUrl} alt="" className="h-full w-full object-cover" /> : <Music2 className="h-4 w-4" />}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-[var(--text-primary)]">{currentTrack.title}</span><span className="mt-0.5 block truncate text-[10px] text-[var(--text-secondary)]">{currentTrack.artist}</span></span><span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); onPlayTrack(currentTrack); }} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--text-primary)] text-[var(--surface)]">{isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 fill-current" />}</span></button>}
       <nav aria-label="音乐主导航" className="grid shrink-0 grid-cols-3 border-t border-[var(--border)] bg-[var(--surface)]/95 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur">

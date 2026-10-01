@@ -8,6 +8,15 @@ import type {
   NeteaseLyrics,
 } from "../neteaseTypes";
 
+export interface NeteaseMusicLibrarySnapshot {
+  account: NeteaseAccount;
+  playlists: NeteasePlaylist[];
+  dailyTracks: NeteaseTrack[];
+}
+
+let libraryCache: NeteaseMusicLibrarySnapshot | null = null;
+let libraryPromise: Promise<NeteaseMusicLibrarySnapshot> | null = null;
+
 export class NeteaseMusicClientError extends Error {
   readonly code?: string;
   readonly status?: number;
@@ -104,6 +113,49 @@ export const searchNeteaseTracks = async (keywords: string): Promise<NeteaseTrac
 export const getNeteaseDailyRecommendations = async (): Promise<NeteaseTrack[]> => {
   const payload = await requestJson(`/api/music/netease/recommendations/daily?t=${Date.now()}`, { method: "GET" });
   return Array.isArray(payload.tracks) ? payload.tracks as NeteaseTrack[] : [];
+};
+
+/**
+ * Warm the authenticated music library before the music app is opened. The
+ * promise is shared so startup preloading and the first screen render never
+ * issue duplicate account/playlist/recommendation requests.
+ */
+export const preloadNeteaseMusicLibrary = async (): Promise<NeteaseMusicLibrarySnapshot> => {
+  if (libraryCache) return libraryCache;
+  if (libraryPromise) return libraryPromise;
+
+  libraryPromise = (async () => {
+    const account = await getNeteaseAccount();
+    const [playlistResult, dailyResult] = await Promise.allSettled([
+      getNeteasePlaylists(),
+      getNeteaseDailyRecommendations(),
+    ]);
+
+    if (playlistResult.status !== "fulfilled") throw playlistResult.reason;
+    if (dailyResult.status === "rejected" && isNeteaseAuthenticationError(dailyResult.reason)) {
+      throw dailyResult.reason;
+    }
+
+    const snapshot: NeteaseMusicLibrarySnapshot = {
+      account: playlistResult.value.account || account,
+      playlists: playlistResult.value.playlists,
+      dailyTracks: dailyResult.status === "fulfilled" ? dailyResult.value : [],
+    };
+    libraryCache = snapshot;
+    return snapshot;
+  })().catch((error) => {
+    libraryPromise = null;
+    throw error;
+  });
+
+  return libraryPromise;
+};
+
+export const getNeteaseMusicLibraryCache = (): NeteaseMusicLibrarySnapshot | null => libraryCache;
+
+export const clearNeteaseMusicLibraryCache = (): void => {
+  libraryCache = null;
+  libraryPromise = null;
 };
 
 export const getNeteaseTrackUrl = async (trackId: string, level: "standard" | "higher" | "exhigh" = "standard"): Promise<NeteasePlayableTrack> => {
