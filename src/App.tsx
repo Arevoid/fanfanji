@@ -295,6 +295,20 @@ class LazyAppErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error("[LazyAppBoundary] 应用模块加载或渲染失败", error, info);
+    if (isLazyModuleLoadError(error)) {
+      void recoverFromLazyModuleError();
+    }
+  }
+
+  componentDidUpdate(previousProps: React.PropsWithChildren<{ visible?: boolean }>) {
+    // App instances stay mounted when the user returns to the desktop. If a
+    // lazy import failed once, clear the boundary when the app is opened
+    // again so the recovery path gets another chance instead of reusing the
+    // previous error screen forever.
+    const currentProps = (this as unknown as { props: React.PropsWithChildren<{ visible?: boolean }> }).props;
+    if (!previousProps.visible && currentProps.visible && this.state.error) {
+      (this as unknown as { setState: (nextState: { error: Error | null }) => void }).setState({ error: null });
+    }
   }
 
   render() {
@@ -315,6 +329,39 @@ class LazyAppErrorBoundary extends React.Component<
     );
   }
 }
+
+const isLazyModuleLoadError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /dynamically imported module|importing a module script failed|loading chunk|failed to fetch/i.test(message);
+};
+
+const recoverFromLazyModuleError = async (): Promise<void> => {
+  if (typeof window === "undefined") return;
+  const recoveryKey = "fanfan-stale-module-recovery-at";
+  const now = Date.now();
+  try {
+    const previousAttempt = Number(window.sessionStorage.getItem(recoveryKey) || 0);
+    if (Number.isFinite(previousAttempt) && previousAttempt > 0 && now - previousAttempt < 30_000) return;
+    window.sessionStorage.setItem(recoveryKey, String(now));
+  } catch {
+    // Continue with the cache cleanup even when session storage is restricted.
+  }
+
+  try {
+    if ("serviceWorker" in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+    if ("caches" in window) {
+      const cacheNames = await window.caches.keys();
+      await Promise.all(cacheNames.map((cacheName) => window.caches.delete(cacheName)));
+    }
+  } catch {
+    // A failed cleanup should not leave the user stuck on the error screen.
+  } finally {
+    window.location.reload();
+  }
+};
 
 function LazyAppBoundary({
   children,

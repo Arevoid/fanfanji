@@ -26,7 +26,7 @@ if (typeof window !== "undefined") {
   // Recover once per short window so a stale client refreshes onto the new
   // asset graph without entering an infinite reload loop.
   const staleModuleRecoveryKey = "fanfan-stale-module-recovery-at";
-  const recoverFromStaleModule = () => {
+  const recoverFromStaleModule = async () => {
     try {
       const previousAttempt = Number(window.sessionStorage.getItem(staleModuleRecoveryKey) || 0);
       const now = Date.now();
@@ -35,19 +35,32 @@ if (typeof window !== "undefined") {
     } catch {
       // A restricted storage context should still receive the normal reload.
     }
-    window.location.reload();
+    try {
+      if ("serviceWorker" in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+      }
+      if ("caches" in window) {
+        const cacheNames = await window.caches.keys();
+        await Promise.all(cacheNames.map((cacheName) => window.caches.delete(cacheName)));
+      }
+    } catch {
+      // A failed cleanup should not leave the user stuck on the old module.
+    } finally {
+      window.location.reload();
+    }
   };
 
   window.addEventListener("vite:preloadError", (event) => {
     event.preventDefault();
-    recoverFromStaleModule();
+    void recoverFromStaleModule();
   });
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event.reason;
     const message = reason instanceof Error ? reason.message : String(reason || "");
     if (/dynamically imported module|importing a module script failed|loading chunk/i.test(message)) {
       event.preventDefault();
-      recoverFromStaleModule();
+      void recoverFromStaleModule();
     }
   });
 
