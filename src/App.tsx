@@ -35,7 +35,7 @@ import { loadConversationSummaries, retractConversationSummariesBySourceMessageI
 import { loadBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
 import { initializeInnerVoiceRepository, loadInnerVoiceRecords, removeInnerVoicesByCharacter, saveInnerVoiceRecords } from "./core/storage/repositories/innerVoiceRepository";
 import { loadScheduleStore, removeAppointmentsByIds, removeAppointmentsByRelations, saveScheduleStore, upsertAppointment } from "./core/storage/repositories/scheduleRepository";
-import { loadCharacterScheduleStore, removeCharacterScheduleByIds, removeCharacterScheduleForRelations, saveCharacterScheduleEntry, loadUserScheduleStore, removeUserScheduleEntry, saveUserScheduleEntry, loadPeriodStore, savePeriodRecord } from "./features/schedule/scheduleDataService";
+import { loadCharacterScheduleStore, removeCharacterScheduleByIds, removeCharacterScheduleForRelations, saveCharacterScheduleEntry, loadUserScheduleStore, removeUserScheduleEntry, saveUserScheduleEntry, loadPeriodStore, removePeriodRecordById, savePeriodRecord } from "./features/schedule/scheduleDataService";
 import { projectAppointmentsToScheduleEntries } from "./domain/schedule/scheduleProjection";
 import type { Appointment } from "./domain/schedule/scheduleTypes";
 import { createCharacterScheduleEntry, type CharacterScheduleEntry } from "./domain/characterLife/scheduleRuntime";
@@ -1006,6 +1006,15 @@ export default function App() {
 
   const handleSavePeriodRecord = (record: PeriodRecord): boolean => {
     const persisted = savePeriodRecord(record);
+    if (!persisted.success) return false;
+    const next = loadPeriodStore().value;
+    periodStoreRef.current = next;
+    setPeriodStore(next);
+    return true;
+  };
+
+  const handleDeletePeriodRecord = (record: PeriodRecord): boolean => {
+    const persisted = removePeriodRecordById(record.id, record.userIdentityId);
     if (!persisted.success) return false;
     const next = loadPeriodStore().value;
     periodStoreRef.current = next;
@@ -5492,6 +5501,7 @@ export default function App() {
                       onSaveUserSchedule={handleSaveUserSchedule}
                       onDeleteCalendarItem={handleDeleteCalendarItem}
                       onSavePeriodRecord={handleSavePeriodRecord}
+                      onDeletePeriodRecord={handleDeletePeriodRecord}
                       onGenerateCharacterSchedule={handleGenerateCharacterSchedule}
                       onOpenChat={(characterId, relationId) => {
                         openChatForCurrentIdentity(characterId, relationId);

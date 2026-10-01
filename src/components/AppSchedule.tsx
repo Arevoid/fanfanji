@@ -25,6 +25,7 @@ interface AppScheduleProps {
   onSaveUserSchedule?: (entry: UserScheduleEntry) => boolean;
   onDeleteCalendarItem?: (item: CalendarViewItem) => boolean;
   onSavePeriodRecord?: (record: PeriodRecord) => boolean;
+  onDeletePeriodRecord?: (record: PeriodRecord) => boolean;
   onGenerateCharacterSchedule?: (input: { characterId: string; relationId?: string; range: "day" | "week" }) => Promise<{ dateKey?: string; count: number }> | { dateKey?: string; count: number };
 }
 
@@ -55,6 +56,7 @@ export default function AppSchedule({
   onSaveUserSchedule,
   onDeleteCalendarItem,
   onSavePeriodRecord,
+  onDeletePeriodRecord,
   onGenerateCharacterSchedule,
 }: AppScheduleProps) {
   const [visibleMonth, setVisibleMonth] = useState(() => {
@@ -187,6 +189,7 @@ export default function AppSchedule({
           onSaveUserSchedule={onSaveUserSchedule}
           onDeleteCalendarItem={onDeleteCalendarItem}
           onSavePeriodRecord={onSavePeriodRecord}
+          onDeletePeriodRecord={onDeletePeriodRecord}
           onGenerateCharacterSchedule={onGenerateCharacterSchedule}
           onClose={onClose}
         />

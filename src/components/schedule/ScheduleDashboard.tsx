@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock3, HeartPulse, Handshake, Plus, RefreshCw, UserRound, UsersRound, X } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock3, HeartPulse, Handshake, Plus, RefreshCw, Trash2, UserRound, UsersRound, X } from "lucide-react";
 import type { Character } from "../../types";
 import type { CharacterScheduleEntry } from "../../domain/characterLife/scheduleRuntime";
 import type { Appointment } from "../../domain/schedule/scheduleTypes";
@@ -11,6 +11,7 @@ import {
   projectCharacterScheduleCalendarItem,
   projectUserScheduleCalendarItem,
 } from "../../domain/schedule/calendarTypes";
+import { getPeriodCalendarPhase, getPeriodCycleStats, getPeriodRecordForDate, periodDaysBetween, type PeriodCalendarPhase, type PeriodPhaseKind } from "../../domain/schedule/periodCycle";
 
 interface ScheduleDashboardProps {
   userIdentityId: string;
@@ -24,6 +25,7 @@ interface ScheduleDashboardProps {
   onSaveUserSchedule?: (entry: UserScheduleEntry) => boolean;
   onDeleteCalendarItem?: (item: CalendarViewItem) => boolean;
   onSavePeriodRecord?: (record: PeriodRecord) => boolean;
+  onDeletePeriodRecord?: (record: PeriodRecord) => boolean;
   onGenerateCharacterSchedule?: (input: { characterId: string; relationId?: string; range: "day" | "week" }) => Promise<{ dateKey?: string; count: number }> | { dateKey?: string; count: number };
   onClose: () => void;
 }
@@ -132,6 +134,7 @@ export default function ScheduleDashboard({
   onSaveUserSchedule,
   onDeleteCalendarItem,
   onSavePeriodRecord,
+  onDeletePeriodRecord,
   onGenerateCharacterSchedule,
   onClose,
 }: ScheduleDashboardProps) {
@@ -151,6 +154,7 @@ export default function ScheduleDashboard({
   const [userAllDay, setUserAllDay] = useState(false);
   const [showCharacterPicker, setShowCharacterPicker] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CalendarViewItem | null>(null);
+  const [periodDeleteTarget, setPeriodDeleteTarget] = useState<PeriodRecord | null>(null);
   const currentWeekStart = useMemo(() => {
     const today = new Date();
     return addDays(today, -((today.getDay() + 6) % 7));
@@ -188,6 +192,21 @@ export default function ScheduleDashboard({
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(currentWeekStart, index)), [currentWeekStart]);
   const selectedCharacter = characters.find((character) => character.id === selectedCharacterId);
   const characterName = (characterId?: string) => characters.find((character) => character.id === characterId)?.remark || characters.find((character) => character.id === characterId)?.name;
+  const todayDateKey = toDateKey(new Date());
+  const periodRecordsForUser = useMemo(() => periodRecords.filter((record) => record.userIdentityId === userIdentityId), [periodRecords, userIdentityId]);
+  const periodStats = useMemo(() => getPeriodCycleStats(periodRecordsForUser), [periodRecordsForUser]);
+  const phaseForDate = (dateKey: string): PeriodCalendarPhase | undefined => getPeriodCalendarPhase(dateKey, periodRecordsForUser, todayDateKey);
+  const selectedPeriodRecord = getPeriodRecordForDate(selectedDate, periodRecordsForUser, todayDateKey);
+  const phaseClass = (kind: PeriodPhaseKind, selected: boolean): string => {
+    if (selected) return "border-2 border-[var(--accent)] bg-[var(--surface)] text-[var(--accent)]";
+    return {
+      menstrual: "bg-rose-500 text-white",
+      predicted_menstrual: "bg-rose-100 text-rose-600",
+      follicular: "bg-amber-50 text-amber-700",
+      ovulation: "bg-violet-100 text-violet-700",
+      luteal: "bg-indigo-100 text-indigo-700",
+    }[kind];
+  };
 
   // When entering a character's calendar, land on the nearest stored item if
   // today is empty. This keeps already-generated schedules visible even when a
@@ -213,7 +232,7 @@ export default function ScheduleDashboard({
 
   const markPeriodStart = () => {
     if (!onSavePeriodRecord) return;
-    const existing = periodRecords.find((record) => record.userIdentityId === userIdentityId && !record.endDate);
+    const existing = periodRecordsForUser.find((record) => !record.endDate);
     const now = Date.now();
     const record: PeriodRecord = existing
       ? { ...existing, startDate: selectedDate, updatedAt: now }
@@ -223,11 +242,23 @@ export default function ScheduleDashboard({
 
   const markPeriodEnd = () => {
     if (!onSavePeriodRecord) return;
-    const existing = periodRecords
-      .filter((record) => record.userIdentityId === userIdentityId && !record.endDate && record.startDate <= selectedDate)
+    const existing = periodRecordsForUser
+      .filter((record) => !record.endDate && record.startDate <= selectedDate)
       .sort((left, right) => right.startDate.localeCompare(left.startDate))[0];
     if (!existing) { notify("没有找到未结束的经期记录"); return; }
     notify(onSavePeriodRecord({ ...existing, endDate: selectedDate, updatedAt: Date.now() }) ? "已标记经期结束" : "经期记录保存失败");
+  };
+
+  const cancelSelectedPeriod = () => {
+    if (!selectedPeriodRecord || !onDeletePeriodRecord) return;
+    setPeriodDeleteTarget(selectedPeriodRecord);
+  };
+
+  const confirmDeletePeriod = () => {
+    if (!periodDeleteTarget || !onDeletePeriodRecord) return;
+    const deleted = onDeletePeriodRecord(periodDeleteTarget);
+    setPeriodDeleteTarget(null);
+    notify(deleted ? "已取消这次经期记录" : "经期记录删除失败，请重试");
   };
 
   const submitUserSchedule = (event: React.FormEvent<HTMLFormElement>) => {
@@ -296,10 +327,18 @@ export default function ScheduleDashboard({
           if (day === null) return <span key={`empty-${index}`} className="h-9" />;
           const dateKey = `${monthYear}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
           const dayItems = items.filter((item) => item.dateKey === dateKey);
-          const periodHit = showPeriod && periodRecords.some((record) => record.userIdentityId === userIdentityId && record.startDate <= dateKey && (!record.endDate || record.endDate >= dateKey));
-          return <button key={dateKey} type="button" onClick={() => setSelectedDate(dateKey)} aria-pressed={selectedDate === dateKey} className="relative flex h-9 items-center justify-center"><span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${selectedDate === dateKey ? "bg-[var(--accent)] text-[var(--accent-contrast)]" : periodHit ? "bg-rose-100 text-rose-700" : "hover:bg-[var(--surface-raised)]"}`}>{day}</span>{dayItems.length > 0 && <span className="absolute bottom-0 flex gap-0.5" aria-hidden="true">{dayItems.slice(0, 3).map((item) => <i key={item.id} className={`h-1 w-1 rounded-full ${categoryClass(item.category).split(" ")[0].replace("bg-", "bg-")}`} />)}</span>}</button>;
+          const phase = showPeriod ? phaseForDate(dateKey) : undefined;
+          const selected = selectedDate === dateKey;
+          const dayClass = phase ? phaseClass(phase.kind, selected) : selected ? "bg-[var(--accent)] text-[var(--accent-contrast)]" : "hover:bg-[var(--surface-raised)]";
+          return <button key={dateKey} type="button" onClick={() => setSelectedDate(dateKey)} aria-pressed={selected} aria-label={phase ? `${dateKey}，${phase.label}${phase.isActual ? "，已记录" : "，预测"}` : dateKey} className="relative flex h-9 items-center justify-center"><span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${dayClass}`}>{day}</span>{dayItems.length > 0 && <span className="absolute bottom-0 flex gap-0.5" aria-hidden="true">{dayItems.slice(0, 3).map((item) => <i key={item.id} className={`h-1 w-1 rounded-full ${categoryClass(item.category).split(" ")[0].replace("bg-", "bg-")}`} />)}</span>}</button>;
         })}
       </div>
+      {showPeriod && <>
+        <div className="mt-4 grid grid-cols-2 gap-x-2 gap-y-2 text-[10px] text-[var(--text-secondary)]">
+          {[{ kind: "menstrual" as const, label: "月经期" }, { kind: "predicted_menstrual" as const, label: "预测经期" }, { kind: "follicular" as const, label: "卵泡期" }, { kind: "ovulation" as const, label: "排卵期" }, { kind: "luteal" as const, label: "黄体期" }].map((item) => <span key={item.kind} className="flex items-center gap-1.5"><i className={`h-2.5 w-2.5 rounded-full ${phaseClass(item.kind, false).split(" ")[0]}`} />{item.label}</span>)}
+        </div>
+        <p className="mt-3 text-[10px] leading-4 text-[var(--text-tertiary)]">{periodRecordsForUser.length > 0 ? `根据近期开始记录估算：周期约 ${periodStats.cycleLength} 天，经期约 ${periodStats.periodLength} 天。预测仅供参考。` : "记录一次经期后，这里会显示卵泡期、排卵期和黄体期预测。"}</p>
+      </>}
     </section>
   );
 
@@ -330,8 +369,29 @@ export default function ScheduleDashboard({
   );
 
   const renderPeriod = () => {
-    const records = periodRecords.filter((record) => record.userIdentityId === userIdentityId);
-    return <main className="flex-1 overflow-y-auto px-4 pb-8">{renderMonthCalendar([], true)}<section className="mt-4 rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-4"><div className="flex items-center justify-between"><h2 className="text-sm font-extrabold">{formatDate(selectedDate)}</h2><HeartPulse className="h-5 w-5 text-rose-500" /></div><div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={markPeriodStart} className="rounded-xl bg-rose-500 px-3 py-3 text-xs font-bold text-white">经期开始</button><button type="button" onClick={markPeriodEnd} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-xs font-bold text-rose-700">经期结束</button></div></section><section className="mt-4 rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-4"><h2 className="text-sm font-extrabold">周期记录</h2>{records.length === 0 ? <p className="mt-3 text-xs text-[var(--text-secondary)]">经期记录只保存在当前身份下。</p> : <div className="mt-3 space-y-2">{records.slice().sort((left, right) => right.startDate.localeCompare(left.startDate)).map((record) => <div key={record.id} className="flex items-center justify-between rounded-xl bg-rose-50 px-3 py-3 text-xs"><span>{record.startDate} - {record.endDate || "进行中"}</span><span className="text-rose-600">{record.endDate ? `${Math.max(1, Math.round((dateFromKey(record.endDate).getTime() - dateFromKey(record.startDate).getTime()) / 86400000) + 1)} 天` : "当前"}</span></div>)}</div>}</section></main>;
+    const selectedPhase = phaseForDate(selectedDate);
+    const selectedDayNumber = selectedPeriodRecord ? periodDaysBetween(selectedPeriodRecord.startDate, selectedDate) + 1 : undefined;
+    const openRecord = periodRecordsForUser.find((record) => !record.endDate && record.startDate <= selectedDate);
+    return <main className="flex-1 overflow-y-auto px-4 pb-8">
+      {renderMonthCalendar([], true)}
+      <section className="mt-4 rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-base font-extrabold">{formatDate(selectedDate)}</h2>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">{selectedPeriodRecord ? `经期第 ${selectedDayNumber} 天` : selectedPhase?.label || "选择日期记录经期"}</p>
+          </div>
+          <HeartPulse className={`h-6 w-6 shrink-0 ${selectedPeriodRecord ? "text-rose-500" : "text-[var(--text-tertiary)]"}`} />
+        </div>
+        <div className="mt-4 flex gap-2">
+          {selectedPeriodRecord ? <button type="button" onClick={cancelSelectedPeriod} className="flex-1 rounded-xl bg-rose-50 px-3 py-3 text-xs font-bold text-rose-700">取消经期</button> : <button type="button" onClick={markPeriodStart} className="flex-1 rounded-xl bg-rose-500 px-3 py-3 text-xs font-bold text-white">标记经期开始</button>}
+          {openRecord && !selectedPeriodRecord && <button type="button" onClick={markPeriodEnd} className="flex-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-xs font-bold text-rose-700">标记经期结束</button>}
+        </div>
+      </section>
+      <section className="mt-4 rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-4">
+        <div className="flex items-center justify-between"><h2 className="text-sm font-extrabold">周期记录</h2><span className="text-[10px] text-[var(--text-tertiary)]">{periodRecordsForUser.length} 条</span></div>
+        {periodRecordsForUser.length === 0 ? <p className="mt-3 text-xs text-[var(--text-secondary)]">还没有经期记录。选择开始日期即可添加。</p> : <div className="mt-3 space-y-2">{periodRecordsForUser.slice().sort((left, right) => right.startDate.localeCompare(left.startDate)).map((record) => { const duration = record.endDate ? `${Math.max(1, periodDaysBetween(record.startDate, record.endDate) + 1)} 天` : "进行中"; return <div key={record.id} className="flex items-center justify-between gap-3 rounded-xl bg-rose-50 px-3 py-3 text-xs"><button type="button" onClick={() => setSelectedDate(record.startDate)} className="min-w-0 flex-1 text-left"><span className="block font-bold text-rose-700">{record.startDate} - {record.endDate || "进行中"}</span><span className="mt-1 block text-rose-600">{duration}</span></button>{onDeletePeriodRecord && <button type="button" onClick={() => setPeriodDeleteTarget(record)} aria-label={`删除周期记录 ${record.startDate}`} className="rounded-full p-2 text-rose-500 hover:bg-rose-100"><Trash2 className="h-4 w-4" /></button>}</div>; })}</div>}
+      </section>
+    </main>;
   };
 
   const renderAppointments = () => <main className="flex-1 overflow-y-auto px-4 pb-8">{renderMonthCalendar(scopedAppointments)}<section className="mt-4"><h2 className="px-1 text-sm font-extrabold">{formatDate(selectedDate)}</h2>{renderTimeline(scopedAppointments, "这一天还没有已确认的见面约定")}</section></main>;
@@ -355,6 +415,18 @@ export default function ScheduleDashboard({
         <div className="grid grid-cols-2 border-t border-[var(--border)]">
           <button type="button" onClick={() => setDeleteTarget(null)} className="py-3.5 text-sm text-[var(--text-secondary)]">取消</button>
           <button type="button" onClick={confirmDelete} className="border-l border-[var(--border)] py-3.5 text-sm font-semibold text-rose-500">删除</button>
+        </div>
+      </div>
+    </div>}
+    {periodDeleteTarget && <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/45 px-5 backdrop-blur-[2px]" role="presentation" onClick={() => setPeriodDeleteTarget(null)}>
+      <div className="w-full max-w-[320px] overflow-hidden rounded-[14px] bg-[var(--surface)] shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="period-delete-title" onClick={(event) => event.stopPropagation()}>
+        <div className="px-6 pb-5 pt-6 text-center">
+          <h2 id="period-delete-title" className="text-base font-extrabold text-[var(--text-primary)]">取消这次经期？</h2>
+          <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">取消后，已记录的经期天数和相关预测会重新计算。</p>
+        </div>
+        <div className="grid grid-cols-2 border-t border-[var(--border)]">
+          <button type="button" onClick={() => setPeriodDeleteTarget(null)} className="py-3.5 text-sm text-[var(--text-secondary)]">保留</button>
+          <button type="button" onClick={confirmDeletePeriod} className="border-l border-[var(--border)] py-3.5 text-sm font-semibold text-rose-500">取消经期</button>
         </div>
       </div>
     </div>}

@@ -31,8 +31,16 @@ export const savePeriodRecord = (record: PeriodRecord): StorageWriteResult => {
   });
 };
 
+export const removePeriodRecordById = (recordId: string, userIdentityId?: string): StorageWriteResult => {
+  const current = loadPeriodStore().value;
+  const nextRecords = current.records.filter((record) => !(record.id === recordId && (!userIdentityId || record.userIdentityId === userIdentityId)));
+  if (nextRecords.length === current.records.length) return { success: false, error: "missing" };
+  return savePeriodStore({ ...current, records: nextRecords });
+};
+
 export const periodRepository = {
   load: loadPeriodStore,
   save: savePeriodStore,
   saveRecord: savePeriodRecord,
+  removeById: removePeriodRecordById,
 };

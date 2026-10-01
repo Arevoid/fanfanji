@@ -7,6 +7,7 @@ import {
 } from "../../core/storage/repositories/characterScheduleRepository";
 import {
   loadPeriodStore,
+  removePeriodRecordById,
   savePeriodRecord,
 } from "../../core/storage/repositories/periodRepository";
 import {
@@ -23,6 +24,7 @@ export {
   removeCharacterScheduleForRelations,
   saveCharacterScheduleEntry,
   loadPeriodStore,
+  removePeriodRecordById,
   savePeriodRecord,
   loadUserScheduleStore,
   removeUserScheduleEntry,
