@@ -52,6 +52,8 @@ export interface Character {
   enableProactiveChat?: boolean;
   /** Whether this contact may occasionally start an incoming voice call. */
   enableProactiveCall?: boolean;
+  /** Show local sticker recommendations while typing in this chat. */
+  enableStickerAssociation?: boolean;
   proactiveChatInterval?: number;
   proactiveStartTime?: string;
   proactiveEndTime?: string;

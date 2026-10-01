@@ -31,6 +31,7 @@ interface UseChatSaveSettingsOptions {
   draftChatIcons: any;
   draftChatStylePreset: any;
   draftEnableProactiveCall: any;
+  draftEnableStickerAssociation: any;
   draftProactiveChatInterval: any;
   draftDisableBracketActions: any;
   draftHistoryMemoryLimit: any;
@@ -67,7 +68,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
   const {
     draftEnableAutoTranslate, draftEnableProactiveChat, draftProactiveStartTime, draftProactiveEndTime,
     draftEnableProactiveOffline, draftRemark, draftAvatar, draftIsPinned, draftGroupMemorySyncEnabled, draftChatBg, draftCustomCss,
-    draftChatIcons, draftChatStylePreset, draftEnableProactiveCall, draftProactiveChatInterval,
+    draftChatIcons, draftChatStylePreset, draftEnableProactiveCall, draftEnableStickerAssociation, draftProactiveChatInterval,
     draftDisableBracketActions, draftHistoryMemoryLimit, draftContextMemoryLimit, draftRetrievalHistoryLimit,
     draftArchiveTemplateType, draftEnableTimeAwareness,
     draftMinimaxVoiceId, draftMosslandVoiceId, draftMinimaxSpeed, draftVoiceFrequency,
@@ -117,6 +118,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
       ...(activeCharacter.isGroupChat ? {} : {
         enableProactiveChat: draftEnableProactiveChat,
         enableProactiveCall: draftEnableProactiveCall,
+        enableStickerAssociation: draftEnableStickerAssociation,
         proactiveChatInterval: draftProactiveChatInterval,
         proactiveStartTime: draftProactiveStartTime,
         proactiveEndTime: draftProactiveEndTime,

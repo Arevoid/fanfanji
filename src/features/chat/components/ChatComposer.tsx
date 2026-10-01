@@ -2,6 +2,8 @@ import { useState, type ReactNode } from "react";
 import type { FormEvent } from "react";
 import { ArrowUp, Plus, Send, Square } from "lucide-react";
 import ChatIcon from "../../../components/ChatIcon";
+import type { Sticker, StickerGroup } from "../../../types";
+import { getStickerRecommendations } from "../services/stickerAssociation";
 
 interface ChatComposerProps {
   className: string;
@@ -23,6 +25,9 @@ interface ChatInputBarProps {
   onToggleAttach: () => void;
   onSendOnly: (inputText: string, event?: FormEvent) => void | Promise<void>;
   onSendAndReply: (inputText: string, event?: FormEvent) => void | Promise<void>;
+  stickerGroups?: readonly StickerGroup[];
+  stickerAssociationEnabled?: boolean;
+  onSelectSticker?: (sticker: Sticker) => void | Promise<void>;
   onStopReply: () => void;
   getChatIcon: (key: "plus" | "sendOnly" | "sendReply" | "stop") => string | undefined;
 }
@@ -54,11 +59,17 @@ export function ChatInputBar({
   onToggleAttach,
   onSendOnly,
   onSendAndReply,
+  stickerGroups = [],
+  stickerAssociationEnabled = false,
+  onSelectSticker,
   onStopReply,
   getChatIcon,
 }: ChatInputBarProps) {
   const [inputText, setInputText] = useState("");
   const hasText = inputText.trim().length > 0;
+  const stickerRecommendations = stickerAssociationEnabled
+    ? getStickerRecommendations(stickerGroups, inputText)
+    : [];
 
   const submitOnly = (event?: FormEvent) => {
     if (event) event.preventDefault();
@@ -77,18 +88,45 @@ export function ChatInputBar({
   };
 
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        // Some mobile browsers submit the surrounding form when the IME
-        // action is pressed even though the textarea keydown did not expose a
-        // normal `Enter` event. In newline mode this must remain an editing
-        // action, never a send action.
-        if (chatEnterKeyNewline) return;
-        submitOnly(event);
-      }}
-      className="w-full min-w-0 max-w-full box-border px-3 py-2 flex items-center gap-2 chat-composer__form"
-    >
+    <div className="w-full min-w-0">
+      {stickerRecommendations.length > 0 && (
+        <div
+          className="flex gap-2 overflow-x-auto border-t border-slate-100 bg-white/95 px-3 py-2.5 scrollbar-none animate-slide-up"
+          aria-label="表情包推荐"
+        >
+          {stickerRecommendations.map((sticker) => (
+            <button
+              key={sticker.id}
+              type="button"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => {
+                if (!onSelectSticker) return;
+                void onSelectSticker(sticker);
+                setInputText("");
+              }}
+              className="flex w-[72px] shrink-0 flex-col items-center gap-1 rounded-xl border border-slate-200 bg-white p-1.5 text-[10px] text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 active:scale-95"
+              aria-label={`发送表情包：${sticker.name}`}
+            >
+              <span className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg bg-slate-50">
+                <img src={sticker.url} alt="" className="h-full w-full object-contain" referrerPolicy="no-referrer" />
+              </span>
+              <span className="w-full truncate text-center font-medium">{sticker.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          // Some mobile browsers submit the surrounding form when the IME
+          // action is pressed even though the textarea keydown did not expose a
+          // normal `Enter` event. In newline mode this must remain an editing
+          // action, never a send action.
+          if (chatEnterKeyNewline) return;
+          submitOnly(event);
+        }}
+        className="w-full min-w-0 max-w-full box-border px-3 py-2 flex items-center gap-2 chat-composer__form"
+      >
       <button
         type="button"
         onClick={onToggleAttach}
@@ -145,6 +183,7 @@ export function ChatInputBar({
             : <ChatIcon src={getChatIcon("sendReply")} className="w-3.5 h-3.5"><Send className="w-3.5 h-3.5 fill-current text-current" /></ChatIcon>}
         </span>
       </button>
-    </form>
+      </form>
+    </div>
   );
 }

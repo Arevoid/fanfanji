@@ -20,6 +20,7 @@ export function useChatSettingsDraft() {
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
   const [draftEnableProactiveOffline, setDraftEnableProactiveOffline] = useState(false);
   const [draftEnableProactiveCall, setDraftEnableProactiveCall] = useState(false);
+  const [draftEnableStickerAssociation, setDraftEnableStickerAssociation] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
   const [draftProactiveStartTime, setDraftProactiveStartTime] = useState("09:00");
   const [draftProactiveEndTime, setDraftProactiveEndTime] = useState("22:00");
@@ -54,6 +55,7 @@ export function useChatSettingsDraft() {
     setDraftEnableProactiveChat(character.enableProactiveChat || false);
     setDraftEnableProactiveOffline(isProactiveOfflineEnabled(relationship));
     setDraftEnableProactiveCall(character.enableProactiveCall || false);
+    setDraftEnableStickerAssociation(character.enableStickerAssociation === true);
     setDraftProactiveChatInterval(character.proactiveChatInterval || 3);
     setDraftProactiveStartTime(character.proactiveStartTime || "09:00");
     setDraftProactiveEndTime(character.proactiveEndTime || "22:00");
@@ -87,6 +89,7 @@ export function useChatSettingsDraft() {
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
     draftEnableProactiveCall, setDraftEnableProactiveCall,
+    draftEnableStickerAssociation, setDraftEnableStickerAssociation,
     draftProactiveChatInterval, setDraftProactiveChatInterval, draftProactiveStartTime, setDraftProactiveStartTime,
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
     draftHistoryMemoryLimit, setDraftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,

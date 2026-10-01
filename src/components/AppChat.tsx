@@ -1859,6 +1859,7 @@ export default function AppChat({
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
     draftEnableProactiveCall, setDraftEnableProactiveCall,
+    draftEnableStickerAssociation, setDraftEnableStickerAssociation,
     draftProactiveChatInterval, draftProactiveStartTime, setDraftProactiveStartTime,
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
     draftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
@@ -4693,6 +4694,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     draftChatIcons,
     draftChatStylePreset,
     draftEnableProactiveCall,
+    draftEnableStickerAssociation,
     draftProactiveChatInterval,
     draftDisableBracketActions,
     draftHistoryMemoryLimit,
@@ -8216,6 +8218,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       </div>
                       <SettingsSwitch checked={draftEnableProactiveCall} onChange={setDraftEnableProactiveCall} label="主动来电" />
                     </div>}
+
+                    {!activeCharacter.isGroupChat && <div className="flex h-[52px] px-4 items-center justify-between gap-3 border-t border-slate-100">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-slate-800 font-medium text-[16px] block">表情包联想</span>
+                      </div>
+                      <SettingsSwitch checked={draftEnableStickerAssociation} onChange={setDraftEnableStickerAssociation} label="表情包联想" />
+                    </div>}
                   </div>
                 </div>
 
@@ -9823,6 +9832,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               }}
               onSendOnly={handleSendOnly}
               onSendAndReply={handleSendAndReply}
+              stickerGroups={stickerGroups}
+              stickerAssociationEnabled={activeCharacter.enableStickerAssociation === true}
+              onSelectSticker={(sticker) => sendStickerMessage(sticker)}
               onStopReply={stopReply}
               getChatIcon={(key) => getChatIcon(key)}
             />
