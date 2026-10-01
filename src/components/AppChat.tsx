@@ -7202,6 +7202,32 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 border-color: var(--chat-input-focus-border, var(--accent));
                 box-shadow: var(--chat-input-focus-shadow, 0 0 0 2px var(--focus-ring));
               }
+              #conv-screen .chat-composer__sticker-recommendations {
+                box-sizing: border-box;
+                margin-inline: 0;
+                padding-left: 0;
+                padding-right: 0;
+                background: var(--chat-input-bg, var(--input-bg));
+                color: var(--chat-input-text, var(--text-primary));
+                border-top: var(--chat-input-border-width, 1px) solid var(--chat-input-border, var(--border));
+                border-bottom: var(--chat-input-border-width, 1px) solid var(--chat-input-border, var(--border));
+              }
+              #conv-screen .chat-composer__sticker-recommendation {
+                box-sizing: border-box;
+                background: var(--chat-input-bg, var(--input-bg));
+                color: var(--chat-input-text, var(--text-primary));
+                border: var(--chat-input-border-width, 1px) solid var(--chat-input-border, var(--border));
+                box-shadow: var(--chat-input-shadow, none);
+              }
+              #conv-screen .chat-composer__sticker-recommendation:hover {
+                border-color: var(--chat-input-focus-border, var(--accent));
+              }
+              #conv-screen .chat-composer__sticker-recommendation > span {
+                color: var(--chat-input-text, var(--text-primary));
+              }
+              #conv-screen .chat-composer__sticker-thumbnail {
+                background: var(--chat-input-bg, var(--input-bg));
+              }
               #conv-screen .chat-composer__button {
                 flex: 0 0 auto !important;
                 border: var(--chat-button-border-width, 1px) solid var(--chat-button-border, var(--border));
