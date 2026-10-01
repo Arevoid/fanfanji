@@ -8238,14 +8238,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       )}
                     </div>}
 
-                    {!activeCharacter.isGroupChat && <div className={`flex h-[52px] px-4 items-center justify-between gap-3 ${draftEnableProactiveChat ? "" : "border-t border-slate-100"}`}>
+                    {!activeCharacter.isGroupChat && <div className="flex h-[52px] px-4 items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <span className="text-slate-800 font-medium text-[16px] block">主动来电</span>
                       </div>
                       <SettingsSwitch checked={draftEnableProactiveCall} onChange={setDraftEnableProactiveCall} label="主动来电" />
                     </div>}
 
-                    {!activeCharacter.isGroupChat && <div className="flex h-[52px] px-4 items-center justify-between gap-3 border-t border-slate-100">
+                    {!activeCharacter.isGroupChat && <div className="flex h-[52px] px-4 items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <span className="text-slate-800 font-medium text-[16px] block">表情包联想</span>
                       </div>
