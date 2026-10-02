@@ -5,6 +5,7 @@ import { buildProactiveOfflineInvitationPrompt } from "../src/features/chat/prom
 import { parseProactiveOfflineInvitationDirective } from "../src/features/chat/services/proactiveOfflineInvitationProtocol";
 
 const now = new Date("2026-08-13T12:00:00+08:00").getTime();
+const timeZone = "Asia/Shanghai";
 const prompt = buildProactiveOfflineInvitationPrompt({ allowedModes: ["scheduled"], now, timeZone: "Asia/Shanghai" });
 assert.match(prompt, /不是要求你必须邀请/);
 assert.match(prompt, /不得声称用户已答应/);
@@ -15,7 +16,7 @@ assert.match(explicitPrompt, /用户本轮明确要求发起线下邀约/);
 assert.match(explicitPrompt, /不要在可见聊天里复述“测试坐标”/);
 
 const raw = `我周日上午坐车过去找你，要不要一起吃饭？\n[[OFFLINE_INVITATION]]\n{"mode":"scheduled","startAt":"2026-08-16T10:00:00+08:00","timePrecision":"morning","activity":"一起吃饭","location":"市中心","traveler":"character","transport":"坐车"}\n[[/OFFLINE_INVITATION]]`;
-const parsed = parseProactiveOfflineInvitationDirective({ text: raw, allowedModes: ["scheduled"], now });
+const parsed = parseProactiveOfflineInvitationDirective({ text: raw, allowedModes: ["scheduled"], now, timeZone });
 assert.equal(parsed.visibleText, "我周日上午坐车过去找你，要不要一起吃饭？");
 assert.equal(parsed.directive?.mode, "scheduled");
 assert.equal(parsed.directive?.startAt, new Date("2026-08-16T10:00:00+08:00").getTime());
@@ -25,6 +26,7 @@ const missingBlock = parseProactiveOfflineInvitationDirective({
   userText: "请发起一次明天晚上 20:00、在附近咖啡厅见面的未来时间线下邀约。",
   allowedModes: ["scheduled"],
   now,
+  timeZone,
 });
 assert.equal(missingBlock.directive?.mode, "scheduled");
 assert.equal(missingBlock.directive?.timePrecision, "exact");
@@ -36,6 +38,7 @@ const malformedButConfirmed = parseProactiveOfflineInvitationDirective({
   userText: "请发起一次明天晚上 20:00、在附近咖啡厅见面的未来时间线下邀约。",
   allowedModes: ["scheduled"],
   now,
+  timeZone,
 });
 assert.equal(malformedButConfirmed.directive?.mode, "scheduled");
 
@@ -44,6 +47,7 @@ const unsolicited = parseProactiveOfflineInvitationDirective({
   userText: "我今天也在想你。",
   allowedModes: ["scheduled"],
   now,
+  timeZone,
 });
 assert.equal(unsolicited.directive, undefined);
 
@@ -60,20 +64,20 @@ assert.equal(appointment.confirmedAt, undefined);
 assert.equal(appointment.proposals[0].proposedBy, "character");
 assert.ok(normalizeAppointment(appointment));
 
-const disallowed = parseProactiveOfflineInvitationDirective({ text: raw.replace('"scheduled"', '"immediate"'), allowedModes: ["scheduled"], now });
+const disallowed = parseProactiveOfflineInvitationDirective({ text: raw.replace('"scheduled"', '"immediate"'), allowedModes: ["scheduled"], now, timeZone });
 assert.equal(disallowed.directive, undefined);
 assert.equal(disallowed.error, "invalid_directive");
 assert.doesNotMatch(disallowed.visibleText, /OFFLINE_INVITATION/);
 
-const past = parseProactiveOfflineInvitationDirective({ text: raw.replace("2026-08-16T10:00:00+08:00", "2026-08-12T10:00:00+08:00"), allowedModes: ["scheduled"], now });
+const past = parseProactiveOfflineInvitationDirective({ text: raw.replace("2026-08-16T10:00:00+08:00", "2026-08-12T10:00:00+08:00"), allowedModes: ["scheduled"], now, timeZone });
 assert.equal(past.error, "invalid_directive");
 
-const malformed = parseProactiveOfflineInvitationDirective({ text: "正常聊天\n[[OFFLINE_INVITATION]]\n{bad json}\n[[/OFFLINE_INVITATION]]", allowedModes: ["scheduled"], now });
+const malformed = parseProactiveOfflineInvitationDirective({ text: "正常聊天\n[[OFFLINE_INVITATION]]\n{bad json}\n[[/OFFLINE_INVITATION]]", allowedModes: ["scheduled"], now, timeZone });
 assert.deepEqual(malformed, { visibleText: "正常聊天", error: "malformed_json" });
-const incomplete = parseProactiveOfflineInvitationDirective({ text: "正常聊天\n[[OFFLINE_INVITATION]]\n{bad", allowedModes: ["scheduled"], now });
+const incomplete = parseProactiveOfflineInvitationDirective({ text: "正常聊天\n[[OFFLINE_INVITATION]]\n{bad", allowedModes: ["scheduled"], now, timeZone });
 assert.equal(incomplete.visibleText, "正常聊天");
 assert.equal(incomplete.directive, undefined);
-const duplicate = parseProactiveOfflineInvitationDirective({ text: `${raw}\n${raw}`, allowedModes: ["scheduled"], now });
+const duplicate = parseProactiveOfflineInvitationDirective({ text: `${raw}\n${raw}`, allowedModes: ["scheduled"], now, timeZone });
 assert.equal(duplicate.error, "multiple_directives");
 assert.doesNotMatch(duplicate.visibleText, /OFFLINE_INVITATION/);
 assert.throws(() => createProactiveAppointment({

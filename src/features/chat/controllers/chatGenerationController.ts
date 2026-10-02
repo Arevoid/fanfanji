@@ -318,7 +318,7 @@ export function generateProactiveChatTurn(input: {
   prompt: PromptInput; settings: UserSettings; characterId: string; disableBracketActions: boolean;
   keepPeriods: boolean; createId: (index: number) => string; currentTime: (index: number) => number;
   transformBubble?: (bubbleText: string, index: number) => string; replyBatchId?: string; cognitiveContext?: CharacterCognitiveContext; requestAi?: RequestAi;
-  proactiveOfflineAllowedModes?: readonly AppointmentMode[]; directiveNow?: number;
+  proactiveOfflineAllowedModes?: readonly AppointmentMode[]; directiveNow?: number; timeZone?: string;
 }) {
   return generateProactiveReplyCandidates({
     requestAi: input.requestAi || apiChat,
@@ -336,6 +336,7 @@ export function generateProactiveChatTurn(input: {
     replyBatchId: input.replyBatchId,
     proactiveOfflineAllowedModes: input.proactiveOfflineAllowedModes,
     directiveNow: input.directiveNow,
+    timeZone: input.timeZone,
     cognitiveContext: input.cognitiveContext,
   });
 }

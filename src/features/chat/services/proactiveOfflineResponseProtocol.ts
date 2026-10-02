@@ -3,6 +3,7 @@ import {
   getCurrentAppointmentProposal,
   transitionAppointment,
 } from "../../../domain/schedule/appointmentPolicy";
+import { addCalendarDays, getZonedDateTimeParts, zonedDateTimeToTimestamp } from "../../../domain/schedule/zonedDateTime";
 import type {
   Appointment,
   AppointmentActor,
@@ -64,17 +65,17 @@ const parseStartAt = (value: unknown): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
-const resolveCounterTime = (text: string, now: number, previousStartAt?: number): { startAt?: number; timePrecision: AppointmentTimePrecision } | undefined => {
+const resolveCounterTime = (text: string, now: number, previousStartAt?: number, timeZone?: string): { startAt?: number; timePrecision: AppointmentTimePrecision } | undefined => {
   const dayReference = text.match(/今天|今晚|明天|明晚|后天/u)?.[0];
   const weekdayReference = text.match(/(?:周|星期)([一二三四五六日天])/u)?.[1];
   const timeMatch = text.match(/(\d{1,2})(?::|：|点|时)(\d{1,2})?(?:分)?/u);
   if (!dayReference && !weekdayReference && !timeMatch) return undefined;
-  const date = new Date(now);
+  const current = getZonedDateTimeParts(now, timeZone);
   const weekdayIndex: Record<string, number> = { 日: 0, 天: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
   const dayOffset = dayReference === "后天" ? 2 : dayReference === "明天" || dayReference === "明晚" ? 1 : weekdayReference
-    ? (weekdayIndex[weekdayReference] - date.getDay() + 7) % 7 || 7
+    ? (weekdayIndex[weekdayReference] - new Date(Date.UTC(current.year, current.month - 1, current.day)).getUTCDay() + 7) % 7 || 7
     : 0;
-  date.setDate(date.getDate() + dayOffset);
+  const date = addCalendarDays(current, dayOffset);
   if (!timeMatch) {
     const period = /晚上|明晚|今晚/u.test(text) ? "evening"
       : /下午/u.test(text) ? "afternoon"
@@ -82,9 +83,11 @@ const resolveCounterTime = (text: string, now: number, previousStartAt?: number)
           : dayReference || weekdayReference ? "date_only" : undefined;
     if (!period) return undefined;
     if (previousStartAt !== undefined) {
-      const previous = new Date(previousStartAt);
-      date.setHours(previous.getHours(), previous.getMinutes(), 0, 0);
-      return { startAt: date.getTime(), timePrecision: period === "date_only" ? "exact" : period };
+      const previous = getZonedDateTimeParts(previousStartAt, timeZone);
+      return {
+        startAt: zonedDateTimeToTimestamp({ ...date, hour: previous.hour, minute: previous.minute, second: 0, millisecond: 0 }, timeZone),
+        timePrecision: period === "date_only" ? "exact" : period,
+      };
     }
     return { timePrecision: period };
   }
@@ -92,8 +95,7 @@ const resolveCounterTime = (text: string, now: number, previousStartAt?: number)
   const minute = Number(timeMatch[2] || 0);
   if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour > 23 || minute > 59) return undefined;
   if (/(晚上|明晚|今晚)/u.test(text) && hour < 12) hour += 12;
-  date.setHours(hour, minute, 0, 0);
-  const startAt = date.getTime();
+  const startAt = zonedDateTimeToTimestamp({ ...date, hour, minute, second: 0, millisecond: 0 }, timeZone);
   return Number.isFinite(startAt) ? { startAt, timePrecision: "exact" } : undefined;
 };
 
@@ -102,12 +104,13 @@ const deriveCounterFallback = (input: {
   appointment: Appointment;
   latestUserText: string;
   now: number;
+  timeZone?: string;
 }): ProactiveOfflineResponseDirective | undefined => {
   if (!COUNTER_CHANGE_EVIDENCE.test(input.latestUserText) || !CHARACTER_COUNTER_CONFIRMATION_EVIDENCE.test(input.text)) return undefined;
   const previous = getCurrentAppointmentProposal(input.appointment);
   const location = input.latestUserText.match(/(?:地点|地方)\s*(?:改成|改为|换成|是|为)?\s*([^，。！？,!?]+?)(?:见面|碰面|会面|集合|见|吧|。|！|！|$)/u)?.[1]?.trim()
     || input.latestUserText.match(/(?:在|去|到)\s*([^，。！？,!?]+?)(?:见面|碰面|会面|集合|见)/u)?.[1]?.trim();
-  const timing = resolveCounterTime(input.latestUserText, input.now, previous?.startAt)
+  const timing = resolveCounterTime(input.latestUserText, input.now, previous?.startAt, input.timeZone)
     || (location && previous?.startAt !== undefined
       ? { startAt: previous.startAt, timePrecision: previous.timePrecision as AppointmentTimePrecision }
       : undefined);
@@ -180,6 +183,8 @@ export function parseProactiveOfflineResponseDirective(input: {
   appointment?: Appointment;
   latestUserText: string;
   now?: number;
+  /** IANA timezone used for relative natural-language dates. */
+  timeZone?: string;
 }): ProactiveOfflineResponseParseResult {
   const completePattern = /\[\[OFFLINE_RESPONSE\]\]([\s\S]*?)\[\[\/OFFLINE_RESPONSE\]\]/g;
   const matches = [...input.text.matchAll(completePattern)];
@@ -194,6 +199,7 @@ export function parseProactiveOfflineResponseDirective(input: {
       appointment: input.appointment,
       latestUserText: input.latestUserText,
       now: input.now ?? Date.now(),
+      timeZone: input.timeZone,
     });
     return fallback ? { visibleText, directive: fallback } : { visibleText };
   }
@@ -212,6 +218,7 @@ export function parseProactiveOfflineResponseDirective(input: {
       appointment: input.appointment,
       latestUserText: input.latestUserText,
       now: input.now ?? Date.now(),
+      timeZone: input.timeZone,
     });
     return fallback ? { visibleText, directive: fallback } : { visibleText, error: "invalid_directive" };
   } catch {
@@ -220,6 +227,7 @@ export function parseProactiveOfflineResponseDirective(input: {
       appointment: input.appointment,
       latestUserText: input.latestUserText,
       now: input.now ?? Date.now(),
+      timeZone: input.timeZone,
     });
     return fallback ? { visibleText, directive: fallback } : { visibleText, error: "malformed_json" };
   }
@@ -232,6 +240,8 @@ export function applyProactiveOfflineResponse(input: {
   characterMessageId?: string;
   now?: number;
   latestUserText?: string;
+  /** IANA timezone used when resolving a date-only counter proposal. */
+  timeZone?: string;
 }): Appointment | undefined {
   if (input.appointment.id !== input.directive.appointmentId) return undefined;
   const now = input.now ?? Date.now();
@@ -250,7 +260,7 @@ export function applyProactiveOfflineResponse(input: {
   const resolvedTiming = input.directive.startAt === undefined
     && input.directive.timePrecision === "date_only"
     && input.latestUserText
-    ? resolveCounterTime(input.latestUserText, now, previous?.startAt)
+    ? resolveCounterTime(input.latestUserText, now, previous?.startAt, input.timeZone)
     : undefined;
   const startAt = input.directive.startAt ?? resolvedTiming?.startAt;
   const timePrecision = startAt !== undefined && input.directive.timePrecision === "date_only"

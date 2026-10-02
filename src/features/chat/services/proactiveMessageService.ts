@@ -24,6 +24,7 @@ export async function generateProactiveReplyCandidates(input: {
   replyBatchId?: string;
   proactiveOfflineAllowedModes?: readonly AppointmentMode[];
   directiveNow?: number;
+  timeZone?: string;
   /** Relation-scoped snapshot; only its ProactivePromptAdapter projection reaches the request. */
   cognitiveContext?: CharacterCognitiveContext | ProactiveCognitiveContext;
 }): Promise<{ data: Awaited<ReturnType<typeof import("../../../utils/apiHelper").apiChat>>; messages: Message[]; proactiveOfflineDirective?: ProactiveOfflineInvitationDirective; proactiveAction?: ProactiveActionDirective }> {
@@ -43,6 +44,7 @@ export async function generateProactiveReplyCandidates(input: {
     text: actionParsed.visibleText,
     allowedModes: input.proactiveOfflineAllowedModes || [],
     now: input.directiveNow,
+    timeZone: input.timeZone,
   });
   const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(stripOuterDialogueQuotes(cleanAiReplyText(parsed.visibleText, input.disableBracketActions))));
   // Internal scheduling metadata is model context, never user-visible chat.

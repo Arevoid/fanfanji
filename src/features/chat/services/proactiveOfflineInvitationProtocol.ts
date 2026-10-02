@@ -1,4 +1,5 @@
 import type { AppointmentActor, AppointmentMode, AppointmentTimePrecision } from "../../../domain/schedule/scheduleTypes";
+import { addCalendarDays, getZonedDateTimeParts, zonedDateTimeToTimestamp } from "../../../domain/schedule/zonedDateTime";
 import { PROACTIVE_OFFLINE_DIRECTIVE_END, PROACTIVE_OFFLINE_DIRECTIVE_START } from "../prompts/proactiveOfflineInvitationPrompt";
 
 const TIME_PRECISIONS = new Set<AppointmentTimePrecision>(["exact", "morning", "afternoon", "evening", "date_only", "undetermined"]);
@@ -43,6 +44,7 @@ const deriveExplicitRequestFallback = (input: {
   userText?: string;
   allowedModes: readonly AppointmentMode[];
   now: number;
+  timeZone?: string;
 }): ProactiveOfflineInvitationDirective | undefined => {
   const userText = input.userText?.trim();
   if (!userText || !input.allowedModes.length) return undefined;
@@ -74,10 +76,8 @@ const deriveExplicitRequestFallback = (input: {
     let hour = Number(timeMatch[1]);
     const minute = Number(timeMatch[2] || 0);
     if (/(?:下午|傍晚|晚上|晚间)/u.test(timeMatch[0]) && hour < 12) hour += 12;
-    const date = new Date(input.now);
-    date.setDate(date.getDate() + dayOffset);
-    date.setHours(hour, minute, 0, 0);
-    startAt = date.getTime();
+    const date = addCalendarDays(getZonedDateTimeParts(input.now, input.timeZone), dayOffset);
+    startAt = zonedDateTimeToTimestamp({ ...date, hour, minute, second: 0, millisecond: 0 }, input.timeZone);
     timePrecision = "exact";
   } else if (/(?:早上|上午)/u.test(userText)) {
     timePrecision = "morning";
@@ -152,6 +152,8 @@ export function parseProactiveOfflineInvitationDirective(input: {
   text: string;
   allowedModes: readonly AppointmentMode[];
   now?: number;
+  /** IANA timezone used for relative natural-language dates. */
+  timeZone?: string;
   /** User-authored request used only for the narrow missing-block fallback. */
   userText?: string;
 }): ProactiveOfflineDirectiveParseResult {
@@ -168,6 +170,7 @@ export function parseProactiveOfflineInvitationDirective(input: {
       userText: input.userText,
       allowedModes: input.allowedModes,
       now: input.now ?? Date.now(),
+      timeZone: input.timeZone,
     });
     return fallback ? { visibleText, directive: fallback } : { visibleText };
   }
@@ -181,6 +184,7 @@ export function parseProactiveOfflineInvitationDirective(input: {
       userText: input.userText,
       allowedModes: input.allowedModes,
       now: input.now ?? Date.now(),
+      timeZone: input.timeZone,
     });
     return fallback ? { visibleText, directive: fallback } : { visibleText, error: "invalid_directive" };
   } catch {
@@ -189,6 +193,7 @@ export function parseProactiveOfflineInvitationDirective(input: {
       userText: input.userText,
       allowedModes: input.allowedModes,
       now: input.now ?? Date.now(),
+      timeZone: input.timeZone,
     });
     return fallback ? { visibleText, directive: fallback } : { visibleText, error: "malformed_json" };
   }

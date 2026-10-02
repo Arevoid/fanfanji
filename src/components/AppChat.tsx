@@ -3558,6 +3558,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             appointment: pendingProactiveOfflineAppointment,
             latestUserText: userMsg?.sender === "user" ? userMsg.content : "",
             now: Date.now(),
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           });
           data.text = proactiveOfflineResponseParse.visibleText;
           proactiveOfflineParse = parseProactiveOfflineInvitationDirective({
@@ -3571,6 +3572,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               ? ["immediate", "scheduled"]
               : proactiveOfflineAllowedModes,
             now: Date.now(),
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             userText: userMsg?.sender === "user" ? userMsg.content : undefined,
           });
           data.text = proactiveOfflineParse.visibleText;
@@ -3816,6 +3818,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               characterMessageId: createdMessages[0].id,
               now: createdMessages[0].timestamp,
               latestUserText: userMsg.content,
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             });
             if (!updatedAppointment || !onSaveAppointment?.(updatedAppointment)) console.warn("Proactive offline response could not be persisted.");
           }
@@ -3833,6 +3836,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               text: createdMessages.map((message) => message.content).join("\n"),
               allowedModes: ["immediate", "scheduled"],
               now: createdMessages[0]?.timestamp ?? Date.now(),
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
               userText: userMsg.content,
             })
             : undefined;
@@ -5328,6 +5332,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         cognitiveContext,
         proactiveOfflineAllowedModes,
         directiveNow: Date.now(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         transformBubble: (bubbleText, idx) => {
           const isVoice = canConvertBubbleToVoice(friend, null, charMsgs, idx, bubbleText, proactiveReplyContext);
           if (!isVoice) return bubbleText;
