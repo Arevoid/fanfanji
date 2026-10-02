@@ -11,4 +11,8 @@ assert.match(hook, /URL\.revokeObjectURL/);
 assert.match(hook, /getSpeechForText/);
 assert.match(hook, /enqueueCallSpeech/);
 assert.match(hook, /setTimeout\(playNextQueuedCallSpeech/);
+assert.match(hook, /msg\.audioUrl/);
+assert.match(appChat, /isVoiceBookmark/);
+assert.match(appChat, /triggerMessageSpeech\(bm\)/);
+assert.match(appChat, /转文字：\{voicePreview\.transcript\}/);
 console.log("PASS AppChat call speech playback is isolated behind a cancellable, URL-safe queue hook");

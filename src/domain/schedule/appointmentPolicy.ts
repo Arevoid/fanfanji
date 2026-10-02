@@ -166,9 +166,11 @@ export const canConfirmAppointment = (appointment: Appointment): boolean => {
   if (!proposal || (appointment.status !== "awaiting_user" && appointment.status !== "negotiating")) return false;
   // An immediate invitation is allowed to be accepted without a precise
   // clock time. The confirmation itself becomes the canonical “now” moment;
-  // scheduled invitations still require a concrete, non-undetermined time.
+  // scheduled invitations still require a concrete future timestamp. Some
+  // providers return that timestamp while leaving the descriptive precision
+  // as `undetermined`; the timestamp is the stronger source of truth.
   if (appointment.mode === "immediate") return true;
-  return proposal.startAt !== undefined && proposal.timePrecision !== "undetermined";
+  return proposal.startAt !== undefined && Number.isFinite(proposal.startAt);
 };
 
 const ALLOWED_TRANSITIONS: Record<AppointmentStatus, readonly AppointmentStatus[]> = {
@@ -204,13 +206,16 @@ export const transitionAppointment = (
   }
   const currentProposal = getCurrentAppointmentProposal(appointment);
   const proposals = nextStatus === "confirmed"
-    && appointment.mode === "immediate"
     && currentProposal
-    && (currentProposal.startAt === undefined || currentProposal.timePrecision === "undetermined")
+    && ((appointment.mode === "immediate"
+      && (currentProposal.startAt === undefined || currentProposal.timePrecision === "undetermined"))
+      || (appointment.mode === "scheduled"
+        && currentProposal.startAt !== undefined
+        && currentProposal.timePrecision === "undetermined"))
     ? appointment.proposals.map((proposal) => proposal.id === currentProposal.id
       ? {
         ...proposal,
-        startAt: proposal.startAt ?? now,
+        ...(proposal.startAt === undefined ? { startAt: now } : {}),
         timePrecision: proposal.timePrecision === "undetermined" ? "exact" as const : proposal.timePrecision,
       }
       : proposal)

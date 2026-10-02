@@ -107,8 +107,9 @@ import {
   WelcomeWidget,
   AddWidgetSheet 
 } from "./components/HomeScreenWidgets";
-
 const scheduleDateKey = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+import CustomWidgetRenderer from "./components/CustomWidgetRenderer";
+import type { CustomWidgetDefinition } from "./domain/home/customWidgetTypes";
 import {
   HOME_GRID_COLUMNS,
   MAX_HOME_GRID_ROWS,
@@ -188,6 +189,7 @@ import {
   ShoppingBag,
   WalletCards,
   Smartphone,
+  Grid2X2,
   X
 } from "lucide-react";
 
@@ -207,6 +209,7 @@ const loadAppReading = () => import("./components/AppReading");
 const loadAppCinema = () => import("./components/AppCinema");
 const loadAppCharacterPhone = () => import("./components/AppCharacterPhone");
 const loadAppRelationshipNetwork = () => import("./components/AppRelationshipNetwork");
+const loadAppWidgets = () => import("./components/AppWidgets");
 
 // Vite can briefly return a failed module response while the dev server is
 // transforming the large chat module. Give the same navigation attempt one
@@ -241,6 +244,7 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   cinema: withModuleRetry(loadAppCinema),
   "character-phone": withModuleRetry(loadAppCharacterPhone),
   "relationship-network": withModuleRetry(loadAppRelationshipNetwork),
+  widgets: withModuleRetry(loadAppWidgets),
 };
 
 const preloadApp = (appId: string) => {
@@ -267,6 +271,7 @@ const IDLE_PRELOAD_APP_IDS = [
   "cinema",
   "character-phone",
   "relationship-network",
+  "widgets",
 ] as const;
 
 const AppChat = React.lazy(loadAppChat);
@@ -285,6 +290,7 @@ const AppReading = React.lazy(loadAppReading);
 const AppCinema = React.lazy(loadAppCinema);
 const AppCharacterPhone = React.lazy(loadAppCharacterPhone);
 const AppRelationshipNetwork = React.lazy(loadAppRelationshipNetwork);
+const AppWidgets = React.lazy(loadAppWidgets);
 class LazyAppErrorBoundary extends React.Component<
   React.PropsWithChildren<{ visible?: boolean }>,
   { error: Error | null }
@@ -412,6 +418,7 @@ const AppIcons = {
   cinema: (className = "w-6 h-6") => <Film className={className} strokeWidth={1.5} />,
   "character-phone": (className = "w-6 h-6") => <Smartphone className={className} strokeWidth={1.5} />,
   "relationship-network": (className = "w-6 h-6") => <Network className={className} strokeWidth={1.5} />,
+  widgets: (className = "w-6 h-6") => <Grid2X2 className={className} strokeWidth={1.5} />,
   timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.5} />,
   theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.5} />,
   activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.5} />,
@@ -1973,6 +1980,9 @@ export default function App() {
       }
       if (selected.has("offline")) setOfflineStories([]);
       if (selected.has("memory")) setMemories([]);
+      if (selected.has("widgets")) {
+        setHomeScreenItems((items) => items.filter((item) => item.widgetType !== "custom"));
+      }
 
       // Keep the settings page visible after the destructive operation. This
       // gives the user an immediate, clickable way to leave the page instead
@@ -2404,6 +2414,32 @@ export default function App() {
     if (activeApp === id) {
       setActiveApp(null);
     }
+  };
+
+  const handlePlaceCustomWidget = (widget: CustomWidgetDefinition) => {
+    setHomeScreenItems((current) => {
+      const alreadyPlaced = current.some((item) => item.type === "widget" && item.widgetType === "custom" && item.customWidgetId === widget.id);
+      if (alreadyPlaced) {
+        setHomeLayoutError("这个小组件已经在桌面上了。");
+        return current;
+      }
+      const position = findFirstAvailablePosition(current, widget.size, 0, homeGridRows);
+      if (!position) {
+        setHomeLayoutError(`桌面已达到 ${MAX_HOME_PAGES} 页上限，无法添加小组件。`);
+        return current;
+      }
+      const item: HomeScreenItem = {
+        id: `custom-widget-item-${widget.id}-${Date.now()}`,
+        type: "widget",
+        widgetType: "custom",
+        customWidgetId: widget.id,
+        size: widget.size,
+        page: position.page,
+        position,
+      };
+      setTimeout(() => setCurrentPage(position.page), 50);
+      return [...current, item];
+    });
   };
 
   const handleItemPointerDown = (
@@ -3847,6 +3883,11 @@ export default function App() {
       icon: AppIcons["relationship-network"](HOME_APP_ICON_GLYPH_CLASS),
     },
     {
+      id: "widgets",
+      name: "小组件",
+      icon: AppIcons.widgets(HOME_APP_ICON_GLYPH_CLASS),
+    },
+    {
       id: "settings",
       name: "设置",
       icon: AppIcons.settings(HOME_APP_ICON_GLYPH_CLASS),
@@ -5111,6 +5152,7 @@ export default function App() {
                                     );
                                   } else {
                                     const isDragged = draggedItem?.id === item.id;
+                                    const isCustomWidget = item.widgetType === "custom" && Boolean(item.customWidgetId);
                                     const WidgetComponent = getWidgetComponent(item.widgetType);
                                     
                                     let colSpanClass = "col-span-2";
@@ -5160,7 +5202,14 @@ export default function App() {
                                             ? (index % 2 === 0 ? "animate-jiggle" : "animate-jiggle-reverse") 
                                             : ""
                                         }`}>
-                                          <WidgetComponent 
+                                          {isCustomWidget ? (
+                                            <CustomWidgetRenderer
+                                              widgetId={item.customWidgetId!}
+                                              isEditing={isEditingHomeScreen}
+                                              onRemove={() => handleRemoveWidget(item.id)}
+                                              widgetBorderRadius={settings.widgetBorderRadius}
+                                            />
+                                          ) : <WidgetComponent
                                             id={item.id} 
                                             isEditing={isEditingHomeScreen}
                                             onRemove={() => handleRemoveWidget(item.id)}
@@ -5194,7 +5243,7 @@ export default function App() {
                                               setActiveApp("reading");
                                               window.setTimeout(() => window.dispatchEvent(new CustomEvent("open-reading-book", { detail: { bookId, paragraphAnchorId } })), 0);
                                             }}
-                                          />
+                                          />}
                                         </div>
                                       </div>
                                     );
@@ -5551,6 +5600,16 @@ export default function App() {
                       onLinkNpcToChat={linkRelationshipNetworkNpcToChat}
                       onGenerateNpcMoment={generateRelationshipNetworkNpcMomentFromNetwork}
                       onCheckNpcAutomation={checkRelationshipNetworkNpcAutomation}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("widgets") && (
+                  <LazyAppBoundary visible={activeApp === "widgets"}>
+                    <AppWidgets
+                      settings={settings}
+                      onPlaceWidget={handlePlaceCustomWidget}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>

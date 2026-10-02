@@ -88,12 +88,12 @@ export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions
       finishQueuedCallSpeech();
     };
 
-    const isVoice = Boolean(msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage));
+    const isVoice = Boolean(msg.audioUrl || (msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage)));
     if (!canPlayTtsMessage({ isOfflineModeActive: options.isOfflineModeActive, isVoiceMessage: isVoice, isQueuedCallSpeech })) {
       revealCallSubtitleOnce();
       return;
     }
-    if (msg.sender === "character" && !options.settings.enableMiniMaxTts) {
+    if (msg.sender === "character" && !options.settings.enableMiniMaxTts && !msg.audioUrl) {
       revealCallSubtitleOnce();
       finishQueuedCallSpeechOnce();
       return;
@@ -114,6 +114,40 @@ export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions
     if (options.voiceTimer && !isQueuedCallSpeech) {
       clearInterval(options.voiceTimer);
       options.setVoiceTimer(null);
+    }
+    // Some imported or externally recorded voice messages carry a playable
+    // source. Prefer it over re-synthesizing the transcript so favorites and
+    // the chat view preserve the original audio whenever it is available.
+    if (msg.audioUrl) {
+      const audio = new Audio(msg.audioUrl);
+      audio.preload = "auto";
+      options.setPlayingMessageId(msg.id);
+      options.setAudioLoadingMessageId(msg.id);
+      options.setActiveTtsAudio(audio);
+      let settled = false;
+      const finishAudio = () => {
+        if (settled) return;
+        settled = true;
+        options.setPlayingMessageId(null);
+        options.setAudioLoadingMessageId(null);
+        options.setActiveTtsAudio(null);
+        if (isQueuedCallSpeech) finishQueuedCallSpeechOnce();
+        else playNextMessageInQueue(msg.id);
+      };
+      audio.onended = finishAudio;
+      audio.onerror = (event) => {
+        console.warn("Audio playback error:", event);
+        finishAudio();
+      };
+      try {
+        const playback = audio.play();
+        revealCallSubtitleOnce();
+        await playback;
+      } catch (error) {
+        console.warn("Audio playback failed:", error);
+        finishAudio();
+      }
+      return;
     }
     if (msg.sender === "user" && msg.content?.startsWith("[语音]|")) {
       options.setPlayingMessageId(msg.id);

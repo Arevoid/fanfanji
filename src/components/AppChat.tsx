@@ -397,6 +397,56 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
 }
 
+interface VoiceMessagePreview {
+  duration: number;
+  transcript: string;
+}
+
+/**
+ * Reads both the current persisted voice markup and the older human-readable
+ * voice format. Favorites need the same duration/transcript preview even when
+ * the message is no longer rendered inside the main chat list.
+ */
+function getVoiceMessagePreview(content: string, fallbackDuration?: number): VoiceMessagePreview {
+  const normalized = content.trim();
+  const safeFallback = Number.isFinite(fallbackDuration) && (fallbackDuration || 0) > 0
+    ? Math.max(1, Math.round(fallbackDuration as number))
+    : 3;
+  if (normalized.startsWith("[语音]|")) {
+    const parts = normalized.split("|");
+    const parsedDuration = Number.parseInt(parts[1] || "", 10);
+    return {
+      duration: Number.isFinite(parsedDuration) && parsedDuration > 0 ? parsedDuration : safeFallback,
+      transcript: parts.slice(2).join("|").trim(),
+    };
+  }
+  if (!normalized.startsWith("[语音")) {
+    return { duration: safeFallback, transcript: normalized };
+  }
+
+  const matchWithDuration = normalized.match(/^\[语音:\s*(?:"([^"]+)"|(.+?))\s*\((\d+)(?:秒|s)\)\]/i);
+  if (matchWithDuration) {
+    return {
+      duration: Math.max(1, Number.parseInt(matchWithDuration[3] || "", 10) || safeFallback),
+      transcript: (matchWithDuration[1] || matchWithDuration[2] || "").trim(),
+    };
+  }
+  const matchWithQuotedText = normalized.match(/^\[语音:\s*"([^"]+)"\]/i);
+  if (matchWithQuotedText) {
+    const transcript = matchWithQuotedText[1].trim();
+    return { duration: Math.max(1, Math.min(60, Math.ceil(transcript.length * 0.35 + 1.2))), transcript };
+  }
+  const cleaned = normalized
+    .replace(/^\[语音\]\s*/, "")
+    .replace(/^\[语音:\s*/, "")
+    .replace(/\]$/, "")
+    .trim();
+  return {
+    duration: Math.max(1, Math.min(60, Math.ceil(cleaned.length * 0.35 + 1.2))) || safeFallback,
+    transcript: cleaned,
+  };
+}
+
 registerDevModuleTrace({
   stage: "chat_module_evaluated",
   timestamp: Date.now(),
@@ -9466,10 +9516,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       })() : msg.content.startsWith("[位置]") ? (() => {
                         const location = msg.content.split("|").slice(1).join("|").trim() || msg.content.replace(/^\[位置\]/, "").trim();
                         return <LocationCard location={location} />;
-                      })() : msg.content.startsWith("[语音") ? (() => {
-                        let content = msg.content;
-                        let durationStr = "3";
-                        let voiceText = "";
+                      })() : (msg.content.startsWith("[语音") || msg.isVoiceMessage === true || Boolean(msg.audioUrl)) ? (() => {
+                         let content = msg.content;
+                         let durationStr = msg.audioDuration ? String(msg.audioDuration) : "3";
+                         let voiceText = msg.content.startsWith("[语音") ? "" : msg.content;
 
                         if (content.startsWith("[语音]|")) {
                           const parts = content.split("|");
@@ -9865,7 +9915,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     })()}
                   </div>
                 </div>
-                <span className="shrink-0 rounded-full bg-[var(--surface-raised)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">可拒绝</span>
+                <span className="shrink-0 rounded-full bg-[var(--surface-raised)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">待你确认</span>
               </div>
               <div className="mt-3 flex gap-2">
                 <button type="button" onClick={() => decidePendingOfflineInvitation("decline")} className="flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-[11px] font-bold text-[var(--text-secondary)]">拒绝</button>
@@ -12370,6 +12420,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         <div className="space-y-3 mt-4">
                           {savedBookmarks.map((bm) => {
                             const owner = characters.find((c) => c.id === bm.characterId);
+                            const isVoiceBookmark = bm.isVoiceMessage === true || bm.content.startsWith("[语音") || Boolean(bm.audioUrl);
+                            const voicePreview = isVoiceBookmark ? getVoiceMessagePreview(bm.content, bm.audioDuration) : null;
+                            const isVoicePlaying = playingMessageId === bm.id;
+                            const isVoiceLoading = audioLoadingMessageId === bm.id;
                             return (
                               <div
                                 key={bm.id}
@@ -12384,9 +12438,39 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                                   <span className="font-bold text-slate-500">
                                     {bm.sender === "user" ? "我" : (owner?.name || "未知")}
                                   </span>
-                                  <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed italic bg-slate-50 p-2 rounded border border-slate-100/60">
-                                    "{bm.content}"
-                                  </p>
+                                  {isVoiceBookmark && voicePreview ? (
+                                    <div className="mt-1 space-y-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => { void triggerMessageSpeech(bm); }}
+                                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-left text-xs font-semibold transition-colors ${
+                                          isVoicePlaying
+                                            ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+                                            : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                                        }`}
+                                        aria-label={`${isVoicePlaying ? "暂停" : "播放"}收藏的语音`}
+                                      >
+                                        {isVoiceLoading ? (
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        ) : isVoicePlaying ? (
+                                          <Pause className="h-3.5 w-3.5 fill-current" />
+                                        ) : (
+                                          <Volume2 className="h-3.5 w-3.5" />
+                                        )}
+                                        <span>{isVoicePlaying ? "播放中" : "播放语音"}</span>
+                                        <span className="text-[10px] opacity-60">{voicePreview.duration}"</span>
+                                      </button>
+                                      {voicePreview.transcript && (
+                                        <p className="rounded border border-slate-100/60 bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-500">
+                                          转文字：{voicePreview.transcript}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p className="text-slate-600 mt-1 whitespace-pre-wrap leading-relaxed italic bg-slate-50 p-2 rounded border border-slate-100/60">
+                                      "{bm.content}"
+                                    </p>
+                                  )}
                                   <span className="text-[9px] text-slate-400 block mt-1">
                                     收藏于 {new Date(bm.timestamp).toLocaleDateString()}
                                   </span>

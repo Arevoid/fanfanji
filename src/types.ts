@@ -905,7 +905,9 @@ export interface ThemeTokenSet {
 export interface HomeScreenItem {
   id: string;
   type: "app" | "widget";
-  widgetType?: "album" | "calendar-album" | "time" | "music" | "dual-music" | "anniversary" | "todo" | "reading" | "chat-stats" | "welcome";
+  widgetType?: "album" | "calendar-album" | "time" | "music" | "dual-music" | "anniversary" | "todo" | "reading" | "chat-stats" | "welcome" | "custom";
+  /** Stable reference used by user-created desktop widgets. */
+  customWidgetId?: string;
   size: "1x1" | "2x2" | "1x4" | "2x3" | "2x4";
   /** Legacy mirror kept during migration. position.page is authoritative. */
   page: number;
