@@ -1,4 +1,5 @@
 import React from "react";
+import { detectErrorPage, getErrorPageMessage } from "../../../utils/errorPageDetection";
 
 const INLINE_MARKDOWN_PATTERN = /(!?\[[^\]]*\]\(https?:\/\/[^\s)]+\)|\(https?:\/\/mcp\.yoww2026\.cn\/i\/[^\s)]+\)|\*\*[^*]+\*\*|__[^_]+__|\x60[^\x60]+\x60|\*[^*]+\*|_[^_]+_|https?:\/\/[^\s<>"']+)/giu;
 const TRAILING_URL_PUNCTUATION = /[.,!?;:)\]}>'"，。！？；：、）》】]+$/u;
@@ -89,5 +90,9 @@ function renderBlocks(text: string): React.ReactNode {
   return <>{nodes}</>;
 }
 export function ChatTextWithLinks({ text }: { text: string }): React.ReactNode {
+  const errorPage = detectErrorPage(text);
+  if (errorPage) {
+    return <span role="status" className="text-amber-700">{getErrorPageMessage(errorPage)}</span>;
+  }
   return renderBlocks(text);
 }

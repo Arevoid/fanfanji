@@ -1,3 +1,5 @@
+import { detectErrorPage, getErrorPageMessage } from "./errorPageDetection";
+
 export type TextApiErrorCode =
   | "configuration"
   | "provider_auth"
@@ -63,6 +65,14 @@ function readProviderMessage(parsed: any, fallback: string): string {
 
 export function parseTextApiErrorPayload(raw: string, status?: number): TextApiErrorDetails {
   const trimmed = raw.trim();
+  const errorPage = detectErrorPage(trimmed);
+  if (errorPage) {
+    return {
+      message: getErrorPageMessage(errorPage),
+      reason: errorPage.code,
+      code: errorPage.code === "cloudflare_block" ? "provider_request" : "provider_invalid_response",
+    };
+  }
   let parsed: any;
   if (trimmed) {
     try { parsed = JSON.parse(trimmed); } catch { parsed = undefined; }

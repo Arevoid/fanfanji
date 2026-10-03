@@ -118,6 +118,7 @@ import { TimeWidget } from "./HomeScreenWidgets";
 import { resolveDesktopBackground } from "../features/theme/desktopBackground";
 import type { ResolvedTheme } from "../features/theme/theme";
 import { StoredCharacterPhoneImage } from "../features/characterPhone/components/StoredCharacterPhoneImage";
+import { detectErrorPage, getErrorPageMessage } from "../utils/errorPageDetection";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
 import { buildCharacterPhoneBrowserDetail } from "../features/characterPhone/characterPhoneBrowserDetails";
@@ -589,6 +590,8 @@ function CharacterPhoneCallRecordMessage({ content }: { content: string }) {
 function CharacterPhoneMessageBody({ content }: { content: string }) {
   if (isCallRecordMarkup(content)) return <CharacterPhoneCallRecordMessage content={content} />;
   if (parseCharacterPhoneStickerContent(content)) return <CharacterPhoneStickerMessage content={content} />;
+  const errorPage = detectErrorPage(content);
+  if (errorPage) return <p role="status" className="text-amber-700">{getErrorPageMessage(errorPage)}</p>;
   return <p className="whitespace-pre-wrap">{content}</p>;
 }
 
