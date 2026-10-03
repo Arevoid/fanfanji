@@ -220,7 +220,6 @@ const BACKUP_KEYS = [
   "phone_characters_v3",
   "phone_homescreen_items",
   "phone_installed_apps",
-  "phone_custom_widgets",
   "phone_memory_vault_items",
   "phone_memory_vault_settings",
   "phone_image_generation_records",

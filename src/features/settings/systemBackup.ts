@@ -9,7 +9,6 @@ import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled, enableMess
 import { messageEntryDb } from "../../core/storage/messageEntryDb";
 import { offlineStoryEntryDb } from "../../core/storage/offlineStoryEntryDb";
 import { characterPhoneDb } from "../../core/storage/characterPhoneDb";
-import { customWidgetDb } from "../../core/storage/customWidgetDb";
 import { flushCharacterPhoneRepository } from "../../core/storage/repositories/characterPhoneRepository";
 import { SETTINGS_ASSET_OVERLAY_KEY } from "../../core/storage/settingsAssetRepository";
 import { SETTINGS_DURABLE_OVERLAY_KEY } from "../../core/storage/repositories/settingsRepository";
@@ -36,7 +35,6 @@ export const SYSTEM_BACKUP_INDEXED_DB_KEYS = [
   "inner-voice-v1",
   SETTINGS_ASSET_OVERLAY_KEY,
   SETTINGS_DURABLE_OVERLAY_KEY,
-  "custom-widgets-v1",
 ] as const;
 export const SYSTEM_BACKUP_CONTENT_ENTRY_KEYS = ["message-entry-v1", "offline-story-entry-v1"] as const;
 
@@ -215,7 +213,6 @@ function includeCharacterPhoneLocalStorageKeys(storage: Storage, requestedKeys: 
 
 const CHARACTER_PHONE_INDEXED_DB_KEY = "character-phone-v1";
 const INNER_VOICE_INDEXED_DB_KEY = "inner-voice-v1";
-const CUSTOM_WIDGETS_INDEXED_DB_KEY = "custom-widgets-v1";
 
 export type SystemBackupFlushers = readonly (readonly [name: string, flush: () => Promise<StorageWriteResult>])[];
 
@@ -239,7 +236,6 @@ export async function flushSystemBackupRepositories(flushers: SystemBackupFlushe
 
 async function loadSystemBackupIndexedDbValue(key: string): Promise<unknown | null> {
   if (key === CHARACTER_PHONE_INDEXED_DB_KEY) return characterPhoneDb.loadAll();
-  if (key === CUSTOM_WIDGETS_INDEXED_DB_KEY) return customWidgetDb.loadAll();
   if (key === INNER_VOICE_INDEXED_DB_KEY) {
     const loaded = await loadInnerVoiceRecordsAsync([]);
     return loaded.valid ? loaded.value : loadInnerVoiceRecords([]).value;
@@ -259,11 +255,6 @@ async function saveSystemBackupIndexedDbValue(key: string, value: unknown): Prom
     if (!saved.success) throw new Error(`恢复心声数据失败：${saved.error || "write"}`);
     return;
   }
-  if (key === CUSTOM_WIDGETS_INDEXED_DB_KEY) {
-    if (!Array.isArray(value)) throw new Error("备份中的小组件数据格式无效");
-    await customWidgetDb.replaceAll(value as never[]);
-    return;
-  }
   await readingAssetDb.saveMetadataValue(key, cloneJson(value));
 }
 
@@ -275,10 +266,6 @@ async function deleteSystemBackupIndexedDbValue(key: string): Promise<void> {
   if (key === INNER_VOICE_INDEXED_DB_KEY) {
     const cleared = await saveInnerVoiceRecords([]);
     if (!cleared.success) throw new Error(`清理心声数据失败：${cleared.error || "write"}`);
-    return;
-  }
-  if (key === CUSTOM_WIDGETS_INDEXED_DB_KEY) {
-    await customWidgetDb.clearAll();
     return;
   }
   await readingAssetDb.deleteMetadataValue(key);

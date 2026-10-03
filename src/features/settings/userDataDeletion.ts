@@ -5,7 +5,6 @@ import { offlineStoryDb } from "../../core/storage/offlineStoryDb";
 import { readingAssetDb } from "../../core/storage/readingAssetDb";
 import { cinemaAssetDb } from "../../core/storage/cinemaAssetDb";
 import { characterPhoneDb } from "../../core/storage/characterPhoneDb";
-import { clearCustomWidgets } from "../../core/storage/repositories/customWidgetRepository";
 import { audioDb } from "../../utils/audioDb";
 import { cleanupOrphanedStorageResources } from "../../core/storage/storageDiagnostics";
 
@@ -31,8 +30,7 @@ export type UserDataAppId =
   | "relationshipNetwork"
   | "characterPhone"
   | "gallery"
-  | "mcp"
-  | "widgets";
+  | "mcp";
 
 export interface UserDataAppOption {
   id: UserDataAppId;
@@ -41,7 +39,6 @@ export interface UserDataAppOption {
 }
 
 export const USER_DATA_APP_OPTIONS: readonly UserDataAppOption[] = [
-  { id: "widgets", label: "小组件", description: "自制小组件、制作人信息与桌面小组件配置" },
   { id: "chat", label: "聊天", description: "聊天记录、会话状态和聊天生成数据" },
   { id: "characters", label: "档案馆", description: "角色、人设和角色关系资料" },
   { id: "worldbook", label: "世界书", description: "世界书词条和绑定信息" },
@@ -75,10 +72,6 @@ const clearOrphanedSharedAssets = async (): Promise<void> => {
 };
 
 const USER_DATA_MANIFEST: Record<UserDataAppId, DataManifest> = {
-  widgets: {
-    keys: ["phone_custom_widgets"],
-    clearBinary: clearCustomWidgets,
-  },
   chat: {
     keys: [
       storageKeys.messages,

@@ -13,7 +13,6 @@ const EXISTING_USER_DATA_KEYS = [
   "phone_diary_entries",
   "phone_forum_threads",
   "phone_notes",
-  "phone_custom_widgets",
 ] as const;
 
 type StorageReader = Pick<Storage, "getItem">;

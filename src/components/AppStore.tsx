@@ -147,17 +147,6 @@ const APPS_LIST: AppItem[] = [
     description: "记录自己的心情，也可以查看角色基于专属聊天写下的私密日记；所有内容都按身份和关系隔离保存。"
   },
   {
-    id: "widgets",
-    name: "小组件",
-    category: "桌面与个性化",
-    icon: "▦",
-    iconBg: "bg-indigo-500",
-    rating: 5.0,
-    reviews: "全新",
-    size: "3.8 MB",
-    description: "用自然语言生成受控的桌面小组件，支持预览、保存、导入导出和填写制作人。",
-  },
-  {
     id: "offline",
     name: "线下模式",
     category: "剧本创作与演练",
