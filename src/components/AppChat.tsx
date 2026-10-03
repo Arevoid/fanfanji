@@ -18,7 +18,7 @@ import { decideAppointmentInvitation } from "../domain/schedule/appointmentInvit
 import { startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
-import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, formatMessageContentForQuote, getCallTranscriptText, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseRedPacketClaimNotice, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
+import { cleanAiReplyText as cleanOnlineMessage, createTextImageMarkup, formatMessageContentForQuote, getCallTranscriptText, getSystemNoticeType, isCallRecordMarkup, isRedPacketMarkup, isTransferMarkup, normalizePaymentMarkup, parseCallRecord, parseRedPacketClaimNotice, parseTextImageDescription, stripInternalDeliveryMarkers } from "../features/chat/services/messageParser";
 import type { CallTranscriptItem } from "../features/chat/services/messageParser";
 import { createCharacterTextMessage, createGroupCharacterMessage, createUserTextMessage } from "../features/chat/services/messageFactory";
 import {
@@ -9102,6 +9102,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               // The actual image bubble remains visible, while new messages no
               // longer create these fragments in the first place.
               if (msg.sender === "character" && isLegacyMcpMediaFragment(msg.content)) return null;
+              const systemNoticeType = getSystemNoticeType(msg);
               const previousVisibleMessage = idx > 0 ? visibleChatMessages[idx - 1] : undefined;
               const interveningOfflineStories = getOfflineTimelineStoriesBetween(previousVisibleMessage?.timestamp, msg.timestamp);
               // Calculate WeChat timestamp divider
@@ -9184,7 +9185,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       });
                       return (
                         <div key={`offline-timeline-${story.id}`} className="chat-offline-timeline-event w-full flex justify-center my-3.5 select-none animate-fade-in">
-                          <div className="chat-offline-timeline-event__label bg-black/5 dark:bg-white/10 text-[#777] dark:text-stone-300 text-[11.5px] px-2.5 py-1 rounded-[4px] tracking-wide font-normal">
+                          <div className="chat-offline-timeline-event__label bg-black/5 dark:bg-white/10 text-[11.5px] px-2.5 py-1 rounded-[4px] tracking-wide font-normal">
                             {eventTime} · 线下见面 · 《{story.title}》
                           </div>
                         </div>
@@ -9231,14 +9232,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   return wrapSelectableMessage(
                     <div 
                       key={msg.id}
-                      className="w-full py-2.5 px-2 my-1.5 text-center text-[11px] leading-relaxed text-[#a1a3a8] border-b border-dashed border-slate-100/60 dark:border-slate-800/60 transition-all cursor-pointer"
+                      className={`chat-system-notice chat-system-notice--${systemNoticeType} w-full py-2.5 px-2 my-1.5 text-center text-[11px] leading-relaxed border-b border-dashed border-slate-100/60 dark:border-slate-800/60 transition-all cursor-pointer`}
+                      data-notice-type={systemNoticeType}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setActiveMenuMsg(msg);
                         setMenuPosition({ x: e.clientX, y: e.clientY });
                       }}
                     >
-                      <div className="max-w-[90%] mx-auto font-normal tracking-wide select-text">
+                      <div className="chat-system-notice__text max-w-[90%] mx-auto font-normal tracking-wide select-text">
                         {msg.content}
                       </div>
                     </div>,
@@ -9312,14 +9314,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 return wrapMessageWithDivider(
                   <div 
                     key={msg.id}
-                    className="w-full py-2.5 px-2 my-1.5 text-center text-[11px] leading-relaxed text-[#a1a3a8] border-b border-dashed border-slate-100/60 dark:border-slate-800/60 transition-all cursor-pointer"
+                    className={`chat-system-notice chat-system-notice--${systemNoticeType} w-full py-2.5 px-2 my-1.5 text-center text-[11px] leading-relaxed border-b border-dashed border-slate-100/60 dark:border-slate-800/60 transition-all cursor-pointer`}
+                    data-notice-type={systemNoticeType}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       setActiveMenuMsg(msg);
                       setMenuPosition({ x: e.clientX, y: e.clientY });
                     }}
                   >
-                    <div className="max-w-[90%] mx-auto font-normal tracking-wide select-text">
+                    <div className="chat-system-notice__text max-w-[90%] mx-auto font-normal tracking-wide select-text">
                       {msg.content}
                     </div>
                   </div>
@@ -9724,7 +9727,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                           </div>
                         );
                       })() : (
-                        <div className={parseQuoteReply(msg.content) ? `message-quote-reply-wrapper ${isSelf ? "message-quote-reply-wrapper--self" : "message-quote-reply-wrapper--other"}` : `chat-message--text px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
+                        <div className={parseQuoteReply(msg.content) ? `message-quote-reply-wrapper ${isSelf ? "message-quote-reply-wrapper--self" : "message-quote-reply-wrapper--other"} ${isFloatingCute ? "message-quote-reply-wrapper--floating-cute" : ""}` : `chat-message--text px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                           isSelf
                             ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
                             : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100")
@@ -9747,8 +9750,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               <>
                                 <div className={`chat-message--text message-quote__reply-body px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative group/bubble ${
                                   isSelf
-                                    ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self pr-6" : "bg-blue-500 text-white chat-bubble-self pr-6")
-                                    : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other pr-6" : "bg-white text-slate-800 chat-bubble-other border border-slate-100 pr-6")
+                                    ? (isFloatingCute ? "bg-[#f2f2f2] border border-slate-300/60 chat-bubble-self pr-6" : "bg-blue-500 chat-bubble-self pr-6")
+                                    : (isFloatingCute ? "bg-white border border-slate-300/60 chat-bubble-other pr-6" : "bg-white chat-bubble-other border border-slate-100 pr-6")
                                 } ${messageGroupClass}`}>{quoteReply.body}</div>
                                 <div className="message-quote message-quote__header text-left text-[11px]">
                                   <span className="message-quote__prefix">↩ {isSelf ? "你回复了" : "回复了"}</span>{" "}

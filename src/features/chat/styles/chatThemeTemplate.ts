@@ -230,18 +230,21 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 .bubble-deco { position: absolute; z-index: 20; overflow: visible; pointer-events: none; }
 
 /* ==================== 引用消息 ==================== */
-.message-quote-reply-wrapper,
-.message-quote-reply-wrapper--self,
-.message-quote-reply-wrapper--other { color: var(--chat-text); }
-.message-quote__header,
-.message-quote__prefix,
-.message-quote__author,
-.message-quote__separator,
-.message-quote__content,
-.message-quote__reply-body { color: inherit; }
+.message-quote-reply-wrapper { --quote-reply-text: var(--chat-text); }
+.message-quote-reply-wrapper--self { --quote-reply-text: var(--chat-user-text); }
+.message-quote-reply-wrapper--other { --quote-reply-text: var(--chat-ai-text); }
+.message-quote__reply-body { color: var(--quote-reply-text); }
+.message-quote__header { color: var(--quote-header, var(--chat-muted-text)); }
+.message-quote__prefix { color: var(--quote-prefix, inherit); }
+.message-quote__author { color: var(--quote-author, inherit); }
+.message-quote__separator { color: var(--quote-separator, inherit); }
+.message-quote__content { color: var(--quote-content, inherit); }
 
-/* Semantic quote hooks.  They intentionally carry no default visual rules;
-   use them from a custom theme without changing the default chat. */
+/* ==================== 系统提示与线下时间线 ==================== */
+.chat-system-notice { --chat-system-notice-text: var(--chat-muted-text); }
+.chat-system-notice__text { color: var(--chat-system-notice-text, var(--chat-muted-text)); }
+.chat-offline-timeline-event { --chat-offline-event-text: var(--chat-muted-text); }
+.chat-offline-timeline-event__label { color: var(--chat-offline-event-text, var(--chat-muted-text)); }
 
 /* ==================== 红包语义接口（仅钩子，不写默认微信视觉） ==================== */
 .wechat-redpacket__main,

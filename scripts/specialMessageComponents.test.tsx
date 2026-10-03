@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { parseQuoteReply, QuotedMessagePreview } from "../src/features/chat/components/QuotedMessagePreview";
 import { RedPacketCard } from "../src/features/chat/components/SpecialMessage/RedPacketCard";
 import { TransferCard } from "../src/features/chat/components/SpecialMessage/TransferCard";
+import { getSystemNoticeType } from "../src/features/chat/services/messageParser";
 import type { Message } from "../src/types";
 
 const message = (content: string): Message => ({ id: "m", characterId: "a", sender: "character", content, timestamp: 1 });
@@ -22,6 +23,9 @@ const checks: Array<[string, boolean]> = [
   ["quote classes", quote("文本").includes("message-quote") && quote("文本").includes("composer-quote-preview")],
   ["quote preview omits wrapper wording", !quote("文本").includes("引用自")],
   ["quote reply parser", parseQuoteReply("「引用 沈安：晚安」\n收到")?.body === "收到"],
+  ["system notice claim type", getSystemNoticeType({ content: "周树生领取了你的红包", isNarration: true }) === "redpacket-claim"],
+  ["system notice recall type", getSystemNoticeType({ content: "你撤回了一条消息", isNarration: true }) === "recall"],
+  ["system notice narration fallback", getSystemNoticeType({ content: "您邀请了小明加入了群聊", isNarration: true }) === "narration"],
   ["packet pending", packet("unclaimed").includes("点击拆红包") && packet("unclaimed").includes('data-status="unclaimed"')],
   ["packet default title and status", packet("unclaimed").includes("红包转账") && packet("unclaimed").includes("待领取")],
   ["packet claimed", packet("claimed").includes("已领取")],
@@ -59,13 +63,14 @@ const checks: Array<[string, boolean]> = [
     "wechat-transfer__memo",
     "wechat-transfer__footer",
   ].every((name) => transfer("pending").includes(name))],
-  ["quote CSS variables", ["--quote-bg", "--quote-border", "--quote-author", "--quote-content"].every((name) => css.includes(name))],
+  ["quote CSS variables", ["--quote-bg", "--quote-border", "--quote-header", "--quote-prefix", "--quote-author", "--quote-separator", "--quote-content", "--quote-reply-text"].every((name) => css.includes(name))],
   ["packet CSS variables", ["--redpacket-bg", "--redpacket-title-color", "--redpacket-money-color", "--redpacket-status-color", "--redpacket-note-color"].every((name) => css.includes(name))],
   ["transfer CSS variables", ["--transfer-bg", "--transfer-title-color", "--transfer-money-color", "--transfer-status-color", "--transfer-note-color"].every((name) => css.includes(name))],
   ["payment font protection", css.includes("RedPacketPayFont")],
   ["semantic hooks preserve default layout", css.includes("display: contents") && css.includes("wechat-redpacket__icon") && css.includes("wechat-transfer__icon")],
   ["red packet custom layer opt-in", css.includes("user-custom-redpacket-css") && css.includes("redpacket-card__wechat-layer")],
-  ["quote legacy header styling", css.includes(".message-quote__header .message-quote__author") && css.includes(".message-quote__separator { display: none; }")],
+  ["quote semantic color hooks", [".message-quote__header", "--quote-header", ".message-quote__prefix { color: var(--quote-prefix", ".message-quote__author { color: var(--quote-author", ".message-quote__content", ".message-quote__reply-body"].every((name) => css.includes(name)) && css.includes(".message-quote__separator { display: none; }")],
+  ["system notice and offline timeline hooks", css.includes(".chat-system-notice__text") && css.includes(".chat-offline-timeline-event__label")],
   ["fixed payment dimensions", ["--payment-card-width: 240px", "--payment-card-height: 112px", "calc(100vw - 120px)"].every((name) => css.includes(name))],
   ["quote reply keeps sender bubble variants", ["message-quote-reply-wrapper--self", "message-quote-reply-wrapper--other", "message-quote__header"].every((name) => css.includes(name))],
 ];

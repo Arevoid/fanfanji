@@ -9,8 +9,12 @@
 .message-quote {
   --quote-bg: color-mix(in srgb, var(--surface-muted) 72%, transparent);
   --quote-border: var(--border-strong);
+  --quote-header: #64748b;
+  --quote-prefix: var(--quote-header);
   --quote-author: var(--text-primary);
+  --quote-separator: var(--quote-header);
   --quote-content: var(--text-secondary);
+  --quote-reply-text: var(--chat-text, var(--text-primary));
 }
 
 .message-quote__content {
@@ -21,12 +25,20 @@
   color: var(--quote-content);
 }
 
-.message-quote__author { color: var(--quote-author); }
+.message-quote__header {
+  color: var(--quote-header, #64748b);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.message-quote__prefix { color: var(--quote-prefix, inherit); }
+.message-quote__author { color: var(--quote-author, inherit); }
+.message-quote__separator { color: var(--quote-separator, inherit); }
 
-/* Sent quote headers used to render as one muted line.  Keep the new
- * semantic author span on that same inherited color while preserving the
- * composer preview's dedicated author color above. */
-.message-quote__header .message-quote__author { color: inherit; }
+.message-quote-reply-wrapper--self { --quote-reply-text: var(--chat-user-text, #ffffff); }
+.message-quote-reply-wrapper--other { --quote-reply-text: var(--chat-ai-text, #18181b); }
+.message-quote-reply-wrapper--floating-cute {
+  --quote-reply-text: #222;
+}
 
 /* Semantic hooks are present in the message DOM for custom themes.  Keep the
  * legacy header presentation by hiding the optional delimiter by default. */
@@ -34,6 +46,7 @@
 
 .message-quote__reply-body {
   margin-top: 0.75rem;
+  color: var(--quote-reply-text, var(--chat-text, var(--text-primary)));
 }
 
 .message-quote-reply-wrapper {
@@ -46,10 +59,14 @@
 .message-quote-reply-wrapper--self { align-items: flex-end; }
 .message-quote-reply-wrapper--other { align-items: flex-start; }
 
-.message-quote__header {
-  color: #64748b;
-  font-size: 0.7rem;
-  font-weight: 700;
+.chat-system-notice { --chat-system-notice-text: #a1a3a8; }
+.chat-system-notice__text { color: var(--chat-system-notice-text); }
+
+.chat-offline-timeline-event { --chat-offline-event-text: #777; }
+.chat-offline-timeline-event__label { color: var(--chat-offline-event-text); }
+
+:root[data-theme="dark"] .chat-offline-timeline-event {
+  --chat-offline-event-text: #d6d3d1;
 }
 
 .special-payment-card {

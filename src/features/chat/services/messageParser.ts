@@ -191,6 +191,14 @@ export interface RedPacketClaimNotice {
   senderName: string;
 }
 
+export type SystemNoticeType = "redpacket-claim" | "recall" | "narration" | "system";
+
+export interface SystemNoticeMessageLike {
+  content?: string;
+  isNarration?: boolean;
+  recalledAt?: number;
+}
+
 export function parseRedPacketClaimNotice(content: string): RedPacketClaimNotice | null {
   const normalized = content.trim();
   const matched = normalized.match(/^\[红包消息：(.+?)领取了(.+?)的红包\]$/u);
@@ -202,6 +210,21 @@ export function parseRedPacketClaimNotice(content: string): RedPacketClaimNotice
   if (/(?:不许|不准|不能|别|不要|禁止|快点|赶紧)[^。！？\n]{0,16}(?:领|抢|拆)/u.test(normalized)) return null;
   if (!/(?:领了|领取了|领到|抢到了|抢到|拆开了|拆了|收了|收到|拿到了|拿到)/u.test(normalized)) return null;
   return { claimantName: "", senderName: "" };
+}
+
+/**
+ * Resolve the stable semantic type used by the system-notice renderer.
+ *
+ * Older messages only persisted `isNarration`, so this deliberately keeps a
+ * narration fallback instead of requiring a data migration. The text checks
+ * are centralized here so rendering code does not accumulate scattered
+ * `content.includes(...)` branches.
+ */
+export function getSystemNoticeType(message: SystemNoticeMessageLike): SystemNoticeType {
+  const content = message.content?.trim() || "";
+  if (parseRedPacketClaimNotice(content)) return "redpacket-claim";
+  if (message.recalledAt || /撤回|撤销|收回/u.test(content)) return "recall";
+  return message.isNarration ? "narration" : "system";
 }
 
 const TEXT_IMAGE_PREFIX = "[文字图]|";
