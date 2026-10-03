@@ -8,6 +8,7 @@ import {
   buildTimeAwarenessPrompt,
   buildVoiceCallPrompts,
   buildVoiceIntervalPrompt,
+  containsPreConnectionCallLanguage,
   CURRENT_SCENE_CONTINUITY_PROMPT,
   CHINESE_SEMANTIC_CONTINUITY_PROMPT,
   DIRECT_CHAT_LONG_GAP_MS,
@@ -16,6 +17,7 @@ import {
   partitionDirectChatHistoryByCurrentDay,
   shouldUseCrossDayHistoryBoundary,
   shouldUseLongGapHistoryBoundary,
+  sanitizeConnectedVoiceCallText,
 } from "../src/features/chat/prompts/directChatTurnPrompt";
 
 const mainPrompt = buildDirectChatMainPrompt({ characterName: "测试角色", disableBracketActions: false });
@@ -133,6 +135,12 @@ assert.equal(detectCallTopicShift({
 }), false);
 assert.match(buildVoiceCallPrompts(false).join("\n"), /not loaded for this turn/);
 assert.match(buildVoiceCallPrompts(true).join("\n"), /available because the user shifted/);
+assert.match(buildVoiceCallPrompts(false).join("\n"), /already connected/);
+assert.match(buildVoiceCallPrompts(false).join("\n"), /pre-call setup only/);
+assert.equal(containsPreConnectionCallLanguage("30秒就好，接一下嘛"), true);
+assert.equal(containsPreConnectionCallLanguage("我已经接通了，听得到。"), false);
+assert.equal(sanitizeConnectedVoiceCallText("30秒就好，接一下嘛"), "已经接通了，我在听。");
+assert.equal(sanitizeConnectedVoiceCallText("我已经接通了，听得到。"), "我已经接通了，听得到。");
 
 const appChatSource = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const regenerationSource = readFileSync(new URL("../src/features/chat/hooks/useChatRegenerationAction.ts", import.meta.url), "utf8");

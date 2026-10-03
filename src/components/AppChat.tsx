@@ -88,7 +88,7 @@ import { CHARACTER_LANGUAGE_POLICY, projectCharacterPrompt } from "../domain/pro
 import { buildCharacterBehaviorPrompt } from "../domain/prompt/characterBehaviorProfile";
 import { formatFinalReplyLanguageInstruction, resolveCharacterReplyLanguage } from "../domain/prompt/characterLanguage";
 import { CHARACTER_MEDIA_USAGE_RULES, DIALOGUE_AUTHORSHIP_AND_ESCALATION_RULES, DIRECT_CHAT_SINGLE_SPEAKER_RULE, WORLD_BOOK_CONTEXT_PRIORITY } from "../features/chat/prompts/chatPromptPolicy";
-import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CHINESE_SEMANTIC_CONTINUITY_PROMPT, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
+import { buildCrossDayHistoricalReferencePrompt, buildDirectChatMainPrompt, buildRedPacketReactionPrompt, buildStickerResponsePrompt, buildTimeAwarenessPrompt, buildVoiceCallPrompts, buildVoiceIntervalPrompt, CHINESE_SEMANTIC_CONTINUITY_PROMPT, CURRENT_SCENE_CONTINUITY_PROMPT, detectCallTopicShift, NEW_DAY_CONVERSATION_BOUNDARY_PROMPT, partitionDirectChatHistoryByCurrentDay, sanitizeConnectedVoiceCallText, shouldUseCrossDayHistoryBoundary } from "../features/chat/prompts/directChatTurnPrompt";
 import { loadUserMemoPromptContext, USER_MEMO_MENTION_LEDGER_KEY } from "../features/chat/prompts/userMemoContext";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../features/chat/prompts/messagePromptSerializer";
 import { getOfflineStoriesContextForOnlineChat } from "../features/chat/prompts/onlineOfflineBoundary";
@@ -1962,6 +1962,13 @@ export default function AppChat({
     openRedPacketDetail, setOpenRedPacketDetail, isOpeningRedPacket, setIsOpeningRedPacket,
     setOpenTransferDetail, setShowTransferDetailModal, setOpenVoiceId, voiceTimer, setVoiceTimer,
   } = useChatAttachmentState();
+  // Call controls can transition from ringing to connected in the same user
+  // gesture that starts a reply. Keep a synchronous snapshot for generation
+  // and delivery instead of relying only on the previous React render.
+  const activeAttachModalRef = useRef(activeAttachModal);
+  const callingStatusRef = useRef(callingStatus);
+  activeAttachModalRef.current = activeAttachModal;
+  callingStatusRef.current = callingStatus;
   const {
     triggerMessageSpeech,
     unlockCallTtsPlayback,
@@ -2233,6 +2240,8 @@ export default function AppChat({
     clearCallSpeechQueue();
     if (activeTtsAudio) activeTtsAudio.pause();
     resetCallTtsPlayback();
+    callingStatusRef.current = "ended";
+    activeAttachModalRef.current = null;
     setCallingStatus("ended");
     setCallingInputText("");
     setActiveAttachModal(null);
@@ -2297,6 +2306,8 @@ export default function AppChat({
     if (!incoming) unlockCallTtsPlayback();
     setIsIncomingCall(incoming);
     setVoiceCallRelationId(callScope.relationId);
+    activeAttachModalRef.current = "calling";
+    callingStatusRef.current = "ringing";
     setCallingStatus("ringing");
     setCallingDuration(0);
     setCallStartTime(0);
@@ -2412,6 +2423,8 @@ export default function AppChat({
     if (!activeChatCharId || !voiceCallRelationId || !sessionScope || activeScopeChanged) {
       clearCallSpeechQueue();
       resetCallTtsPlayback();
+      callingStatusRef.current = "ended";
+      activeAttachModalRef.current = null;
       setActiveAttachModal(null);
       setVoiceCallRelationId(null);
       voiceCallScopeRef.current = null;
@@ -2451,6 +2464,8 @@ export default function AppChat({
     clearCallSpeechQueue();
     if (activeTtsAudio) activeTtsAudio.pause();
     resetCallTtsPlayback();
+    callingStatusRef.current = "ended";
+    activeAttachModalRef.current = null;
     setCallingStatus("ended");
     setCallingInputText("");
     setActiveAttachModal(null);
@@ -2463,18 +2478,19 @@ export default function AppChat({
   };
 
   const acceptIncomingCall = () => {
-    if (!isIncomingCall || callingStatus !== "ringing") return;
+    if (!isIncomingCall || callingStatusRef.current !== "ringing") return;
     unlockCallTtsPlayback();
+    callingStatusRef.current = "connected";
     setCallingStatus("connected");
     setCallStartTime(Date.now());
   };
 
   const rejectIncomingCall = () => {
-    if (!isIncomingCall || callingStatus !== "ringing") return;
+    if (!isIncomingCall || callingStatusRef.current !== "ringing") return;
     finishVoiceCall("rejected");
   };
 
-  const endVoiceCall = () => finishVoiceCall(callingStatus === "connected" ? "completed" : "cancelled", { userEndedCall: true });
+  const endVoiceCall = () => finishVoiceCall(callingStatusRef.current === "connected" ? "completed" : "cancelled", { userEndedCall: true });
 
   useVoiceCallTimers({
     activeAttachModal,
@@ -2486,6 +2502,7 @@ export default function AppChat({
     onDurationTick: () => setCallingDuration((previous) => previous + 1),
     onResetDuration: () => setCallingDuration(0),
     onOutgoingConnected: () => {
+      callingStatusRef.current = "connected";
       setCallingStatus("connected");
       setCallStartTime(Date.now());
     },
@@ -2494,7 +2511,7 @@ export default function AppChat({
   });
 
   const sendVoiceCallMessage = () => {
-    if (isTyping) return;
+    if (isTyping || activeAttachModalRef.current !== "calling" || callingStatusRef.current !== "connected") return;
     const currentCallScope = activeVoiceCallScope ?? voiceCallScopeRef.current;
     const videoCallInputMarkup = callMode === "video"
       ? createVideoCallInputMarkup(callingInputText, videoCallInputMode)
@@ -2526,7 +2543,7 @@ export default function AppChat({
   };
 
   const sendVideoCameraFrame = (imageDataUrl: string) => {
-    if (isTyping || callMode !== "video" || callingStatus !== "connected") return;
+    if (isTyping || callMode !== "video" || activeAttachModalRef.current !== "calling" || callingStatusRef.current !== "connected") return;
     const currentCallScope = activeVoiceCallScope ?? voiceCallScopeRef.current;
     const userMsg = createVoiceCallUserMessage({
       text: "[视频画面]|我打开了摄像头，请识别我当前的画面并结合上下文回应。",
@@ -2809,14 +2826,15 @@ export default function AppChat({
     if (signal?.aborted) return buildOutcome("cancelled", "cancelled", { kind: "cancelled", recoverable: true });
     lifecyclePhase = "requesting";
     setIsTyping(true);
-    const callTurnGeneration = activeAttachModal === "calling" && callingStatus === "connected"
+    const isConnectedVoiceCallNow = activeAttachModalRef.current === "calling" && callingStatusRef.current === "connected";
+    const callTurnGeneration = isConnectedVoiceCallNow
       ? callSpeechGenerationRef.current
       : null;
     const isCancelledCallTurn = () => callTurnGeneration !== null
       && callTurnGeneration !== callSpeechGenerationRef.current;
     const publishReplyError = (message: string) => {
       const timestamp = Date.now();
-      if (activeAttachModal === "calling" && callingStatus === "connected") {
+      if (isConnectedVoiceCallNow) {
         setCallTranscript((previous) => [...previous, {
           id: `call-error-${timestamp}`,
           sender: "character",
@@ -3061,7 +3079,7 @@ export default function AppChat({
 
     try {
       // Collect message history of this specific character to pass to backend
-      const isConnectedVoiceCall = activeAttachModal === "calling" && callingStatus === "connected";
+      const isConnectedVoiceCall = activeAttachModalRef.current === "calling" && callingStatusRef.current === "connected";
       const callHistoryMessages: Message[] = isConnectedVoiceCall
         ? callTranscript.map((item) => ({
             id: item.id,
@@ -3400,7 +3418,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         includeLongTermMemory: shouldLoadLongTermMemory,
         characterKnowledgeBoundary: formatCharacterKnowledgeBoundary({ currentCharacterId: activeCharacter.id }),
         onlineChatSpatialBoundary: formatOnlineChatSpatialBoundary(),
-        voiceCallPrompts: activeAttachModal === "calling"
+        voiceCallPrompts: isConnectedVoiceCall
           ? voiceCallPromptBlocks
           : undefined,
         stickerPrompt,
@@ -3762,10 +3780,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               currentTime: () => Date.now(),
               translationText: data.translation,
               transformBubble: (bubbleText, idx) => {
-                const isVoice = activeAttachModal !== "calling" && canConvertBubbleToVoice(turnCharacter, userMsg, messages, idx, bubbleText, replyContext);
-                if (!isVoice) return bubbleText;
-                const secs = Math.max(1, Math.min(60, Math.ceil(bubbleText.length * 0.35 + 1.2)));
-                return `[语音]|${secs}|${bubbleText}`;
+                const connectedCallBubble = isConnectedVoiceCall
+                  ? sanitizeConnectedVoiceCallText(bubbleText)
+                  : bubbleText;
+                const isVoice = !isConnectedVoiceCall
+                  && canConvertBubbleToVoice(turnCharacter, userMsg, messages, idx, bubbleText, replyContext);
+                if (!isVoice) return connectedCallBubble;
+                const secs = Math.max(1, Math.min(60, Math.ceil(connectedCallBubble.length * 0.35 + 1.2)));
+                return `[语音]|${secs}|${connectedCallBubble}`;
               },
             };
           },

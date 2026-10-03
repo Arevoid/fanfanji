@@ -255,6 +255,34 @@ export function detectCallTopicShift(input: {
   return overlap < 0.28;
 }
 
+const PRE_CONNECTION_CALL_LANGUAGE_PATTERN = /(?:\d{1,3}\s*(?:秒|分钟)\s*(?:就好|就行)?[，,、\s]*)?(?:接一下(?:电话)?|接电话|等你接(?:听)?|正在拨号|电话响了|我(?:现在|正在|马上)?(?:给你)?打电话|\b(?:i['’]?m\s+calling(?:\s+you)?\s+now|please\s+pick\s+up|answer\s+the\s+call)\b)(?:[，,、\s]*(?:嘛|哦|吧))?/iu;
+
+/** Detects language that only makes sense before a call is answered. */
+export function containsPreConnectionCallLanguage(text: string): boolean {
+  return PRE_CONNECTION_CALL_LANGUAGE_PATTERN.test(text);
+}
+
+/**
+ * Keeps a connected-call reply from leaking ringing/dialing language into the
+ * live transcript. The model is still responsible for the character's actual
+ * wording; this is only a narrow safety net for a stale pre-call phrase.
+ */
+export function sanitizeConnectedVoiceCallText(text: string): string {
+  if (!containsPreConnectionCallLanguage(text)) return text;
+  const cleaned = text
+    .replace(PRE_CONNECTION_CALL_LANGUAGE_PATTERN, "")
+    .replace(/^[\s，,、:：;；。.!！?？-]+|[\s，,、:：;；。.!！?？-]+$/gu, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return cleaned || "\u5df2\u7ecf\u63a5\u901a\u4e86\uff0c\u6211\u5728\u542c\u3002";
+}
+
+const CONNECTED_CALL_STATE_PROMPT = `
+[CONNECTED CALL STATE]
+The call is already connected. Both sides can hear each other now; answer the user's latest words directly as an ongoing conversation.
+Never ask the user to answer, pick up, accept, or wait for the call. Never say that you are dialing, calling now, ringing, waiting for pickup, or trying to connect (including "\u63a5\u4e00\u4e0b", "\u63a5\u7535\u8bdd", "\u7b49\u4f60\u63a5", or "\u6b63\u5728\u62e8\u53f7").
+Any such wording in the ordinary-chat lead-in is pre-call setup only, not a line to repeat in the connected call. Treat the live call transcript and the newest user turn as authoritative.`;
+
 export function buildVoiceCallPrompts(callTopicShiftDetected: boolean, callMode: "voice" | "video" = "voice"): string[] {
   if (callMode === "video") {
     return [
@@ -266,6 +294,7 @@ export function buildVoiceCallPrompts(callTopicShiftDetected: boolean, callMode:
 只允许输出这两种标记，不要输出 JSON、旁白标题、系统说明或“对方画面/用户画面”等元话语。画面描述不能替用户做出未输入的动作，也不能凭空改变地点或时间。
 视频通话不是现实摄像头直播；画面应当是角色此刻愿意让用户看到的叙事描述。角色是否展示环境、是否靠近镜头、是否回避镜头，完全服从人设与关系。
 禁止发送表情包、图片、红包、转账、文件、位置或任何方括号附件标记；视频通话只输出画面和台词。`,
+      CONNECTED_CALL_STATE_PROMPT,
       `[VIDEO CALL MEMORY ROUTING]
 1. 先回应用户本轮输入，再参考本次通话内最近几轮；不要重复已经说过的台词或画面。
 2. 本次输入若以“画面：”开头，代表用户描述自己的镜头内容，不是用户说出口的话；请像看到了该画面一样自然回应。
@@ -278,6 +307,7 @@ export function buildVoiceCallPrompts(callTopicShiftDetected: boolean, callMode:
     `[语音电话输出规则]
 你正在和用户进行实时语音电话。只输出适合直接说出口的纯文字台词。
 禁止发送表情包、贴图、图片、红包、转账、文件、位置或任何方括号附件标记；不要输出“[表情]”“[图片]”等描述。`,
+    CONNECTED_CALL_STATE_PROMPT,
     `[VOICE CALL MEMORY ROUTING]
 1. Routing order: answer the user's newest sentence using the current call transcript and short online-chat lead-in before consulting older context.
 2. Do not repeat, paraphrase, or restart an answer already spoken during this call. Compare against your recent call lines and add only new information or a natural follow-up.
