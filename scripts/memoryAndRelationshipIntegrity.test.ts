@@ -37,6 +37,25 @@ assert.equal(
   false,
   "already-synced continuation does not sync twice",
 );
+assert.equal(
+  shouldAutoSyncOnlineContinuation({ ...continuation, memorySyncStatus: "synced", lastSyncedMessageCount: undefined }),
+  false,
+  "legacy synced continuation without a cursor does not sync on view-only exit",
+);
+assert.equal(
+  shouldAutoSyncOnlineContinuation({ ...continuation, memorySyncStatus: "pending", lastSyncedMessageCount: undefined }),
+  true,
+  "pending legacy continuation still syncs its real offline content",
+);
+assert.equal(
+  shouldAutoSyncOnlineContinuation({
+    ...continuation,
+    messages: [{ ...continuation.messages[0], isImportedContext: true }],
+    lastSyncedMessageCount: 0,
+  }),
+  false,
+  "imported online context does not count as new offline progress",
+);
 
 const spatialBoundary = formatOnlineChatSpatialBoundary();
 assert.match(spatialBoundary, /\u8fdc\u7a0b\u7ebf\u4e0a\u804a\u5929/);

@@ -24,6 +24,11 @@ export function useOfflineMessageEditorActions({
     const updatedStory: OfflineStory = {
       ...activeStory,
       messages: activeStory.messages.map((message) => message.id === messageId ? { ...message, content: editingText } : message),
+      archivedAt: undefined,
+      memorySyncStatus: "pending",
+      // The edited message may be before the previous sync cursor. Rewind the
+      // boundary so the next automatic sync cannot miss that change.
+      lastSyncedMessageCount: 0,
       updatedAt: Date.now(),
     };
     saveActiveStorySnapshot(updatedStory);

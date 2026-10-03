@@ -106,6 +106,7 @@ assert.match(timeline, /禁止.*发送成聊天气泡/);
 const pendingStory = createPendingOfflineHandoff({ story, sourceMessages: story.messages, now: 400 });
 assert.equal(pendingStory.onlineHandoff?.status, "pending", "returning online creates a durable handoff without an AI summary");
 assert.deepEqual(pendingStory.onlineHandoff?.sourceMessageIds, ["offline-user", "offline-character"]);
+assert.equal(createPendingOfflineHandoff({ story: pendingStory, sourceMessages: story.messages, now: 401 }), pendingStory, "same pending handoff is idempotent");
 assert.deepEqual(getOfflineHandoffSourceMessagesForReturn(story).map((message) => message.id), ["offline-user", "offline-character"], "continue mode always bridges its confirmed transcript");
 assert.deepEqual(getOfflineHandoffSourceMessagesForReturn({ ...story, characterIds: ["character-a", "character-b"] }), [], "multi-character stories cannot enter one direct relationship handoff");
 const directorStory: OfflineStory = { ...story, mode: "director" };
@@ -152,6 +153,7 @@ const thirdDurableDelivery = recordOfflineHandoffDelivery(secondDelivery, 470, 3
 assert.equal(thirdDurableDelivery.onlineHandoff?.status, "acknowledged", "the bridge retires after three replies only when durable facts exist");
 const acknowledgedStory = acknowledgeOfflineHandoff(pendingStory, 500);
 assert.equal(acknowledgedStory.onlineHandoff?.status, "acknowledged");
+assert.equal(createPendingOfflineHandoff({ story: acknowledgedStory, sourceMessages: story.messages, now: 501 }), acknowledgedStory, "same acknowledged handoff is idempotent");
 assert.equal(selectPendingOfflineHandoffStory({
   stories: [acknowledgedStory], relationId: "relation-a", characterId: "character-a", conversationId: "conversation-a", now: 500,
 }), undefined, "an acknowledged handoff is not injected again");

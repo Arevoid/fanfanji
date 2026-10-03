@@ -6,6 +6,7 @@ const appOffline = readFileSync(new URL("../src/components/AppOffline.tsx", impo
 
 assert.match(hook, /saveActiveStorySnapshot/);
 assert.match(hook, /修改内容已保存/);
+assert.match(hook, /memorySyncStatus: "pending"[\s\S]*lastSyncedMessageCount: 0/);
 assert.match(hook, /updatedAt: Date\.now\(\)/);
 assert.match(appOffline, /useOfflineMessageEditorActions/);
 assert.doesNotMatch(appOffline, /const handleSaveEdit =/);

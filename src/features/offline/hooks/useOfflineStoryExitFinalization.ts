@@ -27,7 +27,6 @@ export function useOfflineStoryExitFinalization({
 }: UseOfflineStoryExitFinalizationOptions) {
   const finalizeStoryBeforeLeaving = async (story: OfflineStory): Promise<OfflineStory> => {
     let completedStory = story;
-    const shouldConsolidateMemory = shouldSyncStoryMemory(story);
     const handoffCreatedAt = Date.now();
     if (!completedStory.archivedAt) {
       completedStory = {
@@ -36,12 +35,17 @@ export function useOfflineStoryExitFinalization({
         updatedAt: handoffCreatedAt,
       };
     }
-    const handoffSourceMessages = getOfflineHandoffSourceMessagesForReturn(completedStory);
-    completedStory = createPendingOfflineHandoff({
-      story: completedStory,
-      sourceMessages: handoffSourceMessages,
-      now: handoffCreatedAt,
-    });
+    // Re-evaluate after finalizing the latest snapshot. A view-only exit of a
+    // legacy synced story must not create a fresh handoff or trigger a summary.
+    const shouldConsolidateMemory = shouldSyncStoryMemory(completedStory);
+    if (shouldConsolidateMemory) {
+      const handoffSourceMessages = getOfflineHandoffSourceMessagesForReturn(completedStory);
+      completedStory = createPendingOfflineHandoff({
+        story: completedStory,
+        sourceMessages: handoffSourceMessages,
+        now: handoffCreatedAt,
+      });
+    }
     if (completedStory.sourceAppointmentId) {
       const appointment = appointments.find((item) => item.id === completedStory.sourceAppointmentId
         && item.relationId === completedStory.relationId);

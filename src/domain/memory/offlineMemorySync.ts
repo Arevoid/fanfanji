@@ -20,6 +20,14 @@ export function getOfflineStoryMarkerPrefix(story: OfflineStory): string {
   return `offline-story:${story.id}:`;
 }
 
+/** Only authored offline content can advance the memory-sync cursor. */
+export function isOfflineStoryMessageSyncable(message: Message): boolean {
+  return !message.isImportedContext
+    && !message.id.startsWith("offline-import-")
+    && !message.isNarration
+    && message.content.trim().length > 0;
+}
+
 export function isOfflineStoryHandoffMemory(memory: MemoryItem, story: OfflineStory): boolean {
   const participantIds = Array.from(new Set((story.characterIds || []).filter(Boolean)));
   if (!story.relationId && participantIds.length > 0 && !participantIds.includes(story.characterId)) {
@@ -192,9 +200,10 @@ export function createPendingOfflineHandoff(input: {
   const sourceMessageIds = input.sourceMessages.map((message) => message.id);
   if (sourceMessageIds.length === 0) return input.story;
   const existing = input.story.onlineHandoff;
-  if (existing?.status === "acknowledged"
+  const sameSourceMessageIds = existing
     && sourceMessageIds.length === existing.sourceMessageIds.length
-    && sourceMessageIds.every((id, index) => id === existing.sourceMessageIds[index])) return input.story;
+    && sourceMessageIds.every((id, index) => id === existing.sourceMessageIds[index]);
+  if (sameSourceMessageIds) return input.story;
   const now = input.now ?? Date.now();
   return {
     ...input.story,
@@ -254,12 +263,7 @@ export function getOfflineMemorySourceMessages(story: OfflineStory, options: { i
   return story.messages
     .slice(syncStart)
     .map((message, index) => ({ message, index }))
-    .filter(({ message }) =>
-      !message.isImportedContext
-      && !message.id.startsWith("offline-import-")
-      && !message.isNarration
-      && message.content.trim().length > 0,
-    )
+    .filter(({ message }) => isOfflineStoryMessageSyncable(message))
     // Old stories did not guarantee array order after editing. Preserve a
     // stable chronological handoff without mutating the persisted story.
     .sort((left, right) => left.message.timestamp - right.message.timestamp || left.index - right.index)
@@ -395,14 +399,17 @@ export function sanitizeOfflineMemoryForOnlineUse(content: string): string {
 }
 
 export function hasUnsyncedOfflineMemoryProgress(story: OfflineStory): boolean {
+  // A synced legacy story may not have received the cursor field introduced
+  // later. Treat its current transcript as the already-synced baseline rather
+  // than re-running extraction every time the user only views and exits it.
+  if (story.memorySyncStatus === "synced" && story.lastSyncedMessageCount === undefined) return false;
   // `archivedAt` only marks that the scene was left. It does not mean that
   // the memory projection finished. Exit finalization persists that marker
   // before starting the asynchronous extraction, so treating an archived
   // story as implicitly synced drops the first automatic sync on the floor.
-  // The durable cursor is the only authoritative boundary; legacy stories
-  // without one must therefore start at zero and remain retryable.
+  // The durable cursor remains the boundary for pending/failed/new stories.
   const syncStart = story.lastSyncedMessageCount ?? 0;
-  return story.messages.length > syncStart;
+  return story.messages.slice(syncStart).some(isOfflineStoryMessageSyncable);
 }
 
 /**
