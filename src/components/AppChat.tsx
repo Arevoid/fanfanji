@@ -5,6 +5,7 @@ import { currentDevDiagnosticMode, registerDevModuleTrace, isDevDiagnosticRuntim
 import { ApiChatError, apiChat, apiExtractMemoriesWithModelFallback, apiTranslate } from "../utils/apiHelper";
 import { readJson, readString, remove as removeStoredValue, writeJson, writeString } from "../core/storage/storageAdapter";
 import { readArray } from "../core/storage/repositories/repositoryUtils";
+import { isMcpEnabledForScope, setCharacterMcpEnabled } from "../features/mcp/mcpPolicyRuntime";
 import { createId } from "../core/id/createId";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type InnerVoiceRecord, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "../types";
@@ -242,7 +243,7 @@ import { InnerVoiceModal } from "../features/chat/components/InnerVoiceModal";
 import { ContactList } from "../features/chat/components/ContactList";
 import { ConversationList } from "../features/chat/components/ConversationList";
 import { MessageList } from "../features/chat/components/MessageList";
-import { ChatTextWithLinks } from "../features/chat/components/ChatTextWithLinks";
+import { ChatTextWithLinks, isLegacyMcpMediaFragment } from "../features/chat/components/ChatTextWithLinks";
 import { parseQuoteReply, QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
 import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
 import { ChatComposer, ChatInputBar } from "../features/chat/components/ChatComposer";
@@ -823,6 +824,7 @@ export default function AppChat({
     ? relationships.find((relation) => relation.id === activeChatRelationId && relation.userIdentityId === activeIdentityId)
     : undefined;
   const activeCharacter = characters.find((c) => c.id === activeChatCharId);
+  const characterMcpEnabled = Boolean(activeCharacter && isMcpEnabledForScope({ characterId: activeCharacter.id }));
   const activeCharacterDisplayName = activeCharacter
     ? activeCharacter.isGroupChat
       ? activeCharacter.name
@@ -8400,6 +8402,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
                     {!activeCharacter.isGroupChat && <div className="flex h-[52px] px-4 items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
+                        <span className="text-slate-800 font-medium text-[16px] block">允许该角色使用 MCP</span>
+                      </div>
+                      <SettingsSwitch checked={characterMcpEnabled} onChange={(enabled) => { setCharacterMcpEnabled(activeCharacter.id, enabled); }} label="允许该角色使用 MCP" />
+                    </div>}
+                    {!activeCharacter.isGroupChat && <div className="flex h-[52px] px-4 items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
                         <span className="text-slate-800 font-medium text-[16px] block">表情包联想</span>
                       </div>
                       <SettingsSwitch checked={draftEnableStickerAssociation} onChange={setDraftEnableStickerAssociation} label="表情包联想" />
@@ -9074,6 +9082,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             }}
             contentClassName="chat-message-list-content"
             renderMessage={(msg, idx) => {
+              // Do not show URL suffix fragments persisted by pre-fix builds.
+              // The actual image bubble remains visible, while new messages no
+              // longer create these fragments in the first place.
+              if (msg.sender === "character" && isLegacyMcpMediaFragment(msg.content)) return null;
               const previousVisibleMessage = idx > 0 ? visibleChatMessages[idx - 1] : undefined;
               const interveningOfflineStories = getOfflineTimelineStoriesBetween(previousVisibleMessage?.timestamp, msg.timestamp);
               // Calculate WeChat timestamp divider
@@ -9482,11 +9494,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         );
                         const displayUrl = foundSticker ? foundSticker.url : stickerUrl;
                         return (
-                          <div className="chat-message--sticker max-w-[130px] rounded-xl overflow-hidden relative select-none">
+                          <div className="chat-message--sticker h-[120px] w-[120px] rounded-xl overflow-hidden relative select-none bg-[var(--media-placeholder-bg)]">
                             <img
                               src={displayUrl}
-                              alt={stickerName}
-                              className="w-full h-auto max-h-[130px] object-contain"
+                              alt=""
+                              loading="lazy"
+                              onError={(event) => { event.currentTarget.style.display = "none"; }}
+                              className="h-full w-full object-contain"
                               referrerPolicy="no-referrer"
                             />
                             <span className="sr-only">[{stickerName}]</span>

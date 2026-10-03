@@ -199,7 +199,7 @@ const USER_DATA_MANIFEST: Record<UserDataAppId, DataManifest> = {
     clearBinary: clearOrphanedSharedAssets,
   },
   mcp: {
-    keys: [storageKeys.mcpServers, storageKeys.mcpResearchSeed, storageKeys.mcpHotSearchSeed],
+    keys: [storageKeys.mcpServers, storageKeys.mcpPolicy, storageKeys.mcpResearchSeed, storageKeys.mcpHotSearchSeed, storageKeys.mcpYowwSeed],
   },
 };
 

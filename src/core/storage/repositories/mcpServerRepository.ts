@@ -1,18 +1,24 @@
 import { readJson, writeJson } from "../storageAdapter";
 import { storageKeys } from "../storageKeys";
-import type { McpConnectionStatus, McpDiscoveredTool, McpServerConfig } from "../../../domain/mcp/mcpTypes";
+import type { McpConnectionStatus, McpDiscoveredTool, McpPermissionMode, McpServerConfig, McpToolAccess } from "../../../domain/mcp/mcpTypes";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 function normalizeTool(value: unknown): McpDiscoveredTool | null {
   if (!isRecord(value) || typeof value.name !== "string" || !value.name.trim()) return null;
-  const readOnly = value.readOnly !== false;
+  const legacyReadOnly = value.readOnly === true;
+  const access: McpToolAccess = value.access === "read" || value.access === "operate" || value.access === "unknown"
+    ? value.access
+    : legacyReadOnly ? "read" : "unknown";
+  const readOnly = access === "read";
   return {
     name: value.name.trim().slice(0, 160),
     description: typeof value.description === "string" ? value.description.slice(0, 1000) : undefined,
     inputSchema: isRecord(value.inputSchema) ? value.inputSchema : undefined,
     readOnly,
-    enabled: readOnly && value.enabled !== false,
+    access,
+    requiresConfirmation: access !== "read",
+    enabled: access === "read" ? value.enabled !== false : access === "operate" ? value.enabled === true : false,
   };
 }
 
@@ -25,13 +31,22 @@ function normalizeServer(value: unknown): McpServerConfig | null {
   const connectionStatus: McpConnectionStatus | undefined = ["unverified", "checking", "connected", "error"].includes(value.connectionStatus as string)
     ? value.connectionStatus as McpConnectionStatus
     : undefined;
+  const permissionMode: McpPermissionMode = value.permissionMode === "operate" ? "operate" : "read";
+  const readOnlyToolAllowlist = Array.isArray(value.readOnlyToolAllowlist)
+    ? value.readOnlyToolAllowlist.filter((name): name is string => typeof name === "string" && Boolean(name.trim())).map((name) => name.trim().slice(0, 160)).slice(0, 100)
+    : undefined;
   return {
     id: value.id.trim().slice(0, 120),
     name: (typeof value.name === "string" && value.name.trim() ? value.name : url.hostname).slice(0, 120),
     url: url.toString(),
     enabled: value.enabled !== false,
     directFetch: value.directFetch === true,
+    ...(isRecord(value.customHeaders) ? {
+      customHeaders: Object.fromEntries(Object.entries(value.customHeaders).filter(([key, item]) => typeof key === "string" && /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,80}$/u.test(key) && typeof item === "string").slice(0, 32).map(([key, item]) => [key, String(item).slice(0, 500)])),
+    } : {}),
+    permissionMode,
     readOnlyOnly: true,
+    ...(readOnlyToolAllowlist && readOnlyToolAllowlist.length > 0 ? { readOnlyToolAllowlist } : {}),
     discoveredTools: tools,
     ...(connectionStatus ? { connectionStatus } : {}),
     ...(typeof value.lastError === "string" && value.lastError.trim() ? { lastError: value.lastError.slice(0, 500) } : {}),

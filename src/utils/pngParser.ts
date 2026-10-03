@@ -284,6 +284,12 @@ export const parseTextToWorldBookEntries = (text: string, filename: string): Wor
 
 export function cleanOnlineMessage(text: string, disableBracketActions: boolean): string {
   if (!text) return "";
+
+  // Parentheses are also part of Markdown links/images.  The bracket-action
+  // filter must not strip a URL wrapper such as `![表情](https://...)` or
+  // `[表情](https://...)`; doing so turns a valid MCP media result into plain
+  // alt text before the chat renderer gets a chance to recognize it.
+  const removeInlineActions = (value: string): string => value.replace(/\((?!\s*https?:\/\/)[^)]*\)/giu, "");
   
   // Strip accidental hidden date-time metadata, including model-shortened
   // variants such as "[时间：2026-08-11 23:42]".
@@ -314,7 +320,7 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
         // If disableBracketActions is enabled, let's also remove any parenthesized/bracketed action parts inside the quote
         // E.g. “（微笑）你醒了？” -> “你醒了？”
         if (disableBracketActions) {
-          content = content.replace(/\([^)]*\)/g, "");
+          content = removeInlineActions(content);
           content = content.replace(/（[^）]*）/g, "");
           content = content.replace(/\*[^*]*\*/g, "");
         }
@@ -365,7 +371,7 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
     
     // Remove inline bracketed action descriptions
     if (disableBracketActions) {
-      trimmed = trimmed.replace(/\([^)]*\)/g, "");
+      trimmed = removeInlineActions(trimmed);
       trimmed = trimmed.replace(/（[^）]*）/g, "");
       trimmed = trimmed.replace(/\*[^*]*\*/g, "");
     }
@@ -384,6 +390,31 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
   return cleanedLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+const MCP_MEDIA_TOKEN_PATTERN = /(?:!?\[[^\]]*\]\(\s*https?:\/\/mcp\.yoww2026\.cn\/i\/[^\s)]+\s*\)|\(\s*https?:\/\/mcp\.yoww2026\.cn\/i\/[^\s)]+\s*\)|https?:\/\/mcp\.yoww2026\.cn\/i\/[^\s)]+)/giu;
+
+function splitMcpMediaParagraph(value: string): string[] {
+  const chunks: string[] = [];
+  const cleanBoundaryText = (text: string): string => text.trim()
+    .replace(/\s+[(\[]$/u, "")
+    .replace(/^[([]\s*$/u, "")
+    .replace(/^[)\]]\s*$/u, "");
+  let cursor = 0;
+  MCP_MEDIA_TOKEN_PATTERN.lastIndex = 0;
+  for (const match of value.matchAll(MCP_MEDIA_TOKEN_PATTERN)) {
+    const index = match.index ?? 0;
+    const before = cleanBoundaryText(value.slice(cursor, index));
+    if (before) chunks.push(before);
+    if (match[0]?.trim()) {
+      const token = match[0].trim().replace(/\]\(\s*/u, "](").replace(/^\(\s*/u, "(").replace(/\s*\)$/u, ")");
+      chunks.push(token);
+    }
+    cursor = index + match[0].length;
+  }
+  const after = cleanBoundaryText(value.slice(cursor));
+  if (after) chunks.push(after);
+  return chunks.length > 0 ? chunks : [value.trim()];
+}
+
 export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = false): string[] {
   if (!text) return [];
 
@@ -397,8 +428,11 @@ export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = fal
     || line.startsWith("[语音")
     || line.startsWith("[表情]|")
     || line.startsWith("[语音通话]");
+  const isMcpMediaPayload = (line: string): boolean => /(?:!?)\[[^\]]*\]\(?(?:https?:\/\/mcp\.yoww2026\.cn\/i\/)[^\s)]+\)?/iu.test(line)
+    || /https?:\/\/mcp\.yoww2026\.cn\/i\/[^\s)]+/iu.test(line);
   const isExplicitSpeakerLine = (line: string): boolean =>
-    !line.startsWith("[")
+    !isMcpMediaPayload(line)
+    && !line.startsWith("[")
     && !line.startsWith("【")
     && /^[^：:\n]{1,24}\s*[：:](?=\s*\S)/u.test(line);
   const isStructuredFieldLine = (line: string): boolean => /^【[^】\n]+】\s*[：:]/u.test(line);
@@ -454,6 +488,14 @@ export function splitIntoWeChatBubbles(text: string, _keepPeriods: boolean = fal
     }
 
     const paragraphText = paragraph.join("\n").trim();
+    // Never split a remote MCP media URL at the generic chat-bubble length
+    // limit. A split URL becomes several ordinary text bubbles and can no
+    // longer be rendered as an image by the chat surface.
+    if (isMcpMediaPayload(paragraphText)) {
+      results.push(...splitMcpMediaParagraph(paragraphText).map(normalizeBubbleText));
+      paragraph = [];
+      return;
+    }
     if (paragraphText.length <= MAX_BUBBLE_LENGTH) {
       results.push(normalizeBubbleText(paragraphText));
       paragraph = [];

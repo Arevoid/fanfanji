@@ -53,6 +53,18 @@ export interface TextProviderInput {
   imageDataUrl?: string;
   /** Extraction may legitimately return an empty candidate set. */
   allowEmptyText?: boolean;
+  tools?: readonly TextProviderTool[];
+}
+
+export interface TextProviderTool {
+  type: "function";
+  function: { name: string; description?: string; parameters?: Record<string, unknown> };
+}
+
+export interface TextProviderToolCall {
+  id?: string;
+  name: string;
+  arguments: Record<string, unknown>;
 }
 
 /** Usage reported by the upstream model provider.  Values are deliberately
@@ -68,6 +80,7 @@ export interface TextProviderDiagnosticResult {
   text: string;
   structuredOutputTelemetry: StructuredOutputTelemetry;
   usage?: TextProviderUsage;
+  toolCalls?: TextProviderToolCall[];
 }
 
 const finiteTokenCount = (value: unknown): number | undefined => {
@@ -134,6 +147,20 @@ export function parseOpenAiTextWithTelemetry(raw: string): TextProviderDiagnosti
   let finishReason: StructuredOutputFinishReasonKind = "missing";
   let observedEnvelope: "openai_choices" | "unknown" = "unknown";
   let usage: TextProviderUsage | undefined;
+  const toolCalls: TextProviderToolCall[] = [];
+  const collectToolCalls = (choices: any[]) => {
+    for (const choice of choices.slice(0, 16)) {
+      const calls = choice?.message?.tool_calls || choice?.delta?.tool_calls;
+      if (!Array.isArray(calls)) continue;
+      for (const call of calls.slice(0, 16)) {
+        const fn = call?.function;
+        if (!fn || typeof fn.name !== "string") continue;
+        let args: Record<string, unknown> = {};
+        try { const parsed = typeof fn.arguments === "string" ? JSON.parse(fn.arguments || "{}") : fn.arguments; if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) args = parsed; } catch { /* partial streamed arguments are handled by the provider fallback */ }
+        toolCalls.push({ ...(typeof call.id === "string" ? { id: call.id } : {}), name: fn.name, arguments: args });
+      }
+    }
+  };
   if (trimmed.startsWith("data:") || trimmed.includes("\ndata:")) {
     for (const sourceLine of trimmed.split("\n")) {
       const line = sourceLine.trim();
@@ -146,6 +173,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): TextProviderDiagnosti
         if (Array.isArray(chunk.choices)) {
           observedEnvelope = "openai_choices";
           choiceCount = Math.min(64, choiceCount + chunk.choices.length);
+          collectToolCalls(chunk.choices);
         }
         const choice = chunk.choices?.[0];
         finishReason = finishReasonKind(choice?.finish_reason || choice?.finishReason);
@@ -161,6 +189,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): TextProviderDiagnosti
     return {
       text: result,
       ...(usage ? { usage } : {}),
+      ...(toolCalls.length ? { toolCalls } : {}),
       structuredOutputTelemetry: emptyStructuredOutputTelemetry({
         protocolFamily: "openai_compatible", transportOk: true, responseEnvelopeKind: observedEnvelope,
         choiceCount, messageContentKind: observedContent, contentPartCount, textPresent: Boolean(result.trim()),
@@ -175,6 +204,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): TextProviderDiagnosti
     if (hasChoices) observedEnvelope = "openai_choices";
     choiceCount = hasChoices ? Math.min(64, parsed.choices.length) : 0;
     const choice = parsed.choices?.[0];
+    collectToolCalls(parsed.choices || []);
     finishReason = finishReasonKind(choice?.finish_reason || choice?.finishReason);
     const content = choice?.message?.content ?? choice?.text;
     const summary = contentKind(content);
@@ -191,6 +221,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): TextProviderDiagnosti
   return {
     text: result,
     ...(usage ? { usage } : {}),
+    ...(toolCalls.length ? { toolCalls } : {}),
     structuredOutputTelemetry: emptyStructuredOutputTelemetry({
       protocolFamily: "openai_compatible", transportOk: true,
       responseEnvelopeKind: observedEnvelope,
@@ -260,6 +291,7 @@ export async function callTextProviderWithDiagnostics(input: TextProviderInput):
         ...(typeof input.maxOutputTokens === "number"
           ? { max_tokens: Math.max(128, Math.floor(input.maxOutputTokens)) }
           : {}),
+        ...(input.tools && input.tools.length > 0 ? { tools: input.tools, tool_choice: "auto" } : {}),
       }),
     }, requestTimeoutMs);
     const raw = await readResponseTextWithTimeout(response, requestTimeoutMs);

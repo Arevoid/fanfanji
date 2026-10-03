@@ -31,6 +31,10 @@ export async function proxyMcpRequest(input: { url: unknown; body: unknown; head
     const value = matchingKey ? incoming[matchingKey] : undefined;
     if (typeof value === "string" && value.length <= 2048) headers[key] = value;
   }
+  for (const [key, value] of Object.entries(incoming)) {
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,80}$/u.test(key) || /^(?:host|content-length|content-type|cookie|origin|referer|authorization|mcp-session-id)$/iu.test(key)) continue;
+    if (typeof value === "string" && value.length <= 2_048 && Object.keys(headers).length < 40) headers[key] = value;
+  }
   let upstream: Response;
   try {
     upstream = await fetch(target, { method: "POST", headers, body: JSON.stringify(input.body) });

@@ -163,8 +163,9 @@ async function directClientChatImpl(params: {
   maxOutputTokens?: number;
   imageDataUrl?: string;
   signal?: AbortSignal;
-}): Promise<{ text: string; usage?: ApiProviderUsage }> {
-  const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible, timeoutMs, maxOutputTokens, imageDataUrl, signal } = params;
+  tools?: readonly ApiToolDefinition[];
+}): Promise<{ text: string; usage?: ApiProviderUsage; toolCalls?: ApiToolCall[] }> {
+  const { message, history, systemInstruction, apiKey, model, apiEndpoint, apiTemperature, streamCompatible, timeoutMs, maxOutputTokens, imageDataUrl, signal, tools } = params;
   const requestTimeoutMs = typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
     ? timeoutMs
     : API_REQUEST_TIMEOUTS.textGeneration;
@@ -207,6 +208,7 @@ async function directClientChatImpl(params: {
         stream: streamCompatible || false,
         ...(streamCompatible === true ? { stream_options: { include_usage: true } } : {}),
         ...(typeof maxOutputTokens === "number" ? { max_tokens: Math.max(128, Math.floor(maxOutputTokens)) } : {})
+        ,...(tools && tools.length > 0 ? { tools, tool_choice: "auto" } : {})
       }),
       signal,
     }, requestTimeoutMs);
@@ -219,6 +221,20 @@ async function directClientChatImpl(params: {
     const responseText = await readResponseTextWithTimeout(responseFetch, requestTimeoutMs);
     let aiText = "";
     let usage: ApiProviderUsage | undefined;
+    const toolCalls: ApiToolCall[] = [];
+    const collectToolCalls = (choices: any[]) => {
+      for (const choice of choices || []) {
+        const calls = choice?.message?.tool_calls || choice?.delta?.tool_calls;
+        if (!Array.isArray(calls)) continue;
+        for (const call of calls.slice(0, 16)) {
+          const fn = call?.function;
+          if (!fn || typeof fn.name !== "string") continue;
+          let args: Record<string, unknown> = {};
+          try { const parsed = typeof fn.arguments === "string" ? JSON.parse(fn.arguments || "{}") : fn.arguments; if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) args = parsed; } catch { /* ignore malformed provider fragments */ }
+          toolCalls.push({ ...(typeof call.id === "string" ? { id: call.id } : {}), name: fn.name, arguments: args });
+        }
+      }
+    };
     const trimmedText = responseText.trim();
     if (trimmedText.startsWith("data:") || trimmedText.includes("\ndata:")) {
       // It is a Server-Sent Events (SSE) stream
@@ -233,6 +249,7 @@ async function directClientChatImpl(params: {
           try {
             const parsedChunk = JSON.parse(dataStr);
             usage = normalizeProviderUsage(parsedChunk.usage) || usage;
+            collectToolCalls(parsedChunk.choices || []);
             const content = parsedChunk.choices?.[0]?.delta?.content || 
                             parsedChunk.choices?.[0]?.message?.content || 
                             parsedChunk.choices?.[0]?.text || "";
@@ -246,6 +263,7 @@ async function directClientChatImpl(params: {
       try {
         const dataFetch = JSON.parse(trimmedText);
         usage = normalizeProviderUsage(dataFetch.usage);
+        collectToolCalls(dataFetch.choices || []);
         const content = dataFetch.choices?.[0]?.message?.content ?? dataFetch.choices?.[0]?.text;
         aiText = Array.isArray(content)
           ? content.map((part: any) => typeof part === "string" ? part : part?.text || "").join("")
@@ -256,7 +274,7 @@ async function directClientChatImpl(params: {
     }
 
     if (aiText.trim()) {
-      return { text: aiText, ...(usage ? { usage } : {}) };
+      return { text: aiText, ...(usage ? { usage } : {}), ...(toolCalls.length ? { toolCalls } : {}) };
     }
     const details = emptyTextApiErrorDetails();
     throw new ApiChatError(details.message, { status: 502, code: details.code, reason: details.reason });
@@ -354,7 +372,7 @@ async function directClientChatImpl(params: {
   }
 }
 
-async function directClientChat(params: Parameters<typeof directClientChatImpl>[0] & { ledger?: AiRequestLedgerSession }): Promise<{ text: string; usage?: ApiProviderUsage }> {
+async function directClientChat(params: Parameters<typeof directClientChatImpl>[0] & { ledger?: AiRequestLedgerSession }): Promise<{ text: string; usage?: ApiProviderUsage; toolCalls?: ApiToolCall[] }> {
   const { ledger, ...request } = params;
   ledger?.markAttempt({
     provider: request.apiEndpoint?.trim() ? "custom-openai-compatible" : "google-gemini",
@@ -429,7 +447,15 @@ export type ApiChatParams = {
   fallbackReasons?: readonly string[];
   estimatedOutputTokens?: number;
   contextItems?: readonly string[];
+  tools?: readonly ApiToolDefinition[];
 };
+
+export type ApiToolDefinition = {
+  type: "function";
+  function: { name: string; description?: string; parameters?: Record<string, unknown> };
+};
+
+export type ApiToolCall = { id?: string; name: string; arguments: Record<string, unknown> };
 
 // chat wrapper
 async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSession }): Promise<{ text: string; usage?: ApiProviderUsage }> {
@@ -499,10 +525,10 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
     // A successful non-JSON response is not a valid chat backend response.
     throw new ApiChatError("聊天 API 返回成功状态，但没有有效的文本响应。", { status: 502, code: "provider_invalid_response" });
   }
-  if (data && typeof data.text === "string" && data.text.trim()) {
+  if (data && (typeof data.text === "string" || Array.isArray(data.toolCalls)) && (data.text?.trim() || data.toolCalls?.length)) {
     const usage = normalizeProviderUsage(data.usage);
     ledger?.recordUsage(usage);
-    return { text: data.text, ...(usage ? { usage } : {}) };
+    return { text: typeof data.text === "string" ? data.text : "", ...(Array.isArray(data.toolCalls) ? { toolCalls: data.toolCalls } : {}), ...(usage ? { usage } : {}) };
   }
   if (data?.error) {
     const details = parseTextApiErrorPayload(responseText, res.status || 502);

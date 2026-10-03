@@ -213,8 +213,8 @@ export default {
 
     if (url.pathname === "/api/chat") {
       try {
-        const result = await callTextProviderWithDiagnostics(textInput(body, String(body.message || ""), typeof body.systemInstruction === "string" ? body.systemInstruction : undefined, typeof body.apiTemperature === "number" ? body.apiTemperature : 0.7));
-        return json({ text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
+        const result = await callTextProviderWithDiagnostics({ ...textInput(body, String(body.message || ""), typeof body.systemInstruction === "string" ? body.systemInstruction : undefined, typeof body.apiTemperature === "number" ? body.apiTemperature : 0.7), tools: Array.isArray(body.tools) ? body.tools : undefined });
+        return json({ text: result.text, ...(result.toolCalls ? { toolCalls: result.toolCalls } : {}), ...(result.usage ? { usage: result.usage } : {}) });
       } catch (error) { return textErrorResponse(error, "聊天 API 请求失败。"); }
     }
 

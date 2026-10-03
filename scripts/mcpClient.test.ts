@@ -31,16 +31,26 @@ globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
   return new Response(JSON.stringify({ jsonrpc: "2.0", result: {} }), { headers: { "Content-Type": "application/json" } });
 }) as typeof fetch;
 try {
+  setMcpSessionToken("demo", "session-token");
   const tools = await discoverMcpTools(server);
   assert.equal(tools.length, 2);
   assert.equal(tools[0].readOnly, true);
+  assert.equal(tools[0].access, "read");
   assert.equal(tools[0].enabled, true);
+  assert.equal(tools[1].access, "operate");
   assert.equal(tools[1].enabled, false);
+  const allowlistedTools = await discoverMcpTools({ ...server, readOnlyToolAllowlist: ["write"] });
+  assert.equal(allowlistedTools[1].access, "read");
+  assert.equal(allowlistedTools[1].enabled, true);
   const ready = { ...server, discoveredTools: tools, connectionStatus: "connected" as const };
-  setMcpSessionToken("demo", "session-token");
+  const initializeCallsBeforeTool = calls.filter((call) => call.body?.method === "initialize").length;
   const result = await callMcpTool(ready, { serverId: "demo", toolName: "lookup", arguments: { q: "x" } });
   assert.equal(result.content[0].text, "safe result");
+  assert.equal(calls.filter((call) => call.body?.method === "initialize").length, initializeCallsBeforeTool, "tool calls should reuse the discovered MCP session");
   assert.equal(calls.some((call) => String((call.headers as Record<string, string>).Authorization || "").includes("session-token")), true);
+  await assert.rejects(() => callMcpTool({ ...ready, permissionMode: "operate" }, { serverId: "demo", toolName: "write", arguments: { value: "x" } }), /not authorized|未获授权/);
+  const operated = await callMcpTool({ ...ready, permissionMode: "operate", discoveredTools: tools.map((tool) => tool.name === "write" ? { ...tool, enabled: true } : tool) }, { serverId: "demo", toolName: "write", arguments: { value: "x" }, confirmed: true });
+  assert.equal(operated.content[0].text, "safe result");
 } finally {
   globalThis.fetch = previousFetch;
 }

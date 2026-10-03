@@ -313,8 +313,9 @@ async function startServer() {
         timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : undefined,
         maxOutputTokens: typeof body.maxOutputTokens === "number" ? body.maxOutputTokens : undefined,
         imageDataUrl: typeof body.imageDataUrl === "string" && body.imageDataUrl.startsWith("data:image/") ? body.imageDataUrl : undefined,
+        tools: Array.isArray(body.tools) ? body.tools : undefined,
       });
-      return res.json({ text: result.text, ...(result.usage ? { usage: result.usage } : {}) });
+      return res.json({ text: result.text, ...(result.toolCalls ? { toolCalls: result.toolCalls } : {}), ...(result.usage ? { usage: result.usage } : {}) });
     } catch (error: any) {
       const normalized = normalizeTextApiError(error, "聊天 API 请求失败。");
       console.error("Chat API Error:", { code: normalized.code, status: normalized.status, reason: normalized.reason, message: normalized.message });

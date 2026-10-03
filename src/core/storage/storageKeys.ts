@@ -88,8 +88,10 @@ export const storageKeys = {
   presets: "phone_presets",
   /** Non-secret external MCP server configuration; tokens never use this key. */
   mcpServers: "phone_mcp_servers_v1",
+  mcpPolicy: "phone_mcp_policy_v1",
   mcpResearchSeed: "phone_mcp_research_seed_v1",
   mcpHotSearchSeed: "phone_mcp_hotsearch_seed_v1",
+  mcpYowwSeed: "phone_mcp_yoww_seed_v1",
   dataSchemaVersion: "phone_data_schema_version",
   migrationState: "phone_storage_migration_state",
   migrationLock: "phone_storage_migration_lock",

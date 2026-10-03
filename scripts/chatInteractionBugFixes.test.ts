@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { shouldSendChatInputOnEnter } from "../src/features/chat/components/ChatComposer";
 import { characterAvatarReplyRefusesChange, isExplicitCharacterAvatarChangeRequest, resolveCharacterAvatarChangeTiming } from "../src/features/chat/services/characterAvatarChangeIntent";
-import { splitIntoWeChatBubbles } from "../src/utils/pngParser";
+import { cleanOnlineMessage, splitIntoWeChatBubbles } from "../src/utils/pngParser";
+import { isLegacyMcpMediaFragment } from "../src/features/chat/components/ChatTextWithLinks";
 
 assert.equal(shouldSendChatInputOnEnter({ key: "Enter", hasText: true, isTyping: false }), true);
 assert.equal(shouldSendChatInputOnEnter({ key: "Enter", hasText: true, isTyping: false, chatEnterKeyNewline: true }), false);
@@ -27,6 +28,25 @@ assert.deepEqual(
   splitIntoWeChatBubbles("这是同一句话，\n只是为了排版换行"),
   ["这是同一句话，\n只是为了排版换行"],
 );
+
+const yowwImage = "![received](https://mcp.yoww2026.cn/i/f4ac139338fa1565/aHR0cHM6Ly9waWMuODIzMTQ5MTIueHl6L2FwaS9jZmlsZS9BZ0FDQWdFQUF5RUdBQVRFY0NuQkFBSk9IV3BsRmhZSDdyVEdsbk9kWEE1S05oaEhjODI1QUFLVERHc2JyNWNwUl9rdzFia0VmUGxrQVFBREFnQURlUUFEUFFR.png)";
+assert.deepEqual(splitIntoWeChatBubbles(yowwImage), [yowwImage], "MCP image URLs must not be split into text bubbles");
+const yowwUrl = yowwImage.match(/https?:\/\/[^)]+/u)?.[0] || "";
+assert.deepEqual(splitIntoWeChatBubbles(`收到\n(\n${yowwUrl}\n)`), ["收到", `(${yowwUrl})`], "wrapped MCP image URLs must not leave stray parentheses");
+assert.deepEqual(splitIntoWeChatBubbles(`收到 (\n${yowwUrl}`), ["收到", yowwUrl], "an incomplete MCP wrapper must not become a standalone punctuation bubble");
+assert.deepEqual(splitIntoWeChatBubbles(`收到\n![received](\n${yowwUrl}\n)`), ["收到", `![received](${yowwUrl})`], "multiline Markdown image URLs must stay in one media bubble");
+assert.deepEqual(
+  splitIntoWeChatBubbles(`收到啦\n${yowwImage}\n再给你一张`),
+  ["收到啦", yowwImage, "再给你一张"],
+  "MCP media should be delivered as its own bubble between surrounding text bubbles",
+);
+assert.equal(
+  cleanOnlineMessage(`[sticker](${yowwImage.match(/https?:\/\/[^)]+/u)?.[0] || ""})`, true),
+  `[sticker](${yowwImage.match(/https?:\/\/[^)]+/u)?.[0] || ""})`,
+  "bracket-action filtering must preserve Markdown URL wrappers",
+);
+assert.equal(isLegacyMcpMediaFragment(".gif)"), true, "legacy image suffixes should be hidden");
+assert.equal(isLegacyMcpMediaFragment("普通文本"), false);
 
 const appChat = readFileSync("src/components/AppChat.tsx", "utf8");
 assert.match(appChat, /sendCustomMessage\(compressed, capturedContext, \{ triggerReply: false \}\)/);
