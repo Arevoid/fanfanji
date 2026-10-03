@@ -11,6 +11,8 @@ interface UseSettingsImageApiActionsOptions {
   onSaveSettings: (updater: (previous: UserSettings) => UserSettings) => boolean;
   enableImageGeneration: boolean;
   setEnableImageGeneration: Dispatch<SetStateAction<boolean>>;
+  enableProactiveImageGeneration: boolean;
+  setEnableProactiveImageGeneration: Dispatch<SetStateAction<boolean>>;
   apiState: ApiPresetState;
 }
 
@@ -19,6 +21,8 @@ export function useSettingsImageApiActions({
   onSaveSettings,
   enableImageGeneration,
   setEnableImageGeneration,
+  enableProactiveImageGeneration,
+  setEnableProactiveImageGeneration,
   apiState,
 }: UseSettingsImageApiActionsOptions) {
   const {
@@ -83,7 +87,7 @@ export function useSettingsImageApiActions({
       referenceImageSupported: supportsReferenceImageForModel(protocol, selectedModel),
     } : preset);
     setImageApiPresets(next);
-    onSaveSettings((previous) => ({ ...previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
+    onSaveSettings((previous) => ({ ...previous, enableImageGeneration, enableProactiveImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
   };
 
   const updateCurrentImageModel = (model: string) => {
@@ -146,6 +150,11 @@ export function useSettingsImageApiActions({
     onSaveSettings((previous) => ({ ...previous, enableImageGeneration: enabled }));
   };
 
+  const updateProactiveImageGenerationEnabled = (enabled: boolean) => {
+    setEnableProactiveImageGeneration(enabled);
+    onSaveSettings((previous) => ({ ...previous, enableProactiveImageGeneration: enabled }));
+  };
+
   const saveImageApiConfig = () => {
     if (!imageSelectedModel.trim()) {
       setImageTestResult({ success: false, message: "请先选择或输入图片模型。" });
@@ -164,7 +173,7 @@ export function useSettingsImageApiActions({
       referenceImageSupported: supportsReferenceImageForModel(protocol, imageSelectedModel),
     } : preset);
     setImageApiPresets(next);
-    const saved = onSaveSettings((previous) => ({ ...previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
+    const saved = onSaveSettings((previous) => ({ ...previous, enableImageGeneration, enableProactiveImageGeneration, imageApiPresets: next, activeImageApiPresetId }));
     if (!saved) {
       setImageTestResult({ success: false, message: "图片 API 设置保存失败：草稿仍保留。请到“设置 > 数据管理 > 存储空间与迁移”检查空间，必要时清理已迁移副本后重试。" });
       return;
@@ -174,7 +183,7 @@ export function useSettingsImageApiActions({
 
   return {
     selectImagePreset, addImagePreset, deleteImagePreset, persistImagePresetDraft,
-    updateCurrentImageModel, fetchImageModels, testImageApi, updateImageGenerationEnabled,
+    updateCurrentImageModel, fetchImageModels, testImageApi, updateImageGenerationEnabled, updateProactiveImageGenerationEnabled,
     saveImageApiConfig, imageModelSuggestions, isFetchingImageModels, isTestingImageApi, imageTestResult,
     imageApiPresets, activeImageApiPresetId, imagePresetName, imageApiEndpoint, imageApiKey, imageSelectedModel,
     imageAspectRatio, setImageApiEndpoint, setImageApiKey, setImageSelectedModel, updateImageAspectRatio,

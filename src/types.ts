@@ -96,6 +96,8 @@ export interface Character {
   voiceFrequency?: "low" | "medium" | "high" | "none";
   /** Canonical appearance data only. It is intentionally never relation-scoped. */
   enableImageGeneration?: boolean;
+  /** Allows this character to decide to send an image without a direct user image request. */
+  enableProactiveImageGeneration?: boolean;
   imageAppearancePrompt?: string;
   imageNegativePrompt?: string;
   /** A single reference image blob is stored in IndexedDB; this is metadata only. */
@@ -273,7 +275,7 @@ export interface ImageGenerationRecord {
   /** Group records retain group semantics instead of using a direct relation. */
   groupId?: string;
   imageAssetId: string;
-  trigger: "manual" | "explicit-user-text";
+  trigger: "manual" | "explicit-user-text" | "character-action";
   createdAt: number;
 }
 
@@ -866,6 +868,8 @@ export interface UserSettings {
   // OpenAI Images compatible settings. Disabled by default so no image request
   // can occur until both this and the canonical Character setting are enabled.
   enableImageGeneration?: boolean;
+  /** Separate global gate for unsolicited character image actions. */
+  enableProactiveImageGeneration?: boolean;
   imageApiPresets?: ImageApiPreset[];
   activeImageApiPresetId?: string;
 }

@@ -44,6 +44,7 @@ interface UseChatSaveSettingsOptions {
   draftMinimaxSpeed: any;
   draftVoiceFrequency: any;
   draftEnableImageGeneration: any;
+  draftEnableProactiveImageGeneration: any;
   draftImageAppearancePrompt: any;
   draftImageNegativePrompt: any;
   draftImageReferenceAssetId: any;
@@ -72,7 +73,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
     draftDisableBracketActions, draftHistoryMemoryLimit, draftContextMemoryLimit, draftRetrievalHistoryLimit,
     draftArchiveTemplateType, draftEnableTimeAwareness,
     draftMinimaxVoiceId, draftMosslandVoiceId, draftMinimaxSpeed, draftVoiceFrequency,
-    draftEnableImageGeneration, draftImageAppearancePrompt, draftImageNegativePrompt,
+    draftEnableImageGeneration, draftEnableProactiveImageGeneration, draftImageAppearancePrompt, draftImageNegativePrompt,
     draftImageReferenceAssetId, draftImageReferenceMimeType,
   } = drafts;
   // Save settings draft
@@ -135,6 +136,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
       minimaxSpeed: draftMinimaxSpeed,
       voiceFrequency: draftVoiceFrequency,
       enableImageGeneration: draftEnableImageGeneration,
+      enableProactiveImageGeneration: draftEnableProactiveImageGeneration,
       imageAppearancePrompt: draftImageAppearancePrompt.trim() || undefined,
       imageNegativePrompt: draftImageNegativePrompt.trim() || undefined,
       imageReferenceAssetId: draftImageReferenceAssetId,

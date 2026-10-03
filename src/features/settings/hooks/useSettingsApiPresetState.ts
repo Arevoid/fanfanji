@@ -78,6 +78,10 @@ export function useSettingsApiPresetState(settings: UserSettings) {
   const initialImagePreset = initialImagePresets.find((preset) => preset.id === (settings.activeImageApiPresetId || initialImagePresets[0].id)) || initialImagePresets[0];
 
   const [enableImageGeneration, setEnableImageGeneration] = useState(settings.enableImageGeneration === true);
+  const [enableProactiveImageGeneration, setEnableProactiveImageGeneration] = useState(settings.enableProactiveImageGeneration === true);
+  useEffect(() => {
+    setEnableProactiveImageGeneration(settings.enableProactiveImageGeneration === true);
+  }, [settings.enableProactiveImageGeneration]);
   const [imageApiPresets, setImageApiPresets] = useState<ImageApiPreset[]>(initialImagePresets);
   const [activeImageApiPresetId, setActiveImageApiPresetId] = useState(settings.activeImageApiPresetId || initialImagePresets[0].id);
   const [imagePresetName, setImagePresetName] = useState(initialImagePreset.name);
@@ -96,7 +100,8 @@ export function useSettingsApiPresetState(settings: UserSettings) {
     apiEndpoint, setApiEndpoint, apiKey, setApiKey, selectedModel, setSelectedModel,
     apiTemperature, setApiTemperature, streamCompatible, setStreamCompatible, showPassword, setShowPassword,
     modelSuggestions, setModelSuggestions, isFetchingModels, setIsFetchingModels,
-    enableImageGeneration, setEnableImageGeneration, imageApiPresets, setImageApiPresets,
+    enableImageGeneration, setEnableImageGeneration, enableProactiveImageGeneration, setEnableProactiveImageGeneration,
+    imageApiPresets, setImageApiPresets,
     activeImageApiPresetId, setActiveImageApiPresetId, imagePresetName, setImagePresetName,
     imageApiEndpoint, setImageApiEndpoint, imageApiKey, setImageApiKey, imageSelectedModel, setImageSelectedModel,
     imageAspectRatio, setImageAspectRatio,

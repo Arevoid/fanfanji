@@ -2,6 +2,7 @@ import type { Character, Message, UserSettings } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { imageAssetDb } from "../../../utils/imageAssetDb";
 import { generateCharacterImage, resolveCharacterImageContext } from "./characterImageService";
+import type { ImageGenerationTrigger } from "./imageGenerationIntent";
 
 export type CharacterImageDeliveryResult =
   | { status: "missing-context" }
@@ -16,7 +17,7 @@ export async function generateCharacterImageForDelivery(input: {
   currentMessages: readonly Message[];
   characters: readonly Character[];
   settings: UserSettings;
-  trigger: "manual" | "explicit-user-text";
+  trigger: ImageGenerationTrigger;
   userText: string;
   createId: () => string;
   isRuntimeCurrent: () => boolean;

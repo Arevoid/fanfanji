@@ -214,7 +214,7 @@ export function formatCharacterActionPrompt(capabilities: readonly CharacterActi
       ? "change_avatar 只能在用户明确要求更换头像/情侣头像且当前对话范围存在可用图片时使用；不要把普通图片分享当成换头像。"
       : "",
     allowed.includes("send_image")
-      ? "send_image 只在用户明确要求你发一张图片/照片且 contentHint 能描述图片意图时使用；动作会生成并发送一张真正的图片。"
+      ? "send_image 只在用户明确要求图片，或已开启角色主动生图且当前情境确实适合分享时使用；必须提供具体 contentHint，不要每轮对话都发送。动作会生成并发送一张真正的图片。"
       : "",
     allowed.includes("send_voice")
       ? "send_voice 只在用户明确要求语音/录音时使用；contentHint 必须是实际要发送的语音内容，动作会在本轮生成语音气泡。"

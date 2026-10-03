@@ -24,7 +24,10 @@ assert.equal(getPendingExplicitImageRequest("现在？", [...pendingThread, { id
 assert.equal(getPendingExplicitImageRequest("现在？", [{ ...pendingThread[0], content: "我们聊聊天" }]), null);
 assert.doesNotThrow(() => assertImageGenerationTrigger("manual"));
 assert.doesNotThrow(() => assertImageGenerationTrigger("explicit-user-text", "给我看看图片"));
+assert.doesNotThrow(() => assertImageGenerationTrigger("character-action", "一张雨天街景", true));
 assert.throws(() => assertImageGenerationTrigger("explicit-user-text", "普通聊天"));
+assert.throws(() => assertImageGenerationTrigger("character-action", "一张雨天街景", false));
+assert.throws(() => assertImageGenerationTrigger("character-action", "", true));
 assert.throws(() => assertImageGenerationConfiguration({ enableImageGeneration: false } as any, { id: "char", name: "角色", avatar: "", personality: "", backstory: "", enableImageGeneration: true }));
 const fakeReply = createDirectReplyCandidates({ rawText: "（发送了一张自拍照片）", disableBracketActions: false, keepPeriods: false, characterId: "char", createId: () => "fake", currentTime: () => 1 });
 assert.equal(fakeReply.messages.length, 0, "failed generation must not leave a fake image text message");

@@ -334,7 +334,7 @@ export default {
 
     if (url.pathname === "/api/image/generate") {
       try {
-        assertImageGenerationTrigger(body.trigger as "manual" | "explicit-user-text", typeof body.userText === "string" ? body.userText : undefined);
+        assertImageGenerationTrigger(body.trigger as "manual" | "explicit-user-text" | "character-action", typeof body.userText === "string" ? body.userText : undefined, body.proactiveAuthorization === true);
         return json({ dataUrl: await generateImageWithProtocol(body as any) });
       } catch (error) {
         const imageError = error instanceof ImageApiError ? error : null;

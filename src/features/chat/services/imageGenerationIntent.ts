@@ -1,5 +1,7 @@
 import type { Message } from "../../../types";
 
+export type ImageGenerationTrigger = "manual" | "explicit-user-text" | "character-action";
+
 const IMAGE_NOUN = "(?:照片|图片|图像|相片|自拍|图)";
 
 const NEGATED_OR_QUOTED = new RegExp(
@@ -39,8 +41,9 @@ export function getPendingExplicitImageRequest(text: string, messages: readonly 
   return hasRealImageAfterRequest ? null : lastUser.content.trim();
 }
 
-export function assertImageGenerationTrigger(trigger: "manual" | "explicit-user-text", userText?: string): void {
+export function assertImageGenerationTrigger(trigger: ImageGenerationTrigger, userText?: string, proactiveAuthorized = false): void {
   if (trigger === "manual") return;
   if (trigger === "explicit-user-text" && isExplicitImageRequest(userText || "")) return;
-  throw new Error("图片生成已拦截：只有明确的用户图片请求或手动确认可以调用图片 API。");
+  if (trigger === "character-action" && proactiveAuthorized && String(userText || "").trim().length >= 3) return;
+  throw new Error("图片生成已拦截：只有明确的用户图片请求、已授权的角色主动生图或手动确认可以调用图片 API。");
 }

@@ -140,6 +140,8 @@ import { persistInlineInnerVoiceBestEffort } from "../features/chat/services/inl
 import { createInlineInnerVoiceRecord } from "../features/chat/services/innerVoiceService";
 import { INLINE_INNER_VOICE_INSTRUCTION, isChatResponseFormatError } from "../features/chat/services/chatTurnResponseProtocol";
 import { generateCharacterImageForDelivery } from "../features/chat/services/characterImageDeliveryService";
+import type { ImageGenerationTrigger } from "../features/chat/services/imageGenerationIntent";
+import { checkProactiveImageGenerationPolicy, isProactiveImageGenerationEnabled } from "../features/chat/services/proactiveImageGenerationPolicy";
 import { imageDataUrlToBlob, parseCharacterSaveUserImageDirective } from "../features/chat/services/userImageMemoryService";
 import { characterAvatarReplyRefusesChange, isExplicitCharacterAvatarChangeRequest, resolveCharacterAvatarChangeTiming, type CharacterAvatarChangeTiming } from "../features/chat/services/characterAvatarChangeIntent";
 import { formatCharacterActionPrompt, parseCharacterActionDirective, type CharacterActionDirective } from "../features/chat/services/characterActionProtocol";
@@ -1944,6 +1946,7 @@ export default function AppChat({
     draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,
     draftMinimaxSpeed, setDraftMinimaxSpeed,
     draftVoiceFrequency, draftEnableImageGeneration, setDraftEnableImageGeneration,
+    draftEnableProactiveImageGeneration, setDraftEnableProactiveImageGeneration,
     draftImageAppearancePrompt, setDraftImageAppearancePrompt, draftImageNegativePrompt, setDraftImageNegativePrompt,
     draftImageReferenceAssetId, setDraftImageReferenceAssetId, draftImageReferenceMimeType, setDraftImageReferenceMimeType,
     loadCharacterDraft,
@@ -3429,7 +3432,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             "publish_moment",
             ...(stickerGroups.some((group) => group.stickers.length > 0) ? ["send_sticker" as const] : []),
             ...(activeCharacter && !activeCharacter.isGroupChat ? ["change_avatar" as const] : []),
-            ...(activeCharacter && !activeCharacter.isGroupChat && settings.enableImageGeneration && activeCharacter.enableImageGeneration ? ["send_image" as const] : []),
+            ...(activeCharacter && !activeCharacter.isGroupChat && isProactiveImageGenerationEnabled(settings, activeCharacter) ? ["send_image" as const] : []),
             "send_voice",
             ...(activeCharacter && !activeCharacter.isGroupChat ? ["friend_request" as const, "call" as const, "video_call" as const] : []),
           ])
@@ -4479,7 +4482,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   };
 
   /** Chat image requests remain isolated from normal text replies and other AI paths. */
-  const generateAndSendCharacterImage = async (trigger: "manual" | "explicit-user-text", userText: string, signal?: AbortSignal): Promise<boolean> => {
+  const generateAndSendCharacterImage = async (trigger: ImageGenerationTrigger, userText: string, signal?: AbortSignal): Promise<boolean> => {
     if (!activeCharacter) return false;
     const capturedContext = activeRuntimeContext;
     setImageGenerationActive(true);
@@ -4860,6 +4863,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     draftMinimaxSpeed,
     draftVoiceFrequency,
     draftEnableImageGeneration,
+    draftEnableProactiveImageGeneration,
     draftImageAppearancePrompt,
     draftImageNegativePrompt,
     draftImageReferenceAssetId,
@@ -5063,9 +5067,20 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     }
     if (directive.type === "send_image") {
       if (characterDeliveryBlocked) return { status: "rejected" };
+      const character = input.character || activeCharacter;
+      if (!character || character.isGroupChat || !input.relationship) return { status: "rejected" };
+      const policy = checkProactiveImageGenerationPolicy({
+        settings,
+        character,
+        records: loadImageGenerationRecords([]).value,
+        relationId: input.relationship.id,
+      });
+      if (!policy.allowed) return { status: "rejected" };
+      const prompt = directive.contentHint?.trim();
+      if (!prompt) return { status: "failed" };
       const sent = await generateAndSendCharacterImage(
-        "explicit-user-text",
-        directive.contentHint?.trim() || "角色主动发送一张符合当前语境的图片",
+        "character-action",
+        prompt,
       );
       return { status: sent ? "success" : "failed" };
     }
@@ -8633,6 +8648,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       {advancedSettingsSection === "voiceImage" && !activeCharacter.isGroupChat && (
                        <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-xs">
                         <div className="flex items-center justify-between"><div><span className="text-slate-800 font-bold text-sm block">图片生成设置</span><span className="text-[10px] text-slate-400">外貌资料属于角色本身，所有身份共用；聊天与记录仍按关系隔离。</span></div><SettingsSwitch checked={draftEnableImageGeneration} onChange={setDraftEnableImageGeneration} label="角色图片生成" /></div>
+                        <div className="flex items-center justify-between"><div><span className="text-slate-800 font-bold text-sm block">角色主动生图</span><span className="text-[10px] text-slate-400">允许该角色在合适的聊天情境中主动分享图片。</span></div><SettingsSwitch checked={draftEnableProactiveImageGeneration} onChange={setDraftEnableProactiveImageGeneration} label="角色主动生图" /></div>
                         <textarea rows={4} value={draftImageAppearancePrompt} onChange={(event) => setDraftImageAppearancePrompt(event.target.value)} placeholder="外貌、服饰、气质、镜头偏好…" className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs leading-relaxed outline-none" />
                         <textarea rows={2} value={draftImageNegativePrompt} onChange={(event) => setDraftImageNegativePrompt(event.target.value)} placeholder="负面提示词，例如：不要水印、不要文字、不要变脸…" className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs leading-relaxed outline-none" />
                         <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3"><p className="mb-2 text-[10px] text-slate-500">参考图仅支持一张，保存到本机 IndexedDB；备份仅包含元数据，不包含图片二进制。</p><label className="inline-flex cursor-pointer items-center rounded-lg bg-white px-3 py-2 text-[10px] font-bold text-slate-700 shadow-sm"><Camera className="mr-1 h-3.5 w-3.5" />{draftImageReferenceAssetId ? "替换参考图" : "上传参考图"}<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; if (file.size > 8 * 1024 * 1024) return showToast("参考图不能超过 8MB。"); const assetId = `character-reference-${activeCharacter.id}`; try { await imageAssetDb.saveImage(assetId, file); if (draftImageReferenceAssetId && draftImageReferenceAssetId !== assetId) await imageAssetDb.deleteImage(draftImageReferenceAssetId); setDraftImageReferenceAssetId(assetId); setDraftImageReferenceMimeType(file.type); showToast("参考图已保存，点击右上角保存设置后生效。"); } catch { showToast("参考图保存失败。"); } }} /></label>{draftImageReferenceAssetId && <button type="button" onClick={() => { imageAssetDb.deleteImage(draftImageReferenceAssetId).catch(() => undefined); setDraftImageReferenceAssetId(undefined); setDraftImageReferenceMimeType(undefined); }} className="ml-2 text-[10px] font-bold text-rose-500">移除</button>}</div>

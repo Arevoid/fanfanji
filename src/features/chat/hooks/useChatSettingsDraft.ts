@@ -36,6 +36,7 @@ export function useChatSettingsDraft() {
   const [draftMinimaxSpeed, setDraftMinimaxSpeed] = useState(1);
   const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("low");
   const [draftEnableImageGeneration, setDraftEnableImageGeneration] = useState(false);
+  const [draftEnableProactiveImageGeneration, setDraftEnableProactiveImageGeneration] = useState(false);
   const [draftImageAppearancePrompt, setDraftImageAppearancePrompt] = useState("");
   const [draftImageNegativePrompt, setDraftImageNegativePrompt] = useState("");
   const [draftImageReferenceAssetId, setDraftImageReferenceAssetId] = useState<string | undefined>();
@@ -74,6 +75,7 @@ export function useChatSettingsDraft() {
     setDraftMinimaxSpeed(character.minimaxSpeed !== undefined ? character.minimaxSpeed : 1);
     setDraftVoiceFrequency(character.voiceFrequency || "low");
     setDraftEnableImageGeneration(character.enableImageGeneration === true);
+    setDraftEnableProactiveImageGeneration(character.enableProactiveImageGeneration === true);
     setDraftImageAppearancePrompt(character.imageAppearancePrompt || "");
     setDraftImageNegativePrompt(character.imageNegativePrompt || "");
     setDraftImageReferenceAssetId(character.imageReferenceAssetId);
@@ -98,6 +100,7 @@ export function useChatSettingsDraft() {
     draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,
     draftMinimaxSpeed, setDraftMinimaxSpeed,
     draftVoiceFrequency, setDraftVoiceFrequency, draftEnableImageGeneration, setDraftEnableImageGeneration,
+    draftEnableProactiveImageGeneration, setDraftEnableProactiveImageGeneration,
     draftImageAppearancePrompt, setDraftImageAppearancePrompt, draftImageNegativePrompt, setDraftImageNegativePrompt,
     draftImageReferenceAssetId, setDraftImageReferenceAssetId, draftImageReferenceMimeType, setDraftImageReferenceMimeType,
     loadCharacterDraft,

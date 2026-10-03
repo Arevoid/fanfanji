@@ -471,7 +471,8 @@ export default function AppSettings({
     apiEndpoint, setApiEndpoint, apiKey, setApiKey, selectedModel, setSelectedModel,
     apiTemperature, setApiTemperature, streamCompatible, setStreamCompatible, showPassword, setShowPassword,
     modelSuggestions, isFetchingModels,
-    enableImageGeneration, setEnableImageGeneration, imageApiPresets, setImageApiPresets,
+    enableImageGeneration, setEnableImageGeneration, enableProactiveImageGeneration, setEnableProactiveImageGeneration,
+    imageApiPresets, setImageApiPresets,
     activeImageApiPresetId, setActiveImageApiPresetId, imagePresetName, setImagePresetName,
     imageApiEndpoint, setImageApiEndpoint, imageApiKey, setImageApiKey, imageSelectedModel, setImageSelectedModel, imageAspectRatio,
     showImagePassword, setShowImagePassword, imageModelSuggestions, setImageModelSuggestions,
@@ -481,12 +482,14 @@ export default function AppSettings({
 
   const {
     selectImagePreset, addImagePreset, deleteImagePreset, persistImagePresetDraft,
-    updateCurrentImageModel, fetchImageModels, testImageApi, updateImageGenerationEnabled, saveImageApiConfig, updateImageAspectRatio,
+    updateCurrentImageModel, fetchImageModels, testImageApi, updateImageGenerationEnabled, updateProactiveImageGenerationEnabled, saveImageApiConfig, updateImageAspectRatio,
   } = useSettingsImageApiActions({
     settings,
     onSaveSettings,
     enableImageGeneration,
     setEnableImageGeneration,
+    enableProactiveImageGeneration,
+    setEnableProactiveImageGeneration,
     apiState: apiPresetState,
   });
   const {
@@ -1149,6 +1152,7 @@ export default function AppSettings({
             <div className="space-y-3 text-left">
               <div className="settings-section-header">图片设置</div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between"><div><span className="text-sm font-bold text-slate-800 block">图片生成总开关</span><span className="text-[10px] text-slate-400">关闭时任何角色都不能生成图片</span></div><button type="button" role="switch" aria-checked={enableImageGeneration} aria-label="图片生成总开关" onClick={() => updateImageGenerationEnabled(!enableImageGeneration)} className={`settings-compact-toggle relative flex shrink-0 items-center border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${enableImageGeneration ? "bg-[var(--button-primary-bg)]" : "bg-[var(--surface-muted)]"}`}><span className={`absolute left-0.5 bg-[var(--surface)] shadow-sm transition-transform duration-200 ${enableImageGeneration ? "translate-x-[18px]" : "translate-x-0"}`} /></button></div>
+              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between"><div><span className="text-sm font-bold text-slate-800 block">允许角色主动生图</span><span className="text-[10px] text-slate-400">开启后，已单独授权的角色可在合适时机分享图片</span></div><button type="button" role="switch" aria-checked={enableProactiveImageGeneration} aria-label="允许角色主动生图" onClick={() => updateProactiveImageGenerationEnabled(!enableProactiveImageGeneration)} className={`settings-compact-toggle relative flex shrink-0 items-center border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${enableProactiveImageGeneration ? "bg-[var(--button-primary-bg)]" : "bg-[var(--surface-muted)]"}`}><span className={`absolute left-0.5 bg-[var(--surface)] shadow-sm transition-transform duration-200 ${enableProactiveImageGeneration ? "translate-x-[18px]" : "translate-x-0"}`} /></button></div>
               <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4"><div className="flex items-center justify-between"><h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">图片 API 配置</h3></div>
                 <div className="flex gap-2"><select value={activeImageApiPresetId} onChange={(event) => selectImagePreset(event.target.value)} className="flex-1 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs">{imageApiPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select><button type="button" onClick={addImagePreset} className="p-2 rounded-xl bg-slate-100"><Plus className="w-4 h-4" /></button><button type="button" onClick={deleteImagePreset} className="p-2 rounded-xl bg-rose-50 text-rose-600"><Trash2 className="w-4 h-4" /></button></div>
                 <input value={imagePresetName} onChange={(event) => { setImagePresetName(event.target.value); persistImagePresetDraft({ name: event.target.value }); }} placeholder="预设名称" className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs" />
@@ -3041,6 +3045,23 @@ export default function AppSettings({
                     className={`settings-compact-toggle relative flex shrink-0 items-center border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${enableImageGeneration ? "bg-[var(--button-primary-bg)]" : "bg-[var(--surface-muted)]"}`}
                   >
                     <span className={`absolute left-0.5 bg-[var(--surface)] shadow-sm transition-transform duration-200 ${enableImageGeneration ? "translate-x-[18px]" : "translate-x-0"}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 border-b border-[var(--divider)] px-4 py-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">允许角色主动生图</h3>
+                    <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">开启后，已单独授权的角色可在合适时机分享图片</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={enableProactiveImageGeneration}
+                    aria-label="允许角色主动生图"
+                    onClick={() => updateProactiveImageGenerationEnabled(!enableProactiveImageGeneration)}
+                    className={`settings-compact-toggle relative flex shrink-0 items-center border-0 p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${enableProactiveImageGeneration ? "bg-[var(--button-primary-bg)]" : "bg-[var(--surface-muted)]"}`}
+                  >
+                    <span className={`absolute left-0.5 bg-[var(--surface)] shadow-sm transition-transform duration-200 ${enableProactiveImageGeneration ? "translate-x-[18px]" : "translate-x-0"}`} />
                   </button>
                 </div>
 

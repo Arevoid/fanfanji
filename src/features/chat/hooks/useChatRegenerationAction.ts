@@ -393,7 +393,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
             "publish_moment",
             ...(stickerGroups.some((group: { stickers: unknown[] }) => group.stickers.length > 0) ? ["send_sticker" as const] : []),
             ...(activeCharacter && !activeCharacter.isGroupChat ? ["change_avatar" as const] : []),
-            ...(activeCharacter && !activeCharacter.isGroupChat && settings.enableImageGeneration && activeCharacter.enableImageGeneration ? ["send_image" as const] : []),
+            ...(activeCharacter && !activeCharacter.isGroupChat && settings.enableProactiveImageGeneration === true && activeCharacter.enableProactiveImageGeneration === true && settings.enableImageGeneration === true && activeCharacter.enableImageGeneration === true ? ["send_image" as const] : []),
             "send_voice",
             ...(activeCharacter && !activeCharacter.isGroupChat ? ["friend_request" as const, "call" as const, "video_call" as const] : []),
           ])

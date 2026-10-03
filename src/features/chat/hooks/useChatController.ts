@@ -8,6 +8,7 @@ import {
   formatQuotedChatInput,
 } from "../controllers/chatController";
 import { getPendingExplicitImageRequest } from "../services/imageGenerationIntent";
+import type { ImageGenerationTrigger } from "../services/imageGenerationIntent";
 
 export type ChatResponseHandler = (
   userMessage: Message | null,
@@ -18,7 +19,7 @@ export type ChatResponseHandler = (
 ) => Promise<void | DirectReplyLifecycleOutcome> | void;
 
 export type CharacterImageHandler = (
-  trigger: "manual" | "explicit-user-text",
+  trigger: ImageGenerationTrigger,
   userText: string,
   signal?: AbortSignal,
 ) => Promise<boolean>;

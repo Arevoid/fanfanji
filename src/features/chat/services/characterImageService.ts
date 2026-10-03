@@ -2,7 +2,8 @@ import type { Character, ImageApiPreset, ImageGenerationRecord, Message, UserSet
 import { resolveCanonicalCharacterId } from "../../../domain/character/characterIdentity";
 import { getConversationId, type CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { buildCharacterImagePrompt } from "../../../domain/prompt/characterImagePrompt";
-import { assertImageGenerationTrigger } from "./imageGenerationIntent";
+import { assertImageGenerationTrigger, type ImageGenerationTrigger } from "./imageGenerationIntent";
+import { isProactiveImageGenerationEnabled } from "./proactiveImageGenerationPolicy";
 import { assertReferenceImageCapability, inferGeminiImageAuthMode, inferImageProtocol, supportsReferenceImageForModel } from "./imageProtocol";
 import { imageAssetDb } from "../../../utils/imageAssetDb";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../../../utils/fetchWithTimeout";
@@ -65,7 +66,7 @@ export function createGeneratedImageMessages(input: {
   characterId: string;
   imageAssetId: string;
   imageMimeType: string;
-  trigger: "manual" | "explicit-user-text";
+  trigger: ImageGenerationTrigger;
   scope: ImageScope;
   timestamp: number;
 }): { message: Message; record: ImageGenerationRecord } {
@@ -99,7 +100,7 @@ function dataUrlToBlob(value: string): Blob {
 async function requestCharacterImageDataImpl(input: {
   settings: UserSettings;
   character: Character;
-  trigger: "manual" | "explicit-user-text";
+  trigger: ImageGenerationTrigger;
   userText: string;
   prompt: string;
   signal?: AbortSignal;
@@ -127,6 +128,8 @@ async function requestCharacterImageDataImpl(input: {
       prompt: input.prompt,
       trigger: input.trigger,
       userText: input.userText,
+      proactiveAuthorization: input.trigger === "character-action"
+        && isProactiveImageGenerationEnabled(input.settings, input.character),
       ...(reference ? { referenceImage: { mimeType: reference.type || input.character.imageReferenceMimeType || "image/png", base64: await blobToBase64(reference) } } : {}),
     }),
   }, API_REQUEST_TIMEOUTS.imageGeneration);
@@ -142,7 +145,7 @@ async function requestCharacterImageDataImpl(input: {
 export async function requestCharacterImageData(input: {
   settings: UserSettings;
   character: Character;
-  trigger: "manual" | "explicit-user-text";
+  trigger: ImageGenerationTrigger;
   userText: string;
   prompt: string;
   signal?: AbortSignal;
@@ -173,12 +176,16 @@ export async function generateCharacterImage(input: {
   relationship?: CharacterRelationship;
   recentMessages: readonly Message[];
   scope: ImageScope;
-  trigger: "manual" | "explicit-user-text";
+  trigger: ImageGenerationTrigger;
   userText: string;
   createId: () => string;
   signal?: AbortSignal;
 }): Promise<{ message: Message; record: ImageGenerationRecord }> {
-  assertImageGenerationTrigger(input.trigger, input.userText);
+  assertImageGenerationTrigger(
+    input.trigger,
+    input.userText,
+    input.trigger === "character-action" && isProactiveImageGenerationEnabled(input.settings, input.character),
+  );
   const { imageBlob } = await requestCharacterImageData({
     settings: input.settings,
     character: input.character,

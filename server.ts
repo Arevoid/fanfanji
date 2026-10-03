@@ -287,7 +287,7 @@ async function startServer() {
     try {
       const { trigger, userText } = req.body || {};
       try {
-        assertImageGenerationTrigger(trigger, String(userText || ""));
+        assertImageGenerationTrigger(trigger, String(userText || ""), req.body?.proactiveAuthorization === true);
       } catch (error: any) {
         return res.status(403).json({ error: error.message || "图片生成已拦截：不是明确的用户图片请求。" });
       }

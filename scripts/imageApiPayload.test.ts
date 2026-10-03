@@ -46,7 +46,7 @@ assert.doesNotMatch(storedChatImage, /generated \? "[^"]*border|: "border shadow
 assert.match(settingsPage, /useSettingsImageApiActions/);
 assert.match(imageApiActions, /const updateCurrentImageModel = \(model: string\)/);
 assert.match(imageApiActions, /const persistImagePresetDraft =/);
-assert.match(imageApiActions, /onSaveSettings\(\(previous\) => \(\{ \.\.\.previous, enableImageGeneration, imageApiPresets: next, activeImageApiPresetId \}\)\)/);
+assert.match(imageApiActions, /onSaveSettings\(\(previous\) => \(\{ \.\.\.previous, enableImageGeneration, enableProactiveImageGeneration, imageApiPresets: next, activeImageApiPresetId \}\)\)/);
 assert.match(imageApiActions, /selectedModel: model/);
 assert.match(imageApiActions, /请先选择或输入图片模型。/);
 assert.match(settingsApiPresetState, /selectedModel: preset\.selectedModel \|\| \(preset as ImageApiPreset & \{ model\?: string \}\)\.model \|\| ""/);
