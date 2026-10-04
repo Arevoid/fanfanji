@@ -101,6 +101,15 @@ export function scopeUserChatCss(input: string): string {
       continue;
     }
     if (char === "}") {
+      // Keep the synthetic root frame alive when user CSS contains an
+      // unmatched closing brace.  Otherwise the next rule opener reads
+      // `segmentStart` from an undefined frame and takes the whole chat app
+      // down during render.
+      if (stack.length === 1) {
+        emittedUntil = index + 1;
+        stack[0].segmentStart = index + 1;
+        continue;
+      }
       const current = stack.pop();
       if (!current) continue;
       output.push(css.slice(emittedUntil, index), "}");
@@ -150,6 +159,13 @@ export function prioritizeUserChatCss(css: string): string {
       continue;
     }
     if (char === "}") {
+      // Match scopeUserChatCss recovery: an extra closing brace is invalid
+      // user input, not a reason to empty the root parser frame.
+      if (stack.length === 1) {
+        emittedUntil = index + 1;
+        stack[0].segmentStart = index + 1;
+        continue;
+      }
       const current = stack.pop();
       if (!current) continue;
       if (current.declarationBlock && !current.skipPriority) output.push(css.slice(emittedUntil, current.segmentStart), appendImportant(css.slice(current.segmentStart, index)));
