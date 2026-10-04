@@ -21,11 +21,14 @@ for (const component of [
   "AppSchedule",
   "AppReading",
 ]) {
-  assert.match(appSource, new RegExp(`const ${component} = React\\.lazy\\(load${component}\\)`));
+  assert.match(appSource, new RegExp(`const ${component} = React\\.lazy\\(withModuleRetry\\(load${component}\\)\\)`));
   assert.doesNotMatch(appSource, new RegExp(`import ${component} from`));
 }
 assert.match(appSource, /function LazyAppBoundary/);
 assert.match(appSource, /<React\.Suspense/);
+assert.match(appSource, /cannot access \.\*uninitialized variable/);
+assert.match(appSource, /_result\\\.default/);
+assert.match(appSource, /fanfan-stale-module-recovery-v2-at/);
 assert.match(appSource, /requestIdleCallback\(preloadIdleApps, \{ timeout: 1500 \}\)/);
 assert.match(appSource, /preloadApp\(item\.id\)/);
 assert.match(appSource, /const IDLE_PRELOAD_APP_IDS = \[[^\]]+\]/);

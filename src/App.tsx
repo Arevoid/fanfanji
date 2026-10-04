@@ -269,22 +269,26 @@ const IDLE_PRELOAD_APP_IDS = [
   "relationship-network",
 ] as const;
 
-const AppChat = React.lazy(loadAppChat);
-const AppArchives = React.lazy(loadAppArchives);
-const AppWorldBook = React.lazy(loadAppWorldBook);
-const AppMusic = React.lazy(loadAppMusic);
-const AppForum = React.lazy(loadAppForum);
-const AppNotes = React.lazy(loadAppNotes);
-const AppDiary = React.lazy(loadAppDiary);
-const AppStore = React.lazy(loadAppStore);
-const AppSettings = React.lazy(loadAppSettings);
-const AppMemory = React.lazy(loadAppMemory);
-const AppOffline = React.lazy(loadAppOffline);
-const AppSchedule = React.lazy(loadAppSchedule);
-const AppReading = React.lazy(loadAppReading);
-const AppCinema = React.lazy(loadAppCinema);
-const AppCharacterPhone = React.lazy(loadAppCharacterPhone);
-const AppRelationshipNetwork = React.lazy(loadAppRelationshipNetwork);
+// Use the same bounded retry for the component that is actually rendered.
+// Preloading alone cannot recover a WebKit service-worker update that cancels
+// the first dynamic import: React.lazy would otherwise keep the rejected
+// promise forever and render a blank error boundary.
+const AppChat = React.lazy(withModuleRetry(loadAppChat));
+const AppArchives = React.lazy(withModuleRetry(loadAppArchives));
+const AppWorldBook = React.lazy(withModuleRetry(loadAppWorldBook));
+const AppMusic = React.lazy(withModuleRetry(loadAppMusic));
+const AppForum = React.lazy(withModuleRetry(loadAppForum));
+const AppNotes = React.lazy(withModuleRetry(loadAppNotes));
+const AppDiary = React.lazy(withModuleRetry(loadAppDiary));
+const AppStore = React.lazy(withModuleRetry(loadAppStore));
+const AppSettings = React.lazy(withModuleRetry(loadAppSettings));
+const AppMemory = React.lazy(withModuleRetry(loadAppMemory));
+const AppOffline = React.lazy(withModuleRetry(loadAppOffline));
+const AppSchedule = React.lazy(withModuleRetry(loadAppSchedule));
+const AppReading = React.lazy(withModuleRetry(loadAppReading));
+const AppCinema = React.lazy(withModuleRetry(loadAppCinema));
+const AppCharacterPhone = React.lazy(withModuleRetry(loadAppCharacterPhone));
+const AppRelationshipNetwork = React.lazy(withModuleRetry(loadAppRelationshipNetwork));
 class LazyAppErrorBoundary extends React.Component<
   React.PropsWithChildren<{ visible?: boolean }>,
   { error: Error | null }
@@ -338,12 +342,12 @@ class LazyAppErrorBoundary extends React.Component<
 
 const isLazyModuleLoadError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error || "");
-  return /dynamically imported module|importing a module script failed|loading chunk|failed to fetch/i.test(message);
+  return /dynamically imported module|importing a module script failed|loading chunk|failed to fetch|cannot access .*uninitialized variable|before initialization|_result\.default/i.test(message);
 };
 
 const recoverFromLazyModuleError = async (): Promise<void> => {
   if (typeof window === "undefined") return;
-  const recoveryKey = "fanfan-stale-module-recovery-at";
+  const recoveryKey = "fanfan-stale-module-recovery-v2-at";
   const now = Date.now();
   try {
     const previousAttempt = Number(window.sessionStorage.getItem(recoveryKey) || 0);
