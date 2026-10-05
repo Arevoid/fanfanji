@@ -37,6 +37,17 @@ const APPS_LIST: AppItem[] = [
     description: "模拟最真实的QQ与微信聊天体验，内置实时回复机制，支持用户管理联系人、置顶聊天、甚至自定义专属的背景图和备注名。"
   },
   {
+    id: "sms",
+    name: "短信",
+    category: "时空连接与独立关系",
+    icon: "💌",
+    iconBg: "bg-indigo-500",
+    rating: 5.0,
+    reviews: "全新",
+    size: "6.8 MB",
+    description: "以未知号码连接过去、现在与未来。短信拥有独立的身份、手机号、时间线和记忆；先以陌生人开始，再由你决定是否锚定关系。"
+  },
+  {
     id: "archives",
     name: "档案馆",
     category: "角色创作与档案",

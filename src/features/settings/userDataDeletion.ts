@@ -29,6 +29,7 @@ export type UserDataAppId =
   | "memory"
   | "relationshipNetwork"
   | "characterPhone"
+  | "sms"
   | "gallery"
   | "mcp";
 
@@ -54,6 +55,7 @@ export const USER_DATA_APP_OPTIONS: readonly UserDataAppOption[] = [
   { id: "memory", label: "记忆书", description: "记忆库内容和记忆设置" },
   { id: "relationshipNetwork", label: "关系网", description: "关系图谱、NPC 和互动记录" },
   { id: "characterPhone", label: "角色手机", description: "所有角色手机及其独立数据" },
+  { id: "sms", label: "短信", description: "短信手机号、时间线、短信专属记忆和记录" },
   { id: "gallery", label: "图片资源", description: "仅清理没有被任何应用引用的图片资源" },
   { id: "mcp", label: "MCP 工具", description: "外部 MCP 服务配置（不会清除聊天记录）" },
 ];
@@ -189,6 +191,9 @@ const USER_DATA_MANIFEST: Record<UserDataAppId, DataManifest> = {
       await characterPhoneDb.clearAll();
       await clearOrphanedSharedAssets();
     },
+  },
+  sms: {
+    keys: [storageKeys.smsStore],
   },
   // Images are shared by chat, moments and generated content.  There is no
   // safe app-specific binary store to wipe here; the deletion action removes

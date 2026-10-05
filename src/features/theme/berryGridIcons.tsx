@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 export type BerryGridIconId =
   | "character-phone"
   | "chat"
+  | "sms"
   | "archives"
   | "worldbook"
   | "music"
@@ -46,6 +47,14 @@ export function BerryGridIcon({ id, className = "h-8 w-8" }: { id: BerryGridIcon
         <circle cx="8" cy="10.5" r="1.1" fill={white} />
         <circle cx="12" cy="10.5" r="1.1" fill={white} />
         <circle cx="16" cy="10.5" r="1.1" fill={white} />
+      </>);
+    case "sms":
+      return iconFrame(className, <>
+        <path d="M3.2 5.5A2.5 2.5 0 0 1 5.7 3h10.9a2.5 2.5 0 0 1 2.5 2.5v6.9a2.5 2.5 0 0 1-2.5 2.5H9l-4.3 3.1c-.6.4-1.5 0-1.5-.8V5.5Z" fill="currentColor" />
+        <path d="M8.2 15h8.3a2.5 2.5 0 0 0 2.5-2.5V9.8h1.1a1.7 1.7 0 0 1 1.7 1.7v5.1c0 .6-.7.9-1.2.5L18 15.6h-6.6a1.7 1.7 0 0 1-1.7-1.7V15Z" fill="currentColor" opacity=".82" />
+        <circle cx="7.8" cy="9.5" r="1" fill={white} />
+        <circle cx="11.2" cy="9.5" r="1" fill={white} />
+        <circle cx="14.6" cy="9.5" r="1" fill={white} />
       </>);
     case "archives":
       return iconFrame(className, <>

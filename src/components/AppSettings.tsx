@@ -606,6 +606,7 @@ export default function AppSettings({
     { key: "character-phone", label: "手机" },
     { key: "diary", label: "日记" },
     { key: "chat", label: "聊天" },
+    { key: "sms", label: "短信" },
     { key: "archives", label: "档案馆" },
     { key: "worldbook", label: "世界书" },
     { key: "music", label: "音乐" },
@@ -623,6 +624,7 @@ export default function AppSettings({
 
   const dockAppOptions = [
     { key: "chat", label: "聊天" },
+    { key: "sms", label: "短信" },
     { key: "archives", label: "档案馆" },
     { key: "worldbook", label: "世界书" },
     { key: "music", label: "音乐" },

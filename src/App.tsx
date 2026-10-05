@@ -177,6 +177,7 @@ import {
   Images,
   Layers3,
   MessageCircle,
+  MessagesSquare,
   Music2,
   NotebookTabs,
   NotebookText,
@@ -207,6 +208,7 @@ const loadAppReading = () => import("./components/AppReading");
 const loadAppCinema = () => import("./components/AppCinema");
 const loadAppCharacterPhone = () => import("./components/AppCharacterPhone");
 const loadAppRelationshipNetwork = () => import("./components/AppRelationshipNetwork");
+const loadAppSms = () => import("./components/AppSms");
 
 // Vite can briefly return a failed module response while the dev server is
 // transforming the large chat module. Give the same navigation attempt one
@@ -258,6 +260,7 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   cinema: withModuleRetry(loadAppCinema),
   "character-phone": withModuleRetry(loadAppCharacterPhone),
   "relationship-network": withModuleRetry(loadAppRelationshipNetwork),
+  sms: withModuleRetry(loadAppSms),
 };
 
 const preloadApp = (appId: string) => {
@@ -284,6 +287,7 @@ const IDLE_PRELOAD_APP_IDS = [
   "cinema",
   "character-phone",
   "relationship-network",
+  "sms",
 ] as const;
 
 // Use the same bounded retry for the component that is actually rendered.
@@ -306,6 +310,7 @@ const AppReading = React.lazy(withModuleRetry(loadAppReading));
 const AppCinema = React.lazy(withModuleRetry(loadAppCinema));
 const AppCharacterPhone = React.lazy(withModuleRetry(loadAppCharacterPhone));
 const AppRelationshipNetwork = React.lazy(withModuleRetry(loadAppRelationshipNetwork));
+const AppSms = React.lazy(withModuleRetry(loadAppSms));
 class LazyAppErrorBoundary extends React.Component<
   React.PropsWithChildren<{ visible?: boolean }>,
   { error: Error | null }
@@ -433,6 +438,7 @@ const AppIcons = {
   cinema: (className = "w-6 h-6") => <Film className={className} strokeWidth={1.5} />,
   "character-phone": (className = "w-6 h-6") => <Smartphone className={className} strokeWidth={1.5} />,
   "relationship-network": (className = "w-6 h-6") => <Network className={className} strokeWidth={1.5} />,
+  sms: (className = "w-6 h-6") => <MessagesSquare className={className} strokeWidth={1.5} />,
   timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.5} />,
   theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.5} />,
   activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.5} />,
@@ -482,6 +488,7 @@ const DEFAULT_HOME_SCREEN_ITEMS: HomeScreenItem[] = [
   { id: "archives", type: "app", size: "1x1", page: 0, position: { page: 0, row: 1, column: 2 } },
   { id: "worldbook", type: "app", size: "1x1", page: 0, position: { page: 0, row: 1, column: 3 } },
   { id: "chat", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 2 } },
+  { id: "sms", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 1 } },
   { id: "offline", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 3 } },
   { id: "music", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 0 } },
   { id: "memory", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 1 } },
@@ -652,6 +659,17 @@ const DEFAULT_SETTINGS: UserSettings = {
   ],
   activeImageApiPresetId: "image-preset-default",
 };
+
+const SMS_ICON_REFRESH_KEY = "phone_sms_icon_refresh_v1";
+
+function migrateLegacySmsIcon(settings: UserSettings): { settings: UserSettings; changed: boolean } {
+  if (typeof window === "undefined" || window.localStorage.getItem(SMS_ICON_REFRESH_KEY) === "1" || !settings.customIcons?.sms) {
+    return { settings, changed: false };
+  }
+  const customIcons = { ...settings.customIcons };
+  delete customIcons.sms;
+  return { settings: { ...settings, customIcons }, changed: true };
+}
 
 const DEFAULT_MESSAGES: Message[] = [];
 
@@ -828,11 +846,12 @@ export default function App() {
           globalCss: BERRY_GRID_PRESET.globalCss,
         }
       : liquidGlassSettings;
-    if (migration.migrated || classicPaletteMigration.settings !== migration.settings || migratedSettings !== classicPaletteMigration.settings) {
-      const saved = saveSettings(migratedSettings);
+    const smsIconMigration = migrateLegacySmsIcon(migratedSettings);
+    if (migration.migrated || classicPaletteMigration.settings !== migration.settings || migratedSettings !== classicPaletteMigration.settings || smsIconMigration.changed) {
+      const saved = saveSettings(smsIconMigration.settings);
       if (!saved.success) console.warn("[settings] Could not persist the settings migration.");
     }
-    return migratedSettings;
+    return smsIconMigration.settings;
   });
   useGlobalTypography(settings);
   const settingsRef = useRef<UserSettings>(settings);
@@ -847,8 +866,15 @@ export default function App() {
       () => settingsRef.current,
       (hydrated) => {
         if (!active) return;
-        settingsRef.current = hydrated;
-        setSettingsState(hydrated);
+        const smsIconMigration = migrateLegacySmsIcon(hydrated);
+        const nextSettings = smsIconMigration.settings;
+        if (smsIconMigration.changed) {
+          const saved = saveSettings(nextSettings);
+          if (!saved.success) console.warn("[settings] Could not persist the SMS icon refresh.");
+        }
+        if (typeof window !== "undefined") window.localStorage.setItem(SMS_ICON_REFRESH_KEY, "1");
+        settingsRef.current = nextSettings;
+        setSettingsState(nextSettings);
       },
     )
       .catch((error) => {
@@ -3868,6 +3894,11 @@ export default function App() {
       icon: AppIcons["relationship-network"](HOME_APP_ICON_GLYPH_CLASS),
     },
     {
+      id: "sms",
+      name: "短信",
+      icon: AppIcons.sms(HOME_APP_ICON_GLYPH_CLASS),
+    },
+    {
       id: "settings",
       name: "设置",
       icon: AppIcons.settings(HOME_APP_ICON_GLYPH_CLASS),
@@ -5611,6 +5642,20 @@ export default function App() {
                         }
                         openChatForCurrentIdentity(characterId, relationId);
                       }}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("sms") && (
+                  <LazyAppBoundary visible={activeApp === "sms"}>
+                    <AppSms
+                      activeIdentity={activeIdentity}
+                      identities={settings.identities}
+                      characters={characters}
+                      relationships={relationships}
+                      worldBookEntries={worldBookEntries}
+                      settings={settings}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>
