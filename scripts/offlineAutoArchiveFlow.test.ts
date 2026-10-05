@@ -14,7 +14,7 @@ assert.match(
 );
 assert.match(
   lifecycleSource,
-  /const shouldConsolidateMemory = shouldSyncStoryMemory\(story\);/,
+  /const shouldConsolidateMemory = shouldSyncStoryMemory\(completedStory\);/,
   "ending or returning from a continuation decides whether automatic memory sync is needed",
 );
 assert.match(
