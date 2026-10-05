@@ -211,13 +211,30 @@ const loadAppRelationshipNetwork = () => import("./components/AppRelationshipNet
 // Vite can briefly return a failed module response while the dev server is
 // transforming the large chat module. Give the same navigation attempt one
 // bounded retry, and make preload failures non-fatal to the actual click.
-const withModuleRetry = <T,>(loader: () => Promise<T>) => async (): Promise<T> => {
+type LazyModuleWithDefault = { default: unknown };
+
+const isLazyModuleWithDefault = (value: unknown): value is LazyModuleWithDefault => Boolean(
+  value
+  && typeof value === "object"
+  && "default" in value
+  && (value as { default?: unknown }).default,
+);
+
+const loadModuleWithDefault = async <T extends LazyModuleWithDefault>(loader: () => Promise<T>): Promise<T> => {
+  const module = await loader();
+  if (!isLazyModuleWithDefault(module)) {
+    throw new Error("Lazy module default export unavailable");
+  }
+  return module;
+};
+
+const withModuleRetry = <T extends LazyModuleWithDefault>(loader: () => Promise<T>) => async (): Promise<T> => {
   try {
-    return await loader();
+    return await loadModuleWithDefault(loader);
   } catch (firstError) {
     await new Promise((resolve) => setTimeout(resolve, 120));
     try {
-      return await loader();
+      return await loadModuleWithDefault(loader);
     } catch {
       throw firstError;
     }
@@ -342,7 +359,7 @@ class LazyAppErrorBoundary extends React.Component<
 
 const isLazyModuleLoadError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error || "");
-  return /dynamically imported module|importing a module script failed|loading chunk|failed to fetch|cannot access .*uninitialized variable|before initialization|_result\.default/i.test(message);
+  return /dynamically imported module|importing a module script failed|loading chunk|failed to fetch|cannot access .*uninitialized variable|before initialization|_result\.default|lazy module default export unavailable/i.test(message);
 };
 
 const recoverFromLazyModuleError = async (): Promise<void> => {

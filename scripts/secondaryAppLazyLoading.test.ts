@@ -28,6 +28,7 @@ assert.match(appSource, /function LazyAppBoundary/);
 assert.match(appSource, /<React\.Suspense/);
 assert.match(appSource, /cannot access \.\*uninitialized variable/);
 assert.match(appSource, /_result\\\.default/);
+assert.match(appSource, /Lazy module default export unavailable/);
 assert.match(appSource, /fanfan-stale-module-recovery-v2-at/);
 assert.match(appSource, /requestIdleCallback\(preloadIdleApps, \{ timeout: 1500 \}\)/);
 assert.match(appSource, /preloadApp\(item\.id\)/);
