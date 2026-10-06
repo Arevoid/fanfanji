@@ -451,13 +451,18 @@ try {
     now: 1_185,
   });
   assert.equal(multiNpcRepair.status, "generated", "persisted target evidence allows repair even if the provider omits citations");
-  for (const contactId of ["repair-npc-mom-a", "repair-npc-mom-b", "repair-npc-friend"]) {
+  for (const contactId of ["repair-npc-mom-a", "repair-npc-friend"]) {
     const thread = multiNpcRepair.phone.threadMessages.filter((message) => message.contactId === contactId);
     assert.ok(thread.some((message) => message.sender === "contact"), `${contactId} keeps/receives a contact message`);
     assert.ok(thread.some((message) => message.sender === "character"), `${contactId} receives the missing role reply`);
     assert.ok(thread.filter((message) => message.id !== "repair-npc-one-sided")
       .every((message) => message.sourceRefs?.some((source) => source.kind === "worldbook" && source.id === "world-generation")), `${contactId} newly repaired messages cite their verified source`);
   }
+  assert.equal(
+    multiNpcRepair.phone.threadMessages.some((message) => message.contactId === "repair-npc-mom-b"),
+    false,
+    "duplicate generated contacts are merged into the first stable row",
+  );
   assert.equal(multiNpcRepair.phone.threadMessages.filter((message) => message.contactId === "repair-npc-mom-a" && message.sender === "contact").length, 1, "repair only adds the missing side of an existing one-sided conversation");
   assert.match(String(requestBodies.at(-1)?.message || ""), /repair-npc-mom-a/);
 

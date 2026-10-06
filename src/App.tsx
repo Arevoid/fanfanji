@@ -23,6 +23,7 @@ import { cleanAndExtractMoment } from "./features/moments/services/chatMomentUti
 import { generateRelationshipNetworkNpcMoment } from "./features/moments/services/relationshipNetworkNpcMomentService";
 import { upsertMomentPreservingOrder } from "./features/moments/services/momentState";
 import { limitMomentCommentsPerActor } from "./features/moments/services/momentCommentLimit";
+import { migrateMomentIdentitySnapshots, toggleMomentLike } from "./features/moments/services/momentIdentityPresentation";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
 import { loadOfflineStories, mergeOfflineStoryCollections } from "./core/storage/repositories/offlineRepository";
@@ -663,7 +664,7 @@ const DEFAULT_SETTINGS: UserSettings = {
 const SMS_ICON_REFRESH_KEY = "phone_sms_icon_refresh_v1";
 
 function migrateLegacySmsIcon(settings: UserSettings): { settings: UserSettings; changed: boolean } {
-  if (typeof window === "undefined" || window.localStorage.getItem(SMS_ICON_REFRESH_KEY) === "1" || !settings.customIcons?.sms) {
+  if (typeof window === "undefined" || readString(SMS_ICON_REFRESH_KEY).value === "1" || !settings.customIcons?.sms) {
     return { settings, changed: false };
   }
   const customIcons = { ...settings.customIcons };
@@ -703,6 +704,8 @@ const normalizeLoadedMoments = (loadedMoments: Moment[]): Moment[] => loadedMome
   ...moment,
   comments: limitMomentCommentsPerActor(moment.comments),
 }));
+
+type PendingMomentIdentityMigration = { previous: UserSettings; next: UserSettings };
 
 export default function App() {
   useRuntimeErrorMonitoring();
@@ -817,13 +820,18 @@ export default function App() {
         momentsPersistenceReady.current = true;
         skipNextMomentsPersistenceRef.current = true;
         const normalizedMoments = normalizeLoadedMoments(result.value);
+        const pendingIdentityMigration = pendingMomentIdentityMigrationRef.current;
+        const repairedMoments = pendingIdentityMigration
+          ? migrateMomentIdentitySnapshots(pendingIdentityMigration.previous, pendingIdentityMigration.next, normalizedMoments)
+          : { moments: normalizedMoments, changed: false };
+        pendingMomentIdentityMigrationRef.current = null;
         const commentsWereTrimmed = normalizedMoments.some((moment, index) =>
           moment.comments.length !== result.value[index]?.comments.length,
         );
         // Persist a one-time cleanup for legacy feeds that already contain an
         // unbounded NPC comment/reply chain.
-        if (commentsWereTrimmed) skipNextMomentsPersistenceRef.current = false;
-        setMoments(normalizedMoments);
+        if (commentsWereTrimmed || repairedMoments.changed) skipNextMomentsPersistenceRef.current = false;
+        setMoments(repairedMoments.moments);
       }
     });
     return () => { active = false; };
@@ -872,7 +880,8 @@ export default function App() {
           const saved = saveSettings(nextSettings);
           if (!saved.success) console.warn("[settings] Could not persist the SMS icon refresh.");
         }
-        if (typeof window !== "undefined") window.localStorage.setItem(SMS_ICON_REFRESH_KEY, "1");
+        const markerWrite = writeString(SMS_ICON_REFRESH_KEY, "1");
+        if (!markerWrite.success) console.warn("[settings] Could not persist the SMS icon refresh marker.");
         settingsRef.current = nextSettings;
         setSettingsState(nextSettings);
       },
@@ -886,12 +895,34 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
+  // Keep the in-memory Moments snapshot available to settings updates. Profile
+  // edits and feed mutations can happen in the same render, so the ref avoids
+  // waiting for a second render before migrating identity-backed snapshots.
+  const [moments, setMoments] = useState<Moment[]>(() => normalizeLoadedMoments(loadMoments([]).value));
+  const momentsRef = useRef<Moment[]>(moments);
+  momentsRef.current = moments;
+  const pendingMomentIdentityMigrationRef = useRef<PendingMomentIdentityMigration | null>(null);
+
   const setSettings = (update: UserSettingsUpdate): boolean => {
-    const nextSettings = applyLiquidGlassTextDefaults(resolveSettingsUpdate(settingsRef.current, update));
+    const previousSettings = settingsRef.current;
+    const nextSettings = applyLiquidGlassTextDefaults(resolveSettingsUpdate(previousSettings, update));
     const result = saveSettings(nextSettings);
     if (!result.success) {
       console.error("Failed to save settings to localStorage:", result.error);
       return false;
+    }
+    const migratedMoments = migrateMomentIdentitySnapshots(previousSettings, nextSettings, momentsRef.current);
+    if (migratedMoments.changed) {
+      momentsRef.current = migratedMoments.moments;
+      setMoments(migratedMoments.moments);
+      if (momentsPersistenceReady.current) {
+        const momentsResult = saveMoments(migratedMoments.moments);
+        if (!momentsResult.success) console.error("Failed to save renamed Moments identity snapshots:", momentsResult.error);
+      } else {
+        pendingMomentIdentityMigrationRef.current = pendingMomentIdentityMigrationRef.current
+          ? { previous: pendingMomentIdentityMigrationRef.current.previous, next: nextSettings }
+          : { previous: previousSettings, next: nextSettings };
+      }
     }
     settingsRef.current = nextSettings;
     setSettingsState(nextSettings);
@@ -899,11 +930,25 @@ export default function App() {
   };
 
   const setSettingsAsync = async (update: UserSettingsUpdate): Promise<boolean> => {
-    const nextSettings = applyLiquidGlassTextDefaults(resolveSettingsUpdate(settingsRef.current, update));
+    const previousSettings = settingsRef.current;
+    const nextSettings = applyLiquidGlassTextDefaults(resolveSettingsUpdate(previousSettings, update));
     const result = await saveSettingsAsync(nextSettings);
     if (!result.success) {
       console.error("Failed to persist settings update:", result.error);
       return false;
+    }
+    const migratedMoments = migrateMomentIdentitySnapshots(previousSettings, nextSettings, momentsRef.current);
+    if (migratedMoments.changed) {
+      momentsRef.current = migratedMoments.moments;
+      setMoments(migratedMoments.moments);
+      if (momentsPersistenceReady.current) {
+        const momentsResult = saveMoments(migratedMoments.moments);
+        if (!momentsResult.success) console.error("Failed to save renamed Moments identity snapshots:", momentsResult.error);
+      } else {
+        pendingMomentIdentityMigrationRef.current = pendingMomentIdentityMigrationRef.current
+          ? { previous: pendingMomentIdentityMigrationRef.current.previous, next: nextSettings }
+          : { previous: previousSettings, next: nextSettings };
+      }
     }
     settingsRef.current = nextSettings;
     setSettingsState(nextSettings);
@@ -931,7 +976,6 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
-  const [moments, setMoments] = useState<Moment[]>(() => normalizeLoadedMoments(loadMoments([]).value));
   const [momentsStorageReady, setMomentsStorageReady] = useState(false);
 
   const [presets, setPresets] = useState<StylePreset[]>(() => loadPresets([]).value);
@@ -3541,17 +3585,10 @@ export default function App() {
     ));
   };
 
-  const handleLikeMoment = (id: string, userName: string) => {
+  const handleLikeMoment = (id: string, userName: string, identityId?: string) => {
     setMoments((prev) =>
       prev.map((mom) => {
-        if (mom.id === id) {
-          const liked = mom.likes.includes(userName);
-          return {
-            ...mom,
-            likes: liked ? mom.likes.filter((n) => n !== userName) : [...mom.likes, userName],
-          };
-        }
-        return mom;
+        return mom.id === id ? toggleMomentLike(mom, { identityId, name: userName }) : mom;
       })
     );
   };

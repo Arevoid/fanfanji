@@ -329,11 +329,7 @@ export default function AppOffline({
   });
 
   const shouldSyncStoryMemory = (story: OfflineStory) =>
-    story.mode === "continue"
-    && (shouldAutoSyncOnlineContinuation(story)
-      || needsLegacyHandoffRepair(story)
-      || needsMissingSummaryRepair(story)
-      || needsUninformativeSummaryRepair(story));
+    story.mode === "continue" && shouldAutoSyncOnlineContinuation(story);
 
   const { finalizeStoryBeforeLeaving } = useOfflineStoryExitFinalization({
     activeStoryRef,

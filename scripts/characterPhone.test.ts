@@ -142,8 +142,17 @@ assert.deepEqual(
     pickerCharacter("legacy-group", "旧群聊", pickerOtherPrimary.id, { isGroupChat: true }),
   ], pickerPrimary.id, [pickerPrimary, pickerAlias, pickerOtherPrimary], ["legacy-role", "legacy-group"])
     .map((character) => character.id),
-  ["legacy-role"],
-  "a legacy role with an existing phone scope may be shown without admitting group chats",
+  [],
+  "an explicitly foreign-owned legacy role cannot bypass identity isolation",
+);
+assert.deepEqual(
+  listCharacterPhoneSelectableCharacters([
+    pickerCharacter("legacy-unowned-role", "旧角色", undefined as unknown as string),
+    pickerCharacter("network-npc", "关系网 NPC", pickerPrimary.id, { relationshipNetworkNpcId: "npc-1" }),
+  ], pickerPrimary.id, [pickerPrimary, pickerAlias, pickerOtherPrimary], ["legacy-unowned-role", "network-npc"])
+    .map((character) => character.id),
+  ["legacy-unowned-role"],
+  "ownerless legacy records remain scoped while NPC actors stay out of the phone picker",
 );
 assert.match(component, /overflow-hidden overscroll-none bg-black/);
 assert.match(component, /activeApp === "gallery"/);

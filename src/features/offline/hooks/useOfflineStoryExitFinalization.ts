@@ -28,6 +28,11 @@ export function useOfflineStoryExitFinalization({
   const finalizeStoryBeforeLeaving = async (story: OfflineStory): Promise<OfflineStory> => {
     let completedStory = story;
     const handoffCreatedAt = Date.now();
+    // Decide from the pre-archive snapshot. A newly-created continuation has
+    // real unsynced messages and must schedule its first sync; a legacy story
+    // that was already archived must not become a fresh sync candidate merely
+    // because this view is being opened and closed again.
+    const shouldConsolidateMemory = shouldSyncStoryMemory(completedStory);
     if (!completedStory.archivedAt) {
       completedStory = {
         ...completedStory,
@@ -35,9 +40,6 @@ export function useOfflineStoryExitFinalization({
         updatedAt: handoffCreatedAt,
       };
     }
-    // Re-evaluate after finalizing the latest snapshot. A view-only exit of a
-    // legacy synced story must not create a fresh handoff or trigger a summary.
-    const shouldConsolidateMemory = shouldSyncStoryMemory(completedStory);
     if (shouldConsolidateMemory) {
       const handoffSourceMessages = getOfflineHandoffSourceMessagesForReturn(completedStory);
       completedStory = createPendingOfflineHandoff({

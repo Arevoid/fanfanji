@@ -327,6 +327,7 @@ import {
 import { isShortMomentImageDescription, sanitizeMomentPublishText } from "../features/moments/services/momentContent";
 import { createMomentTemporalContext } from "../features/moments/services/momentTemporalContext";
 import { buildMomentWorldKnowledge, buildPublicMomentContext, cleanAndExtractMoment, compactTopicHint, findMomentRelationshipCharacter, getKnownMomentsContextString, getMomentComments, getPostIntervalMs, getRelationshipLastMomentTimestamp, renderMomentContent } from "../features/moments/services/chatMomentUtils";
+import { getMomentLikeDisplayNames, isMomentLikedByIdentity, resolveMomentCommentAuthor } from "../features/moments/services/momentIdentityPresentation";
 import { generateMomentImage } from "../features/moments/services/momentImageGenerationService";
 import { useMomentComposerState } from "../features/moments/hooks/useMomentComposerState";
 import {
@@ -481,7 +482,7 @@ interface AppChatProps {
   onAddMoment: (moment: Moment) => void;
   onAddCommentToMoment: (momentId: string, comment: MomentComment) => void;
   onDeleteCommentFromMoment?: (momentId: string, commentId: string) => void;
-  onLikeMoment: (momentId: string, userName: string) => void;
+  onLikeMoment: (momentId: string, userName: string, identityId?: string) => void;
   onDeleteMoment?: (momentId: string) => void;
   onDeleteMomentsByRelation?: (relationId: string) => void;
   onToggleBookmark: (messageId: string, scope?: MessageMutationScope) => void;
@@ -762,6 +763,7 @@ export default function AppChat({
     || (activeIdentityRecord?.kind === "primary" ? activeIdentityRecord : undefined);
   const momentsFeedIdentityId = momentsProfileIdentity?.id || activeIdentityRootId;
   const momentsFeedProfile = {
+    identityId: momentsFeedIdentityId,
     name: momentsProfileIdentity?.name?.trim() || settings.name || "用户",
     avatar: momentsProfileIdentity?.avatar || settings.avatar,
   };
@@ -12715,7 +12717,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 momentsForMainPersona
                   .filter(m => m.characterId === singleCharacterMomentsId)
                   .map((mom) => {
-                    const hasLiked = mom.likes.includes(momentsFeedProfile.name);
+                    const momLikeNames = getMomentLikeDisplayNames(mom, settings);
+                    const hasLiked = isMomentLikedByIdentity(mom, momentsFeedProfile.identityId, momentsFeedProfile.name);
                     const momChar = mom.characterId
                       ? characters.find((c) => c.id === resolveCanonicalCharacterId(mom.characterId!, characters))
                       : null;
@@ -12821,13 +12824,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             {/* Like / Comment small buttons */}
                             <div className="flex items-center gap-4">
                               <button
-                                onClick={() => onLikeMoment(mom.id, momentsFeedProfile.name)}
+                                onClick={() => onLikeMoment(mom.id, momentsFeedProfile.name, momentsFeedProfile.identityId)}
                                 className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${
                                   hasLiked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"
                                 }`}
                               >
                                 <Heart className={`w-3.5 h-3.5 ${hasLiked ? "fill-rose-500 text-rose-500" : ""}`} />
-                                <span>{mom.likes.length || "赞"}</span>
+                                <span>{momLikeNames.length || "赞"}</span>
                               </button>
 
                               <button
@@ -12851,13 +12854,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                           </div>
 
                           {/* WeChat-style integrated Like & Comment Shelf */}
-                          {(mom.likes.length > 0 || getMomentComments(mom).length > 0) && (
+                          {(momLikeNames.length > 0 || getMomentComments(mom).length > 0) && (
                             <div className="moments-reaction-shelf bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
                               {/* Likes shelf details */}
-                              {mom.likes.length > 0 && (
+                              {momLikeNames.length > 0 && (
                                 <div className="moments-reaction-divider flex items-center gap-1.5 text-[#576b95] font-bold flex-wrap pb-1">
                                   <Heart className="w-3 h-3 text-rose-500 fill-current shrink-0" />
-                                  <span className="leading-tight">{mom.likes.join(", ")}</span>
+                                  <span className="leading-tight">{momLikeNames.join(", ")}</span>
                                 </div>
                               )}
 
@@ -12865,8 +12868,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               {getMomentComments(mom).length > 0 && (
                                 <div className="moments-comment-list py-0.5">
                                   {getMomentComments(mom).map((comm) => {
-                                    const commChar = characters.find((c) => c.name === comm.authorName);
-                                    const commAuthorName = commChar ? (commChar.remark || commChar.name) : comm.authorName;
+                                    const commAuthorName = resolveMomentCommentAuthor(comm, settings, characters).name;
                                     return (
                                       <div
                                         key={comm.id}

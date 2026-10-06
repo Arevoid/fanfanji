@@ -1350,6 +1350,17 @@ export default function AppCharacterPhone({
     missingPosts.sort((left, right) => right.timestamp - left.timestamp).slice(0, 1).forEach(syncCharacterPhonePost);
   }, [currentPhone, selectedCharacter, moments, onSyncCharacterPhonePost, userIdentityId]);
   const currentUserAvatar = activeIdentity?.avatar || settings?.avatar;
+  const getPhonePostAuthorName = (post: CharacterPhonePost): string =>
+    post.source === "user" ? activeIdentity?.name?.trim() || post.author : post.author;
+  const resolvePhonePostCommentAuthor = (comment: CharacterPhonePostComment): { name: string; avatar?: string } => {
+    const identity = comment.authorIdentityId
+      ? identities.find((candidate) => candidate.id === comment.authorIdentityId)
+      : undefined;
+    return {
+      name: identity?.name?.trim() || comment.authorName,
+      avatar: identity?.avatar || comment.authorAvatar,
+    };
+  };
   const getPhonePostComment = (post: CharacterPhonePost, index: number): CharacterPhonePostComment => {
     const detail = post.commentDetails?.[index];
     if (detail) return detail;
@@ -3140,7 +3151,7 @@ export default function AppCharacterPhone({
             <article key={post.id} className="flex gap-3 py-5 first:pt-2">
               <img src={(post.source === "user" ? currentUserAvatar : undefined) || post.authorAvatar || selectedCharacter.avatar} alt="" className="h-10 w-10 shrink-0 rounded-md border border-slate-100 bg-slate-50 object-cover" referrerPolicy="no-referrer" />
               <div className="min-w-0 flex-1">
-              <h4 className="truncate text-xs font-bold text-[#576b95]">{post.author || selectedCharacter.name}</h4>
+              <h4 className="truncate text-xs font-bold text-[#576b95]">{getPhonePostAuthorName(post) || selectedCharacter.name}</h4>
               <p className="mt-1 whitespace-pre-wrap rounded p-1 text-xs leading-relaxed text-[var(--text-primary)]">{post.content}</p>
               <div className="mt-3 flex items-center justify-between">
                 <span className="text-[10px] font-medium text-slate-400">{new Date(post.timestamp).toLocaleDateString([], { month: "2-digit", day: "2-digit" })} {new Date(post.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
@@ -3161,9 +3172,10 @@ export default function AppCharacterPhone({
                     <div className="space-y-1 py-0.5">
                       {post.comments.map((_, index) => {
                         const comment = getPhonePostComment(post, index);
+                        const commentAuthor = resolvePhonePostCommentAuthor(comment);
                         return (
                           <div key={`${post.id}-${comment.id}`} className="py-1.5 leading-relaxed text-slate-800">
-                            <span className="font-semibold text-[#576b95]">{comment.authorName}</span>
+                            <span className="font-semibold text-[#576b95]">{commentAuthor.name}</span>
                             <span>：{comment.content}</span>
                           </div>
                         );
@@ -3688,7 +3700,7 @@ export default function AppCharacterPhone({
           .map((post) => (
             <article key={post.id} className="mt-4 rounded-2xl bg-white/70 p-4">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-bold">{post.author}</p>
+                <p className="text-sm font-bold">{getPhonePostAuthorName(post)}</p>
                 <div className="flex items-center gap-2">
                   <p className="text-[10px] text-neutral-500">
                     {formatTime(post.timestamp)}
@@ -3729,12 +3741,13 @@ export default function AppCharacterPhone({
               </div>
               {post.comments.map((_, index) => {
                 const comment = getPhonePostComment(post, index);
+                const commentAuthor = resolvePhonePostCommentAuthor(comment);
                 return (
                   <div
                     key={`${post.id}-${comment.id}`}
                     className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-black/5 px-3 py-2 text-xs"
                   >
-                    <span><strong className="text-[#576b95]">{comment.authorName}</strong>：{comment.content}</span>
+                    <span><strong className="text-[#576b95]">{commentAuthor.name}</strong>：{comment.content}</span>
                     <button
                       type="button"
                       onClick={() => deletePhonePostComment(post.id, index)}

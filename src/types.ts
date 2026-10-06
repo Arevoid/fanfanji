@@ -324,6 +324,14 @@ export interface MomentComment {
   replyToCommentId?: string;
 }
 
+/** Stable identity-backed like metadata. Legacy Moments keep using `likes`
+ * until a user interacts with them again, so this stays optional for a
+ * backwards-compatible migration. */
+export interface MomentLikeActor {
+  identityId?: string;
+  name: string;
+}
+
 /** Audience for a character's social post. Legacy moments without this field are public. */
 export type MomentVisibility = "public" | "private" | "user" | "specific";
 
@@ -341,6 +349,8 @@ export interface Moment {
   content: string;
   timestamp: number;
   likes: string[]; // List of names
+  /** Identity-backed likes written by the current Moments implementation. */
+  likeActors?: MomentLikeActor[];
   comments: MomentComment[];
   /** Legacy comments parsed from older post content that the user has removed. */
   deletedCommentIds?: string[];

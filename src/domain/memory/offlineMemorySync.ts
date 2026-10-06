@@ -403,6 +403,16 @@ export function hasUnsyncedOfflineMemoryProgress(story: OfflineStory): boolean {
   // later. Treat its current transcript as the already-synced baseline rather
   // than re-running extraction every time the user only views and exits it.
   if (story.memorySyncStatus === "synced" && story.lastSyncedMessageCount === undefined) return false;
+  // Older stories can have an archive timestamp without any sync metadata.
+  // That timestamp means the story had already been ended by the legacy
+  // lifecycle, not that every later view should replay its full transcript.
+  // A pending handoff is the explicit exception: it marks a real, unfinished
+  // first consolidation and must remain retryable after a reload.
+  if (
+    story.archivedAt
+    && !story.memorySyncStatus
+    && story.onlineHandoff?.status !== "pending"
+  ) return false;
   // `archivedAt` only marks that the scene was left. It does not mean that
   // the memory projection finished. Exit finalization persists that marker
   // before starting the asynchronous extraction, so treating an archived

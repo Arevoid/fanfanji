@@ -47,3 +47,29 @@ assert.equal(finalized.onlineHandoff, undefined, "view-only exit does not create
 assert.equal(consolidationStarted, false, "view-only exit does not schedule memory consolidation");
 assert.equal(saved.length, 1, "view-only exit persists one archive snapshot");
 console.log("PASS view-only offline exit archives without a duplicate handoff or memory summary");
+
+const legacyStory: OfflineStory = {
+  ...story,
+  id: "legacy-view-only-story",
+  memorySyncStatus: undefined,
+  archivedAt: 3,
+  onlineHandoff: undefined,
+};
+const legacyActiveStoryRef = { current: legacyStory as OfflineStory | null };
+let legacyConsolidationStarted = false;
+const { finalizeStoryBeforeLeaving: finalizeLegacyStory } = useOfflineStoryExitFinalization({
+  activeStoryRef: legacyActiveStoryRef,
+  appointments: [],
+  shouldSyncStoryMemory: shouldAutoSyncOnlineContinuation,
+  handleSyncMemoryToBrain: async () => {
+    legacyConsolidationStarted = true;
+    return legacyStory;
+  },
+  onSaveOfflineStory: () => true,
+  saveActiveStorySnapshot: () => undefined,
+  showToast: () => undefined,
+});
+
+await finalizeLegacyStory(legacyStory);
+assert.equal(legacyConsolidationStarted, false, "legacy archived view-only exit does not replay memory consolidation");
+console.log("PASS legacy archived offline exit stays quiet without sync metadata");

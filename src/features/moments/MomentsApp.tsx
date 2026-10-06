@@ -4,6 +4,7 @@ import type { Character, Moment, MomentComment, UserSettings } from "../../types
 import type { RelationshipNetworkPendingInteraction, RelationshipNetworkPendingMoment } from "../../domain/relationshipNetwork/relationshipNetworkTypes";
 import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 import { cleanAndExtractMoment, getMomentComments, isShortMomentImageDescription, renderMomentContent, sanitizeMomentPublishText } from "./services/momentContent";
+import { getMomentLikeDisplayNames, isMomentLikedByIdentity, resolveMomentCommentAuthor } from "./services/momentIdentityPresentation";
 import { StoredMomentImage } from "./components/StoredMomentImage";
 
 export interface MomentsAppProps {
@@ -11,7 +12,7 @@ export interface MomentsAppProps {
   characters: Character[];
   settings: UserSettings;
   /** Profile shown by the main Moments feed, independent of the active chat identity. */
-  feedProfile?: { name: string; avatar: string };
+  feedProfile?: { identityId?: string; name: string; avatar: string };
   translations: Record<string, string>;
   filterCharacterId: string | null;
   onClearFilter: () => void;
@@ -20,7 +21,7 @@ export interface MomentsAppProps {
   onAddComment: (momentId: string, comment: MomentComment) => void;
   onDeleteComment: (momentId: string, commentId: string) => void;
   onDeleteMoment?: (momentId: string) => void;
-  onLikeMoment: (momentId: string, userName: string) => void;
+  onLikeMoment: (momentId: string, userName: string, identityId?: string) => void;
   onSaveSettings: (settings: UserSettings) => void;
   onPublishUserMoment: (input: { content: string; image: string | null; imageDescription: string }) => void;
   onGenerateMomentImage?: (moment: Moment) => Promise<void>;
@@ -238,7 +239,8 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
               </button>
             ) : null;
             const comments = getMomentComments(moment);
-            const liked = moment.likes.includes(profileName);
+            const likeNames = getMomentLikeDisplayNames(moment, settings);
+            const liked = isMomentLikedByIdentity(moment, feedProfile?.identityId, profileName);
             return (
               <div key={moment.id} className="py-5 first:pt-2 flex gap-3">
                 <img src={authorAvatar} alt="" className="w-10 h-10 rounded-[6px] object-cover bg-slate-50 shrink-0 border border-slate-100" />
@@ -290,9 +292,9 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                             <span>关系网</span>
                           </button>
                         )}
-                        <button onClick={() => onLikeMoment(moment.id, profileName)} className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${liked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"}`}>
+                        <button onClick={() => onLikeMoment(moment.id, profileName, feedProfile?.identityId)} className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${liked ? "text-rose-500" : "text-slate-400 hover:text-slate-600"}`}>
                         <Heart className={`w-3.5 h-3.5 ${liked ? "fill-rose-500 text-rose-500" : ""}`} />
-                        <span>{moment.likes.length || "赞"}</span>
+                        <span>{likeNames.length || "赞"}</span>
                       </button>
                       <button
                         onClick={() =>
@@ -308,12 +310,12 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                       </button>
                     </div>
                   </div>
-                  {(moment.likes.length > 0 || comments.length > 0) && (
+                  {(likeNames.length > 0 || comments.length > 0) && (
                     <div className="moments-reaction-shelf bg-[#f7f7f7] rounded-[4px] p-2 text-[11px] mt-2 space-y-2">
-                      {moment.likes.length > 0 && (
+                      {likeNames.length > 0 && (
                         <div className="moments-reaction-divider flex items-center gap-1.5 text-[#576b95] font-bold flex-wrap pb-1">
                           <Heart className="w-3 h-3 text-rose-500 fill-current shrink-0" />
-                          <span className="leading-tight">{moment.likes.join(", ")}</span>
+                          <span className="leading-tight">{likeNames.join(", ")}</span>
                         </div>
                       )}
                       {comments.length > 0 && (
@@ -340,7 +342,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                               className="py-1.5 leading-relaxed text-slate-800 cursor-pointer transition-colors text-[11px] block text-left moments-comment-item"
                               title="点击回复；长按删除评论"
                             >
-                              <span className="font-bold text-[#576b95] mr-1">{comment.authorName}</span>
+                              <span className="font-bold text-[#576b95] mr-1">{resolveMomentCommentAuthor(comment, settings, characters).name}</span>
                               <span className="text-slate-700">{comment.content}</span>
                             </div>
                           ))}

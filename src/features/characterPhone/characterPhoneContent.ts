@@ -6,7 +6,7 @@ import type {
   WorldBookEntry,
   MusicTrack,
 } from "../../types";
-import { DEFAULT_IDENTITY_ID, type CharacterRelationship } from "../../domain/relationship/characterRelationship";
+import { DEFAULT_IDENTITY_ID, getRootIdentityId, type CharacterRelationship } from "../../domain/relationship/characterRelationship";
 import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 import { buildCharacterPhoneLifeContext } from "./characterPhoneLifeContext";
 import { listCharacterPhoneRelationshipNetworkContacts, type CharacterPhoneRelationshipNetworkContact } from "./characterPhoneRelationshipNetwork";
@@ -69,6 +69,17 @@ function contactKey(name: string): string {
   return name.trim().toLocaleLowerCase();
 }
 
+function sameIdentityWorkspace(
+  left: string,
+  right: string,
+  identities: readonly UserIdentity[] = [],
+): boolean {
+  // Imported/legacy fixtures may not carry the identity catalog. In that
+  // case the persisted IDs are the only trustworthy scope signal.
+  if (identities.length === 0) return left === right;
+  return getRootIdentityId(left, identities) === getRootIdentityId(right, identities);
+}
+
 function linkedCharacterId(contact: CharacterPhoneContact): string | undefined {
   if (contact.linkedCharacterId) return contact.linkedCharacterId;
   if (contact.source !== "linked" || contact.kind !== "character") return undefined;
@@ -97,13 +108,23 @@ function mergeVerifiedDuplicateContacts(
   characters: readonly Character[],
 ): { contacts: CharacterPhoneContact[]; threadMessages: CharacterPhoneThreadMessage[] } {
   const keptByIdentity = new Map<string, CharacterPhoneContact>();
+  const keptByGeneratedIdentity = new Map<string, CharacterPhoneContact>();
   const keptById = new Map<string, CharacterPhoneContact>();
   const remappedContactIds = new Map<string, string>();
   const merged: CharacterPhoneContact[] = [];
 
   contacts.forEach((contact) => {
     const identityKey = verifiedContactIdentityKey(contact, characters);
-    const previous = (identityKey && keptByIdentity.get(identityKey)) || keptById.get(contact.id);
+    // Generated contacts do not have a canonical ID. Use a conservative
+    // fallback so repeated generations of the same named contact do not
+    // create several identical address-book rows. Explicitly linked/user
+    // contacts continue to use their stable identity keys only.
+    const generatedKey = !identityKey && contact.source === "generated"
+      ? `generated:${contactKey(contact.name)}:${contactKey(contact.relation || "")}`
+      : undefined;
+    const previous = (identityKey && keptByIdentity.get(identityKey))
+      || (generatedKey && keptByGeneratedIdentity.get(generatedKey))
+      || keptById.get(contact.id);
     if (previous) {
       remappedContactIds.set(contact.id, previous.id);
       return;
@@ -111,6 +132,7 @@ function mergeVerifiedDuplicateContacts(
     merged.push(contact);
     keptById.set(contact.id, contact);
     if (identityKey) keptByIdentity.set(identityKey, contact);
+    if (generatedKey) keptByGeneratedIdentity.set(generatedKey, contact);
   });
 
   return {
@@ -201,7 +223,11 @@ function makeUserContact(
 function makeUserContacts(input: CharacterPhoneContentInput): CharacterPhoneContact[] {
   const identities = input.identities ?? [];
   const identityById = new Map(identities.map((identity) => [identity.id, identity]));
-  const relationsById = new Map(input.relationships.map((relation) => [relation.id, relation]));
+  const relationsById = new Map(
+    input.relationships
+      .filter((relation) => sameIdentityWorkspace(relation.userIdentityId, input.phone.ownerIdentityId, identities))
+      .map((relation) => [relation.id, relation]),
+  );
   const contacts = [...relationsById.values()].map((relation) => makeUserContact(
     input.phone,
     identityById.get(relation.userIdentityId)
@@ -368,7 +394,11 @@ function syncContacts(input: CharacterPhoneContentInput): {
       const linkedProfile = canonicalLinkedId
         ? input.characters.find((candidate) => candidate.id === canonicalLinkedId && !candidate.isContactInstance)
         : undefined;
-      if (linkedProfile && (linkedProfile.ownerIdentityId || DEFAULT_IDENTITY_ID) !== input.phone.ownerIdentityId) {
+      if (linkedProfile && !sameIdentityWorkspace(
+        linkedProfile.ownerIdentityId || DEFAULT_IDENTITY_ID,
+        input.phone.ownerIdentityId,
+        input.identities || [],
+      )) {
         // Older versions could copy a different alias's archive character into
         // this shared phone. Preserve its old messages, but hide that row from
         // the current primary-owned contact list.
@@ -427,7 +457,11 @@ function syncContacts(input: CharacterPhoneContentInput): {
   ].filter(Boolean).join(" ").toLocaleLowerCase();
   const linkedContacts = input.characters
     .filter((candidate) => !candidate.isContactInstance && !candidate.isGroupChat)
-    .filter((candidate) => (candidate.ownerIdentityId || DEFAULT_IDENTITY_ID) === input.phone.ownerIdentityId)
+    .filter((candidate) => sameIdentityWorkspace(
+      candidate.ownerIdentityId || DEFAULT_IDENTITY_ID,
+      input.phone.ownerIdentityId,
+      input.identities || [],
+    ))
     .filter((candidate) => resolveCanonicalCharacterId(candidate.id, input.characters) !== roleCharacterId)
     .filter((candidate) => contactEvidenceContext.includes(candidate.name.toLocaleLowerCase()))
     .filter((candidate) => {

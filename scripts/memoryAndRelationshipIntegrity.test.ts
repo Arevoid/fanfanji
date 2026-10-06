@@ -43,9 +43,19 @@ assert.equal(
   "legacy synced continuation without a cursor does not sync on view-only exit",
 );
 assert.equal(
+  shouldAutoSyncOnlineContinuation({ ...continuation, archivedAt: 10, memorySyncStatus: undefined, onlineHandoff: undefined }),
+  false,
+  "legacy archived continuation without sync metadata does not replay on view-only exit",
+);
+assert.equal(
   shouldAutoSyncOnlineContinuation({ ...continuation, memorySyncStatus: "pending", lastSyncedMessageCount: undefined }),
   true,
   "pending legacy continuation still syncs its real offline content",
+);
+assert.equal(
+  shouldAutoSyncOnlineContinuation({ ...continuation, archivedAt: 10, memorySyncStatus: undefined, onlineHandoff: { status: "pending", createdAt: 10, startedAt: 2, endedAt: 10, sourceMessageIds: ["plot-1"] } }),
+  true,
+  "an unfinished legacy handoff remains eligible for its first consolidation",
 );
 assert.equal(
   shouldAutoSyncOnlineContinuation({

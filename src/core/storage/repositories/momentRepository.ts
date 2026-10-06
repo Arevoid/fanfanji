@@ -51,6 +51,18 @@ export function mergeMomentSnapshots(primary: readonly Moment[], fallback: reado
     if (Array.isArray(moment.likes) || Array.isArray(legacy.likes)) {
       mergedMoment.likes = [...new Set([...primaryLikes, ...fallbackLikes])];
     }
+    const primaryLikeActors = Array.isArray(moment.likeActors) ? moment.likeActors : [];
+    const fallbackLikeActors = Array.isArray(legacy.likeActors) ? legacy.likeActors : [];
+    if (primaryLikeActors.length > 0 || fallbackLikeActors.length > 0) {
+      const actors = [...fallbackLikeActors, ...primaryLikeActors];
+      const seen = new Set<string>();
+      mergedMoment.likeActors = actors.filter((actor) => {
+        const key = actor.identityId ? `identity:${actor.identityId}` : `name:${actor.name}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
     if (Array.isArray(moment.comments) || Array.isArray(legacy.comments)) {
       mergedMoment.comments = mergeMomentComments(primaryComments, fallbackComments);
     }
