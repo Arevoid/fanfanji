@@ -63,9 +63,11 @@ export interface SmsStore {
 
 export interface SmsConversationPreview {
   character: Character;
-  timeline: SmsTimeline;
+  timeline?: SmsTimeline;
   latestMessage?: SmsMessage;
   unreadCount: number;
+  /** Real activity time used by the inbox sorter. Empty conversations use 0. */
+  lastActivityAt: number;
 }
 
 export const SMS_DEFAULT_PHONE = "1380000000000";

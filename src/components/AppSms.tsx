@@ -27,6 +27,7 @@ import {
   type SmsTimelineKind,
 } from "../domain/sms/smsTypes";
 import { createAnchoredSmsTimeline, createUnanchoredSmsTimeline } from "../features/sms/smsTimeline";
+import { resolveSmsConversationActivity } from "../features/sms/smsInbox";
 import { buildSmsHistory, buildSmsMemoryNote, buildSmsSystemPrompt, selectSmsWorldBookEntries } from "../features/sms/smsPrompt";
 import { apiChat } from "../utils/apiHelper";
 import { ChatAvatar } from "../features/chat/components/ChatAvatar";
@@ -329,13 +330,12 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
 
   const previews: SmsConversationPreview[] = useMemo(() => friendCharacters.map((character) => {
     const timelines = store.timelines.filter((timeline) => timeline.ownerIdentityId === selectedIdentityId && timeline.phoneNumber === selectedPhone && timeline.characterId === character.id);
-    const timeline = timelines.sort((a, b) => b.updatedAt - a.updatedAt)[0] || createUnanchoredSmsTimeline({ ownerIdentityId: selectedIdentityId, phoneNumber: selectedPhone, characterId: character.id });
-    const latestMessage = store.messages.filter((message) => message.timelineId === timeline.id).sort((a, b) => b.receivedAt - a.receivedAt)[0];
-    const unreadCount = store.messages.filter((message) => message.timelineId === timeline.id && message.sender === "character" && !message.readAt).length;
-    return { character, timeline, latestMessage, unreadCount };
+    const activity = resolveSmsConversationActivity(timelines, store.messages);
+    const timeline = activity.latestTimeline || createUnanchoredSmsTimeline({ ownerIdentityId: selectedIdentityId, phoneNumber: selectedPhone, characterId: character.id });
+    return { character, timeline, ...activity };
   }).sort((left, right) => {
     if (right.unreadCount !== left.unreadCount) return right.unreadCount - left.unreadCount;
-    return (right.latestMessage?.receivedAt || right.timeline.updatedAt) - (left.latestMessage?.receivedAt || left.timeline.updatedAt);
+    return right.lastActivityAt - left.lastActivityAt;
   }), [friendCharacters, selectedIdentityId, selectedPhone, store.messages, store.timelines]);
 
   const totalUnreadCount = previews.reduce((total, preview) => total + preview.unreadCount, 0);
