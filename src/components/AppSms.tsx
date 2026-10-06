@@ -88,6 +88,7 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
   const [manualTimeline, setManualTimeline] = useState({ label: "", kind: "custom" as SmsTimelineKind, timelineTime: "", relationshipHint: "", knowsCurrentTimeline: false });
   const [anchorDraft, setAnchorDraft] = useState({ label: "恋人时间线", kind: "custom" as SmsTimelineKind, timelineTime: "", relationshipHint: "恋人", knowsCurrentTimeline: false });
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const messagesViewportRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     storeRef.current = store;
@@ -138,6 +139,16 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
   const selectedMessages = selectedTimeline
     ? store.messages.filter((message) => message.timelineId === selectedTimeline.id).sort((a, b) => a.receivedAt - b.receivedAt)
     : [];
+
+  useEffect(() => {
+    if (page !== "detail" || !selectedTimeline) return;
+    const viewport = messagesViewportRef.current;
+    if (!viewport) return;
+    const frame = window.requestAnimationFrame(() => {
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [page, selectedTimeline?.id, selectedMessages.length, isSending]);
 
   const persistStore = (next: SmsStore) => {
     storeRef.current = next;
@@ -284,7 +295,6 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
       setError(sendError instanceof Error ? sendError.message : "短信暂时没有送达，请检查 API 设置后重试。");
     } finally {
       setIsSending(false);
-      window.setTimeout(() => composerRef.current?.focus(), 0);
     }
   };
 
@@ -323,6 +333,9 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
     const latestMessage = store.messages.filter((message) => message.timelineId === timeline.id).sort((a, b) => b.receivedAt - a.receivedAt)[0];
     const unreadCount = store.messages.filter((message) => message.timelineId === timeline.id && message.sender === "character" && !message.readAt).length;
     return { character, timeline, latestMessage, unreadCount };
+  }).sort((left, right) => {
+    if (right.unreadCount !== left.unreadCount) return right.unreadCount - left.unreadCount;
+    return (right.latestMessage?.receivedAt || right.timeline.updatedAt) - (left.latestMessage?.receivedAt || left.timeline.updatedAt);
   }), [friendCharacters, selectedIdentityId, selectedPhone, store.messages, store.timelines]);
 
   const totalUnreadCount = previews.reduce((total, preview) => total + preview.unreadCount, 0);
@@ -341,6 +354,13 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
 
   return (
     <div data-theme-page="sms" className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] font-sans text-[var(--text-primary)]">
+      <style>{`
+        .phone-screen-container [data-theme-page="sms"] textarea.sms-composer-input {
+          box-sizing: border-box;
+          padding: 8px 16px !important;
+          line-height: 20px !important;
+        }
+      `}</style>
       {page === "list" && (
         <>
           {header("短信")}
@@ -369,7 +389,7 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
             <div className="min-w-0 text-center"><h1 className="truncate text-base font-bold tracking-tight text-[var(--text-primary)]">{selectedCharacter.name}</h1><p className="text-[10px] text-[var(--text-secondary)]">短信 · {selectedTimeline.mode === "unanchored" ? "未知时空" : selectedTimeline.label}</p></div>
             <button type="button" onClick={() => openSettings("detail")} className="app-nav-icon-button grid h-9 w-9 place-items-center" aria-label="短信设置"><Settings2 className="h-5 w-5" /></button>
           </header>
-          <main className="min-h-0 flex-1 overflow-y-auto bg-[var(--surface-muted)] px-3 py-5">
+          <main ref={messagesViewportRef} className="min-h-0 flex-1 overflow-y-auto bg-[var(--surface-muted)] px-3 py-5">
             <div className="mx-auto mb-5 flex max-w-[25rem] items-center justify-center gap-2 text-[10px] text-[var(--text-secondary)]"><Clock3 className="h-3.5 w-3.5" /><span>真实收发时间与时间线时间分开保存</span></div>
             {selectedMessages.length === 0 && <div className="mx-auto mt-20 max-w-[17rem] rounded-2xl bg-[var(--surface)]/80 px-4 py-3 text-center text-xs leading-5 text-[var(--text-secondary)] shadow-sm"><ShieldQuestion className="mx-auto mb-2 h-5 w-5 text-[var(--accent)]" />这是一个陌生号码。先发一条短信，看看这个时空里的 {selectedCharacter.name} 会如何回应。</div>}
             <div className="mx-auto flex max-w-[25rem] flex-col gap-2">
@@ -379,7 +399,7 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
           </main>
           {error && <button type="button" onClick={() => setError(null)} className="shrink-0 border-t border-rose-100 bg-rose-50 px-4 py-2 text-left text-[11px] leading-5 text-rose-600">{error}</button>}
           <footer className="flex shrink-0 items-center gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 pb-[calc(env(safe-area-inset-bottom,0px)+10px)]">
-            <textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} rows={1} placeholder="短信内容…" className="h-10 min-h-10 max-h-28 flex-1 resize-none rounded-[20px] border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-2.5 text-sm leading-5 text-[var(--text-primary)] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20" />
+            <textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} rows={1} placeholder="短信内容…" className="sms-composer-input h-10 min-h-10 max-h-28 flex-1 resize-none rounded-[20px] border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-2.5 text-sm leading-5 text-[var(--text-primary)] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20" />
             <button type="button" onClick={() => void sendMessage()} disabled={!draft.trim() || isSending} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] shadow-sm transition-transform active:scale-95 disabled:cursor-not-allowed disabled:bg-[var(--surface-muted)] disabled:text-[var(--text-secondary)]" aria-label="发送短信"><Send className="h-4 w-4" /></button>
           </footer>
         </>
