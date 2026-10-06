@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { inferCharacterPhoneLocation } from "../src/features/characterPhone/characterPhoneLocation";
 import { listCharacterPhoneSelectableCharacters } from "../src/features/characterPhone/characterPhoneSelection";
+import { normalizeCharacterPhoneContactName } from "../src/features/characterPhone/characterPhoneContactVisuals";
 import type { Character, UserIdentity } from "../src/types";
 
 const component = readFileSync(new URL("../src/components/AppCharacterPhone.tsx", import.meta.url), "utf8");
@@ -149,11 +150,30 @@ assert.deepEqual(
   listCharacterPhoneSelectableCharacters([
     pickerCharacter("legacy-unowned-role", "旧角色", undefined as unknown as string),
     pickerCharacter("network-npc", "关系网 NPC", pickerPrimary.id, { relationshipNetworkNpcId: "npc-1" }),
+    pickerCharacter("legacy-network-npc", "旧关系网 NPC", pickerPrimary.id, { remark: "来自关系网的 NPC" }),
   ], pickerPrimary.id, [pickerPrimary, pickerAlias, pickerOtherPrimary], ["legacy-unowned-role", "network-npc"])
     .map((character) => character.id),
   ["legacy-unowned-role"],
   "ownerless legacy records remain scoped while NPC actors stay out of the phone picker",
 );
+const scopedLegacyCharacters = [
+  pickerCharacter("legacy-primary-role", "主身份旧角色", undefined as unknown as string),
+  pickerCharacter("legacy-foreign-role", "其他身份旧角色", undefined as unknown as string),
+  pickerCharacter("legacy-ambiguous-role", "归属不明旧角色", undefined as unknown as string),
+];
+const legacyScopes = new Map<string, readonly string[]>([
+  ["legacy-primary-role", [pickerPrimary.id]],
+  ["legacy-foreign-role", [pickerOtherPrimary.id]],
+  ["legacy-ambiguous-role", [pickerPrimary.id, pickerOtherPrimary.id]],
+]);
+assert.deepEqual(
+  listCharacterPhoneSelectableCharacters(scopedLegacyCharacters, pickerPrimary.id, [pickerPrimary, pickerOtherPrimary], [], legacyScopes)
+    .map((character) => character.id),
+  ["legacy-primary-role"],
+  "ownerless legacy records with ambiguous or foreign identity evidence stay out of the current picker",
+);
+assert.equal(normalizeCharacterPhoneContactName("而不"), "", "sentence-fragment NPC names are discarded");
+assert.equal(normalizeCharacterPhoneContactName("若啊"), "", "particle-only NPC names are discarded");
 assert.match(component, /overflow-hidden overscroll-none bg-black/);
 assert.match(component, /activeApp === "gallery"/);
 assert.match(component, /const isGalleryDetail = activeApp === "gallery" && Boolean\(selectedGallery\)/);

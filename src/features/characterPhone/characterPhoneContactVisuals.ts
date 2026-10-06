@@ -85,6 +85,12 @@ export function normalizeCharacterPhoneContactName(
     .trim();
   if (!cleaned || cleaned.length < 2 || cleaned.length > 16) return "";
   if (/^(?:很多|不少|一些|若干|几个|几位|一群|一堆|各种|多人|无|没有|未知|不详|user|npc|contact|unknown|内容|备注|角色|用户)$/i.test(cleaned)) return "";
+  // A provider occasionally returns a sentence fragment made only from
+  // conjunctions/particles (for example “而不” or “若啊”) as a contact name.
+  // These are never reliable person names, while the known-name fast path
+  // above still preserves an explicitly linked character with an unusual
+  // nickname.
+  if (/^(?:而|且|或|若|则|故|但|却|还|又|也|都|不|无|未|将|会|能|可|应|该|啊|呀|呢|吧|嘛|哦|嗯|哈|唉|哎)+$/.test(cleaned)) return "";
   // A name beginning with a first/second/third-person pronoun is almost
   // always a sentence fragment. Real linked names are returned by the known
   // name fast path above and therefore remain untouched.

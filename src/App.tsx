@@ -3114,7 +3114,15 @@ export default function App() {
   const handleSaveCharacter = async (char: Character): Promise<boolean> => {
     const currentCharacters = charactersRef.current;
     const existingCharacter = currentCharacters.find((candidate) => candidate.id === char.id);
-    const savedCharacter = existingCharacter ? { ...existingCharacter, ...char } : char;
+    // New/imported archive records historically omitted ownership, which made
+    // the role-phone picker treat the same character as belonging to every
+    // identity. Preserve an existing explicit owner, otherwise bind the
+    // record to the identity that is active when it is created/edited.
+    const activeOwnerIdentityId = settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    const ownerIdentityId = existingCharacter?.ownerIdentityId || char.ownerIdentityId || activeOwnerIdentityId;
+    const savedCharacter = existingCharacter
+      ? { ...existingCharacter, ...char, ownerIdentityId }
+      : { ...char, ownerIdentityId };
     const nextCharacters = existingCharacter
       ? currentCharacters.map((candidate) => candidate.id === char.id ? savedCharacter : candidate)
       : [...currentCharacters, savedCharacter];

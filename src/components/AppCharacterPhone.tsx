@@ -905,24 +905,32 @@ export default function AppCharacterPhone({
       window.removeEventListener("character-phone-storage-reset", refreshLegacyPhoneScopes);
     };
   }, []);
-  const legacyCharacterIds = useMemo(() => {
-    const ids = new Set<string>();
+  const legacyCharacterScopes = useMemo(() => {
+    const scopes = new Map<string, Set<string>>();
+    const addScope = (characterId: string, identityId: string) => {
+      if (!characterId || !identityId) return;
+      const rootIdentityId = getRootIdentityId(identityId, identities);
+      const current = scopes.get(characterId) || new Set<string>();
+      current.add(rootIdentityId);
+      scopes.set(characterId, current);
+    };
+    const ownerRootId = getRootIdentityId(userIdentityId, identities);
     characters.forEach((character) => {
       if (character.isContactInstance || character.isGroupChat) return;
-      if (getCharacterPhone(userIdentityId, character.id)) ids.add(character.id);
+      if (getCharacterPhone(userIdentityId, character.id)) addScope(character.id, ownerRootId);
     });
-    const ownerRootId = getRootIdentityId(userIdentityId, identities);
     relationships.forEach((relationship) => {
-      if (getRootIdentityId(relationship.userIdentityId, identities) !== ownerRootId) return;
       const canonicalId = resolveCanonicalCharacterId(relationship.characterId, characters);
       const character = characters.find((candidate) => candidate.id === canonicalId);
-      if (character && !character.isContactInstance && !character.isGroupChat) ids.add(character.id);
+      if (character && !character.isContactInstance && !character.isGroupChat) {
+        addScope(character.id, relationship.userIdentityId);
+      }
     });
-    return [...ids];
+    return new Map([...scopes.entries()].map(([characterId, identityScopes]) => [characterId, [...identityScopes]] as const));
   }, [characters, identities, relationships, userIdentityId, phoneStorageRevision]);
   const selectableCharacters = useMemo(
-    () => listCharacterPhoneSelectableCharacters(characters, userIdentityId, identities, legacyCharacterIds),
-    [characters, userIdentityId, identities, legacyCharacterIds],
+    () => listCharacterPhoneSelectableCharacters(characters, userIdentityId, identities, [], legacyCharacterScopes),
+    [characters, userIdentityId, identities, legacyCharacterScopes],
   );
   const [selectedCharacterId, setSelectedCharacterId] = useState(
     selectableCharacters[0]?.id || "",

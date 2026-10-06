@@ -16,7 +16,7 @@ assert.match(archives, /\.\.\.\(originalChar \|\| \{\}\)/);
 assert.match(app, /const charactersRef = useRef<Character\[\]>\(characters\)/);
 assert.match(app, /const charactersRepositoryHydrated = useRef\(false\)/);
 assert.match(app, /if \(!charactersRepositoryHydrated\.current\) return;/);
-assert.match(app, /const savedCharacter = existingCharacter \? \{ \.\.\.existingCharacter, \.\.\.char \} : char/);
+assert.match(app, /const savedCharacter = existingCharacter\s+\? \{ \.\.\.existingCharacter, \.\.\.char, ownerIdentityId \}\s+: \{ \.\.\.char, ownerIdentityId \}/);
 assert.match(app, /const handleUpdateCharacter = async/);
 assert.match(sideEffects, /updateCharacter\?: \(characterId: string, patch: Partial<Character>\)/);
 assert.match(sideEffects, /dependencies\.updateCharacter\(input\.activeCharacter\.id, \{ momentsCover: selectedCover \}\)/);
