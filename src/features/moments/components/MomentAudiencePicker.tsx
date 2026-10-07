@@ -63,7 +63,7 @@ export const MomentAudiencePicker: React.FC<MomentAudiencePickerProps> = ({ visi
         aria-haspopup="dialog"
         aria-expanded={open || targetPickerOpen}
         onClick={() => setOpen((current) => !current)}
-        className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-muted)]"
+        className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-muted)]"
       >
         <span className="min-w-0 truncate font-semibold">
           {showLabel && <span className="mr-2 text-[10px] font-normal text-[var(--text-tertiary)]">谁可以看</span>}

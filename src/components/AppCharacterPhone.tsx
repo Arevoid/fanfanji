@@ -3156,7 +3156,7 @@ export default function AppCharacterPhone({
             <div className="flex items-center justify-between"><span className="text-xs font-bold">分享新鲜事…</span><button type="button" onClick={() => setPhoneMomentComposerOpen(false)} className="text-xs text-[var(--text-tertiary)]">收起</button></div>
             <textarea value={postDraft} onChange={(event) => setPostDraft(event.target.value)} placeholder="写下角色会发布的内容…" className="min-h-20 w-full resize-none rounded-xl bg-[var(--surface-muted)] p-2 text-xs outline-none" />
             <span className="block text-[10px] font-semibold text-[var(--text-tertiary)]">所在位置（可选）</span>
-            <label className="block min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors focus-within:border-[var(--color-accent)]"><input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="w-full bg-transparent p-0 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" /></label>
+            <label className="block min-h-11 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors focus-within:border-[var(--color-accent)]"><input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="w-full bg-transparent p-0 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" /></label>
             <span className="block text-[10px] font-semibold text-[var(--text-tertiary)]">谁可以看</span>
             {renderPostVisibilitySelect()}
             <div className="mt-2 flex items-center gap-3 text-xs text-[var(--text-secondary)]">
@@ -3836,7 +3836,7 @@ export default function AppCharacterPhone({
             className="min-h-20 w-full rounded-xl bg-black/5 p-2 text-xs outline-none"
           />
           <span className="mt-2 block text-[10px] font-semibold text-neutral-500">所在位置（可选）</span>
-          <label className="block min-h-11 rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-left text-xs text-neutral-800 transition-colors focus-within:border-black/30"><input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="w-full bg-transparent p-0 text-xs text-neutral-800 outline-none placeholder:text-neutral-400" /></label>
+          <label className="block min-h-11 rounded-lg border border-black/10 bg-white/70 px-3 py-2 text-left text-xs text-neutral-800 transition-colors focus-within:border-black/30"><input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="w-full bg-transparent p-0 text-xs text-neutral-800 outline-none placeholder:text-neutral-400" /></label>
           <span className="block text-[10px] font-semibold text-neutral-500">谁可以看</span>
           {renderPostVisibilitySelect()}
           <div className="mt-2 flex items-center gap-3 text-xs text-neutral-600">

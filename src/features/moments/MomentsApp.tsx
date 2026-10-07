@@ -185,7 +185,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
           </div>
           <textarea rows={3} value={content} onChange={(event) => setContent(event.target.value)} placeholder="说点什么吧，可以配一个好看的插图..." className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-xs leading-relaxed focus:outline-none resize-none" />
           <span className="block text-[10px] font-semibold text-[var(--text-tertiary)]">所在位置（可选）</span>
-          <label className="block min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors focus-within:border-[var(--color-accent)]">
+          <label className="block min-h-11 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors focus-within:border-[var(--color-accent)]">
             <input value={location} onChange={(event) => setLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="w-full bg-transparent p-0 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" />
           </label>
           <span className="block text-[10px] font-semibold text-[var(--text-tertiary)]">谁可以看</span>
