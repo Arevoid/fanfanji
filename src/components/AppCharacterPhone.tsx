@@ -3153,10 +3153,9 @@ export default function AppCharacterPhone({
         {phoneMomentComposerOpen && (
           <div className="mx-4 my-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
             <div className="flex items-center justify-between"><span className="text-xs font-bold">分享新鲜事…</span><button type="button" onClick={() => setPhoneMomentComposerOpen(false)} className="text-xs text-[var(--text-tertiary)]">收起</button></div>
-            <span className="mt-2 block text-[10px] font-semibold text-[var(--text-tertiary)]">文案内容</span>
-            <textarea value={postDraft} onChange={(event) => setPostDraft(event.target.value)} placeholder="写下角色会发布的内容…" className="min-h-20 w-full resize-none rounded-xl bg-[var(--surface-muted)] p-2 text-xs outline-none" />
             <label className="block min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors focus-within:border-[var(--color-accent)]"><span className="block text-[10px] text-[var(--text-tertiary)]">所在位置（可选）</span><input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="mt-0.5 w-full bg-transparent p-0 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" /></label>
             {renderPostVisibilitySelect()}
+            <textarea value={postDraft} onChange={(event) => setPostDraft(event.target.value)} placeholder="写下角色会发布的内容…" className="min-h-20 w-full resize-none rounded-xl bg-[var(--surface-muted)] p-2 text-xs outline-none" />
             <div className="mt-2 flex items-center gap-3 text-xs text-[var(--text-secondary)]">
               <label className="flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl px-2 hover:bg-[var(--surface-muted)]"><Image className="h-4 w-4" />添加图片<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; const compressed = await compressImage(file, 800, 800, 0.7); setPostImage(compressed); setPostImageDescription(""); }} /></label>
               <button type="button" onClick={() => setShowPostTextImage((value) => !value)} className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 hover:bg-[var(--surface-muted)]"><Camera className="h-4 w-4" />文字图</button>
@@ -3827,15 +3826,14 @@ export default function AppCharacterPhone({
           ))}
         <div className="mt-5 rounded-2xl bg-white/70 p-3">
           <p className="text-xs font-bold">以角色身份发布</p>
-          <p className="mt-2 text-[10px] font-semibold text-neutral-500">文案内容</p>
+          <label className="mt-2 block min-h-11 rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-left text-xs text-neutral-800 transition-colors focus-within:border-black/30"><span className="block text-[10px] text-neutral-500">所在位置（可选）</span><input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="mt-0.5 w-full bg-transparent p-0 text-xs text-neutral-800 outline-none placeholder:text-neutral-400" /></label>
+          {renderPostVisibilitySelect()}
           <textarea
             value={postDraft}
             onChange={(event) => setPostDraft(event.target.value)}
             placeholder="写下角色会发布的内容…"
             className="min-h-20 w-full rounded-xl bg-black/5 p-2 text-xs outline-none"
           />
-          <label className="mt-2 block min-h-11 rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-left text-xs text-neutral-800 transition-colors focus-within:border-black/30"><span className="block text-[10px] text-neutral-500">所在位置（可选）</span><input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="mt-0.5 w-full bg-transparent p-0 text-xs text-neutral-800 outline-none placeholder:text-neutral-400" /></label>
-          {renderPostVisibilitySelect()}
           <div className="mt-2 flex items-center gap-3 text-xs text-neutral-600">
             <label className="flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl px-2 hover:bg-black/5"><Image className="h-4 w-4" />添加图片<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; const compressed = await compressImage(file, 800, 800, 0.7); setPostImage(compressed); setPostImageDescription(""); }} /></label>
             <button type="button" onClick={() => setShowPostTextImage((value) => !value)} className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 hover:bg-black/5"><Camera className="h-4 w-4" />文字图</button>
