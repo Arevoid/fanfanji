@@ -187,6 +187,7 @@ import {
   PartyPopper,
   ScanLine,
   Settings as SettingsIcon,
+  Eye,
   ShoppingBag,
   WalletCards,
   Smartphone,
@@ -210,6 +211,7 @@ const loadAppCinema = () => import("./components/AppCinema");
 const loadAppCharacterPhone = () => import("./components/AppCharacterPhone");
 const loadAppRelationshipNetwork = () => import("./components/AppRelationshipNetwork");
 const loadAppSms = () => import("./components/AppSms");
+const loadAppNow = () => import("./components/AppNow");
 
 // Vite can briefly return a failed module response while the dev server is
 // transforming the large chat module. Give the same navigation attempt one
@@ -312,6 +314,7 @@ const AppCinema = React.lazy(withModuleRetry(loadAppCinema));
 const AppCharacterPhone = React.lazy(withModuleRetry(loadAppCharacterPhone));
 const AppRelationshipNetwork = React.lazy(withModuleRetry(loadAppRelationshipNetwork));
 const AppSms = React.lazy(withModuleRetry(loadAppSms));
+const AppNow = React.lazy(withModuleRetry(loadAppNow));
 class LazyAppErrorBoundary extends React.Component<
   React.PropsWithChildren<{ visible?: boolean }>,
   { error: Error | null }
@@ -440,6 +443,7 @@ const AppIcons = {
   "character-phone": (className = "w-6 h-6") => <Smartphone className={className} strokeWidth={1.5} />,
   "relationship-network": (className = "w-6 h-6") => <Network className={className} strokeWidth={1.5} />,
   sms: (className = "w-6 h-6") => <MessagesSquare className={className} strokeWidth={1.5} />,
+  now: (className = "w-6 h-6") => <Eye className={className} strokeWidth={1.5} />,
   timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.5} />,
   theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.5} />,
   activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.5} />,
@@ -490,6 +494,7 @@ const DEFAULT_HOME_SCREEN_ITEMS: HomeScreenItem[] = [
   { id: "worldbook", type: "app", size: "1x1", page: 0, position: { page: 0, row: 1, column: 3 } },
   { id: "chat", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 2 } },
   { id: "sms", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 1 } },
+  { id: "now", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 0 } },
   { id: "offline", type: "app", size: "1x1", page: 0, position: { page: 0, row: 2, column: 3 } },
   { id: "music", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 0 } },
   { id: "memory", type: "app", size: "1x1", page: 0, position: { page: 0, row: 3, column: 1 } },
@@ -1970,6 +1975,10 @@ export default function App() {
     }
 
     items = items.filter((item) => item.id !== HOME_WELCOME_WIDGET_ID || !settings.hideHomeWelcomeWidget);
+    if (!items.some((item) => item.id === "now")) {
+      const position = findFirstAvailablePosition(items, "1x1", 0, MAX_HOME_GRID_ROWS);
+      if (position) items = [...items, { id: "now", type: "app", size: "1x1", page: position.page, position }];
+    }
     if (!settings.hideHomeWelcomeWidget && !items.some((item) => item.id === HOME_WELCOME_WIDGET_ID)) {
       const positionedItems = normalizeHomeScreenLayout(items);
       const canInsertAtTop = positionedItems
@@ -3953,6 +3962,11 @@ export default function App() {
       icon: AppIcons.sms(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
+      id: "now",
+      name: "此刻",
+      icon: AppIcons.now(HOME_APP_ICON_GLYPH_CLASS),
+    },
+    {
       id: "settings",
       name: "设置",
       icon: AppIcons.settings(HOME_APP_ICON_GLYPH_CLASS),
@@ -5710,6 +5724,22 @@ export default function App() {
                       relationships={relationships}
                       worldBookEntries={worldBookEntries}
                       settings={settings}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("now") && (
+                  <LazyAppBoundary visible={activeApp === "now"}>
+                    <AppNow
+                      activeIdentity={activeIdentity}
+                      characters={characters}
+                      relationships={relationships}
+                      messages={messages}
+                      offlineStories={offlineStories}
+                      worldBookEntries={worldBookEntries}
+                      settings={settings}
+                      visible={activeApp === "now"}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>

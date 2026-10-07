@@ -15,6 +15,17 @@ interface AppItem {
 
 const APPS_LIST: AppItem[] = [
   {
+    id: "now",
+    name: "此刻",
+    category: "闈欐€佽绐楀拰瑙掕壊鐢熸椿瑙傚療",
+    icon: "馃懁",
+    iconBg: "bg-rose-400",
+    rating: 5.0,
+    reviews: "鍏ㄦ柊",
+    size: "5.2 MB",
+    description: "閫夋嫨涓€涓鑹诧紝浠ョ櫧瑙傝瑙掑伓鐒剁湅瑙佷粬鐢熸椿涓殑涓€灏忔銆傚彧灞曠ず褰撲笅鏄剧幇鐨勮涓庢兂娉曪紝淇濈暀鏈煡锛屼笉棰勬祴鏈潵銆?",
+  },
+  {
     id: "character-phone",
     name: "手机",
     category: "角色沉浸与私人空间",

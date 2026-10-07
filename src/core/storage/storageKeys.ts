@@ -86,6 +86,8 @@ export const storageKeys = {
   readingCoStoryStore: "phone_reading_co_story_store_v1",
   cinemaStore: "phone_cinema_store_v1",
   smsStore: "phone_sms_store_v1",
+  /** Character life observation threads and scene fragments for the 此刻 app. */
+  nowStore: "phone_now_observations_v1",
   presets: "phone_presets",
   /** Non-secret external MCP server configuration; tokens never use this key. */
   mcpServers: "phone_mcp_servers_v1",

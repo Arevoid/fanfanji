@@ -30,6 +30,7 @@ export type UserDataAppId =
   | "relationshipNetwork"
   | "characterPhone"
   | "sms"
+  | "now"
   | "gallery"
   | "mcp";
 
@@ -40,6 +41,7 @@ export interface UserDataAppOption {
 }
 
 export const USER_DATA_APP_OPTIONS: readonly UserDataAppOption[] = [
+  { id: "now", label: "Now", description: "Character life observation records" },
   { id: "chat", label: "聊天", description: "聊天记录、会话状态和聊天生成数据" },
   { id: "characters", label: "档案馆", description: "角色、人设和角色关系资料" },
   { id: "worldbook", label: "世界书", description: "世界书词条和绑定信息" },
@@ -191,6 +193,9 @@ const USER_DATA_MANIFEST: Record<UserDataAppId, DataManifest> = {
       await characterPhoneDb.clearAll();
       await clearOrphanedSharedAssets();
     },
+  },
+  now: {
+    keys: [storageKeys.nowStore],
   },
   sms: {
     keys: [storageKeys.smsStore],

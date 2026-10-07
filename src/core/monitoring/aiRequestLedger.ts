@@ -21,6 +21,7 @@ export const AI_PURPOSES = [
   "moment_comment",
   "moment_reply",
   "diary_generate",
+  "character_now_generate",
   "character_phone_generate",
   "forum_generate",
   "forum_story_generate",
@@ -38,6 +39,7 @@ export type AiPurpose = typeof AI_PURPOSES[number];
 
 /** Stable, user-facing names for the built-in prompt used by each AI flow. */
 export const AI_PURPOSE_PROMPT_LABELS: Partial<Record<AiPurpose, string>> = {
+  character_now_generate: "姝ゆ椂瑙傚療鎻愮ず璇?",
   chat_reply: "线上对话提示词",
   group_chat_reply: "群聊对话提示词",
   offline_story_generate: "线下剧情提示词",

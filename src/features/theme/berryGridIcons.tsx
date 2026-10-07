@@ -4,6 +4,7 @@ export type BerryGridIconId =
   | "character-phone"
   | "chat"
   | "sms"
+  | "now"
   | "archives"
   | "worldbook"
   | "music"
@@ -55,6 +56,12 @@ export function BerryGridIcon({ id, className = "h-8 w-8" }: { id: BerryGridIcon
         <circle cx="7.8" cy="9.5" r="1" fill={white} />
         <circle cx="11.2" cy="9.5" r="1" fill={white} />
         <circle cx="14.6" cy="9.5" r="1" fill={white} />
+      </>);
+    case "now":
+      return iconFrame(className, <>
+        <circle cx="12" cy="12" r="7.8" fill="currentColor" />
+        <circle cx="12" cy="12" r="3.1" fill={white} opacity=".94" />
+        <path d="M12 3.2v2.3M12 18.5v2.3M3.2 12h2.3M18.5 12h2.3" stroke={white} strokeWidth="1.6" strokeLinecap="round" opacity=".9" />
       </>);
     case "archives":
       return iconFrame(className, <>
