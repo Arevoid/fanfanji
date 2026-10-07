@@ -128,6 +128,44 @@ assert.equal(phoneA.musicTracks?.length, 0, "does not seed a synthetic music lib
 assert.equal(phoneA.listeningHistory?.length, 0, "does not seed synthetic listening history without a user source");
 assert.equal(phoneA.musicPlaylists?.length, 0, "does not seed a synthetic playlist without a user source");
 
+// Role-phone Moments respect the post audience in both directions: the role
+// author can always see its own public/private/specific posts, while user
+// posts are limited to public or a specific audience that names this role.
+const rolePhoneVisibilityMoments: Moment[] = [
+  { id: "role-public", ownerIdentityId: identity.id, characterId: characterA.id, authorName: characterA.name, authorAvatar: characterA.avatar, content: "角色公开", timestamp: 30, likes: [], comments: [], visibility: "public" },
+  { id: "role-private", ownerIdentityId: identity.id, characterId: characterA.id, authorName: characterA.name, authorAvatar: characterA.avatar, content: "角色私密", timestamp: 31, likes: [], comments: [], visibility: "private" },
+  { id: "role-specific", ownerIdentityId: identity.id, characterId: characterA.id, authorName: characterA.name, authorAvatar: characterA.avatar, content: "角色特别的人", timestamp: 32, likes: [], comments: [], visibility: "specific", visibilityTargetIds: [characterB.id] },
+  { id: "user-public", ownerIdentityId: identity.id, authorName: identity.name, authorAvatar: identity.avatar, content: "用户公开", timestamp: 33, likes: [], comments: [], visibility: "public" },
+  { id: "user-specific-a", ownerIdentityId: identity.id, authorName: identity.name, authorAvatar: identity.avatar, content: "用户给角色 A", timestamp: 34, likes: [], comments: [], visibility: "specific", visibilityTargetIds: [characterA.id] },
+  { id: "user-specific-b", ownerIdentityId: identity.id, authorName: identity.name, authorAvatar: identity.avatar, content: "用户给角色 B", timestamp: 35, likes: [], comments: [], visibility: "specific", visibilityTargetIds: [characterB.id] },
+  { id: "user-private", ownerIdentityId: identity.id, authorName: identity.name, authorAvatar: identity.avatar, content: "用户私密", timestamp: 36, likes: [], comments: [], visibility: "private" },
+  { id: "user-only", ownerIdentityId: identity.id, authorName: identity.name, authorAvatar: identity.avatar, content: "用户仅自己", timestamp: 37, likes: [], comments: [], visibility: "user" },
+];
+const phoneAWithStaleVisibilityPost = ensureCharacterPhoneContent({
+  phone: {
+    ...emptyPhone("phone-a-visibility", characterA.id),
+    posts: [{ id: "stale-user-specific-b", author: identity.name, content: "旧的未授权镜像", timestamp: 1, likes: 2, comments: ["旧评论"], source: "user", sourceMomentId: "user-specific-b" }],
+  },
+  character: characterA,
+  characters: [characterA, characterB],
+  activeIdentity: identity,
+  relationships: [relation],
+  messages,
+  moments: rolePhoneVisibilityMoments,
+  worldBookEntries: worldBook,
+  now: 100,
+});
+const phoneAVisibilityIds = new Set(phoneAWithStaleVisibilityPost.posts.map((post) => post.sourceMomentId));
+assert.ok(phoneAVisibilityIds.has("role-public"));
+assert.ok(phoneAVisibilityIds.has("role-private"));
+assert.ok(phoneAVisibilityIds.has("role-specific"));
+assert.ok(phoneAVisibilityIds.has("user-public"));
+assert.ok(phoneAVisibilityIds.has("user-specific-a"));
+assert.ok(!phoneAVisibilityIds.has("user-specific-b"), "a role cannot see a user post targeted at another role");
+assert.ok(!phoneAVisibilityIds.has("user-private"), "a role cannot see the user's private post");
+assert.ok(!phoneAVisibilityIds.has("user-only"), "a role cannot see the user's user-only post");
+assert.ok(!phoneAWithStaleVisibilityPost.posts.some((post) => post.id === "stale-user-specific-b"), "removes a stale mirror after its audience changes");
+
 // A phone screen can remain mounted while the main chat receives a new
 // message. A user-side block is directional: the user's new message still
 // reaches the character and must be mirrored into the role phone as a normal

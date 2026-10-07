@@ -3177,14 +3177,16 @@ export default function AppCharacterPhone({
                 <h4 className="min-w-0 truncate text-xs font-bold text-[#576b95]">{getPhonePostAuthorName(post) || selectedCharacter.name}</h4>
                 <div className="shrink-0 text-right text-[10px] text-slate-400">
                   <time dateTime={new Date(post.timestamp).toISOString()}>{new Date(post.timestamp).toLocaleDateString([], { month: "2-digit", day: "2-digit" })} {new Date(post.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</time>
-                  {post.location && <div className="mt-0.5 max-w-28 truncate">{post.location}</div>}
                 </div>
               </div>
               <p className="mt-1 whitespace-pre-wrap rounded p-1 text-xs leading-relaxed text-[var(--text-primary)]">{post.content}</p>
               {post.image && <img src={post.image} alt={post.imageDescription || "朋友圈配图"} className="mt-2 max-h-52 max-w-[200px] rounded-lg object-contain" />}
               {!post.image && post.imageDescription && <div className="mt-2 max-w-[200px] rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-4 text-xs leading-relaxed text-[var(--text-primary)]">{post.imageDescription}</div>}
-              <div className="mt-3 flex items-center justify-between">
-                {post.visibility === "specific" ? <button type="button" onClick={() => setViewingPostAudience(post)} className="min-h-8 rounded-lg px-1 text-[10px] font-semibold text-[var(--color-accent)] hover:bg-[var(--surface-muted)]">{formatMomentVisibilityLabel(post.visibility)}</button> : <span className="px-1 text-[10px] font-semibold text-slate-400">{formatMomentVisibilityLabel(post.visibility)}</span>}
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  {post.visibility === "specific" ? <button type="button" onClick={() => setViewingPostAudience(post)} className="min-h-8 shrink-0 rounded-lg px-1 text-[10px] font-semibold text-[var(--color-accent)] hover:bg-[var(--surface-muted)]">{formatMomentVisibilityLabel(post.visibility)}</button> : <span className="shrink-0 px-1 text-[10px] font-semibold text-slate-400">{formatMomentVisibilityLabel(post.visibility)}</span>}
+                  {post.location && <span className="min-w-0 max-w-28 truncate text-[10px] text-slate-400">{post.location}</span>}
+                </div>
                 <div className="flex items-center gap-3">
                   <button type="button" onClick={() => togglePhonePostLike(post.id)} className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${likedPostIds.includes(post.id) ? "text-rose-500" : "text-slate-400"}`}><Heart className={`h-3.5 w-3.5 ${likedPostIds.includes(post.id) ? "fill-rose-500 text-rose-500" : ""}`} /><span>{post.likes || "赞"}</span></button>
                   <button type="button" onClick={() => setPostCommentDrafts((drafts) => ({ ...drafts, [post.id]: drafts[post.id] ?? "" }))} className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400"><MessageCircle className="h-3.5 w-3.5" /><span>{post.comments.length || "评论"}</span></button>
@@ -3752,12 +3754,14 @@ export default function AppCharacterPhone({
                   </button>
                 </div>
               </div>
-              {post.location && <p className="mt-1 text-right text-[10px] text-neutral-400">{post.location}</p>}
               {post.image && <img src={post.image} alt={post.imageDescription || "朋友圈配图"} className="mt-2 max-h-52 max-w-[200px] rounded-lg object-contain" />}
               {!post.image && post.imageDescription && <div className="mt-2 rounded-xl bg-black/5 px-3 py-4 text-sm leading-6">{post.imageDescription}</div>}
               <p className="mt-3 text-sm leading-6">{post.content}</p>
               <div className="mt-3 flex items-center justify-between gap-4 text-[10px] text-neutral-500">
-                {post.visibility === "specific" ? <button type="button" onClick={() => setViewingPostAudience(post)} className="font-semibold text-[var(--color-accent)]">{formatMomentVisibilityLabel(post.visibility)}</button> : <span className="font-semibold">{formatMomentVisibilityLabel(post.visibility)}</span>}
+                <div className="flex min-w-0 items-center gap-2">
+                  {post.visibility === "specific" ? <button type="button" onClick={() => setViewingPostAudience(post)} className="shrink-0 font-semibold text-[var(--color-accent)]">{formatMomentVisibilityLabel(post.visibility)}</button> : <span className="shrink-0 font-semibold">{formatMomentVisibilityLabel(post.visibility)}</span>}
+                  {post.location && <span className="min-w-0 max-w-28 truncate text-neutral-400">{post.location}</span>}
+                </div>
                 <div className="flex items-center gap-4">
                 <button
                   type="button"

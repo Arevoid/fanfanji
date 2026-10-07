@@ -275,7 +275,6 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                     <h4 className="min-w-0 text-xs font-bold text-[#576b95] hover:underline cursor-pointer">{authorName}</h4>
                     <div className="shrink-0 text-right text-[10px] text-slate-400">
                       <time dateTime={new Date(moment.timestamp).toISOString()}>{new Date(moment.timestamp).toLocaleDateString([], { month: "2-digit", day: "2-digit" })}{" "}{new Date(moment.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</time>
-                      {moment.location && <div className="mt-0.5 max-w-32 truncate">{moment.location}</div>}
                     </div>
                   </div>
                   <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative" title="长按/右键 弹出菜单" onContextMenu={(event) => onMomentTextContextMenu(event, moment.id, momentContextText, authorName, authorAvatar, isOwnMoment, moment.timestamp)} onPointerDown={(event) => onMomentTextPointerDown(event, moment.id, momentContextText, authorName, authorAvatar, isOwnMoment, moment.timestamp)} onPointerUp={onMomentTextPointerUpOrLeave} onPointerLeave={onMomentTextPointerUpOrLeave} onPointerMove={onMomentTextPointerMove}>
@@ -305,12 +304,15 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                       {momentImageAction}
                     </div>
                   )}
-                  <div className="flex justify-between items-center mt-3">
-                    {moment.visibility === "specific" ? (
-                      <button type="button" onClick={() => setViewingAudience(moment)} className="min-h-8 rounded-lg px-1 text-[10px] font-semibold text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]">{formatMomentVisibilityLabel(moment.visibility)}</button>
-                    ) : (
-                      <span className="px-1 text-[10px] font-semibold text-slate-400">{formatMomentVisibilityLabel(moment.visibility)}</span>
-                    )}
+                  <div className="flex items-center justify-between gap-3 mt-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      {moment.visibility === "specific" ? (
+                        <button type="button" onClick={() => setViewingAudience(moment)} className="min-h-8 shrink-0 rounded-lg px-1 text-[10px] font-semibold text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]">{formatMomentVisibilityLabel(moment.visibility)}</button>
+                      ) : (
+                        <span className="shrink-0 px-1 text-[10px] font-semibold text-slate-400">{formatMomentVisibilityLabel(moment.visibility)}</span>
+                      )}
+                      {moment.location && <span className="min-w-0 max-w-32 truncate text-[10px] text-slate-400">{moment.location}</span>}
+                    </div>
                       <div className="flex items-center gap-3">
                         {onTriggerRelationshipNetworkComments && (
                           <button type="button" onClick={() => onTriggerRelationshipNetworkComments(moment)} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-indigo-500 font-semibold transition-colors" title="让关系网参与">
