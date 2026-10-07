@@ -32,6 +32,7 @@ import {
 } from "../core/storage/repositories/characterPhoneRepository";
 import {
   evaluateCharacterPhonePasswordChange,
+  isExplicitCharacterPhonePasswordAcceptance,
   parseCharacterPhonePasswordActionMarker,
   parseCharacterPhonePasswordChangeRequest,
 } from "../domain/characterPhone/passwordPolicy";
@@ -2961,55 +2962,84 @@ export default function AppChat({
     const phonePasswordRequest = userMsg?.sender === "user"
       ? parseCharacterPhonePasswordChangeRequest(userMsg.content)
       : undefined;
+    const phonePasswordPolicyPreview = phonePasswordRequest && characterPhone
+      ? evaluateCharacterPhonePasswordChange({
+        request: phonePasswordRequest,
+        action: {
+          decision: "accept",
+          purpose: phonePasswordRequest.purpose,
+          passcode: phonePasswordRequest.passcode,
+          reason: "user_request",
+        },
+        relationship: turnRelationship?.relationship,
+        lastChangedAt: characterPhone.passwordChangedAt,
+        now: Date.now(),
+      })
+      : undefined;
 
     const applyCharacterPhonePasswordAction = (text: string): string => {
       const parsed = parseCharacterPhonePasswordActionMarker(text);
-      if (!parsed.action) return parsed.visibleText;
+      const naturalAcceptance = !parsed.action && phonePasswordRequest
+        ? isExplicitCharacterPhonePasswordAcceptance(parsed.visibleText, phonePasswordRequest)
+        : false;
+      const action = parsed.action?.decision === "accept" && phonePasswordRequest
+        ? {
+            ...parsed.action,
+            purpose: phonePasswordRequest.purpose,
+            passcode: phonePasswordRequest.passcode,
+            reason: "user_request" as const,
+          }
+        : parsed.action || (naturalAcceptance && phonePasswordRequest
+          ? {
+              decision: "accept" as const,
+              purpose: phonePasswordRequest.purpose,
+              passcode: phonePasswordRequest.passcode,
+              reason: "user_request" as const,
+            }
+          : undefined);
+      if (!action) return parsed.visibleText;
       if (!characterPhone || !resolvedCharacterPhoneOwnerIdentityId) {
-        return parsed.visibleText || "这部手机还没有完成初始化，我现在不能修改密码。";
+        return parsed.visibleText;
       }
       const policy = evaluateCharacterPhonePasswordChange({
         request: phonePasswordRequest,
-        action: parsed.action,
+        action,
         relationship: turnRelationship?.relationship,
         lastChangedAt: characterPhone.passwordChangedAt,
         now: Date.now(),
       });
-      if (parsed.action.decision !== "accept") {
-        if (parsed.visibleText) return parsed.visibleText;
-        return "我想了想，这次先不改。";
+      if (action.decision !== "accept") {
+        return parsed.visibleText;
       }
-      if (!policy.allowed || !parsed.action.passcode) {
-        if (policy.reason === "relationship_not_trusted") return "我们现在的关系还没到改这种密码的程度。";
-        if (policy.reason === "cooldown") return "密码才刚改过，我暂时不想频繁更换。";
-        if (policy.reason === "request_mismatch") return "你说的密码和我准备修改的不是同一个，我先不改。";
-        if (policy.reason === "invalid_passcode") return "这个密码格式不对，我不会保存它。";
-        return "我想了想，这次先不改。";
+      if (!policy.allowed || !action.passcode) {
+        // The policy decides whether persistence is allowed, but the visible
+        // refusal must remain in the character's own voice. Do not replace a
+        // persona/world-book-aware answer with a fixed system sentence.
+        return parsed.visibleText;
       }
       const write = changeCharacterPhonePasscode({
         ownerIdentityId: resolvedCharacterPhoneOwnerIdentityId,
         characterId: turnCharacter.id,
-        purpose: parsed.action.purpose,
-        passcode: parsed.action.passcode,
-        reason: parsed.action.reason || (phonePasswordRequest ? "user_request" : "major_event"),
+        purpose: action.purpose,
+        passcode: action.passcode,
+        reason: action.reason || (phonePasswordRequest ? "user_request" : "major_event"),
         now: Date.now(),
       });
       if (!write.success || !write.phone) {
-        return "刚才的密码修改没有生效，我不会把没保存的数字当成新密码。";
+        return parsed.visibleText;
       }
       characterPhone = write.phone;
-      const label = parsed.action.purpose === "hidden-gallery" ? "隐藏相册密码" : "手机解锁密码";
-      const visibleText = parsed.visibleText || `好了，${label}已经改好了。`;
-      // The marker is the source of truth. Correct a stray number near a
-      // password claim so the character can never say one value while the
-      // phone stores another.
+      const visibleText = parsed.visibleText;
+      // A validated marker or an explicit natural-language acceptance is the
+      // source of truth. Correct a stray number near a password claim so the
+      // character can never say one value while the phone stores another.
       const correctedPasswordClaim = visibleText.replace(
         new RegExp(`((?:手机|解锁|锁屏|隐藏相册|相册)?密码[^\\d]{0,10})\\d{4}`, "gu"),
-        `$1${parsed.action.passcode}`,
+        `$1${action.passcode}`,
       );
       return correctedPasswordClaim.replace(
         new RegExp(`((?:改|换|设(?:为|成)?)[^。！？!?\\n]{0,8})\\d{4}`, "gu"),
-        `$1${parsed.action.passcode}`,
+        `$1${action.passcode}`,
       );
     };
     const pendingProactiveOfflineAppointment = turnRelationship && userMsg?.sender === "user"
@@ -3369,11 +3399,19 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         && activeRelationship.blockedBy === "user"
         ? `\n\n【拉黑关系最终约束·优先于普通话题】\n你仍被对方拉黑。即使对方发送的是“人呢”“在吗”或其他日常句子，也必须先保持被拉黑后的关系情绪，再回答当前内容；不要突然像普通聊天一样换到无关话题。具体语气必须服从你的角色卡、关系和最近上下文，可以委屈、嘴硬、道歉、质问或撒娇，但不要使用固定模板，也不要照抄示例。不得凭空引入最近上下文和人设中没有的 C++、报警、外星人等新事件；不要声称消息已经送达、被看见，或提及系统、API、角色手机和拦截规则。若最近上下文没有明确冲突，就自然表达困惑并请求说明原因；若正在争吵，就延续争吵后的情绪。`
         : "";
+      const characterPhonePasswordFinalInstruction = phonePasswordRequest
+        ? `\n\n【角色手机密码请求·自然回复规则】
+用户刚刚提出了${phonePasswordRequest.purpose === "hidden-gallery" ? "隐藏相册密码" : "手机解锁密码"}变更请求。请先结合角色人设、世界书、当前关系状态和最近对话，自然判断是否愿意接受；不要使用客服口吻、固定模板或直接复述内部校验原因。
+内部校验结果：${phonePasswordPolicyPreview?.allowed ? "当前可以尝试接受；明确接受后系统会保存" : "当前不能执行，必须拒绝变更"}。
+如果不能接受，请用角色自己的语气说明态度或边界，不要声称密码已经改好，也不要输出 accept 标记；回复应像正常聊天，而不是系统提示。
+如果决定接受，先用角色自己的语气回复，再在回复末尾追加校验标记；标记中的四位密码必须与用户请求完全一致。即使遗漏标记，系统也只会在回复明确表达“已经同意并改好”时兜底保存；模糊、试探或条件式说法不会写入。`
+        : "";
       const directChatSystemInstructionSuffix = [
         "\n\n",
         INLINE_INNER_VOICE_INSTRUCTION,
         characterPhoneProxyFinalInstruction,
         blockedRelationshipFinalInstruction,
+        characterPhonePasswordFinalInstruction,
       ].join("");
 
       const stickerPrompt = activeAttachModal !== "calling"
@@ -3480,7 +3518,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               const pendingRequestText = phonePasswordRequest
                 ? "\n用户本轮明确提出了密码变更请求：将"
                   + (phonePasswordRequest.purpose === "hidden-gallery" ? "隐藏相册密码" : "手机解锁密码")
-                  + "改为“" + phonePasswordRequest.passcode + "”。你必须先按当前关系和人设判断接受还是拒绝；只有接受时，才输出下面的 accept 标记，且 passcode 必须逐字等于用户请求的四位数字。普通朋友/陌生关系通常应拒绝，亲密朋友或伴侣才考虑接受。"
+                  + "改为“" + phonePasswordRequest.passcode + "”。你必须结合人设、世界书、当前关系和上下文判断接受还是拒绝；关系阶段本身不是硬性拦截条件。只有明确接受时，才输出下面的 accept 标记，且 passcode 必须逐字等于用户请求的四位数字。"
                 : "\n如果你因为丢失手机、密码泄露、重大冲突、分手、信任变化或关系修复等重大事件，确实决定主动换密码，才允许使用下面的协议；日常情绪波动或普通聊天不要换。";
               return "【角色手机密码事实与变更协议】\n本轮回复前，系统已经先为这个角色的虚拟手机固定并保存了两组密码：解锁密码“"
                 + characterPhone.passcode + "”、隐藏相册密码“" + hiddenGalleryPasscode + "”。这两组密码已经写入角色手机，是本轮对话开始前就存在的事实，不是让你临时生成的新密码。\n"
@@ -3591,14 +3629,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         let callAction: PreparedDirectReplyResponse["callAction"];
         let characterAction: PreparedDirectReplyResponse["characterAction"];
         if (data.text) {
-          const hadPhonePasswordActionMarker = /\[\[\s*CHARACTER_PHONE_PASSWORD_CHANGE\s*\]\]/u.test(data.text);
           data.text = applyCharacterPhonePasswordAction(data.text);
-          // A model must not claim that an explicit user-requested change
-          // happened unless it emitted the validated action marker first.
-          if (phonePasswordRequest && !hadPhonePasswordActionMarker
-            && /(?:密码|口令|解锁码)[^。！？!?\n]{0,14}(?:改|换|设)[^。！？!?\n]{0,14}\d{4}/u.test(data.text)) {
-            data.text = "刚才的密码修改没有完成，我不会把没保存的数字当成新密码。";
-          }
+          // Persistence requires either a validated action marker or an
+          // explicit natural-language acceptance. Refusals stay in the
+          // character's own voice instead of being replaced by a template.
           const userImageSaveDecision = imageDataUrl && !ephemeralImage
             ? parseCharacterSaveUserImageDirective(data.text)
             : { shouldSave: false, visibleText: data.text };

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   CHARACTER_PHONE_PASSWORD_CHANGE_COOLDOWN_MS,
   evaluateCharacterPhonePasswordChange,
+  isExplicitCharacterPhonePasswordAcceptance,
   parseCharacterPhonePasswordActionMarker,
   parseCharacterPhonePasswordChangeRequest,
 } from "../src/domain/characterPhone/passwordPolicy";
@@ -46,12 +47,31 @@ assert.equal(evaluateCharacterPhonePasswordChange({
   request: { purpose: "unlock", passcode: "1234" },
   action: { decision: "accept", purpose: "unlock", passcode: "1234" },
   relationship: "friend",
-}).reason, "relationship_not_trusted");
+}).allowed, true);
+assert.equal(evaluateCharacterPhonePasswordChange({
+  request: { purpose: "unlock", passcode: "1234" },
+  action: { decision: "accept", purpose: "unlock", passcode: "1234" },
+  relationship: "unknown",
+  lastChangedAt: 1_000,
+  now: 1_001,
+}).allowed, true);
 assert.equal(evaluateCharacterPhonePasswordChange({
   request: { purpose: "unlock", passcode: "1234" },
   action: { decision: "accept", purpose: "unlock", passcode: "1234" },
   relationship: "partner",
 }).allowed, true);
+assert.equal(isExplicitCharacterPhonePasswordAcceptance(
+  "好，我已经把手机密码改成 1234 了。",
+  { purpose: "unlock", passcode: "1234" },
+), true);
+assert.equal(isExplicitCharacterPhonePasswordAcceptance(
+  "如果你坚持，我可以考虑改成 1234。",
+  { purpose: "unlock", passcode: "1234" },
+), false);
+assert.equal(isExplicitCharacterPhonePasswordAcceptance(
+  "不行，手机密码我不会改。",
+  { purpose: "unlock", passcode: "1234" },
+), false);
 assert.equal(evaluateCharacterPhonePasswordChange({
   action: { decision: "accept", purpose: "unlock", passcode: "1234" },
 }).reason, "missing_major_event");

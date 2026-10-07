@@ -107,23 +107,46 @@ export function parseCharacterPhonePasswordActionMarker(text: string): {
   }
 }
 
+/**
+ * Models normally return the hidden action marker, but a natural-language
+ * reply must still be authoritative when the model omits that internal
+ * protocol. This intentionally requires an explicit password-change context
+ * and rejects refusals/conditional promises so a casual mention cannot rotate
+ * the phone secret.
+ */
+export function isExplicitCharacterPhonePasswordAcceptance(
+  text: string,
+  request: CharacterPhonePasswordChangeRequest,
+): boolean {
+  const normalized = text.trim();
+  if (!normalized || !/(?:密码|口令|解锁码|锁屏|手机解锁|隐藏相册)/u.test(normalized)) return false;
+  if (/(?:不能|不可以|不行|拒绝|不愿意|不想|先不|暂时不|不会|没法|不改|不换|不设置|不接受|还没到|别想|免谈)/u.test(normalized)) return false;
+  if (/(?:如果|要是|除非|等(?:我|以后|之后)?[^。！？!?\n]{0,8}再|先[^。！？!?\n]{0,8}再|需要[^。！？!?\n]{0,8}才|考虑一下|再说)/u.test(normalized)) return false;
+
+  const mentionsChange = /(?:改|换|设置|设为|设成|修改|更换|重置)/u.test(normalized);
+  if (!mentionsChange) return false;
+  const mentionsRequestedPasscode = normalized.includes(request.passcode);
+  const explicitlyAccepted = /(?:已经|已按|已将|已把|改好了|换好了|设置好了|修改好了|更好了|完成了|成功|可以|行|好的?|好吧|没问题|同意|答应|收到|那就)/u.test(normalized);
+  return mentionsRequestedPasscode && explicitlyAccepted;
+}
+
 export function evaluateCharacterPhonePasswordChange(input: CharacterPhonePasswordPolicyInput): CharacterPhonePasswordPolicyResult {
   if (input.action.decision !== "accept") return { allowed: false, reason: "declined" };
   if (!input.action.passcode || !PASSCODE_PATTERN.test(input.action.passcode)) {
     return { allowed: false, reason: "invalid_passcode" };
   }
-  const now = input.now ?? Date.now();
-  if (typeof input.lastChangedAt === "number" && now - input.lastChangedAt < CHARACTER_PHONE_PASSWORD_CHANGE_COOLDOWN_MS) {
-    return { allowed: false, reason: "cooldown" };
-  }
   if (input.request) {
     if (input.request.purpose !== input.action.purpose || input.request.passcode !== input.action.passcode) {
       return { allowed: false, reason: "request_mismatch" };
     }
-    if (input.relationship !== "close_friend" && input.relationship !== "partner") {
-      return { allowed: false, reason: "relationship_not_trusted" };
-    }
+    // An explicit user request is resolved by the character's current
+    // persona/context response. Relationship stage must not override a clear
+    // in-character acceptance or refusal.
     return { allowed: true, reason: "accepted" };
+  }
+  const now = input.now ?? Date.now();
+  if (typeof input.lastChangedAt === "number" && now - input.lastChangedAt < CHARACTER_PHONE_PASSWORD_CHANGE_COOLDOWN_MS) {
+    return { allowed: false, reason: "cooldown" };
   }
   if (!input.action.reason || !MAJOR_EVENT_REASONS.has(input.action.reason)) {
     return { allowed: false, reason: "missing_major_event" };
