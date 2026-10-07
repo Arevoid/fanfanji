@@ -3160,7 +3160,7 @@ export default function AppCharacterPhone({
               {postImage && <button type="button" onClick={() => setPostImage(null)} className="text-rose-500">移除图片</button>}
             </div>
             {showPostTextImage && <textarea value={postImageDescription} onChange={(event) => { setPostImageDescription(event.target.value); setPostImage(null); }} placeholder="输入文字图内容…" className="mt-1 min-h-16 w-full resize-none rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-muted)] p-2 text-xs outline-none" />}
-            <input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="所在位置（可选）" className="mt-2 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-xs outline-none" />
+            <label className="mt-2 block min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors focus-within:border-[var(--color-accent)]"><span className="block text-[10px] text-[var(--text-tertiary)]">所在位置（可选）</span><input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="mt-0.5 w-full bg-transparent p-0 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" /></label>
             {renderPostVisibilitySelect()}
             <button type="button" disabled={isPublishingPost} onClick={() => { void publishPost(); setPhoneMomentComposerOpen(false); }} className="mt-2 rounded-xl bg-neutral-950 px-3 py-2 text-xs font-bold text-white disabled:cursor-wait disabled:opacity-60">{isPublishingPost ? "保存中…" : "发布动态"}</button>
           </div>
@@ -3837,7 +3837,7 @@ export default function AppCharacterPhone({
             <button type="button" onClick={() => setShowPostTextImage((value) => !value)} className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 hover:bg-black/5"><Camera className="h-4 w-4" />文字图</button>
           </div>
           {showPostTextImage && <textarea value={postImageDescription} onChange={(event) => { setPostImageDescription(event.target.value); setPostImage(null); }} placeholder="输入文字图内容…" className="mt-1 min-h-16 w-full resize-none rounded-xl bg-black/5 p-2 text-xs outline-none" />}
-          <input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="所在位置（可选）" className="mt-2 min-h-11 w-full rounded-xl bg-black/5 px-3 py-2 text-xs outline-none" />
+          <label className="mt-2 block min-h-11 rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-left text-xs text-neutral-800 transition-colors focus-within:border-black/30"><span className="block text-[10px] text-neutral-500">所在位置（可选）</span><input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="mt-0.5 w-full bg-transparent p-0 text-xs text-neutral-800 outline-none placeholder:text-neutral-400" /></label>
           {renderPostVisibilitySelect()}
           <button
             type="button"

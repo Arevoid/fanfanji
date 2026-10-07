@@ -184,9 +184,9 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
             </button>
           </div>
           <textarea rows={3} value={content} onChange={(event) => setContent(event.target.value)} placeholder="说点什么吧，可以配一个好看的插图..." className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-100 focus:outline-none text-xs resize-none leading-relaxed text-left" />
-          <label className="block text-xs text-slate-500">
-            所在位置（可选）
-            <input value={location} onChange={(event) => setLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="mt-1 min-h-11 w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-800 outline-none focus:border-[var(--color-accent)]" />
+          <label className="block min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors focus-within:border-[var(--color-accent)]">
+            <span className="block text-[10px] text-[var(--text-tertiary)]">所在位置（可选）</span>
+            <input value={location} onChange={(event) => setLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="mt-0.5 w-full bg-transparent p-0 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" />
           </label>
           <MomentAudiencePicker
             visibility={visibility}
