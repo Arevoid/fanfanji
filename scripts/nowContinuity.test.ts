@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { enforceNowContinuity, getNowActionLabel, hasVisibleTransitionEvidence } from "../src/domain/now/nowContinuity";
+import { enforceNowContinuity, getNowActionLabel, hasVisibleTransitionEvidence, normalizeSingleMomentContent } from "../src/domain/now/nowContinuity";
 import type { NowScene } from "../src/domain/now/nowTypes";
 
 const previous: NowScene = {
@@ -43,5 +43,8 @@ const naturalTransition = enforceNowContinuity(previous, {
 });
 assert.equal(naturalTransition.continuityMode, "transition");
 assert.equal(getNowActionLabel(naturalTransition), "自然变化");
-console.log("now continuity tests passed");
 
+const multiMomentContent = "观察时间 01:15，人物坐在窗边，手指停在杯沿。\n\n02:30，人物起身走向厨房。\n\n05:00，房间重新安静下来。";
+assert.equal(normalizeSingleMomentContent(multiMomentContent), "人物坐在窗边，手指停在杯沿。");
+assert.equal(normalizeSingleMomentContent("观察时间 01:15，人物坐在窗边，手指停在杯沿。"), "人物坐在窗边，手指停在杯沿。");
+console.log("now continuity tests passed");

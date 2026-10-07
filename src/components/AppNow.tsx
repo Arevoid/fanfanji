@@ -31,7 +31,7 @@ import {
   saveNowObservationThreads,
   subscribeNowObservationState,
 } from "../features/now/nowObservationService";
-import { enforceNowContinuity, getNowActionLabel } from "../domain/now/nowContinuity";
+import { enforceNowContinuity, getNowActionLabel, normalizeSingleMomentContent } from "../domain/now/nowContinuity";
 import type { NowActionType, NowContinuityMode, NowObservationThread, NowScene } from "../domain/now/nowTypes";
 import { AppHeader } from "./ui/AppHeader";
 import { IconButton } from "./ui/IconButton";
@@ -188,7 +188,7 @@ const parseGeneratedScene = (raw: string, character: Character, previous?: NowSc
         return fallback;
       }
       return {
-        content: parsed.content.trim(),
+        content: normalizeSingleMomentContent(parsed.content),
         location: cleanText(parsed.location, previous?.location || "室内某处"),
         environment: cleanText(parsed.environment, previous?.environment || "周围安静"),
         durationMinutes: duration,
@@ -391,7 +391,7 @@ export default function AppNow({
             recentChat ? `最近聊天（只作为生活锚点，不要复述聊天记录）：\n${recentChat}` : "",
             recentScenes ? `此前观察片段（不要重复，不要预测未来）：\n${recentScenes}` : "",
             previous ? `上一个观察时刻：${formatSceneDate(previous.storyAt)}，地点：${previous.location}，动作：${previous.actionSummary || "未标注"}。除非有明确可见证据，不要改变这个动作。` : "这是第一次观察。",
-            `请生成一段${lengthPreset === "immersive" ? "1800-2600" : "800-1500"}字的监控式生活观察记录。你是有限视角的固定机位观察者，不是全知叙述者。只描写镜头中看得见的动作、姿势、物品互动、位置变化和光线变化，不写心理活动、内心独白、作者解释或下一步预测。若上一条记录没有自然结束，必须保持原动作；如果画面没有明显变化，就明确写“画面无明显变化”，不要为了生成新记录而让角色换地点或开始新活动。内容要详细、有空间感，但不能写成流水账。请只返回 JSON，不要 Markdown：{"content":"只描述可见动作的详细正文","actionType":"moving|still|transition|out-of-view","continuityMode":"continue|no-change|transition","actionSummary":"一句话动作标签","visibleChanges":["可见变化"],"transitionReason":"只有自然转场时填写","location":"当下地点","cameraLabel":"虚构机位名称","environment":"可观察的环境氛围","durationMinutes":8}`,
+            `请生成一段${lengthPreset === "immersive" ? "1800-2600" : "800-1500"}字的监控式生活观察记录。本次只记录一个固定观察时刻，正文只能发生在“当前观察时刻”，不能写成时间轴、回放或连续剧。严禁在正文中出现两个或更多时钟时间、时间范围、日期跳转，也不要写“过了几分钟/几小时”“随后到了……”等时间推进；不要用多个带时间标题的段落。你是有限视角的固定机位观察者，不是全知叙述者。只描写这一刻镜头中看得见的动作、姿势、物品互动、空间关系和光线状态，不写心理活动、内心独白、作者解释或下一步预测。若上一条记录没有自然结束，必须保持原动作；如果画面没有明显变化，就明确写“画面无明显变化”，不要为了生成新记录而让角色换地点或开始新活动。内容要详细、有空间感，但所有细节必须属于同一时刻。durationMinutes 只表示这一画面预计可以保持到下一次观察，不要把这段时长写进正文。请只返回 JSON，不要 Markdown：{"content":"只描述当前单一时刻可见动作的详细正文，不要写时间标题","actionType":"moving|still|transition|out-of-view","continuityMode":"continue|no-change|transition","actionSummary":"一句话动作标签","visibleChanges":["可见变化"],"transitionReason":"只有自然转场时填写","location":"当下地点","cameraLabel":"虚构机位名称","environment":"可观察的环境氛围","durationMinutes":8}`,
           ].filter(Boolean).join("\n\n"),
           history: [],
           systemInstruction: "只输出合规 JSON。正文只能是固定机位能观察到的动作和画面变化，不得出现心理活动、未来预测、行动计划、下一步提示或作者解释。自动观察不等于推动角色行动；没有可见变化时必须保持原状态。",

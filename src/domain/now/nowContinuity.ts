@@ -39,3 +39,21 @@ export const getNowActionLabel = (scene: Pick<NowScene, "actionType" | "continui
   return "有人活动";
 };
 
+/**
+ * A single observation is one fixed moment, not a time-lapse montage. Some
+ * providers still add clock headings when asked for a long, detailed scene.
+ * Keep only the first clock-delimited block so one generated record cannot
+ * silently describe several hours in one entry.
+ */
+const CLOCK_HEADING_RE = /(?:^|\n)\s*(?:观察时间\s*)?(?:[01]?\d|2[0-3]):[0-5]\d(?:\s*(?:至|到|-|—|–)\s*(?:[01]?\d|2[0-3]):[0-5]\d)?\s*(?:[，,:：—–-]\s*)?/g;
+
+export const normalizeSingleMomentContent = (content: string): string => {
+  const normalized = content.replace(/\r\n?/g, "\n").trim();
+  const headings = [...normalized.matchAll(CLOCK_HEADING_RE)];
+  if (headings.length < 2) {
+    return normalized.replace(CLOCK_HEADING_RE, "").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  const firstBlock = normalized.slice(0, headings[1].index ?? normalized.length);
+  return firstBlock.replace(CLOCK_HEADING_RE, "").replace(/\n{3,}/g, "\n\n").trim();
+};
