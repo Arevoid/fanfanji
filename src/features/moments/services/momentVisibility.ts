@@ -14,13 +14,21 @@ export function normalizeMomentVisibility(value: MomentVisibility | undefined): 
   return value || "public";
 }
 
-/** The author always sees their own post; private posts never enter the shared feed. */
+/**
+ * The owner sees every visibility state on their own Moments feed. Character
+ * posts keep their audience rules: private posts stay inside the character
+ * phone, while public/user-only posts may appear in the owner's feed.
+ */
 export function isMomentVisibleToViewer(moment: Moment, viewer: MomentVisibilityViewer): boolean {
   if ((moment.ownerIdentityId || "identity-1") !== viewer.ownerIdentityId) return false;
+  const isUserAuthored = !moment.characterId && !moment.relationshipNetworkNpcId;
+  const isOwnerFeed = !viewer.characterId && !viewer.identityId;
+  if (isUserAuthored && isOwnerFeed) return true;
   const visibility = normalizeMomentVisibility(moment.visibility);
-  // A user's own private post remains visible in their own feed. Character
-  // phone private posts are mirrored for storage but stay inside that phone.
-  if (visibility === "private") return !moment.characterId && !moment.relationshipNetworkNpcId;
+  // Character-phone private posts are mirrored into the shared store for
+  // synchronization, but they remain visible only inside that character's
+  // phone. `user` is the character's "对我可见" state.
+  if (visibility === "private") return false;
   if (visibility === "user") return true;
   if (visibility === "specific") {
     const targets = new Set(moment.visibilityTargetIds || []);
