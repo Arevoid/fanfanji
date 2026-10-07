@@ -283,7 +283,7 @@ import {
   type RelationshipNetworkMomentCommentCandidate,
 } from "../features/moments/services/relationshipNetworkMomentCommentService";
 import { generateAutomaticMomentReply } from "../features/moments/services/automaticMomentReplyPipeline";
-import { isMomentVisibleToUser, isMomentPublic } from "../features/moments/services/momentVisibility";
+import { isMomentVisibleToUser, isMomentVisibleToViewer, isMomentPublic } from "../features/moments/services/momentVisibility";
 import {
   MAX_MOMENT_COMMENTS_PER_ACTOR,
   hasReachedMomentCommentLimit,
@@ -5892,7 +5892,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     const commentingRelationships = [...activeRelationships]
       .filter((relationship) => {
         const friend = findMomentRelationshipCharacter(characters, relationship);
-        return Boolean(friend && !friend.isGroupChat);
+        if (!friend || friend.isGroupChat) return false;
+        return isMomentVisibleToViewer(newMo, {
+          ownerIdentityId: newMo.ownerIdentityId || activeIdentityId,
+          characterId: friend.id,
+        });
       })
       .sort((left, right) => latestCommentAt(left) - latestCommentAt(right))
       .slice(0, Math.min(3, activeRelationships.length));
@@ -5973,6 +5977,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       relationId: relationship.id,
       authorName: friend.remark || friend.name,
     };
+    if (!isMomentVisibleToViewer(targetMoment, {
+      ownerIdentityId: targetMoment.ownerIdentityId || activeIdentityId,
+      characterId: friend.id,
+    })) return;
     if (hasReachedMomentCommentLimit(getMomentComments(targetMoment), friendActor)) return;
     const delay = Math.random() * 5000 + 3000; // 3 to 8 seconds delay
     

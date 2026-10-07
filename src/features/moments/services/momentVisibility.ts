@@ -29,13 +29,15 @@ export function isMomentVisibleToViewer(moment: Moment, viewer: MomentVisibility
   // synchronization, but they remain visible only inside that character's
   // phone. `user` is the character's "对我可见" state.
   if (visibility === "private") return false;
-  if (visibility === "user") return true;
+  // `user` means "对我可见": it is readable by the owner feed, not by a
+  // different character reading the owner's social feed.
+  if (visibility === "user") return !viewer.characterId;
   if (visibility === "specific") {
     const targets = new Set(moment.visibilityTargetIds || []);
     return targets.has(viewer.ownerIdentityId)
       || Boolean(viewer.identityId && targets.has(viewer.identityId))
       || Boolean(viewer.characterId && targets.has(viewer.characterId))
-      || targets.has("user");
+      || (targets.has("user") && !viewer.characterId);
   }
   return true;
 }

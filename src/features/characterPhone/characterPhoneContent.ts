@@ -827,8 +827,18 @@ function syncMoments(
       visibilityTargetIds: sourcePost.visibilityTargetIds,
     };
   });
+  // A previously mirrored post can become invisible when its owner changes
+  // the audience from public to private/specific (or changes the selected
+  // characters). Do not leave that stale mirror in the role phone. Posts
+  // without a central Moment source are local phone content and remain intact.
+  const relevantMomentIds = new Set(relevant.map((moment) => moment.id));
+  const refreshedPosts = refreshedExistingPosts.filter((post) =>
+    !post.sourceMomentId
+    || relevantMomentIds.has(post.sourceMomentId)
+    || !moments.some((moment) => moment.id === post.sourceMomentId),
+  );
   return {
-    posts: [...refreshedExistingPosts, ...newPosts].sort((left, right) => right.timestamp - left.timestamp),
+    posts: [...refreshedPosts, ...newPosts].sort((left, right) => right.timestamp - left.timestamp),
     lastMomentId: relevant.slice().sort((left, right) => left.timestamp - right.timestamp).at(-1)?.id,
   };
 }
