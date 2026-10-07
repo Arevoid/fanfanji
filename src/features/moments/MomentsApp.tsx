@@ -183,7 +183,6 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
               <X className="w-4 h-4" />
             </button>
           </div>
-          <textarea rows={3} value={content} onChange={(event) => setContent(event.target.value)} placeholder="说点什么吧，可以配一个好看的插图..." className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-100 focus:outline-none text-xs resize-none leading-relaxed text-left" />
           <label className="block min-h-11 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors focus-within:border-[var(--color-accent)]">
             <span className="block text-[10px] text-[var(--text-tertiary)]">所在位置（可选）</span>
             <input value={location} onChange={(event) => setLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="mt-0.5 w-full bg-transparent p-0 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" />
@@ -195,6 +194,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
             onVisibilityChange={setVisibility}
             onTargetIdsChange={setVisibilityTargetIds}
           />
+          <textarea rows={3} value={content} onChange={(event) => setContent(event.target.value)} placeholder="说点什么吧，可以配一个好看的插图..." className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-100 focus:outline-none text-xs resize-none leading-relaxed text-left" />
           <div className="flex justify-between items-center">
             <label className="cursor-pointer text-slate-400 hover:text-blue-500 flex items-center gap-1.5 text-xs font-semibold">
               <ImageIcon className="w-4 h-4" />
