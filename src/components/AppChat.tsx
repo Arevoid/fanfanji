@@ -8,7 +8,7 @@ import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { isMcpEnabledForScope, setCharacterMcpEnabled } from "../features/mcp/mcpPolicyRuntime";
 import { createId } from "../core/id/createId";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type InnerVoiceRecord, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "../types";
+import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, MomentVisibility, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type InnerVoiceRecord, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "../types";
 import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proactiveOfflinePreference";
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
@@ -7081,7 +7081,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     handleAutoReplyToUserComment(momentId, text.trim(), replyingTo);
   };
 
-  const publishMomentFromFeature = (input: { content: string; image: string | null; imageDescription: string }) => {
+  const publishMomentFromFeature = (input: { content: string; image: string | null; imageDescription: string; location?: string; visibility: MomentVisibility; visibilityTargetIds: string[] }) => {
     const newMo: Moment = {
       id: Date.now().toString(),
       ownerIdentityId: activeIdentityId,
@@ -7095,6 +7095,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       image: input.image || undefined,
       imageType: input.image ? "photo" : (input.imageDescription.trim() ? "text" : undefined),
       imageDescription: input.imageDescription.trim() || undefined,
+      location: input.location?.trim() || undefined,
+      visibility: input.visibility || "public",
+      ...(input.visibility === "specific" ? { visibilityTargetIds: input.visibilityTargetIds } : {}),
     };
     if (!newMo.content && !newMo.image && !newMo.imageDescription) {
       showToast("朋友圈不支持聊天表情包，请发布文字或图片内容");

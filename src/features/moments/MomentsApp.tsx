@@ -1,11 +1,13 @@
 import React, { useState } from "react";
-import { Camera, ChevronLeft, FileText, Heart, Image as ImageIcon, Languages, Loader2, MessageCircle, Plus, RefreshCw, Sparkles, X } from "lucide-react";
-import type { Character, Moment, MomentComment, UserSettings } from "../../types";
+import { Camera, ChevronLeft, Heart, Image as ImageIcon, Languages, Loader2, MessageCircle, Plus, RefreshCw, Sparkles, X } from "lucide-react";
+import type { Character, Moment, MomentComment, MomentVisibility, UserSettings } from "../../types";
 import type { RelationshipNetworkPendingInteraction, RelationshipNetworkPendingMoment } from "../../domain/relationshipNetwork/relationshipNetworkTypes";
 import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 import { cleanAndExtractMoment, getMomentComments, isShortMomentImageDescription, renderMomentContent, sanitizeMomentPublishText } from "./services/momentContent";
 import { getMomentLikeDisplayNames, isMomentLikedByIdentity, resolveMomentCommentAuthor } from "./services/momentIdentityPresentation";
+import { formatMomentVisibilityLabel } from "./services/momentVisibility";
 import { StoredMomentImage } from "./components/StoredMomentImage";
+import { MomentAudiencePicker } from "./components/MomentAudiencePicker";
 
 export interface MomentsAppProps {
   moments: Moment[];
@@ -23,7 +25,7 @@ export interface MomentsAppProps {
   onDeleteMoment?: (momentId: string) => void;
   onLikeMoment: (momentId: string, userName: string, identityId?: string) => void;
   onSaveSettings: (settings: UserSettings) => void;
-  onPublishUserMoment: (input: { content: string; image: string | null; imageDescription: string }) => void;
+  onPublishUserMoment: (input: { content: string; image: string | null; imageDescription: string; location?: string; visibility: MomentVisibility; visibilityTargetIds: string[] }) => void;
   onGenerateMomentImage?: (moment: Moment) => Promise<void>;
   onPublishComment: (momentId: string, content: string, replyingTo?: MomentComment) => void;
   onTriggerRelationshipNetworkComments?: (moment: Moment) => void;
@@ -50,11 +52,15 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
   const [content, setContent] = useState("");
   const [image, setImage] = useState<string | null>(null);
   const [imageDescription, setImageDescription] = useState("");
+  const [location, setLocation] = useState("");
+  const [visibility, setVisibility] = useState<MomentVisibility>("public");
+  const [visibilityTargetIds, setVisibilityTargetIds] = useState<string[]>([]);
   const [showTextImage, setShowTextImage] = useState(false);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [showCommentInput, setShowCommentInput] = useState<Record<string, boolean>>({});
   const [replyingTo, setReplyingTo] = useState<Record<string, MomentComment>>({});
   const [viewingDescription, setViewingDescription] = useState<string | null>(null);
+  const [viewingAudience, setViewingAudience] = useState<Moment | null>(null);
   const [showPendingInteractions, setShowPendingInteractions] = useState(false);
   const [showPendingMoments, setShowPendingMoments] = useState(false);
   const [generatingMomentIds, setGeneratingMomentIds] = useState<Record<string, boolean>>({});
@@ -71,13 +77,20 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
     event.preventDefault();
     const publishedContent = sanitizeMomentPublishText(content);
     if (!publishedContent && !image && !imageDescription.trim()) return;
-    onPublishUserMoment({ content: publishedContent, image, imageDescription });
+    if (visibility === "specific" && visibilityTargetIds.length === 0) return;
+    onPublishUserMoment({ content: publishedContent, image, imageDescription, location: location.trim() || undefined, visibility, visibilityTargetIds });
     setContent("");
     setImage(null);
     setImageDescription("");
+    setLocation("");
+    setVisibility("public");
+    setVisibilityTargetIds([]);
     setShowTextImage(false);
     setShowPublisher(false);
   };
+  const audienceOptions = characters
+    .filter((character) => character.id !== filterCharacterId)
+    .map((character) => ({ id: character.id, label: character.remark || character.name, avatar: character.avatar }));
   const upload = async (file: File, kind: "moment" | "cover") => {
     const uploaded = await onUploadImage(file, kind);
     if (kind === "moment" && uploaded) setImage(uploaded);
@@ -171,6 +184,17 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
             </button>
           </div>
           <textarea rows={3} value={content} onChange={(event) => setContent(event.target.value)} placeholder="说点什么吧，可以配一个好看的插图..." className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-100 focus:outline-none text-xs resize-none leading-relaxed text-left" />
+          <label className="block text-xs text-slate-500">
+            所在位置（可选）
+            <input value={location} onChange={(event) => setLocation(event.target.value)} maxLength={80} placeholder="输入地点，例如：学校图书馆" className="mt-1 min-h-11 w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-800 outline-none focus:border-[var(--color-accent)]" />
+          </label>
+          <MomentAudiencePicker
+            visibility={visibility}
+            targetIds={visibilityTargetIds}
+            options={audienceOptions}
+            onVisibilityChange={setVisibility}
+            onTargetIdsChange={setVisibilityTargetIds}
+          />
           <div className="flex justify-between items-center">
             <label className="cursor-pointer text-slate-400 hover:text-blue-500 flex items-center gap-1.5 text-xs font-semibold">
               <ImageIcon className="w-4 h-4" />
@@ -186,7 +210,7 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
               />
             </label>
             <button type="button" onClick={() => setShowTextImage((value) => !value)} className="text-slate-400 hover:text-blue-500 flex items-center gap-1.5 text-xs font-semibold">
-              <FileText className="w-4 h-4" />
+              <Camera className="w-4 h-4" />
               <span>文字图</span>
             </button>
             <button type="submit" className="px-4 py-1.5 bg-neutral-950 hover:bg-neutral-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all">
@@ -245,7 +269,13 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
               <div key={moment.id} className="py-5 first:pt-2 flex gap-3">
                 <img src={authorAvatar} alt="" className="w-10 h-10 rounded-[6px] object-cover bg-slate-50 shrink-0 border border-slate-100" />
                 <div className="flex-1 min-w-0">
-                  <h4 className="text-xs font-bold text-[#576b95] hover:underline cursor-pointer">{authorName}</h4>
+                  <div className="flex items-start justify-between gap-3">
+                    <h4 className="min-w-0 text-xs font-bold text-[#576b95] hover:underline cursor-pointer">{authorName}</h4>
+                    <div className="shrink-0 text-right text-[10px] text-slate-400">
+                      <time dateTime={new Date(moment.timestamp).toISOString()}>{new Date(moment.timestamp).toLocaleDateString([], { month: "2-digit", day: "2-digit" })}{" "}{new Date(moment.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</time>
+                      {moment.location && <div className="mt-0.5 max-w-32 truncate">{moment.location}</div>}
+                    </div>
+                  </div>
                   <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap mt-1 select-none cursor-pointer hover:bg-slate-50/50 rounded p-1 transition-colors relative" title="长按/右键 弹出菜单" onContextMenu={(event) => onMomentTextContextMenu(event, moment.id, momentContextText, authorName, authorAvatar, isOwnMoment, moment.timestamp)} onPointerDown={(event) => onMomentTextPointerDown(event, moment.id, momentContextText, authorName, authorAvatar, isOwnMoment, moment.timestamp)} onPointerUp={onMomentTextPointerUpOrLeave} onPointerLeave={onMomentTextPointerUpOrLeave} onPointerMove={onMomentTextPointerMove}>
                     {renderMomentContent(moment.content)}
                   </p>
@@ -274,17 +304,11 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
                     </div>
                   )}
                   <div className="flex justify-between items-center mt-3">
-                    <span className="text-[10px] text-slate-400 font-medium">
-                      {new Date(moment.timestamp).toLocaleDateString([], {
-                        month: "2-digit",
-                        day: "2-digit",
-                      })}{" "}
-                      {new Date(moment.timestamp).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: false,
-                      })}
-                    </span>
+                    {moment.visibility === "specific" ? (
+                      <button type="button" onClick={() => setViewingAudience(moment)} className="min-h-8 rounded-lg px-1 text-[10px] font-semibold text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]">{formatMomentVisibilityLabel(moment.visibility)}</button>
+                    ) : (
+                      <span className="px-1 text-[10px] font-semibold text-slate-400">{formatMomentVisibilityLabel(moment.visibility)}</span>
+                    )}
                       <div className="flex items-center gap-3">
                         {onTriggerRelationshipNetworkComments && (
                           <button type="button" onClick={() => onTriggerRelationshipNetworkComments(moment)} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-indigo-500 font-semibold transition-colors" title="让关系网参与">
@@ -378,6 +402,23 @@ export const MomentsApp: React.FC<MomentsAppProps> = ({ moments, characters, set
           })
         )}
       </div>
+      {viewingAudience && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4" role="presentation" onClick={() => setViewingAudience(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-[var(--surface)] p-4 shadow-xl" role="dialog" aria-modal="true" aria-label="特别的人可见范围" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div><h2 className="text-sm font-bold text-[var(--text-primary)]">特别的人</h2><p className="mt-1 text-[10px] text-[var(--text-tertiary)]">以下角色可以看到这条朋友圈</p></div>
+              <button type="button" onClick={() => setViewingAudience(null)} className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--text-tertiary)] hover:bg-[var(--surface-muted)]" aria-label="关闭可见范围"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="mt-3 space-y-1">
+              {(viewingAudience.visibilityTargetIds || []).map((targetId) => {
+                const target = audienceOptions.find((option) => option.id === targetId);
+                return <div key={targetId} className="flex min-h-11 items-center gap-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2 text-xs"><span className="h-7 w-7 rounded-full bg-[var(--border)]" aria-hidden="true" />{target?.label || targetId}</div>;
+              })}
+              {(viewingAudience.visibilityTargetIds || []).length === 0 && <p className="py-4 text-center text-xs text-[var(--text-tertiary)]">未选择角色</p>}
+            </div>
+          </div>
+        </div>
+      )}
       {showPendingInteractions && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4">
           <div className="max-h-[78vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-xl">

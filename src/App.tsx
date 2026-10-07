@@ -3528,6 +3528,11 @@ export default function App() {
     const normalized = {
       ...newMo,
       content,
+      location: newMo.location?.trim().slice(0, 80) || undefined,
+      visibility: newMo.visibility || "public",
+      visibilityTargetIds: newMo.visibility === "specific"
+        ? Array.from(new Set((newMo.visibilityTargetIds || []).map((target) => target.trim()).filter(Boolean)))
+        : undefined,
       comments: newMo.comments
         .map((comment) => ({ ...comment, content: sanitizeMomentPublishText(comment.content) }))
         .filter((comment) => Boolean(comment.content)),
@@ -3578,8 +3583,12 @@ export default function App() {
       timestamp: post.timestamp,
       likes,
       comments,
+      image: post.image || existing?.image,
+      imageType: post.imageType || existing?.imageType,
+      imageDescription: post.imageDescription || existing?.imageDescription,
       visibility: post.visibility || existing?.visibility || "public",
       visibilityTargetIds: post.visibilityTargetIds || existing?.visibilityTargetIds,
+      location: post.location || existing?.location,
       sourceCharacterPhonePostId: post.id,
     };
     if (!normalized.content) return;

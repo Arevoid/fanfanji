@@ -86,6 +86,9 @@ import type { Appointment, ScheduleEntry } from "../domain/schedule/scheduleType
 import { projectAppointmentToScheduleEntry } from "../domain/schedule/scheduleProjection";
 import type { CharacterScheduleEntry } from "../domain/characterLife/scheduleRuntime";
 import AppSchedule from "./AppSchedule";
+import { compressImage } from "../utils/pngParser";
+import { MomentAudiencePicker } from "../features/moments/components/MomentAudiencePicker";
+import { formatMomentVisibilityLabel } from "../features/moments/services/momentVisibility";
 import { createCharacterTextMessage } from "../features/chat/services/messageFactory";
 import {
   advanceCharacterPhoneWithResult,
@@ -1090,8 +1093,13 @@ export default function AppCharacterPhone({
     setDraftsByContact((previous) => ({ ...previous, [selectedContactId]: value }));
   };
   const [postDraft, setPostDraft] = useState("");
+  const [postImage, setPostImage] = useState<string | null>(null);
+  const [postImageDescription, setPostImageDescription] = useState("");
+  const [showPostTextImage, setShowPostTextImage] = useState(false);
+  const [postLocation, setPostLocation] = useState("");
   const [postVisibility, setPostVisibility] = useState<MomentVisibility>("public");
   const [postVisibilityTargetIds, setPostVisibilityTargetIds] = useState<string[]>([]);
+  const [viewingPostAudience, setViewingPostAudience] = useState<CharacterPhonePost | null>(null);
   const [phoneMomentComposerOpen, setPhoneMomentComposerOpen] = useState(false);
   const [isPublishingPost, setIsPublishingPost] = useState(false);
   const [selectedDiaryId, setSelectedDiaryId] = useState<string | null>(null);
@@ -1867,7 +1875,11 @@ export default function AppCharacterPhone({
     setDraft("");
   };
   const publishPost = async () => {
-    if (!currentPhone || !selectedCharacter || !postDraft.trim() || publishingPostRef.current) return;
+    if (!currentPhone || !selectedCharacter || (!postDraft.trim() && !postImage && !postImageDescription.trim()) || publishingPostRef.current) return;
+    if (postVisibility === "specific" && postVisibilityTargetIds.length === 0) {
+      setPhoneNotice("请至少选择一个可查看的角色");
+      return;
+    }
     publishingPostRef.current = true;
     setIsPublishingPost(true);
     const now = Date.now();
@@ -1881,6 +1893,8 @@ export default function AppCharacterPhone({
           authorId: selectedCharacter.id,
           authorAvatar: selectedCharacter.avatar,
           content: postDraft.trim().slice(0, 500),
+          ...(postImage ? { image: postImage, imageType: "photo" as const } : postImageDescription.trim() ? { imageType: "text" as const, imageDescription: postImageDescription.trim().slice(0, 300) } : {}),
+          ...(postLocation.trim() ? { location: postLocation.trim().slice(0, 80) } : {}),
           timestamp: now,
           likes: 0,
           comments: [],
@@ -1917,6 +1931,10 @@ export default function AppCharacterPhone({
       setPhoneNotice("");
       syncCharacterPhonePost(next.posts[next.posts.length - 1]);
       setPostDraft("");
+      setPostImage(null);
+      setPostImageDescription("");
+      setShowPostTextImage(false);
+      setPostLocation("");
       setPostVisibility("public");
       setPostVisibilityTargetIds([]);
     } finally {
@@ -3091,34 +3109,20 @@ export default function AppCharacterPhone({
     </div>
   );
   const roleAudienceContacts = visiblePhoneContacts.filter((contact) => Boolean(contact.linkedCharacterId));
-  const postVisibilitySelectValue = postVisibility === "specific"
-    ? `character:${postVisibilityTargetIds[0] || ""}`
-    : postVisibility;
+  const roleAudienceOptions = roleAudienceContacts.map((contact) => ({
+    id: contact.linkedCharacterId!,
+    label: contact.remark || contact.name,
+    avatar: resolveCharacterPhoneContactAvatar(contact),
+  }));
   const renderPostVisibilitySelect = () => (
-    <label className="mt-2 flex items-center justify-between gap-2 text-[11px] text-[var(--text-secondary)]">
-      <span>谁可以看</span>
-      <select
-        value={postVisibilitySelectValue}
-        onChange={(event) => {
-          const value = event.target.value;
-          if (value.startsWith("character:")) {
-            setPostVisibility("specific");
-            setPostVisibilityTargetIds([value.slice("character:".length)]);
-          } else {
-            setPostVisibility(value as MomentVisibility);
-            setPostVisibilityTargetIds(value === "user" ? ["user"] : []);
-          }
-        }}
-        className="rounded-lg bg-[var(--surface-muted)] px-2 py-1 text-[11px] outline-none"
-      >
-        <option value="public">所有人可见</option>
-        <option value="user">只给{activeIdentity?.name || "我"}看</option>
-        {roleAudienceContacts.map((contact) => (
-          <option key={contact.id} value={`character:${contact.linkedCharacterId}`}>只给{contact.remark || contact.name}看</option>
-        ))}
-        <option value="private">仅我可见</option>
-      </select>
-    </label>
+    <MomentAudiencePicker
+      className="mt-2"
+      visibility={postVisibility}
+      targetIds={postVisibilityTargetIds}
+      options={roleAudienceOptions}
+      onVisibilityChange={setPostVisibility}
+      onTargetIdsChange={setPostVisibilityTargetIds}
+    />
   );
   const phoneMomentsView = (
     <div data-theme-page="moments" className="flex min-h-0 flex-1 flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
@@ -3150,6 +3154,13 @@ export default function AppCharacterPhone({
           <div className="mx-4 my-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
             <div className="flex items-center justify-between"><span className="text-xs font-bold">分享新鲜事…</span><button type="button" onClick={() => setPhoneMomentComposerOpen(false)} className="text-xs text-[var(--text-tertiary)]">收起</button></div>
             <textarea value={postDraft} onChange={(event) => setPostDraft(event.target.value)} placeholder="写下角色会发布的内容…" className="mt-2 min-h-20 w-full resize-none rounded-xl bg-[var(--surface-muted)] p-2 text-xs outline-none" />
+            <div className="mt-2 flex items-center gap-3 text-xs text-[var(--text-secondary)]">
+              <label className="flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl px-2 hover:bg-[var(--surface-muted)]"><Image className="h-4 w-4" />添加图片<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; const compressed = await compressImage(file, 800, 800, 0.7); setPostImage(compressed); setPostImageDescription(""); }} /></label>
+              <button type="button" onClick={() => setShowPostTextImage((value) => !value)} className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 hover:bg-[var(--surface-muted)]"><Camera className="h-4 w-4" />文字图</button>
+              {postImage && <button type="button" onClick={() => setPostImage(null)} className="text-rose-500">移除图片</button>}
+            </div>
+            {showPostTextImage && <textarea value={postImageDescription} onChange={(event) => { setPostImageDescription(event.target.value); setPostImage(null); }} placeholder="输入文字图内容…" className="mt-1 min-h-16 w-full resize-none rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-muted)] p-2 text-xs outline-none" />}
+            <input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="所在位置（可选）" className="mt-2 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-xs outline-none" />
             {renderPostVisibilitySelect()}
             <button type="button" disabled={isPublishingPost} onClick={() => { void publishPost(); setPhoneMomentComposerOpen(false); }} className="mt-2 rounded-xl bg-neutral-950 px-3 py-2 text-xs font-bold text-white disabled:cursor-wait disabled:opacity-60">{isPublishingPost ? "保存中…" : "发布动态"}</button>
           </div>
@@ -3159,10 +3170,18 @@ export default function AppCharacterPhone({
             <article key={post.id} className="flex gap-3 py-5 first:pt-2">
               <img src={(post.source === "user" ? currentUserAvatar : undefined) || post.authorAvatar || selectedCharacter.avatar} alt="" className="h-10 w-10 shrink-0 rounded-md border border-slate-100 bg-slate-50 object-cover" referrerPolicy="no-referrer" />
               <div className="min-w-0 flex-1">
-              <h4 className="truncate text-xs font-bold text-[#576b95]">{getPhonePostAuthorName(post) || selectedCharacter.name}</h4>
+              <div className="flex items-start justify-between gap-2">
+                <h4 className="min-w-0 truncate text-xs font-bold text-[#576b95]">{getPhonePostAuthorName(post) || selectedCharacter.name}</h4>
+                <div className="shrink-0 text-right text-[10px] text-slate-400">
+                  <time dateTime={new Date(post.timestamp).toISOString()}>{new Date(post.timestamp).toLocaleDateString([], { month: "2-digit", day: "2-digit" })} {new Date(post.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</time>
+                  {post.location && <div className="mt-0.5 max-w-28 truncate">{post.location}</div>}
+                </div>
+              </div>
               <p className="mt-1 whitespace-pre-wrap rounded p-1 text-xs leading-relaxed text-[var(--text-primary)]">{post.content}</p>
+              {post.image && <img src={post.image} alt={post.imageDescription || "朋友圈配图"} className="mt-2 max-h-52 max-w-[200px] rounded-lg object-contain" />}
+              {!post.image && post.imageDescription && <div className="mt-2 max-w-[200px] rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-4 text-xs leading-relaxed text-[var(--text-primary)]">{post.imageDescription}</div>}
               <div className="mt-3 flex items-center justify-between">
-                <span className="text-[10px] font-medium text-slate-400">{new Date(post.timestamp).toLocaleDateString([], { month: "2-digit", day: "2-digit" })} {new Date(post.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
+                {post.visibility === "specific" ? <button type="button" onClick={() => setViewingPostAudience(post)} className="min-h-8 rounded-lg px-1 text-[10px] font-semibold text-[var(--color-accent)] hover:bg-[var(--surface-muted)]">{formatMomentVisibilityLabel(post.visibility)}</button> : <span className="px-1 text-[10px] font-semibold text-slate-400">{formatMomentVisibilityLabel(post.visibility)}</span>}
                 <div className="flex items-center gap-3">
                   <button type="button" onClick={() => togglePhonePostLike(post.id)} className={`flex items-center gap-1.5 text-[10px] font-semibold transition-colors ${likedPostIds.includes(post.id) ? "text-rose-500" : "text-slate-400"}`}><Heart className={`h-3.5 w-3.5 ${likedPostIds.includes(post.id) ? "fill-rose-500 text-rose-500" : ""}`} /><span>{post.likes || "赞"}</span></button>
                   <button type="button" onClick={() => setPostCommentDrafts((drafts) => ({ ...drafts, [post.id]: drafts[post.id] ?? "" }))} className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400"><MessageCircle className="h-3.5 w-3.5" /><span>{post.comments.length || "评论"}</span></button>
@@ -3202,6 +3221,14 @@ export default function AppCharacterPhone({
         </div>
       </div>
       </div>
+      {viewingPostAudience && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4" role="presentation" onClick={() => setViewingPostAudience(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-[var(--surface)] p-4 shadow-xl" role="dialog" aria-modal="true" aria-label="特别的人可见范围" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between"><div><h2 className="text-sm font-bold">特别的人</h2><p className="mt-1 text-[10px] text-[var(--text-tertiary)]">以下角色可以看到这条朋友圈</p></div><button type="button" onClick={() => setViewingPostAudience(null)} className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--text-tertiary)]" aria-label="关闭可见范围"><X className="h-4 w-4" /></button></div>
+            <div className="mt-3 space-y-1">{(viewingPostAudience.visibilityTargetIds || []).map((targetId) => { const target = roleAudienceOptions.find((option) => option.id === targetId); return <div key={targetId} className="flex min-h-11 items-center gap-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2 text-xs"><span className="h-7 w-7 rounded-full bg-[var(--border)]" aria-hidden="true" />{target?.label || targetId}</div>; })}</div>
+          </div>
+        </div>
+      )}
       {phoneSocialNav}
     </div>
   );
@@ -3722,8 +3749,13 @@ export default function AppCharacterPhone({
                   </button>
                 </div>
               </div>
+              {post.location && <p className="mt-1 text-right text-[10px] text-neutral-400">{post.location}</p>}
+              {post.image && <img src={post.image} alt={post.imageDescription || "朋友圈配图"} className="mt-2 max-h-52 max-w-[200px] rounded-lg object-contain" />}
+              {!post.image && post.imageDescription && <div className="mt-2 rounded-xl bg-black/5 px-3 py-4 text-sm leading-6">{post.imageDescription}</div>}
               <p className="mt-3 text-sm leading-6">{post.content}</p>
-              <div className="mt-3 flex items-center gap-4 text-[10px] text-neutral-500">
+              <div className="mt-3 flex items-center justify-between gap-4 text-[10px] text-neutral-500">
+                {post.visibility === "specific" ? <button type="button" onClick={() => setViewingPostAudience(post)} className="font-semibold text-[var(--color-accent)]">{formatMomentVisibilityLabel(post.visibility)}</button> : <span className="font-semibold">{formatMomentVisibilityLabel(post.visibility)}</span>}
+                <div className="flex items-center gap-4">
                 <button
                   type="button"
                   onClick={() => togglePhonePostLike(post.id)}
@@ -3746,6 +3778,7 @@ export default function AppCharacterPhone({
                 >
                   评论 {post.comments.length || ""}
                 </button>
+                </div>
               </div>
               {post.comments.map((_, index) => {
                 const comment = getPhonePostComment(post, index);
@@ -3799,6 +3832,12 @@ export default function AppCharacterPhone({
             placeholder="写下角色会发布的内容…"
             className="mt-2 min-h-20 w-full rounded-xl bg-black/5 p-2 text-xs outline-none"
           />
+          <div className="mt-2 flex items-center gap-3 text-xs text-neutral-600">
+            <label className="flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl px-2 hover:bg-black/5"><Image className="h-4 w-4" />添加图片<input type="file" accept="image/*" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; const compressed = await compressImage(file, 800, 800, 0.7); setPostImage(compressed); setPostImageDescription(""); }} /></label>
+            <button type="button" onClick={() => setShowPostTextImage((value) => !value)} className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 hover:bg-black/5"><Camera className="h-4 w-4" />文字图</button>
+          </div>
+          {showPostTextImage && <textarea value={postImageDescription} onChange={(event) => { setPostImageDescription(event.target.value); setPostImage(null); }} placeholder="输入文字图内容…" className="mt-1 min-h-16 w-full resize-none rounded-xl bg-black/5 p-2 text-xs outline-none" />}
+          <input value={postLocation} onChange={(event) => setPostLocation(event.target.value)} maxLength={80} placeholder="所在位置（可选）" className="mt-2 min-h-11 w-full rounded-xl bg-black/5 px-3 py-2 text-xs outline-none" />
           {renderPostVisibilitySelect()}
           <button
             type="button"

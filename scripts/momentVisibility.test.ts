@@ -1,25 +1,29 @@
 import assert from "node:assert/strict";
 import type { Moment } from "../src/types";
-import { isMomentPublic, isMomentVisibleToUser } from "../src/features/moments/services/momentVisibility";
+import { formatMomentVisibilityLabel, isMomentPublic, isMomentVisibleToViewer, isMomentVisibleToUser, normalizeMomentVisibility } from "../src/features/moments/services/momentVisibility";
 
 const base: Moment = {
-  id: "phone-moment-1",
-  characterId: "character-1",
-  ownerIdentityId: "identity-1",
-  authorName: "步随影",
-  authorAvatar: "avatar",
-  content: "一条角色手机动态",
+  id: "moment-test",
+  ownerIdentityId: "identity-owner",
+  authorName: "用户",
+  authorAvatar: "",
+  content: "测试",
   timestamp: 1,
   likes: [],
   comments: [],
 };
 
-assert.equal(isMomentVisibleToUser(base, "identity-1"), true, "legacy moments remain public");
+assert.equal(normalizeMomentVisibility(undefined), "public");
 assert.equal(isMomentPublic(base), true);
-assert.equal(isMomentVisibleToUser({ ...base, visibility: "private" }, "identity-1"), false);
-assert.equal(isMomentPublic({ ...base, visibility: "user" }), false);
-assert.equal(isMomentVisibleToUser({ ...base, visibility: "user" }, "identity-1"), true);
-assert.equal(isMomentVisibleToUser({ ...base, visibility: "specific", visibilityTargetIds: ["character-2"] }, "identity-1"), false);
-assert.equal(isMomentPublic({ ...base, visibility: "specific", visibilityTargetIds: ["character-2"] }), false);
+assert.equal(isMomentVisibleToUser(base, "identity-owner"), true);
+assert.equal(isMomentVisibleToUser(base, "identity-other"), false);
 
-console.log("moment visibility tests passed");
+assert.equal(isMomentVisibleToViewer({ ...base, visibility: "private" }, { ownerIdentityId: "identity-owner" }), true);
+assert.equal(isMomentVisibleToViewer({ ...base, characterId: "character-author", visibility: "private" }, { ownerIdentityId: "identity-owner" }), false);
+assert.equal(isMomentVisibleToViewer({ ...base, visibility: "user" }, { ownerIdentityId: "identity-owner" }), true);
+assert.equal(isMomentVisibleToViewer({ ...base, visibility: "specific", visibilityTargetIds: ["character-target"] }, { ownerIdentityId: "identity-owner", characterId: "character-target" }), true);
+assert.equal(isMomentVisibleToViewer({ ...base, visibility: "specific", visibilityTargetIds: ["character-target"] }, { ownerIdentityId: "identity-owner", characterId: "character-other" }), false);
+assert.equal(isMomentVisibleToViewer({ ...base, visibility: "specific", visibilityTargetIds: ["identity-reader"] }, { ownerIdentityId: "identity-owner", identityId: "identity-reader" }), true);
+assert.equal(formatMomentVisibilityLabel("public"), "公开");
+assert.equal(formatMomentVisibilityLabel("private"), "私密");
+assert.equal(formatMomentVisibilityLabel("specific"), "特别的人");

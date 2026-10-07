@@ -363,6 +363,8 @@ export interface Moment {
   /** A placeholder image rendered from text until image generation is available. */
   imageType?: "photo" | "text";
   imageDescription?: string;
+  /** Optional free-form place label shown with the post metadata. */
+  location?: string;
   /** The user identity whose social circle this post belongs to. */
   ownerIdentityId?: string;
   /** Who can see this post. `private` stays on the character phone; `user` is visible to the owner only. */

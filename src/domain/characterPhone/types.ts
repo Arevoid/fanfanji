@@ -83,6 +83,9 @@ export interface CharacterPhonePost {
   id: string;
   author: string;
   content: string;
+  image?: string;
+  imageType?: "photo" | "text";
+  imageDescription?: string;
   timestamp: number;
   likes: number;
   comments: string[];
@@ -93,6 +96,8 @@ export interface CharacterPhonePost {
   authorAvatar?: string;
   sourceMomentId?: string;
   lifeEventId?: string;
+  /** Optional free-form place label shown with the post metadata. */
+  location?: string;
   /** Audience selected when the role posts from their simulated phone. */
   visibility?: MomentVisibility;
   /** Character/identity ids selected for a specific audience. */
