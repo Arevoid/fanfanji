@@ -15,6 +15,7 @@ export interface MomentAudiencePickerProps {
   onVisibilityChange: (visibility: MomentVisibility) => void;
   onTargetIdsChange: (targetIds: string[]) => void;
   className?: string;
+  showLabel?: boolean;
 }
 
 const VISIBILITY_OPTIONS: Array<{ value: MomentVisibility; label: string; description: string }> = [
@@ -24,7 +25,7 @@ const VISIBILITY_OPTIONS: Array<{ value: MomentVisibility; label: string; descri
 ];
 
 /** Shared audience control for the main Moments feed and character-phone Moments. */
-export const MomentAudiencePicker: React.FC<MomentAudiencePickerProps> = ({ visibility, targetIds, options, onVisibilityChange, onTargetIdsChange, className = "" }) => {
+export const MomentAudiencePicker: React.FC<MomentAudiencePickerProps> = ({ visibility, targetIds, options, onVisibilityChange, onTargetIdsChange, className = "", showLabel = true }) => {
   const [open, setOpen] = React.useState(false);
   const [targetPickerOpen, setTargetPickerOpen] = React.useState(false);
   const [draftTargetIds, setDraftTargetIds] = React.useState<string[]>(targetIds);
@@ -64,9 +65,9 @@ export const MomentAudiencePicker: React.FC<MomentAudiencePickerProps> = ({ visi
         onClick={() => setOpen((current) => !current)}
         className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-muted)]"
       >
-        <span className="min-w-0">
-          <span className="block text-[10px] text-[var(--text-tertiary)]">谁可以看</span>
-          <span className="block truncate font-semibold">{formatMomentVisibilityLabel(visibility)}{visibility === "specific" && targetIds.length > 0 ? `（${targetIds.length}人）` : ""}</span>
+        <span className="min-w-0 truncate font-semibold">
+          {showLabel && <span className="mr-2 text-[10px] font-normal text-[var(--text-tertiary)]">谁可以看</span>}
+          <span>{formatMomentVisibilityLabel(visibility)}{visibility === "specific" && targetIds.length > 0 ? `（${targetIds.length}人）` : ""}</span>
         </span>
       </button>
 
