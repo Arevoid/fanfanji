@@ -75,4 +75,15 @@ const expired = createNeteaseMusicAdapter({
 await assert.rejects(() => expired.getAccount(), (error: unknown) => isNeteaseAuthenticationError(error));
 assert.equal(isNeteaseAuthenticationError(new NeteaseMusicApiError("网络错误")), false);
 
+const timeoutFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+  init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+})) as typeof fetch;
+const timeoutAdapter = createNeteaseMusicAdapter({ baseUrl: "https://ncm.example.test", timeoutMs: 5, fetchImpl: timeoutFetch });
+await assert.rejects(
+  () => timeoutAdapter.getAccount(),
+  (error: unknown) => error instanceof NeteaseMusicApiError
+    && error.status === 504
+    && error.message.includes("网易云接口 /user/account 请求超时"),
+);
+
 console.log("neteaseMusicAdapter tests passed");

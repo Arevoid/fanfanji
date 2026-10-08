@@ -132,6 +132,7 @@ export default function MusicLibraryPanel({
       setAccount(cachedLibrary.account);
       setPlaylists(cachedLibrary.playlists);
       setDailyRemoteTracks(cachedLibrary.dailyTracks);
+      setLibraryError(cachedLibrary.warnings.length ? cachedLibrary.warnings.join(" ") : null);
       setAuthState("authenticated");
     }
     setLoading(true);
@@ -143,6 +144,7 @@ export default function MusicLibraryPanel({
       setAccount(nextLibrary.account);
       setPlaylists(nextLibrary.playlists);
       setDailyRemoteTracks(nextLibrary.dailyTracks);
+      setLibraryError(nextLibrary.warnings.length ? nextLibrary.warnings.join(" ") : null);
       setAuthState("authenticated");
     } catch (nextError) {
       if (isNeteaseAuthenticationError(nextError)) {

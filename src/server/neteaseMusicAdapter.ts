@@ -1,4 +1,4 @@
-import { fetchWithTimeout, API_REQUEST_TIMEOUTS } from "../utils/fetchWithTimeout";
+import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError, readResponseTextWithTimeout } from "../utils/fetchWithTimeout";
 import type { NeteaseAccount, NeteaseLyrics, NeteasePlayableTrack, NeteasePlaylist, NeteaseQrSession as PublicNeteaseQrSession, NeteaseQrStatus, NeteaseTrack } from "../features/music/neteaseTypes";
 export type { NeteaseAccount, NeteaseLyrics, NeteasePlayableTrack, NeteasePlaylist, NeteaseTrack } from "../features/music/neteaseTypes";
 export type NeteaseQrSession = PublicNeteaseQrSession & { /** Server-only upstream cookie captured after QR authorization. */ sessionCookie?: string };
@@ -87,8 +87,8 @@ const appendQuery = (path: string, query: Record<string, string | number | undef
   return queryString ? `${path}?${queryString}` : path;
 };
 
-const readJson = async (response: Response): Promise<NeteaseResponse> => {
-  const raw = await response.text();
+const readJson = async (response: Response, timeoutMs: number): Promise<NeteaseResponse> => {
+  const raw = await readResponseTextWithTimeout(response, timeoutMs);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -127,12 +127,19 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
   if (!baseUrl) throw new Error("网易云兼容 API 地址不能为空。");
 
   const request = async (path: string, init: RequestInit = {}): Promise<{ payload: NeteaseResponse; sessionCookie?: string }> => {
-    const response = await fetchWithTimeout(`${baseUrl}${path}`, { ...init, headers: {
-      Accept: "application/json",
-      ...(cookie ? { Cookie: cookie } : {}),
-      ...(init.headers || {}),
-    } }, timeoutMs, fetchImpl);
-    return { payload: await readJson(response), sessionCookie: response.headers.get("set-cookie") || undefined };
+    const endpoint = path.split("?", 1)[0];
+    try {
+      const response = await fetchWithTimeout(`${baseUrl}${path}`, { ...init, headers: {
+        Accept: "application/json",
+        ...(cookie ? { Cookie: cookie } : {}),
+        ...(init.headers || {}),
+      } }, timeoutMs, fetchImpl);
+      return { payload: await readJson(response, timeoutMs), sessionCookie: response.headers.get("set-cookie") || undefined };
+    } catch (error) {
+      if (error instanceof NeteaseMusicApiError) throw error;
+      const status = isApiRequestError(error, "timeout") ? 504 : isApiRequestError(error, "network") ? 502 : undefined;
+      throw new NeteaseMusicApiError(describeApiRequestError(error, `网易云接口 ${endpoint} `), { status });
+    }
   };
 
   return {

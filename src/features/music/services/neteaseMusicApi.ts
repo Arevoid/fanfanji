@@ -1,4 +1,4 @@
-import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../../../utils/fetchWithTimeout";
+import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, readResponseTextWithTimeout } from "../../../utils/fetchWithTimeout";
 import type {
   NeteaseAccount,
   NeteasePlayableTrack,
@@ -12,6 +12,7 @@ export interface NeteaseMusicLibrarySnapshot {
   account: NeteaseAccount;
   playlists: NeteasePlaylist[];
   dailyTracks: NeteaseTrack[];
+  warnings: string[];
 }
 
 let libraryCache: NeteaseMusicLibrarySnapshot | null = null;
@@ -49,9 +50,14 @@ async function requestJson(path: string, init: RequestInit = {}): Promise<ApiPay
       ...(init.headers || {}),
     } }, API_REQUEST_TIMEOUTS.modelList);
   } catch (error) {
-    throw new NeteaseMusicClientError(error instanceof Error ? error.message : "网易云代理网络请求失败。");
+    throw new NeteaseMusicClientError(describeApiRequestError(error, "网易云代理"));
   }
-  const raw = await response.text();
+  let raw: string;
+  try {
+    raw = await readResponseTextWithTimeout(response, API_REQUEST_TIMEOUTS.modelList);
+  } catch (error) {
+    throw new NeteaseMusicClientError(describeApiRequestError(error, "网易云代理响应"));
+  }
   let payload: ApiPayload;
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -131,15 +137,19 @@ export const preloadNeteaseMusicLibrary = async (): Promise<NeteaseMusicLibraryS
       getNeteaseDailyRecommendations(),
     ]);
 
-    if (playlistResult.status !== "fulfilled") throw playlistResult.reason;
-    if (dailyResult.status === "rejected" && isNeteaseAuthenticationError(dailyResult.reason)) {
-      throw dailyResult.reason;
-    }
+    if (playlistResult.status !== "fulfilled" && isNeteaseAuthenticationError(playlistResult.reason)) throw playlistResult.reason;
+    if (dailyResult.status === "rejected" && isNeteaseAuthenticationError(dailyResult.reason)) throw dailyResult.reason;
+
+    const warnings = [
+      playlistResult.status === "rejected" ? (playlistResult.reason instanceof Error ? playlistResult.reason.message : "网易云歌单读取失败。") : "",
+      dailyResult.status === "rejected" ? (dailyResult.reason instanceof Error ? dailyResult.reason.message : "网易云每日推荐读取失败。") : "",
+    ].filter(Boolean);
 
     const snapshot: NeteaseMusicLibrarySnapshot = {
-      account: playlistResult.value.account || account,
-      playlists: playlistResult.value.playlists,
+      account: playlistResult.status === "fulfilled" ? (playlistResult.value.account || account) : account,
+      playlists: playlistResult.status === "fulfilled" ? playlistResult.value.playlists : [],
       dailyTracks: dailyResult.status === "fulfilled" ? dailyResult.value : [],
+      warnings,
     };
     libraryCache = snapshot;
     return snapshot;
