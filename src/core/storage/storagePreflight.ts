@@ -249,7 +249,15 @@ export async function runStoragePreflight(options: StoragePreflightOptions = {})
   }
 
   const migrationState = loadStorageMigrationState();
-  const hasInterruptedMigration = Boolean(migrationState && migrationState.phase !== "completed");
+  // A failed/cancelled run is a recoverable report, not an active migration.
+  // Treating it as interrupted permanently blocked the next preflight and
+  // left users with no way to retry after fixing the original cause.
+  const hasInterruptedMigration = Boolean(
+    migrationState
+      && migrationState.phase !== "completed"
+      && migrationState.phase !== "failed"
+      && migrationState.phase !== "cancelled",
+  );
   if (hasInterruptedMigration && !options.allowInterruptedMigration) {
     warnings.push(`存在未完成的迁移状态（${migrationState.phase}），需要先恢复、回滚或人工确认。`);
   }

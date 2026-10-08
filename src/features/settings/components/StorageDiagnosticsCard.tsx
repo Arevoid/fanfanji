@@ -67,7 +67,7 @@ export function StorageDiagnosticsCard({
             <div>运行时错误统计（近 30 天）：{runtimeErrors.total} 次，{runtimeErrors.buckets} 种错误类型（仅记录类型与次数）</div>
             <div>最近备份：{lastBackupAt ? new Date(Number(lastBackupAt)).toLocaleString() : "暂无记录"}</div>
             <div>最近迁移：{diagnostics.migrationState?.phase === "completed" ? new Date(diagnostics.migrationState.updatedAt).toLocaleString() : "暂无已完成迁移"}</div>
-            <div>未完成迁移：{diagnostics.migrationState && diagnostics.migrationState.phase !== "completed" ? "是" : "否"}</div>
+            <div>迁移待处理：{diagnostics.migrationState && diagnostics.migrationState.phase !== "completed" ? "是" : "否"}</div>
             {diagnostics.characterKnowledgeMigration && <div>
               Truth Layer 迁移：{diagnostics.characterKnowledgeMigration.status === "completed" ? "已完成" : diagnostics.characterKnowledgeMigration.status === "failed" ? "失败（已保留旧数据）" : "未执行"}
               （记忆 {diagnostics.characterKnowledgeMigration.migratedMemoryIds.length}，摘要 {diagnostics.characterKnowledgeMigration.migratedSummaryIds.length}，行为纠正 {diagnostics.characterKnowledgeMigration.migratedCorrectionIds.length}，待核对孤立记录 {diagnostics.characterKnowledgeMigration.orphanRecordIds.length}）
@@ -75,7 +75,7 @@ export function StorageDiagnosticsCard({
             {diagnostics.characterKnowledgeMigration?.lastError && <div className="text-amber-700">Truth Layer 迁移提示：{diagnostics.characterKnowledgeMigration.lastError}</div>}
             <div>持久化许可：{diagnostics.persisted === undefined ? "未知" : diagnostics.persisted ? "已启用" : "未启用"}</div>
             {diagnostics.migrationState && <div>迁移状态：{diagnostics.migrationState.phase}（{diagnostics.migrationState.completedModules.length} 个模块已完成）</div>}
-            {diagnostics.migrationState && diagnostics.migrationState.phase !== "completed" && diagnostics.migrationState.phase !== "failed" && diagnostics.migrationState.phase !== "cancelled" && <button type="button" disabled={contentMigrationRunning} onClick={onResumeInterruptedMigration} className="mt-2 rounded-[10px] bg-amber-600 px-3 py-2 font-bold text-white disabled:opacity-50">恢复未完成迁移</button>}
+            {diagnostics.migrationState && diagnostics.migrationState.phase !== "completed" && <button type="button" disabled={contentMigrationRunning} onClick={onResumeInterruptedMigration} className="mt-2 rounded-[10px] bg-amber-600 px-3 py-2 font-bold text-white disabled:opacity-50">{diagnostics.migrationState.phase === "failed" || diagnostics.migrationState.phase === "cancelled" ? "重新校验并重试迁移" : "恢复未完成迁移"}</button>}
             {diagnostics.migrationState?.report && <div>迁移报告：完成 {diagnostics.migrationState.report.completed}，跳过 {diagnostics.migrationState.report.skipped}，修复 {diagnostics.migrationState.report.repaired}，失败 {diagnostics.migrationState.report.failed}</div>}
             {diagnostics.migrationLock && <div>迁移锁：{diagnostics.migrationLock.ownerId}，有效至 {new Date(diagnostics.migrationLock.expiresAt).toLocaleString()}</div>}
             <div>浏览器总配额状态：{diagnostics.pressure === "critical" ? "空间严重不足" : diagnostics.pressure === "warning" ? "空间偏高" : diagnostics.pressure === "normal" ? "正常" : "未知"}</div>

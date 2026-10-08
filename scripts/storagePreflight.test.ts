@@ -90,6 +90,22 @@ const recoveryResult = await runStoragePreflight({ allowInterruptedMigration: tr
 assert.notEqual(recoveryResult.status, "blocked");
 assert.equal(recoveryResult.warnings.some((warning) => warning.includes("存在未完成的迁移状态")), false);
 
+// A failed/cancelled report must be retryable without an unrecoverable
+// preflight deadlock; active runs still require explicit recovery above.
+values.set(storageKeys.migrationState, JSON.stringify({
+  id: "content-storage-migration",
+  sourceVersion: 1,
+  targetVersion: 2,
+  phase: "failed",
+  startedAt: Date.now() - 1_000,
+  updatedAt: Date.now(),
+  completedModules: [],
+  error: "simulated failure",
+}));
+const failedResult = await runStoragePreflight();
+assert.notEqual(failedResult.status, "blocked");
+assert.equal(failedResult.warnings.some((warning) => warning.includes("存在未完成的迁移状态")), false);
+
 Object.defineProperty(globalThis, "navigator", {
   value: { storage: { estimate: async () => ({ usage: 9_999, quota: 10_000 }) } },
   configurable: true,

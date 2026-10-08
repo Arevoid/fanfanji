@@ -13,6 +13,7 @@ import {
 import {
   appendToKnowledgeClaims,
   loadKnowledgeClaims,
+  normalizeKnowledgeClaims,
   saveKnowledgeClaims,
 } from "../../../core/storage/repositories/characterKnowledgeRepository";
 import {
@@ -194,7 +195,10 @@ export function runLegacyCharacterKnowledgeMigration(
     existingSummaries: summariesBefore.value,
     existingCorrections: correctionsBefore.value,
   });
-  const nextClaims = appendToKnowledgeClaims(claimsBefore.value, result.claims);
+  // The repository normalizes and merges same-meaning claims on every write.
+  // Build the expected snapshot with the same normalizer, otherwise a valid
+  // meaning-level merge is mistaken for a failed verification on startup.
+  const nextClaims = normalizeKnowledgeClaims(appendToKnowledgeClaims(claimsBefore.value, result.claims));
   const nextSummaries = appendConversationSummaries(summariesBefore.value, result.summaries);
   const nextCorrections = appendBehaviorCorrections(correctionsBefore.value, result.corrections);
   const nextState = {
@@ -240,22 +244,21 @@ export function runLegacyCharacterKnowledgeMigration(
   const correctionsAfter = stores.corrections.load();
   const stateAfter = stores.state.load();
   const legacyAfter = legacyMemoryStore?.load();
-  const verificationFailed = !isSafeRead(claimsAfter)
-    || !isSafeRead(summariesAfter)
-    || !isSafeRead(correctionsAfter)
-    || !isSafeRead(stateAfter)
-    || !sameJson(claimsAfter.value, nextClaims)
-    || !sameJson(summariesAfter.value, nextSummaries)
-    || !sameJson(correctionsAfter.value, nextCorrections)
-    || !sameJson(stateAfter.value, nextState)
-    || Boolean(legacyAfter && (!isSafeRead(legacyAfter) || legacyAfter.value.length > 0));
+  const verificationMismatches = [
+    !isSafeRead(claimsAfter) || !sameJson(claimsAfter.value, nextClaims) ? "claims" : undefined,
+    !isSafeRead(summariesAfter) || !sameJson(summariesAfter.value, nextSummaries) ? "summaries" : undefined,
+    !isSafeRead(correctionsAfter) || !sameJson(correctionsAfter.value, nextCorrections) ? "corrections" : undefined,
+    !isSafeRead(stateAfter) || !sameJson(stateAfter.value, nextState) ? "migration state" : undefined,
+    legacyAfter && (!isSafeRead(legacyAfter) || legacyAfter.value.length > 0) ? "legacy MemoryItem store" : undefined,
+  ].filter((item): item is string => Boolean(item));
+  const verificationFailed = verificationMismatches.length > 0;
   if (verificationFailed) {
     if (touched.claims) restoreStore("claims verification rollback", stores.claims.save, claimsBefore.value, rollbackErrors);
     if (touched.summaries) restoreStore("summaries verification rollback", stores.summaries.save, summariesBefore.value, rollbackErrors);
     if (touched.corrections) restoreStore("corrections verification rollback", stores.corrections.save, correctionsBefore.value, rollbackErrors);
     if (touched.legacyMemories && legacyMemoryStore) restoreStore("legacy MemoryItem verification rollback", legacyMemoryStore.save, legacyBefore.value, rollbackErrors);
     restoreState("migration state verification rollback", stores.state.save, previousState, rollbackErrors);
-    const error = "迁移写入校验失败，已尝试恢复迁移前数据。";
+    const error = `迁移写入校验失败（${verificationMismatches.join("、")}），已尝试恢复迁移前数据。`;
     const failedState = mergeState(previousState, result, input.now, "failed", error, false);
     const stateWrite = stores.state.save(failedState);
     if (!stateWrite.success) rollbackErrors.push(`failed state: ${stateWrite.error || "write"}`);
