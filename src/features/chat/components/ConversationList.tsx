@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { MessageSquare, Pin } from "lucide-react";
 import type { Character, Message } from "../../../types";
 import { parseTextImageDescription } from "../services/messageParser";
+import { getVoiceMessageSummary, isVoiceMessageContent } from "../services/voiceMessageContent";
 
 export interface ConversationThread {
   id: string;
@@ -44,9 +45,13 @@ export function ConversationList({
       ) : (
         threads.map(({ id, character, lastMessage, isPinned, subtitle }) => {
           const unreadCount = getUnreadCount(id);
-          const directMessageSummary = lastMessage && parseTextImageDescription(lastMessage.content)
-            ? "[文字图]"
-            : lastMessage?.content || "";
+          const directMessageSummary = lastMessage
+            ? parseTextImageDescription(lastMessage.content)
+              ? "[文字图]"
+              : isVoiceMessageContent(lastMessage.content, lastMessage.isVoiceMessage === true, Boolean(lastMessage.audioUrl))
+                ? getVoiceMessageSummary(lastMessage.content, lastMessage.audioDuration)
+                : lastMessage.content
+            : "";
           return (
             <div
               key={id}

@@ -31,6 +31,7 @@ import { resolveSmsConversationActivity } from "../features/sms/smsInbox";
 import { buildSmsHistory, buildSmsMemoryNote, buildSmsSystemPrompt, selectSmsWorldBookEntries } from "../features/sms/smsPrompt";
 import { apiChat } from "../utils/apiHelper";
 import { ChatAvatar } from "../features/chat/components/ChatAvatar";
+import { getVoiceMessageSummary, isVoiceMessageContent } from "../features/chat/services/voiceMessageContent";
 
 interface AppSmsProps {
   activeIdentity: UserIdentity;
@@ -374,7 +375,7 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
             ) : previews.map(({ character, latestMessage, unreadCount }) => (
               <button type="button" key={character.id} onClick={() => openCharacter(character.id)} className="flex w-full items-center gap-3 border-b border-[var(--border)] px-4 py-3 text-left transition-colors hover:bg-[var(--surface-muted)] active:bg-[var(--surface-muted)]">
                 <div className="relative shrink-0"><ChatAvatar src={character.avatar} alt={`${character.name}头像`} name={character.name} className="h-12 w-12 rounded-full bg-[var(--surface-muted)] object-cover text-xl shadow-inner" />{unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-[var(--surface)] bg-[#ff3b30] px-1 text-[10px] font-bold leading-none text-white" aria-label={`${unreadCount} 条未读`}>{unreadCount > 99 ? "99+" : unreadCount}</span>}</div>
-                <div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><span className={`truncate text-[15px] ${unreadCount > 0 ? "font-extrabold text-[var(--text-primary)]" : "font-bold text-[var(--text-primary)]"}`}>{character.name}</span><span className="shrink-0 text-[10px] text-[var(--text-secondary)]">{formatDate(latestMessage?.receivedAt)}</span></div><p className={`mt-1 truncate text-xs ${unreadCount > 0 ? "font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>{latestMessage?.content || "开始一段未知时空的短信"}</p></div>
+                <div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><span className={`truncate text-[15px] ${unreadCount > 0 ? "font-extrabold text-[var(--text-primary)]" : "font-bold text-[var(--text-primary)]"}`}>{character.name}</span><span className="shrink-0 text-[10px] text-[var(--text-secondary)]">{formatDate(latestMessage?.receivedAt)}</span></div><p className={`mt-1 truncate text-xs ${unreadCount > 0 ? "font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>{latestMessage ? (isVoiceMessageContent(latestMessage.content) ? getVoiceMessageSummary(latestMessage.content) : latestMessage.content) : "开始一段未知时空的短信"}</p></div>
                 <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
               </button>
             ))}

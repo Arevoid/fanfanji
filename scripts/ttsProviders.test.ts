@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, normalizeMosslandApiEndpoint, resolveTtsCharacter, shouldQueueCallSpeech } from "../src/features/voice/ttsConfig";
-import { fetchSingleTtsSegment } from "../src/utils/minimaxTts";
+import { fetchSingleTtsSegment, getTtsCacheKey } from "../src/utils/minimaxTts";
+import { synthesizeElevenLabsSpeech } from "../src/server/elevenLabsTts";
 
 const mosslandSettings: any = {
   ttsProvider: "mossland",
@@ -10,6 +11,7 @@ const mosslandSettings: any = {
   mosslandModel: "moss-tts",
 };
 assert.equal(getTtsProvider({}), "minimax", "legacy settings must remain on MiniMax");
+assert.equal(getTtsProvider({ ttsProvider: "elevenlabs" }), "elevenlabs", "ElevenLabs provider must be selectable");
 assert.equal(normalizeMosslandApiEndpoint("https://mossland.mosi.cn"), "https://api.mosi.cn/v1/audio/speech");
 assert.equal(normalizeMosslandApiEndpoint("https://mossland.studio/"), "https://api.mosi.cn/v1/audio/speech");
 assert.equal(normalizeMosslandApiEndpoint("https://proxy.example/custom/speech"), "https://proxy.example/custom/speech");
@@ -36,6 +38,10 @@ assert.match(
 assert.match(callPlaybackSource, /callSpeechGenerationRef\.current \+= 1/, "clearing a call must invalidate in-flight speech synthesis");
 assert.match(callPlaybackSource, /const blob = await getSpeechForText[\s\S]*if \(isCancelledCallSpeech\(\)\) return/, "late TTS results must be discarded after hang-up");
 assert.match(callPlaybackSource, /if \(callTtsObjectUrlRef\.current\)[\s\S]*URL\.revokeObjectURL/, "hang-up must revoke the active call audio URL");
+assert.match(callPlaybackSource, /audioDb\.getTrackFile\(msg\.audioAssetId\)/, "message playback must prefer the durable saved audio asset");
+assert.match(callPlaybackSource, /onUpdateMessage\(msg\.id, \{ audioAssetId: cacheKey \}/, "first synthesis must link its cache asset back to the message");
+assert.match(callPlaybackSource, /msg\.audioUrl \|\| msg\.audioAssetId/, "saved voice assets must remain eligible for playback even after a reload");
+assert.match(readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8"), /triggerMessageSpeech\(bm\)/, "favorites must reuse the shared message speech playback path");
 assert.match(
   directReplyDeliverySource,
   /if \(input\.shouldCancel\(\) \|\| input\.signal\?\.aborted\) break/,
@@ -67,11 +73,38 @@ const minimaxOptions = buildCharacterTtsOptions({
 assert.equal(minimaxOptions.provider, "minimax");
 assert.equal(minimaxOptions.voiceId, "mini-voice");
 assert.equal(minimaxOptions.speed, 1.3);
+assert.equal(
+  getTtsCacheKey("（轻声）你好", minimaxOptions),
+  getTtsCacheKey("你好", minimaxOptions),
+  "action-only markup must not create a second billable audio asset",
+);
+assert.notEqual(
+  getTtsCacheKey("你好", minimaxOptions),
+  getTtsCacheKey("你好", { ...minimaxOptions, voiceId: "another-voice" }),
+  "different voices must keep separate audio assets",
+);
+
+const elevenLabsSettings: any = {
+  ttsProvider: "elevenlabs",
+  elevenlabsApiEndpoint: "https://api.elevenlabs.io",
+  elevenlabsApiKey: "eleven-key",
+  elevenlabsModel: "eleven_multilingual_v2",
+};
+const elevenLabsOptions = buildCharacterTtsOptions(elevenLabsSettings, { elevenlabsVoiceId: "eleven-voice" });
+assert.deepEqual(elevenLabsOptions, {
+  provider: "elevenlabs",
+  apiEndpoint: "https://api.elevenlabs.io",
+  apiKey: "eleven-key",
+  model: "eleven_multilingual_v2",
+  voiceId: "eleven-voice",
+});
 
 const originalFetch = globalThis.fetch;
 let capturedUrl = "";
 let capturedInit: RequestInit | undefined;
+let fetchCount = 0;
 globalThis.fetch = async (input, init) => {
+  fetchCount += 1;
   capturedUrl = String(input);
   capturedInit = init;
   return new Response(new Uint8Array([1, 2, 3]), {
@@ -109,6 +142,30 @@ try {
   });
   assert.equal(minimaxBlob.type, "audio/mpeg");
 
+  const elevenLabsBlob = await fetchSingleTtsSegment("你好", elevenLabsOptions);
+  assert.equal(capturedUrl, "/api/elevenlabs-tts", "ElevenLabs must use the app proxy by default");
+  assert.deepEqual(JSON.parse(String(capturedInit?.body)), {
+    apiEndpoint: "https://api.elevenlabs.io",
+    apiKey: "eleven-key",
+    model: "eleven_multilingual_v2",
+    text: "你好",
+    voiceId: "eleven-voice",
+  });
+  assert.equal(elevenLabsBlob.type, "audio/mpeg");
+
+  const beforeConcurrentSynthesis = fetchCount;
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await Promise.all([
+      import("../src/utils/minimaxTts").then(({ getSpeechForText }) => getSpeechForText("并发去重测试", elevenLabsOptions)),
+      import("../src/utils/minimaxTts").then(({ getSpeechForText }) => getSpeechForText("并发去重测试", elevenLabsOptions)),
+    ]);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(fetchCount - beforeConcurrentSynthesis, 1, "same audio synthesis must share one in-flight provider request");
+
   await assert.rejects(
     () => fetchSingleTtsSegment("你好", buildCharacterTtsOptions(mosslandSettings)),
     /Mossland Voice ID/,
@@ -116,5 +173,27 @@ try {
 } finally {
   globalThis.fetch = originalFetch;
 }
+
+let upstreamUrl = "";
+let upstreamInit: RequestInit | undefined;
+const upstreamResult = await synthesizeElevenLabsSpeech({
+  apiEndpoint: "https://api.elevenlabs.io",
+  apiKey: "eleven-key",
+  model: "eleven_multilingual_v2",
+  voiceId: "eleven-voice",
+  text: "测试",
+}, async (input, init) => {
+  upstreamUrl = String(input);
+  upstreamInit = init;
+  return new Response(new Uint8Array([4, 5, 6]), { status: 200, headers: { "Content-Type": "audio/mpeg" } });
+});
+assert.equal(upstreamUrl, "https://api.elevenlabs.io/v1/text-to-speech/eleven-voice?output_format=mp3_44100_128");
+assert.equal(new Headers(upstreamInit?.headers).get("xi-api-key"), "eleven-key");
+assert.deepEqual(JSON.parse(String(upstreamInit?.body)), { text: "测试", model_id: "eleven_multilingual_v2" });
+assert.equal(upstreamResult.contentType, "audio/mpeg");
+await assert.rejects(
+  () => synthesizeElevenLabsSpeech({ apiKey: "eleven-key", model: "eleven_multilingual_v2", text: "测试" }, async () => new Response()),
+  /ElevenLabs Voice ID/,
+);
 
 console.log("TTS provider tests passed");

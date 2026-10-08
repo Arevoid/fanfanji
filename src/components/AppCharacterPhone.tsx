@@ -90,6 +90,7 @@ import { compressImage } from "../utils/pngParser";
 import { MomentAudiencePicker } from "../features/moments/components/MomentAudiencePicker";
 import { formatMomentVisibilityLabel } from "../features/moments/services/momentVisibility";
 import { createCharacterTextMessage } from "../features/chat/services/messageFactory";
+import { getVoiceMessageSummary, isVoiceMessageContent } from "../features/chat/services/voiceMessageContent";
 import {
   advanceCharacterPhoneWithResult,
   type CharacterPhoneGenerationNoChangeReason,
@@ -565,7 +566,8 @@ function getCharacterPhoneMessagePreview(content: string): string {
       : `${callType} · ${call.status === "rejected" ? "已拒绝" : "已取消"}`;
   }
   const sticker = parseCharacterPhoneStickerContent(content);
-  return sticker ? `[表情] ${sticker.name}` : content;
+  if (sticker) return `[表情] ${sticker.name}`;
+  return isVoiceMessageContent(content) ? getVoiceMessageSummary(content) : content;
 }
 
 function getCharacterPhoneThreadMessageDisplay(message: CharacterPhoneThreadMessage): string {

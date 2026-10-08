@@ -1,6 +1,7 @@
 import { assertImageGenerationTrigger } from "../features/chat/services/imageGenerationIntent";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "../server/imageProtocolAdapters";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "../server/mosslandTts";
+import { ElevenLabsTtsError, synthesizeElevenLabsSpeech } from "../server/elevenLabsTts";
 import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { buildTranslationPrompt, callTextProvider, callTextProviderWithDiagnostics, fetchTextModels, normalizeTextApiError } from "../server/textProtocolAdapters";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
@@ -112,12 +113,13 @@ export default {
     }
     const isImageRoute = url.pathname.startsWith("/api/image/");
     const isMosslandRoute = url.pathname === "/api/mossland-tts";
+    const isElevenLabsRoute = url.pathname === "/api/elevenlabs-tts";
     const isTextRoute = ["/api/chat", "/api/translate", "/api/test-key", "/api/models", "/api/extract-memories", "/api/summarize-personality"].includes(url.pathname);
     const isMinimaxRoute = url.pathname === "/api/minimax-tts";
     const isNeteaseRoute = url.pathname.startsWith("/api/music/netease/");
     const isMcpRoute = url.pathname === "/api/mcp-proxy";
     const isHotSearchMcpRoute = url.pathname === "/api/hotsearch-mcp";
-    if (!isImageRoute && !isMosslandRoute && !isTextRoute && !isMinimaxRoute && !isNeteaseRoute && !isMcpRoute && !isHotSearchMcpRoute) return withSecurityHeaders(await env.ASSETS.fetch(request));
+    if (!isImageRoute && !isMosslandRoute && !isElevenLabsRoute && !isTextRoute && !isMinimaxRoute && !isNeteaseRoute && !isMcpRoute && !isHotSearchMcpRoute) return withSecurityHeaders(await env.ASSETS.fetch(request));
     if (!isNeteaseRoute && request.method !== "POST") return json({ success: false, error: "代理接口只接受 POST 请求。" }, 405);
 
     if (isNeteaseRoute) {
@@ -210,6 +212,19 @@ export default {
     if (isHotSearchMcpRoute) return handleHotSearchMcp(body);
 
     if (isMinimaxRoute) return synthesizeMinimax(body);
+
+    if (isElevenLabsRoute) {
+      try {
+        const result = await synthesizeElevenLabsSpeech(body);
+        return new Response(result.audio, {
+          headers: { "Content-Type": result.contentType, "Cache-Control": "no-store", "Content-Security-Policy": CONTENT_SECURITY_POLICY },
+        });
+      } catch (error) {
+        const status = error instanceof ElevenLabsTtsError ? error.status : 500;
+        const message = error instanceof Error ? error.message : "ElevenLabs 语音代理服务异常。";
+        return json({ error: message }, status);
+      }
+    }
 
     if (url.pathname === "/api/chat") {
       try {

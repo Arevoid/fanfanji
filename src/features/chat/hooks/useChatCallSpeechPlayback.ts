@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { Character, Message, UserSettings } from "../../../types";
-import { getSpeechForText } from "../../../utils/minimaxTts";
-import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, resolveTtsCharacter } from "../../voice/ttsConfig";
+import { audioDb } from "../../../utils/audioDb";
+import { getSpeechForText, getTtsCacheKey } from "../../../utils/minimaxTts";
+import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, getTtsProviderLabel, resolveTtsCharacter } from "../../voice/ttsConfig";
 
 interface ChatCallSpeechPlaybackOptions {
   settings: UserSettings;
@@ -15,6 +16,7 @@ interface ChatCallSpeechPlaybackOptions {
   voiceTimer: ReturnType<typeof setInterval> | null;
   setVoiceTimer: (timer: ReturnType<typeof setInterval> | null) => void;
   showToast: (message: string) => void;
+  onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, original: Message) => void;
 }
 
 export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions) {
@@ -24,6 +26,7 @@ export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions
   const callTtsAudioRef = useRef<HTMLAudioElement | null>(null);
   const callTtsObjectUrlRef = useRef<string | null>(null);
   const callSpeechGenerationRef = useRef(0);
+  const messageAudioAssetUpdatesRef = useRef(new Map<string, string>());
 
   const unlockCallTtsPlayback = () => {
     if (typeof Audio === "undefined") return;
@@ -88,12 +91,12 @@ export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions
       finishQueuedCallSpeech();
     };
 
-    const isVoice = Boolean(msg.audioUrl || (msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage)));
+    const isVoice = Boolean(msg.audioUrl || msg.audioAssetId || (msg.content && (msg.content.startsWith("[语音") || msg.isVoiceMessage)));
     if (!canPlayTtsMessage({ isOfflineModeActive: options.isOfflineModeActive, isVoiceMessage: isVoice, isQueuedCallSpeech })) {
       revealCallSubtitleOnce();
       return;
     }
-    if (msg.sender === "character" && !options.settings.enableMiniMaxTts && !msg.audioUrl) {
+    if (msg.sender === "character" && !options.settings.enableMiniMaxTts && !msg.audioUrl && !msg.audioAssetId) {
       revealCallSubtitleOnce();
       finishQueuedCallSpeechOnce();
       return;
@@ -115,11 +118,20 @@ export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions
       clearInterval(options.voiceTimer);
       options.setVoiceTimer(null);
     }
-    // Some imported or externally recorded voice messages carry a playable
-    // source. Prefer it over re-synthesizing the transcript so favorites and
-    // the chat view preserve the original audio whenever it is available.
-    if (msg.audioUrl) {
-      const audio = new Audio(msg.audioUrl);
+    // Imported/recorded audio and synthesized audio assets are both durable
+    // playback sources. Resolve the IndexedDB asset before considering TTS so
+    // a bookmarked message never has to be synthesized again.
+    let storedAudioBlob: Blob | null = null;
+    if (msg.audioAssetId) {
+      try {
+        storedAudioBlob = await audioDb.getTrackFile(msg.audioAssetId);
+      } catch (error) {
+        console.warn("Failed to load saved speech asset:", error);
+      }
+    }
+    if (msg.audioUrl || storedAudioBlob) {
+      objectUrl = storedAudioBlob ? URL.createObjectURL(storedAudioBlob) : null;
+      const audio = new Audio(objectUrl || msg.audioUrl || "");
       audio.preload = "auto";
       options.setPlayingMessageId(msg.id);
       options.setAudioLoadingMessageId(msg.id);
@@ -128,6 +140,7 @@ export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions
       const finishAudio = () => {
         if (settled) return;
         settled = true;
+        releaseObjectUrl();
         options.setPlayingMessageId(null);
         options.setAudioLoadingMessageId(null);
         options.setActiveTtsAudio(null);
@@ -168,9 +181,8 @@ export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions
 
     options.setPlayingMessageId(msg.id);
     options.setAudioLoadingMessageId(msg.id);
-    let ttsProviderName = "MiniMax";
+    let ttsProviderName = getTtsProviderLabel(getTtsProvider(options.settings));
     try {
-      ttsProviderName = getTtsProvider(options.settings) === "mossland" ? "Mossland" : "MiniMax";
       const msgChar = resolveTtsCharacter(options.characters, msg.characterId, msg.senderId);
       const ttsOptions = buildCharacterTtsOptions(options.settings, msgChar);
       let cleanText = msg.content;
@@ -185,6 +197,25 @@ export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions
       }
       const blob = await getSpeechForText(cleanText, ttsOptions);
       if (isCancelledCallSpeech()) return;
+      const cacheKey = getTtsCacheKey(cleanText, ttsOptions);
+      if (cacheKey && !msg.audioAssetId && options.onUpdateMessage && messageAudioAssetUpdatesRef.current.get(msg.id) !== cacheKey) {
+        // getSpeechForText normally persists this already. Verify the asset
+        // before linking it to the message; a failed IndexedDB write must not
+        // create a broken reference that causes future re-synthesis loops.
+        try {
+          let persisted = await audioDb.getTrackFile(cacheKey);
+          if (!persisted) {
+            await audioDb.saveTrackFile(cacheKey, blob);
+            persisted = await audioDb.getTrackFile(cacheKey);
+          }
+          if (persisted) {
+            messageAudioAssetUpdatesRef.current.set(msg.id, cacheKey);
+            options.onUpdateMessage(msg.id, { audioAssetId: cacheKey }, msg);
+          }
+        } catch (error) {
+          console.warn("Failed to link synthesized speech to message:", error);
+        }
+      }
       objectUrl = URL.createObjectURL(blob);
       if (isQueuedCallSpeech) callTtsObjectUrlRef.current = objectUrl;
       const audio = isQueuedCallSpeech ? (callTtsAudioRef.current || new Audio()) : new Audio();

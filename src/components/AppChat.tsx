@@ -47,7 +47,7 @@ import { enqueueProactiveAction, takePendingProactiveAction } from "../features/
 import { evaluateProactiveAction } from "../features/chat/services/proactiveActionPolicy";
 import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallMessage";
 import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
-import { getVoiceMessagePreview, normalizeVoiceTranslation } from "../features/chat/services/voiceMessageContent";
+import { getVoiceMessagePreview, getVoiceMessageSummary, isVoiceMessageContent, normalizeVoiceTranslation } from "../features/chat/services/voiceMessageContent";
 import { recordCharacterBlockReaction } from "../features/characterPhone/characterPhoneBlockReaction";
 import { generateCharacterBlockAiResponse } from "../features/characterPhone/characterBlockAi";
 import {
@@ -146,7 +146,7 @@ import type { ImageGenerationTrigger } from "../features/chat/services/imageGene
 import { checkProactiveImageGenerationPolicy, isProactiveImageGenerationEnabled } from "../features/chat/services/proactiveImageGenerationPolicy";
 import { imageDataUrlToBlob, parseCharacterSaveUserImageDirective } from "../features/chat/services/userImageMemoryService";
 import { characterAvatarReplyRefusesChange, isExplicitCharacterAvatarChangeRequest, resolveCharacterAvatarChangeTiming, type CharacterAvatarChangeTiming } from "../features/chat/services/characterAvatarChangeIntent";
-import { formatCharacterActionPrompt, parseCharacterActionDirective, type CharacterActionDirective } from "../features/chat/services/characterActionProtocol";
+import { formatCharacterActionPrompt, parseCharacterActionDirective, sanitizeCharacterActionText, type CharacterActionDirective } from "../features/chat/services/characterActionProtocol";
 import { resolveRecentUserImageForTurn } from "../features/chat/services/recentUserImageContext";
 import { resolveChatMessageAvatar } from "../features/chat/services/messageAvatarResolver";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
@@ -1145,7 +1145,16 @@ export default function AppChat({
       timestamp: record.createdAt,
     })), [activeBlockedDeliveries, activeRelationship?.conversationId]);
   const visibleChatMessages = useMemo<Message[]>(() => [...projectedVisibleChatMessages, ...blockedChatMessages]
-    .sort((left, right) => left.timestamp - right.timestamp), [blockedChatMessages, projectedVisibleChatMessages]);
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .map((message) => ({
+      ...message,
+      // Older persisted turns may still contain the private action envelope.
+      // Sanitize the render projection as a final boundary so historical
+      // messages cannot leak protocol text while the underlying action data
+      // remains available to the runtime and migration paths.
+      ...(message.sender === "character" ? { content: sanitizeCharacterActionText(message.content) } : {}),
+      ...(message.translation ? { translation: sanitizeCharacterActionText(message.translation) } : {}),
+    })), [blockedChatMessages, projectedVisibleChatMessages]);
   const activeDirectScope = resolveDirectInteractionScope({
     characterId: activeCharacter?.id,
     activeIdentityId,
@@ -1898,6 +1907,7 @@ export default function AppChat({
     draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType,
     draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
     draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,
+    draftElevenlabsVoiceId, setDraftElevenlabsVoiceId,
     draftMinimaxSpeed, setDraftMinimaxSpeed,
     draftVoiceFrequency, draftEnableImageGeneration, setDraftEnableImageGeneration,
     draftEnableProactiveImageGeneration, setDraftEnableProactiveImageGeneration,
@@ -1947,6 +1957,7 @@ export default function AppChat({
     voiceTimer,
     setVoiceTimer,
     showToast,
+    onUpdateMessage,
   });
   const onSendMessage = createChatMessageDeliveryHandler({
     settings,
@@ -4847,6 +4858,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     draftEnableTimeAwareness,
     draftMinimaxVoiceId,
     draftMosslandVoiceId,
+    draftElevenlabsVoiceId,
     draftMinimaxSpeed,
     draftVoiceFrequency,
     draftEnableImageGeneration,
@@ -8616,6 +8628,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-semibold placeholder-slate-400 focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
                           />
                         </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-semibold mb-1">ElevenLabs VOICE ID</label>
+                          <input
+                            type="text"
+                            value={draftElevenlabsVoiceId}
+                            onChange={(e) => setDraftElevenlabsVoiceId(e.target.value)}
+                            placeholder="请输入 ElevenLabs Voice ID"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-[8px] px-2.5 py-1.5 text-xs text-slate-700 font-semibold placeholder-slate-400 focus:ring-1 focus:ring-neutral-950 focus:border-neutral-950 focus:outline-none"
+                          />
+                        </div>
 
                         <div className="space-y-1.5 pt-1">
                           <div className="flex items-center justify-between">
@@ -8637,7 +8659,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             <span>极快 (2.0)</span>
                           </div>
                       </div>
-                      <p className="text-[9px] leading-relaxed text-slate-400">两个平台的音色 ID 分开保存，实际播放使用全局语音设置中当前选择的平台。</p>
+                      <p className="text-[9px] leading-relaxed text-slate-400">三个平台的音色 ID 分开保存，实际播放使用全局语音设置中当前选择的平台。</p>
                     </div>
                     </div>
                     )}
@@ -11145,7 +11167,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               getUnreadCount={getUnreadCount}
               renderAvatar={(character) => <RenderAvatar src={character.avatar || (character.isGroupChat ? "👥" : "")} alt={character.name} name={character.remark || character.name} className="w-11 h-11 rounded-full object-cover bg-slate-100 border border-slate-100 aspect-square flex items-center justify-center text-xl select-none" />}
               getGroupMessageSummary={(message) => {
-                const content = parseTextImageDescription(message.content) ? "[文字图]" : message.content;
+                const content = parseTextImageDescription(message.content)
+                  ? "[文字图]"
+                  : isVoiceMessageContent(message.content, message.isVoiceMessage === true, Boolean(message.audioUrl))
+                    ? getVoiceMessageSummary(message.content, message.audioDuration)
+                    : message.content;
                 if (message.sender === "user") return `我: ${content}`;
                 const senderChar = characters.find((character) => character.id === message.senderId);
                 return `${senderChar ? (senderChar.remark || senderChar.name) : "成员"}: ${content}`;
@@ -12459,7 +12485,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         <div className="space-y-3 mt-4">
                           {savedBookmarks.map((bm) => {
                             const owner = characters.find((c) => c.id === bm.characterId);
-                            const isVoiceBookmark = bm.isVoiceMessage === true || bm.content.startsWith("[语音") || Boolean(bm.audioUrl);
+                            const isVoiceBookmark = bm.isVoiceMessage === true || bm.content.startsWith("[语音") || Boolean(bm.audioUrl || bm.audioAssetId);
                             const voicePreview = isVoiceBookmark ? getVoiceMessagePreview(bm.content, bm.audioDuration) : null;
                             const isVoicePlaying = playingMessageId === bm.id;
                             const isVoiceLoading = audioLoadingMessageId === bm.id;

@@ -92,6 +92,7 @@ export interface Character {
   relationshipNetworkNpcId?: string;
   minimaxVoiceId?: string;
   mosslandVoiceId?: string;
+  elevenlabsVoiceId?: string;
   minimaxSpeed?: number;
   voiceFrequency?: "low" | "medium" | "high" | "none";
   /** Canonical appearance data only. It is intentionally never relation-scoped. */
@@ -146,6 +147,8 @@ export interface Message {
   isNarration?: boolean;
   translation?: string;
   audioUrl?: string;
+  /** IndexedDB asset key for synthesized speech. Keeps chat and favorites on the same audio. */
+  audioAssetId?: string;
   audioDuration?: number;
   isVoiceMessage?: boolean;
   /** Image data lives in IndexedDB. Legacy uploaded images remain in content as data URLs. */
@@ -865,7 +868,7 @@ export interface UserSettings {
 
   // Voice synthesis settings. The legacy enableMiniMaxTts key remains the global switch.
   enableMiniMaxTts?: boolean;
-  ttsProvider?: "minimax" | "mossland";
+  ttsProvider?: "minimax" | "mossland" | "elevenlabs";
   minimaxApiKey?: string;
   minimaxGroupId?: string;
   minimaxModel?: string;
@@ -876,6 +879,9 @@ export interface UserSettings {
   mosslandApiEndpoint?: string;
   mosslandApiKey?: string;
   mosslandModel?: string;
+  elevenlabsApiEndpoint?: string;
+  elevenlabsApiKey?: string;
+  elevenlabsModel?: string;
 
   // OpenAI Images compatible settings. Disabled by default so no image request
   // can occur until both this and the canonical Character setting are enabled.

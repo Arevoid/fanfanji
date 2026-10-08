@@ -16,6 +16,18 @@ const existing = await ensureDirectReplyTranslation(
 );
 assert.equal(existing.translation, "已有译文");
 
+const actionMarker = await ensureDirectReplyTranslation(
+  { text: "hello", translation: '你好 [[CHAR_ACTION]]{"type":"send_voice","actor":"character"}[/CHAR_ACTION]' },
+  { enabled: true, settings, translate: async () => { throw new Error("must not call"); } },
+);
+assert.equal(actionMarker.translation, "你好");
+
+const translatedActionMarker = await ensureDirectReplyTranslation(
+  { text: "hello" },
+  { enabled: true, settings, translate: async () => ({ text: '你好 [[CHAR_ACTION]]{"type":"send_voice","actor":"character"}[/CHAR_ACTION]' }) },
+);
+assert.equal(translatedActionMarker.translation, "你好");
+
 const failed = await ensureDirectReplyTranslation(
   { text: "hello" },
   { enabled: true, settings, translate: async () => { throw new Error("provider unavailable"); } },

@@ -48,6 +48,12 @@ export function getVoiceMessagePreview(content: string, fallbackDuration?: numbe
   };
 }
 
+/** Compact label for conversation/contact previews. Never expose the voice transcript here. */
+export function getVoiceMessageSummary(content: string, fallbackDuration?: number): string {
+  const { duration } = getVoiceMessagePreview(content, fallbackDuration);
+  return `语音 ${duration}"`;
+}
+
 export const isVoiceMessageContent = (content: string, isVoiceMessage = false, hasAudioUrl = false): boolean => (
   isVoiceMessage || hasAudioUrl || content.trim().startsWith("[语音")
 );

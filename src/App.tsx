@@ -600,6 +600,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   ttsProvider: "minimax",
   mosslandApiEndpoint: "https://api.mosi.cn/v1/audio/speech",
   mosslandModel: "moss-tts",
+  elevenlabsApiEndpoint: "https://api.elevenlabs.io",
+  elevenlabsModel: "eleven_multilingual_v2",
   activeApiPresetId: "preset-gemini",
   apiPresets: [
     {

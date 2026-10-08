@@ -55,6 +55,10 @@ export const CHARACTER_ACTION_END = "[[/CHAR_ACTION]]";
 // `[[CHAR_ACTION]{...}`). Keep the recovery deliberately narrow so ordinary
 // prose containing the word CHAR_ACTION is never treated as a command.
 const CHARACTER_ACTION_START_PATTERN = /\[\[\s*CHAR_ACTION\s*(?:\]\]|\])/gu;
+// Providers occasionally return a malformed closing marker such as
+// `[/CHAR_ACTION]` or `[[/CHAR_ACTION]`. Treat these as protocol markers too
+// so they cannot leak into the translated or persisted visible text.
+const CHARACTER_ACTION_END_PATTERN = /\[\[\s*\/\s*CHAR_ACTION\s*\]\]|\[\[\s*\/\s*CHAR_ACTION\s*\]|\[\s*\/\s*CHAR_ACTION\s*\]\]|\[\s*\/\s*CHAR_ACTION\s*\]/gu;
 
 const ACTION_TYPES = new Set<CharacterActionType>([
   "publish_moment",
@@ -164,10 +168,11 @@ export function parseCharacterActionDirective(input: { text: string }): ParsedCh
     const startIndex = match.index;
     visibleParts.push(source.slice(cursor, startIndex));
     const markerEnd = startIndex + match[0].length;
-    const endIndex = source.indexOf(CHARACTER_ACTION_END, markerEnd);
-    if (endIndex >= 0) {
-      parseBody(source.slice(markerEnd, endIndex));
-      cursor = endIndex + CHARACTER_ACTION_END.length;
+    CHARACTER_ACTION_END_PATTERN.lastIndex = markerEnd;
+    const endMatch = CHARACTER_ACTION_END_PATTERN.exec(source);
+    if (endMatch) {
+      parseBody(source.slice(markerEnd, endMatch.index));
+      cursor = endMatch.index + endMatch[0].length;
       continue;
     }
 
@@ -189,7 +194,7 @@ export function parseCharacterActionDirective(input: { text: string }): ParsedCh
     break;
   }
 
-  visibleParts.push(source.slice(cursor).replaceAll(CHARACTER_ACTION_END, ""));
+  visibleParts.push(source.slice(cursor).replace(CHARACTER_ACTION_END_PATTERN, ""));
   const visibleText = cleanVisibleText(visibleParts.join(""));
   if (bodies.length === 0) return { visibleText, ...(firstError ? { error: firstError } : {}) };
   if (bodies.length > 1) return { visibleText, error: "multiple_directives" };
@@ -199,6 +204,15 @@ export function parseCharacterActionDirective(input: { text: string }): ParsedCh
   } catch {
     return { visibleText, error: "malformed_json" };
   }
+}
+
+/**
+ * Removes private character-action protocol from user-visible text without
+ * executing any action. This is used for translation and legacy messages,
+ * where the action must remain metadata rather than become chat content.
+ */
+export function sanitizeCharacterActionText(text: string): string {
+  return parseCharacterActionDirective({ text }).visibleText;
 }
 
 export function formatCharacterActionPrompt(capabilities: readonly CharacterActionType[]): string {

@@ -4,9 +4,10 @@ import { ensureExplicitStickerDelivery, suppressCharacterEmoji } from "./charact
 import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatServiceTypes";
 import { containsNonChineseText } from "../../../utils/textLanguage";
 import { normalizeVoiceTranslation } from "./voiceMessageContent";
+import { sanitizeCharacterActionText } from "./characterActionProtocol";
 
 export function createDirectReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
-  const replyText = ensureExplicitStickerDelivery(context.rawText, context.requestedStickerMessage);
+  const replyText = sanitizeCharacterActionText(ensureExplicitStickerDelivery(context.rawText, context.requestedStickerMessage));
   const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(
     stripSimulatedUserTurns(stripOuterDialogueQuotes(cleanAiReplyText(replyText, context.disableBracketActions)), context),
     context.allowEmoji,
@@ -17,7 +18,7 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
     ? normalizeDirectReplyBubbles(removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup)), context.keepPeriods)
     : [];
   const translatedBubbles = context.translationText
-    ? splitAiReplyBubbles(context.translationText, context.keepPeriods).map(normalizePaymentMarkup)
+    ? splitAiReplyBubbles(sanitizeCharacterActionText(context.translationText), context.keepPeriods).map(normalizePaymentMarkup)
     : [];
   return {
     cleanedText,

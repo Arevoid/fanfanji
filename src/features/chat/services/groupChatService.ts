@@ -5,6 +5,7 @@ import { requestAiReply } from "./aiReplyService";
 import { createGroupCharacterMessage } from "./messageFactory";
 import { containsNonChineseText } from "../../../utils/textLanguage";
 import { normalizeVoiceTranslation } from "./voiceMessageContent";
+import { sanitizeCharacterActionText } from "./characterActionProtocol";
 import { cleanAiReplyText, normalizePaymentMarkup } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import { matchGroupReplyMembers, parseGroupReplies } from "./groupReplyParser";
@@ -208,13 +209,15 @@ export async function generateGroupReplyCandidates(input: {
     // Match by the original reply index, not sender name: a member may send
     // several bubbles in one turn, each with a different inner voice/action.
     structuredReply: structured?.[item.index],
-    content: normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(item.reply.content.trim(), input.disableBracketActions))),
+    content: normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(sanitizeCharacterActionText(item.reply.content.trim()), input.disableBracketActions))),
   })).filter((item) => Boolean(item.content) || item.structuredReply?.redPacketAction === "claim_silent" || item.structuredReply?.redPacketAction === "silent");
   const messages = valid.map((item) => createGroupCharacterMessage({
     id: input.createId(item.index), characterId: input.groupId, senderId: item.member.id,
     conversationId: `group:${input.groupId}`,
     content: item.content, timestamp: input.currentTime(),
-    translation: containsNonChineseText(item.content) ? normalizeVoiceTranslation(item.structuredReply?.translation) : undefined,
+    translation: containsNonChineseText(item.content)
+      ? normalizeVoiceTranslation(item.structuredReply?.translation ? sanitizeCharacterActionText(item.structuredReply.translation) : undefined)
+      : undefined,
     redPacketAction: item.structuredReply?.redPacketAction,
   }));
   const innerVoices: Array<{ message: Message; member: Character; content: InlineInnerVoicePayload }> = [];

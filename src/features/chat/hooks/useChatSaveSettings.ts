@@ -4,6 +4,7 @@ import type { CharacterRelationship } from "../../../domain/relationship/charact
 import { apiTranslate } from "../../../utils/apiHelper";
 import { containsNonChineseText } from "../../../utils/textLanguage";
 import { createProactiveOfflinePreferencePatch } from "../../../domain/schedule/proactiveOfflinePreference";
+import { sanitizeCharacterActionText } from "../services/characterActionProtocol";
 
 interface UseChatSaveSettingsOptions {
   activeCharacter: Character | undefined;
@@ -41,6 +42,7 @@ interface UseChatSaveSettingsOptions {
   draftEnableTimeAwareness: any;
   draftMinimaxVoiceId: any;
   draftMosslandVoiceId: any;
+  draftElevenlabsVoiceId: any;
   draftMinimaxSpeed: any;
   draftVoiceFrequency: any;
   draftEnableImageGeneration: any;
@@ -72,7 +74,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
     draftChatIcons, draftChatStylePreset, draftEnableProactiveCall, draftEnableStickerAssociation, draftProactiveChatInterval,
     draftDisableBracketActions, draftHistoryMemoryLimit, draftContextMemoryLimit, draftRetrievalHistoryLimit,
     draftArchiveTemplateType, draftEnableTimeAwareness,
-    draftMinimaxVoiceId, draftMosslandVoiceId, draftMinimaxSpeed, draftVoiceFrequency,
+    draftMinimaxVoiceId, draftMosslandVoiceId, draftElevenlabsVoiceId, draftMinimaxSpeed, draftVoiceFrequency,
     draftEnableImageGeneration, draftEnableProactiveImageGeneration, draftImageAppearancePrompt, draftImageNegativePrompt,
     draftImageReferenceAssetId, draftImageReferenceMimeType,
   } = drafts;
@@ -133,6 +135,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
       enableAutoTranslate: draftEnableAutoTranslate,
       minimaxVoiceId: draftMinimaxVoiceId.trim() || undefined,
       mosslandVoiceId: draftMosslandVoiceId.trim() || undefined,
+      elevenlabsVoiceId: draftElevenlabsVoiceId.trim() || undefined,
       minimaxSpeed: draftMinimaxSpeed,
       voiceFrequency: draftVoiceFrequency,
       enableImageGeneration: draftEnableImageGeneration,
@@ -155,14 +158,15 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
       currentChatMessages.forEach((msg) => {
         if (containsNonChineseText(msg.content)) {
           apiTranslate({
-            text: msg.content,
+            text: sanitizeCharacterActionText(msg.content),
             apiKey: settings.apiKey || "",
             model: settings.selectedModel,
             apiEndpoint: settings.apiEndpoint,
           })
             .then((res) => {
-              if (res && res.text && res.text !== msg.content) {
-                onUpdateMessage(msg.id, { translation: res.text }, msg);
+              const translatedText = sanitizeCharacterActionText(res?.text || "");
+              if (translatedText && translatedText !== msg.content) {
+                onUpdateMessage(msg.id, { translation: translatedText }, msg);
               }
             })
             .catch((err) => {

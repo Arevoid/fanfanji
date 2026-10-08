@@ -33,6 +33,7 @@ export function useChatSettingsDraft() {
   const [draftEnableAutoTranslate, setDraftEnableAutoTranslate] = useState(false);
   const [draftMinimaxVoiceId, setDraftMinimaxVoiceId] = useState("");
   const [draftMosslandVoiceId, setDraftMosslandVoiceId] = useState("");
+  const [draftElevenlabsVoiceId, setDraftElevenlabsVoiceId] = useState("");
   const [draftMinimaxSpeed, setDraftMinimaxSpeed] = useState(1);
   const [draftVoiceFrequency, setDraftVoiceFrequency] = useState<"low" | "medium" | "high" | "none">("low");
   const [draftEnableImageGeneration, setDraftEnableImageGeneration] = useState(false);
@@ -72,6 +73,7 @@ export function useChatSettingsDraft() {
     setDraftEnableAutoTranslate(character.enableAutoTranslate || false);
     setDraftMinimaxVoiceId(character.minimaxVoiceId || "");
     setDraftMosslandVoiceId(character.mosslandVoiceId || "");
+    setDraftElevenlabsVoiceId(character.elevenlabsVoiceId || "");
     setDraftMinimaxSpeed(character.minimaxSpeed !== undefined ? character.minimaxSpeed : 1);
     setDraftVoiceFrequency(character.voiceFrequency || "low");
     setDraftEnableImageGeneration(character.enableImageGeneration === true);
@@ -98,6 +100,7 @@ export function useChatSettingsDraft() {
     draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType, setDraftArchiveTemplateType,
     draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
     draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,
+    draftElevenlabsVoiceId, setDraftElevenlabsVoiceId,
     draftMinimaxSpeed, setDraftMinimaxSpeed,
     draftVoiceFrequency, setDraftVoiceFrequency, draftEnableImageGeneration, setDraftEnableImageGeneration,
     draftEnableProactiveImageGeneration, setDraftEnableProactiveImageGeneration,

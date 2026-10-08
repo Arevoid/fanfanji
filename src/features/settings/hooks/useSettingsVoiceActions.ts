@@ -1,6 +1,6 @@
 import type { useSettingsVoiceConfigState } from "./useSettingsVoiceConfigState";
 import type { UserSettings } from "../../../types";
-import { normalizeMosslandApiEndpoint } from "../../voice/ttsConfig";
+import { normalizeElevenLabsApiEndpoint, normalizeMosslandApiEndpoint } from "../../voice/ttsConfig";
 
 type VoiceConfigState = ReturnType<typeof useSettingsVoiceConfigState>;
 
@@ -15,6 +15,7 @@ export function useSettingsVoiceActions({ onSaveSettings, voiceState }: UseSetti
     enableMiniMaxTts, ttsProvider, minimaxApiKey, minimaxGroupId, minimaxModel,
     minimaxSpeed, minimaxPitch, minimaxVol, minimaxProxyUrl,
     mosslandApiEndpoint, mosslandApiKey, mosslandModel,
+    elevenlabsApiEndpoint, elevenlabsApiKey, elevenlabsModel,
   } = voiceState;
 
   const handleSaveVoiceSettings = () => {
@@ -32,6 +33,9 @@ export function useSettingsVoiceActions({ onSaveSettings, voiceState }: UseSetti
       mosslandApiEndpoint: normalizeMosslandApiEndpoint(mosslandApiEndpoint),
       mosslandApiKey: mosslandApiKey.trim(),
       mosslandModel: mosslandModel.trim(),
+      elevenlabsApiEndpoint: normalizeElevenLabsApiEndpoint(elevenlabsApiEndpoint),
+      elevenlabsApiKey: elevenlabsApiKey.trim(),
+      elevenlabsModel: elevenlabsModel.trim() || "eleven_multilingual_v2",
     }));
     alert("语音设置保存成功！");
   };

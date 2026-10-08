@@ -2,8 +2,9 @@ import type { Character, UserSettings } from "../../types";
 import type { TtsOptions } from "../../utils/minimaxTts";
 import { resolveCanonicalCharacterId } from "../../domain/character/characterIdentity";
 
-export type TtsProvider = "minimax" | "mossland";
+export type TtsProvider = "minimax" | "mossland" | "elevenlabs";
 export const MOSSLAND_DEFAULT_SPEECH_ENDPOINT = "https://api.mosi.cn/v1/audio/speech";
+export const ELEVENLABS_DEFAULT_SPEECH_ENDPOINT = "https://api.elevenlabs.io";
 
 export function normalizeMosslandApiEndpoint(value?: string): string {
   const endpoint = value?.trim() || MOSSLAND_DEFAULT_SPEECH_ENDPOINT;
@@ -17,8 +18,27 @@ export function normalizeMosslandApiEndpoint(value?: string): string {
   }
 }
 
+export function normalizeElevenLabsApiEndpoint(value?: string): string {
+  const endpoint = value?.trim() || ELEVENLABS_DEFAULT_SPEECH_ENDPOINT;
+  try {
+    const url = new URL(endpoint);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+      return ELEVENLABS_DEFAULT_SPEECH_ENDPOINT;
+    }
+    const pathname = url.pathname.replace(/\/+$/, "").replace(/\/v1$/, "");
+    return `${url.origin}${pathname}`;
+  } catch {
+    return ELEVENLABS_DEFAULT_SPEECH_ENDPOINT;
+  }
+}
+
 export function getTtsProvider(settings: Pick<UserSettings, "ttsProvider">): TtsProvider {
+  if (settings.ttsProvider === "elevenlabs") return "elevenlabs";
   return settings.ttsProvider === "mossland" ? "mossland" : "minimax";
+}
+
+export function getTtsProviderLabel(provider: TtsProvider): string {
+  return provider === "elevenlabs" ? "ElevenLabs" : provider === "mossland" ? "Mossland" : "MiniMax";
 }
 
 export function canPlayTtsMessage(input: {
@@ -47,7 +67,7 @@ export function resolveTtsCharacter(
 
 export function buildCharacterTtsOptions(
   settings: UserSettings,
-  character?: Pick<Character, "minimaxVoiceId" | "mosslandVoiceId" | "minimaxSpeed">,
+  character?: Pick<Character, "minimaxVoiceId" | "mosslandVoiceId" | "elevenlabsVoiceId" | "minimaxSpeed">,
   provider: TtsProvider = getTtsProvider(settings),
 ): TtsOptions {
   if (provider === "mossland") {
@@ -57,6 +77,16 @@ export function buildCharacterTtsOptions(
       apiKey: settings.mosslandApiKey || undefined,
       model: settings.mosslandModel || "moss-tts",
       voiceId: character?.mosslandVoiceId || undefined,
+    };
+  }
+
+  if (provider === "elevenlabs") {
+    return {
+      provider,
+      apiEndpoint: normalizeElevenLabsApiEndpoint(settings.elevenlabsApiEndpoint),
+      apiKey: settings.elevenlabsApiKey || undefined,
+      model: settings.elevenlabsModel || "eleven_multilingual_v2",
+      voiceId: character?.elevenlabsVoiceId || undefined,
     };
   }
 

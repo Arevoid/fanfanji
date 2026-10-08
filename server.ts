@@ -19,6 +19,7 @@ import {
 import { persistGovernedMemoryAdmissionEvidence } from "./scripts/memoryAdmissionEvidencePersistence";
 import { prepareGeminiPromptTransport, prepareOpenAiPromptTransport, toGeminiHistoryEntry, toOpenAiHistoryEntry } from "./src/domain/prompt/promptTransport";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "./src/server/mosslandTts";
+import { ElevenLabsTtsError, synthesizeElevenLabsSpeech } from "./src/server/elevenLabsTts";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./src/utils/fetchWithTimeout";
 import { CONTENT_SECURITY_POLICY } from "./src/core/security/contentSecurityPolicy";
 import { assertImageGenerationTrigger } from "./src/features/chat/services/imageGenerationIntent";
@@ -927,6 +928,21 @@ ${text}
     } catch (error) {
       const status = error instanceof MosslandTtsError ? error.status : 500;
       const message = error instanceof Error ? error.message : "Mossland 语音代理服务异常";
+      return res.status(status).json({ error: message });
+    }
+  });
+
+  // API Route: ElevenLabs TTS proxy. The browser sends provider settings here;
+  // the upstream API key is never added to the page URL or audio cache key.
+  app.post("/api/elevenlabs-tts", async (req, res) => {
+    try {
+      const result = await synthesizeElevenLabsSpeech(req.body);
+      res.setHeader("Content-Type", result.contentType);
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(Buffer.from(result.audio));
+    } catch (error) {
+      const status = error instanceof ElevenLabsTtsError ? error.status : 500;
+      const message = error instanceof Error ? error.message : "ElevenLabs 语音代理服务异常";
       return res.status(status).json({ error: message });
     }
   });

@@ -4,6 +4,7 @@ import {
   CHARACTER_ACTION_START,
   formatCharacterActionPrompt,
   parseCharacterActionDirective,
+  sanitizeCharacterActionText,
 } from "../src/features/chat/services/characterActionProtocol";
 
 const valid = parseCharacterActionDirective({
@@ -27,6 +28,17 @@ const truncatedMarker = parseCharacterActionDirective({
 assert.equal(truncatedMarker.visibleText, "好啦，已经发出去了。");
 assert.equal(truncatedMarker.directive?.type, "publish_moment");
 assert.equal(truncatedMarker.error, undefined);
+
+const malformedClosingMarker = parseCharacterActionDirective({
+  text: `已经发出语音。${CHARACTER_ACTION_START}{"type":"send_voice","actor":"character"}[/CHAR_ACTION]`,
+});
+assert.equal(malformedClosingMarker.visibleText, "已经发出语音。");
+assert.equal(malformedClosingMarker.directive?.type, "send_voice");
+assert.equal(sanitizeCharacterActionText(`只保留这句话${CHARACTER_ACTION_START}{"type":"send_voice","actor":"character"}[/CHAR_ACTION]`), "只保留这句话");
+assert.equal(
+  sanitizeCharacterActionText('好的，没问题。[[CHAR_ACTION]]{"type":"send_voice","actor":"character","contentHint":"辛苦了，饭饭。'),
+  "好的，没问题。",
+);
 
 const quoted = parseCharacterActionDirective({
   text: `你是在引用那句话，不是现在要做。${CHARACTER_ACTION_START}{"type":"not_supported","actor":"character"}${CHARACTER_ACTION_END}`,

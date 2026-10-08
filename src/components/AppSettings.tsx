@@ -506,6 +506,8 @@ export default function AppSettings({
     minimaxSpeed, setMinimaxSpeed, minimaxPitch, setMinimaxPitch, minimaxVol, setMinimaxVol, minimaxProxyUrl,
     mosslandApiEndpoint, setMosslandApiEndpoint, mosslandApiKey, setMosslandApiKey, mosslandModel, setMosslandModel,
     showMosslandPassword, setShowMosslandPassword,
+    elevenlabsApiEndpoint, setElevenlabsApiEndpoint, elevenlabsApiKey, setElevenlabsApiKey, elevenlabsModel, setElevenlabsModel,
+    showElevenlabsPassword, setShowElevenlabsPassword,
   } = voiceConfigState;
   const { handleSaveVoiceSettings } = useSettingsVoiceActions({
     onSaveSettings,
@@ -2841,11 +2843,12 @@ export default function AppSettings({
                 <label className="block text-xs font-bold text-slate-700">语音平台</label>
                 <select
                   value={ttsProvider}
-                  onChange={(event) => setTtsProvider(event.target.value as "minimax" | "mossland")}
+                  onChange={(event) => setTtsProvider(event.target.value as "minimax" | "mossland" | "elevenlabs")}
                   className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-bold"
                 >
                   <option value="mossland">Mossland</option>
                   <option value="minimax">MiniMax</option>
+                  <option value="elevenlabs">ElevenLabs</option>
                 </select>
                 <p className="text-[10px] leading-relaxed text-slate-400">切换平台不会删除另一平台已经保存的密钥、模型或角色音色 ID。</p>
               </div>
@@ -3015,6 +3018,50 @@ export default function AppSettings({
                       <label className="block text-xs font-semibold text-slate-500 mb-1">合成模型 (TTS Model)</label>
                       <select value={mosslandModel} onChange={(event) => setMosslandModel(event.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-bold">
                         <option value="moss-tts">moss-tts</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {ttsProvider === "elevenlabs" && (
+                <div className="space-y-4 px-4 py-4">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">ElevenLabs 接口配置</h3>
+                  <div className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">接口地址</label>
+                      <input
+                        type="url"
+                        value={elevenlabsApiEndpoint}
+                        onChange={(event) => setElevenlabsApiEndpoint(event.target.value)}
+                        placeholder="https://api.elevenlabs.io"
+                        className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-semibold"
+                      />
+                      <p className="mt-1 text-[10px] text-slate-400">填写基础地址即可，程序会自动调用 /v1/text-to-speech。</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">API KEY</label>
+                      <div className="relative">
+                        <input
+                          type={showElevenlabsPassword ? "text" : "password"}
+                          value={elevenlabsApiKey}
+                          onChange={(event) => setElevenlabsApiKey(event.target.value)}
+                          placeholder="请输入 ElevenLabs API Key"
+                          className="w-full pl-3 pr-10 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-semibold"
+                        />
+                        <button type="button" onClick={() => setShowElevenlabsPassword((visible) => !visible)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label={showElevenlabsPassword ? "隐藏 ElevenLabs API Key" : "显示 ElevenLabs API Key"}>
+                          {showElevenlabsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">合成模型 (TTS Model)</label>
+                      <select value={elevenlabsModel} onChange={(event) => setElevenlabsModel(event.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-bold">
+                        <option value="eleven_multilingual_v2">Multilingual v2（多语言）</option>
+                        <option value="eleven_flash_v2_5">Flash v2.5（最快）</option>
+                        <option value="eleven_turbo_v2_5">Turbo v2.5（快速）</option>
+                        <option value="eleven_v3">v3（表现力）</option>
+                        <option value="eleven_v4">Eleven v4（自然度）</option>
                       </select>
                     </div>
                   </div>

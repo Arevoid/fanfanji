@@ -5,7 +5,7 @@ import { Plus, Trash2, User, ChevronLeft, AlertCircle, X, Image, Sparkles, Brain
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
 import { getSpeechForText } from "../utils/minimaxTts";
 import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile, createCharacterFromRawDocument } from "../features/archives/characterExport";
-import { buildCharacterTtsOptions, type TtsProvider } from "../features/voice/ttsConfig";
+import { buildCharacterTtsOptions, getTtsProviderLabel, type TtsProvider } from "../features/voice/ttsConfig";
 import { decodeJsonStorageText, readString } from "../core/storage/storageAdapter";
 import { createCharacterFromInput } from "../domain/character/characterCreation";
 
@@ -121,6 +121,7 @@ export default function AppArchives({
   const [errorMsg, setErrorMsg] = useState("");
   const [minimaxVoiceId, setMinimaxVoiceId] = useState("");
   const [mosslandVoiceId, setMosslandVoiceId] = useState("");
+  const [elevenlabsVoiceId, setElevenlabsVoiceId] = useState("");
   const [isAuditioning, setIsAuditioning] = useState(false);
   const [auditionProvider, setAuditionProvider] = useState<TtsProvider | null>(null);
   const [auditionAudio, setAuditionAudio] = useState<HTMLAudioElement | null>(null);
@@ -153,6 +154,7 @@ export default function AppArchives({
       const ttsOptions = buildCharacterTtsOptions(settings as UserSettings, {
         minimaxVoiceId,
         mosslandVoiceId,
+        elevenlabsVoiceId,
       }, provider);
 
       const auditionText = "您好！我已经成功绑定了此项语音。请问您喜欢我的这个声音吗？";
@@ -167,7 +169,7 @@ export default function AppArchives({
       };
       audio.onerror = (e) => {
         console.error("Audition playback failed:", e);
-        setErrorMsg(`试听音频播放失败，请检查 ${provider === "mossland" ? "Mossland" : "MiniMax"} 配置`);
+        setErrorMsg(`试听音频播放失败，请检查 ${getTtsProviderLabel(provider)} 配置`);
         setIsAuditioning(false);
         setAuditionProvider(null);
         setAuditionAudio(null);
@@ -175,7 +177,7 @@ export default function AppArchives({
       audio.play();
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || `试听合成失败，请确认 ${provider === "mossland" ? "Mossland" : "MiniMax"} 语音配置有效！`);
+      setErrorMsg(err.message || `试听合成失败，请确认 ${getTtsProviderLabel(provider)} 语音配置有效！`);
       setIsAuditioning(false);
       setAuditionProvider(null);
     }
@@ -195,6 +197,7 @@ export default function AppArchives({
     setErrorMsg("");
     setMinimaxVoiceId("");
     setMosslandVoiceId("");
+    setElevenlabsVoiceId("");
     if (auditionAudio) {
       auditionAudio.pause();
       setAuditionAudio(null);
@@ -214,6 +217,7 @@ export default function AppArchives({
     setAvatar(char.avatar);
     setMinimaxVoiceId(char.minimaxVoiceId || "");
     setMosslandVoiceId(char.mosslandVoiceId || "");
+    setElevenlabsVoiceId(char.elevenlabsVoiceId || "");
     
     // Combine existing backstory if populated and valid
     let combined = char.personality;
@@ -409,6 +413,7 @@ export default function AppArchives({
       references: originalChar ? originalChar.references : [],
       minimaxVoiceId: minimaxVoiceId,
       mosslandVoiceId: mosslandVoiceId,
+      elevenlabsVoiceId: elevenlabsVoiceId,
     });
 
     onSaveCharacter(savedChar);
@@ -796,6 +801,7 @@ export default function AppArchives({
                 {([
                   { provider: "mossland" as const, label: "Mossland", value: mosslandVoiceId, setValue: setMosslandVoiceId },
                   { provider: "minimax" as const, label: "MiniMax", value: minimaxVoiceId, setValue: setMinimaxVoiceId },
+                  { provider: "elevenlabs" as const, label: "ElevenLabs", value: elevenlabsVoiceId, setValue: setElevenlabsVoiceId },
                 ]).map(({ provider, label, value, setValue }) => (
                   <div key={provider} className="flex gap-2">
                     <input
@@ -826,7 +832,7 @@ export default function AppArchives({
                 ))}
               </div>
               <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400 font-medium">
-                两个平台的 ID 分开保存；实际聊天使用“设置” → “语音设置”中当前选择的平台。
+                三个平台的 ID 分开保存；实际聊天使用“设置” → “语音设置”中当前选择的平台。
               </p>
             </div>
 

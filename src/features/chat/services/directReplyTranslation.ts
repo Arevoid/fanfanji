@@ -1,5 +1,6 @@
 import type { UserSettings } from "../../../types";
 import { containsNonChineseText } from "../../../utils/textLanguage";
+import { sanitizeCharacterActionText } from "./characterActionProtocol";
 
 export interface DirectReplyTranslationResponse {
   text: string;
@@ -22,21 +23,35 @@ export async function ensureDirectReplyTranslation<T extends DirectReplyTranslat
     translate: DirectReplyTranslator;
   },
 ): Promise<T & DirectReplyTranslationResponse> {
-  if (!input.enabled || !response.text.trim() || response.translation?.trim() || !containsNonChineseText(response.text)) return response;
+  const cleanedExistingTranslation = response.translation
+    ? sanitizeCharacterActionText(response.translation)
+    : undefined;
+  const cleanedResponse = cleanedExistingTranslation !== undefined && cleanedExistingTranslation !== response.translation
+    ? cleanedExistingTranslation
+      ? { ...response, translation: cleanedExistingTranslation }
+      : (() => {
+          const next = { ...response } as T & DirectReplyTranslationResponse;
+          delete next.translation;
+          return next;
+        })()
+    : response;
+
+  if (!input.enabled || !cleanedResponse.text.trim() || cleanedResponse.translation?.trim() || !containsNonChineseText(cleanedResponse.text)) return cleanedResponse;
   try {
     const translated = await input.translate({
-      text: response.text,
+      text: sanitizeCharacterActionText(cleanedResponse.text),
       apiKey: input.settings.apiKey || "",
       model: input.settings.selectedModel,
       apiEndpoint: input.settings.apiEndpoint,
     });
-    if (translated.text.trim() && translated.text.trim() !== response.text.trim()) {
-      return { ...response, translation: translated.text };
+    const translatedText = sanitizeCharacterActionText(translated.text);
+    if (translatedText && translatedText !== cleanedResponse.text.trim()) {
+      return { ...cleanedResponse, translation: translatedText };
     }
   } catch (error) {
     // Translation is an enhancement; a provider failure must not suppress the
     // already valid direct reply.
     console.warn("Automatic direct-reply translation failed:", error);
   }
-  return response;
+  return cleanedResponse;
 }
