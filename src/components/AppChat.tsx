@@ -47,6 +47,7 @@ import { enqueueProactiveAction, takePendingProactiveAction } from "../features/
 import { evaluateProactiveAction } from "../features/chat/services/proactiveActionPolicy";
 import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallMessage";
 import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
+import { getVoiceMessagePreview } from "../features/chat/services/voiceMessageContent";
 import { recordCharacterBlockReaction } from "../features/characterPhone/characterPhoneBlockReaction";
 import { generateCharacterBlockAiResponse } from "../features/characterPhone/characterBlockAi";
 import {
@@ -400,56 +401,6 @@ function getBubbleBackgroundStyle(hexColor: string, opacityPercent: number): str
   const rgb = hexToRgb(hexColor);
   if (!rgb) return hexColor;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacityPercent / 100})`;
-}
-
-interface VoiceMessagePreview {
-  duration: number;
-  transcript: string;
-}
-
-/**
- * Reads both the current persisted voice markup and the older human-readable
- * voice format. Favorites need the same duration/transcript preview even when
- * the message is no longer rendered inside the main chat list.
- */
-function getVoiceMessagePreview(content: string, fallbackDuration?: number): VoiceMessagePreview {
-  const normalized = content.trim();
-  const safeFallback = Number.isFinite(fallbackDuration) && (fallbackDuration || 0) > 0
-    ? Math.max(1, Math.round(fallbackDuration as number))
-    : 3;
-  if (normalized.startsWith("[语音]|")) {
-    const parts = normalized.split("|");
-    const parsedDuration = Number.parseInt(parts[1] || "", 10);
-    return {
-      duration: Number.isFinite(parsedDuration) && parsedDuration > 0 ? parsedDuration : safeFallback,
-      transcript: parts.slice(2).join("|").trim(),
-    };
-  }
-  if (!normalized.startsWith("[语音")) {
-    return { duration: safeFallback, transcript: normalized };
-  }
-
-  const matchWithDuration = normalized.match(/^\[语音:\s*(?:"([^"]+)"|(.+?))\s*\((\d+)(?:秒|s)\)\]/i);
-  if (matchWithDuration) {
-    return {
-      duration: Math.max(1, Number.parseInt(matchWithDuration[3] || "", 10) || safeFallback),
-      transcript: (matchWithDuration[1] || matchWithDuration[2] || "").trim(),
-    };
-  }
-  const matchWithQuotedText = normalized.match(/^\[语音:\s*"([^"]+)"\]/i);
-  if (matchWithQuotedText) {
-    const transcript = matchWithQuotedText[1].trim();
-    return { duration: Math.max(1, Math.min(60, Math.ceil(transcript.length * 0.35 + 1.2))), transcript };
-  }
-  const cleaned = normalized
-    .replace(/^\[语音\]\s*/, "")
-    .replace(/^\[语音:\s*/, "")
-    .replace(/\]$/, "")
-    .trim();
-  return {
-    duration: Math.max(1, Math.min(60, Math.ceil(cleaned.length * 0.35 + 1.2))) || safeFallback,
-    transcript: cleaned,
-  };
 }
 
 registerDevModuleTrace({
@@ -9619,49 +9570,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         const location = msg.content.split("|").slice(1).join("|").trim() || msg.content.replace(/^\[位置\]/, "").trim();
                         return <LocationCard location={location} />;
                       })() : (msg.content.startsWith("[语音") || msg.isVoiceMessage === true || Boolean(msg.audioUrl)) ? (() => {
-                         let content = msg.content;
-                         let durationStr = msg.audioDuration ? String(msg.audioDuration) : "3";
-                         let voiceText = msg.content.startsWith("[语音") ? "" : msg.content;
-
-                        if (content.startsWith("[语音]|")) {
-                          const parts = content.split("|");
-                          durationStr = parts[1] || "3";
-                          voiceText = parts.slice(2).join("|") || "";
-                        } else {
-                          // e.g. [语音: "晚安，要听话" (5秒)]
-                          let text = "";
-                          let secs = 5;
-                          
-                          const match1 = content.match(/^\[语音:\s*"([^"]+)"\s*\((\d+)(?:秒|s)\)\]/i);
-                          const match2 = content.match(/^\[语音:\s*(.+?)\s*\((\d+)(?:秒|s)\)\]/i);
-                          const match3 = content.match(/^\[语音:\s*(\d+)(?:秒|s)\]/i);
-                          const match4 = content.match(/^\[语音:\s*"([^"]+)"\]/i) || content.match(/^\[语音:\s*(.+?)\]/i);
-
-                          if (match1) {
-                            text = match1[1];
-                            secs = parseInt(match1[2], 10) || 5;
-                          } else if (match2) {
-                            text = match2[1];
-                            secs = parseInt(match2[2], 10) || 5;
-                          } else if (match3) {
-                            text = "";
-                            secs = parseInt(match3[1], 10) || 5;
-                          } else if (match4) {
-                            text = match4[1];
-                            secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
-                          } else {
-                            const clean = content.replace(/^\[语音\]\s*/, "").replace(/^\[语音:\s*/, "").replace(/\]$/, "").trim();
-                            text = clean;
-                            secs = Math.max(1, Math.min(60, Math.ceil(text.length * 0.35 + 1.2)));
-                          }
-                          durationStr = secs.toString();
-                          voiceText = text;
-                        }
+                        const voicePreview = getVoiceMessagePreview(msg.content, msg.audioDuration);
+                        const voiceText = voicePreview.transcript;
 
                         // Determine the duration dynamically based on the text length for authentic feel (approx 3.5 characters per second)
                         const duration = voiceText 
                           ? Math.max(1, Math.min(60, Math.round(voiceText.length / 3.5) || 1)) 
-                          : parseInt(durationStr || "3", 10);
+                          : voicePreview.duration;
                         
                         const isPlaying = playingMessageId === msg.id;
                         const formattedDuration = `${duration}"`;
@@ -9759,6 +9674,24 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               </button>
                             </div>
 
+                            {msg.translation && !collapsedTranslations.has(msg.id) && (
+                              <div className={`chat-message--voice-translation px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative max-w-[240px] ${
+                                isSelf
+                                  ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
+                                  : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100")
+                              } ${isSelf ? "self-end" : "self-start"}`}>
+                                <span className="whitespace-pre-wrap">{msg.translation}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setCollapsedTranslations((previous) => new Set(previous).add(msg.id))}
+                                  className="ml-2 text-[10px] opacity-70 hover:opacity-100"
+                                  aria-label="收起翻译"
+                                >
+                                  收起
+                                </button>
+                              </div>
+                            )}
+
                             {/* Transcription Display - Rendered exactly like a regular text bubble below matching Image 2 */}
                             {voiceTranscribed[msg.id] && (
                               <div 
@@ -9809,7 +9742,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               </>
                             ) : <div className="text-left" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}><ChatTextWithLinks text={msg.content} /></div>;
                           })()}
-                          {activeCharacter.enableAutoTranslate && containsNonChineseText(msg.content) && msg.translation && !collapsedTranslations.has(msg.id) && (
+                          {msg.translation && !collapsedTranslations.has(msg.id) && (
                             <>
                               <div className={`my-1.5 border-t border-dashed ${isSelf ? "border-white/20" : "border-stone-200"}`} />
                               <div className={`flex items-start gap-2 text-left text-[11px] leading-relaxed ${isSelf ? "text-white/90" : "text-stone-500"}`}>

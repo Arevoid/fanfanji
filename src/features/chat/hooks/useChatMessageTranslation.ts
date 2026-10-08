@@ -1,5 +1,6 @@
 import type { Message, UserSettings } from "../../../types";
 import { apiTranslate } from "../../../utils/apiHelper";
+import { getVoiceMessagePreview, isVoiceMessageContent } from "../services/voiceMessageContent";
 
 interface UseChatMessageTranslationOptions {
   settings: UserSettings;
@@ -11,18 +12,28 @@ export function useChatMessageTranslation({ settings, onUpdateMessage, showToast
   const handleTranslateMessage = (msg: Message) => {
     if (!onUpdateMessage) return;
     
+    const isVoice = isVoiceMessageContent(msg.content, msg.isVoiceMessage === true, Boolean(msg.audioUrl));
+    const sourceText = isVoice ? getVoiceMessagePreview(msg.content, msg.audioDuration).transcript : msg.content.trim();
+    if (!sourceText) {
+      showToast(isVoice ? "语音暂无可翻译文本，请先语音转文字" : "翻译无内容");
+      return;
+    }
+
     showToast("正在翻译中...");
     
     apiTranslate({
-      text: msg.content,
+      text: sourceText,
       apiKey: settings.apiKey || "",
       model: settings.selectedModel,
       apiEndpoint: settings.apiEndpoint
     })
     .then(res => {
-      if (res && res.text) {
-        onUpdateMessage(msg.id, { translation: res.text }, msg);
+      const translatedText = res?.text?.trim() || "";
+      if (translatedText && translatedText !== sourceText) {
+        onUpdateMessage(msg.id, { translation: translatedText }, msg);
         showToast("翻译完成");
+      } else if (translatedText) {
+        showToast("翻译结果与原文相同");
       } else {
         showToast("翻译无结果");
       }
