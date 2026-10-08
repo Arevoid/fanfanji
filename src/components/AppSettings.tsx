@@ -3087,9 +3087,9 @@ export default function AppSettings({
                     aria-checked={ttsEmotionEnabled}
                     aria-label="情绪语音"
                     onClick={() => setTtsEmotionEnabled((enabled) => !enabled)}
-                    className={`relative mt-0.5 inline-flex h-7 w-12 min-w-[48px] shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${ttsEmotionEnabled ? "bg-[var(--button-primary-bg)]" : "bg-[var(--surface-muted)] border border-[var(--border)]"}`}
+                    className={`settings-emotion-toggle relative mt-0.5 inline-flex h-7 w-12 min-w-[48px] shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${ttsEmotionEnabled ? "bg-[var(--button-primary-bg)]" : "bg-[var(--surface-muted)] border border-[var(--border)]"}`}
                   >
-                    <span className={`inline-block h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${ttsEmotionEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                    <span className={`pointer-events-none absolute left-0.5 top-0.5 inline-block h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${ttsEmotionEnabled ? "translate-x-5" : "translate-x-0"}`} />
                   </button>
                 </div>
                 <label className="block text-[10px] font-semibold text-[var(--text-tertiary)]">

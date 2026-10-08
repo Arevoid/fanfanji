@@ -903,6 +903,7 @@ export default function AppWorldBook({
                   type="button"
                   onClick={() => setIsActive(!isActive)}
                   aria-checked={isActive}
+                  aria-label={isActive ? "禁用此词条设定" : "启用此词条设定"}
                   role="switch"
                   className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
                     isActive
@@ -911,7 +912,7 @@ export default function AppWorldBook({
                   }`}
                 >
                   <span
-                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full shadow-sm transition duration-200 ease-in-out ${
+                    className={`pointer-events-none absolute left-0.5 top-0.5 inline-block h-4 w-4 transform rounded-full shadow-sm transition duration-200 ease-in-out ${
                       isActive
                         ? "translate-x-4 bg-[var(--toggle-mono-on-thumb)]"
                         : "translate-x-0 bg-[var(--toggle-mono-off-thumb)]"
@@ -1154,8 +1155,9 @@ export default function AppWorldBook({
                                       type="button"
                                       onClick={() => onSaveEntry({ ...entry, isActive: !isActive })}
                                       aria-checked={isActive}
+                                      aria-label={`${isActive ? "禁用" : "启用"}世界书词条：${entry.title}`}
                                       role="switch"
-                                      className={`relative inline-flex h-4 w-7.5 shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] shrink-0 ${
+                                      className={`relative inline-flex h-4 w-[30px] shrink-0 cursor-pointer rounded-full border transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${
                                         isActive
                                           ? "bg-[var(--toggle-mono-on-bg)] border-[var(--toggle-mono-border)]"
                                           : "bg-[var(--toggle-mono-off-bg)] border-[var(--toggle-mono-border)]"
@@ -1163,7 +1165,7 @@ export default function AppWorldBook({
                                       title={isActive ? "已启用此词条" : "已禁用此词条"}
                                     >
                                       <span
-                                        className={`pointer-events-none inline-block h-3 w-3 transform rounded-full shadow-sm transition duration-200 ease-in-out ${
+                                        className={`pointer-events-none absolute left-0.5 top-0.5 inline-block h-3 w-3 transform rounded-full shadow-sm transition duration-200 ease-in-out ${
                                           isActive
                                             ? "translate-x-3.5 bg-[var(--toggle-mono-on-thumb)]"
                                             : "translate-x-0 bg-[var(--toggle-mono-off-thumb)]"
