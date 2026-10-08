@@ -16,6 +16,7 @@ export function useSettingsVoiceActions({ onSaveSettings, voiceState }: UseSetti
     minimaxSpeed, minimaxPitch, minimaxVol, minimaxProxyUrl,
     mosslandApiEndpoint, mosslandApiKey, mosslandModel,
     elevenlabsApiEndpoint, elevenlabsApiKey, elevenlabsModel,
+    ttsEmotionEnabled, ttsEmotionIntensity,
   } = voiceState;
 
   const handleSaveVoiceSettings = () => {
@@ -36,6 +37,8 @@ export function useSettingsVoiceActions({ onSaveSettings, voiceState }: UseSetti
       elevenlabsApiEndpoint: normalizeElevenLabsApiEndpoint(elevenlabsApiEndpoint),
       elevenlabsApiKey: elevenlabsApiKey.trim(),
       elevenlabsModel: elevenlabsModel.trim() || "eleven_multilingual_v2",
+      ttsEmotionEnabled: ttsEmotionEnabled === true,
+      ttsEmotionIntensity,
     }));
     alert("语音设置保存成功！");
   };

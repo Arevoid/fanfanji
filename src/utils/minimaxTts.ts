@@ -1,6 +1,7 @@
 import { audioDb } from "./audioDb";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "./fetchWithTimeout";
 import { withAiRequestLedger } from "../core/monitoring/aiRequestLedger";
+import { buildTtsSynthesisText, emotionTagForTts, supportsTtsEmotion, type TtsEmotion, type TtsEmotionIntensity } from "./ttsEmotion";
 
 /**
  * Filter out dialogue actions in brackets / parentheticals or asterisks.
@@ -21,12 +22,15 @@ export function cleanBracketActions(text: string): string {
 /**
  * Split ultra-long text into sentences or shorter chunks (< 150 characters) to avoid API limit
  */
-export function splitTextIntoChunks(text: string, maxLen: number = 150): string[] {
-  const cleaned = cleanBracketActions(text);
+export function splitTextIntoChunks(text: string, maxLen: number = 150, alreadyClean = false): string[] {
+  const cleaned = alreadyClean ? text.trim() : cleanBracketActions(text);
   if (!cleaned) return [];
+  const leadingTags = alreadyClean ? cleaned.match(/^\s*(?:(?:\[[^\]]+\])\s*)+/)?.[0].trim() || "" : "";
+  const body = leadingTags ? cleaned.slice(cleaned.indexOf(leadingTags) + leadingTags.length).trim() : cleaned;
+  if (!body) return leadingTags ? [leadingTags] : [];
   
   // Split into sentences using common sentence terminators
-  const sentences = cleaned.split(/([。！？\n!?；;]+)/);
+  const sentences = body.split(/([。！？\n!?；;]+)/);
   const chunks: string[] = [];
   let currentChunk = "";
   
@@ -68,7 +72,9 @@ export function splitTextIntoChunks(text: string, maxLen: number = 150): string[
       }
     }
   }
-  return finalChunks.filter(c => c.length > 0);
+  const result = finalChunks.filter(c => c.length > 0);
+  if (leadingTags && result.length > 0) result[0] = `${leadingTags} ${result[0]}`.trim();
+  return result;
 }
 
 export interface TtsOptions {
@@ -83,11 +89,15 @@ export interface TtsOptions {
   voiceId?: string;
   proxyUrl?: string;
   forceDirectTts?: boolean;
+  /** Request-time delivery metadata; never shown as chat content. */
+  emotion?: TtsEmotion;
+  emotionIntensity?: TtsEmotionIntensity;
+  emotionEnabled?: boolean;
 }
 
 /** Stable IndexedDB key for one text + voice/provider configuration. */
 export function getTtsCacheKey(text: string, options: TtsOptions): string | null {
-  const cleanedText = cleanBracketActions(text);
+  const cleanedText = buildTtsSynthesisText(text, options);
   if (!cleanedText) return null;
   const voiceId = options.voiceId || "female-shaonv";
   const speed = options.speed !== undefined ? options.speed : 1.0;
@@ -96,7 +106,17 @@ export function getTtsCacheKey(text: string, options: TtsOptions): string | null
   const model = options.model || "speech-2.8-hd";
   const provider = options.provider || "minimax";
   const endpoint = options.apiEndpoint || "default";
-  return `tts_v4:${provider}:${endpoint}:${model}:${voiceId}:${speed}:${pitch}:${vol}:${cleanedText}`;
+  const emotion = options.emotion || "neutral";
+  const emotionIntensity = options.emotionIntensity || "natural";
+  const shouldVersionEmotionKey = options.emotionEnabled === true
+    && supportsTtsEmotion(provider, model)
+    && Boolean(emotionTagForTts(emotion, emotionIntensity));
+  if (!shouldVersionEmotionKey) {
+    // Keep the legacy key for ordinary speech so upgrading does not make every
+    // previously cached neutral message synthesize and bill again.
+    return `tts_v4:${provider}:${endpoint}:${model}:${voiceId}:${speed}:${pitch}:${vol}:${cleanedText}`;
+  }
+  return `tts_v5:${provider}:${endpoint}:${model}:${voiceId}:${speed}:${pitch}:${vol}:on:${emotion}:${emotionIntensity}:${cleanedText}`;
 }
 
 // One in-flight promise per cache key prevents double billing when a user
@@ -267,6 +287,7 @@ export async function fetchSingleTtsSegment(
   text: string,
   options: TtsOptions,
 ): Promise<Blob> {
+  const synthesisText = buildTtsSynthesisText(text, options);
   const provider = options.provider || "minimax";
   const endpoint = provider === "elevenlabs"
     ? (options.apiEndpoint || "/api/elevenlabs-tts")
@@ -279,7 +300,7 @@ export async function fetchSingleTtsSegment(
     model: options.model,
     endpoint,
     transport,
-    inputCharacters: text.length,
+    inputCharacters: synthesisText.length,
   }, async (ledger) => {
     ledger.markAttempt({
       provider,
@@ -287,7 +308,7 @@ export async function fetchSingleTtsSegment(
       endpoint,
       transport,
     });
-    return fetchSingleTtsSegmentImpl(text, options);
+    return fetchSingleTtsSegmentImpl(synthesisText, options);
   });
 }
 
@@ -326,6 +347,7 @@ export async function getSpeechForText(
   options: TtsOptions,
   onProgress?: (msg: string) => void
 ): Promise<Blob> {
+  const synthesisText = buildTtsSynthesisText(text, options);
   const cacheKey = getTtsCacheKey(text, options);
   if (!cacheKey) {
     throw new Error("无有效可读台词（过滤括号和动作后文本为空）");
@@ -334,7 +356,7 @@ export async function getSpeechForText(
   if (existing) return existing;
 
   const synthesis = (async () => {
-    const cleanedText = cleanBracketActions(text);
+    const cleanedText = synthesisText;
     try {
       const cachedBlob = await audioDb.getTrackFile(cacheKey);
       if (cachedBlob) {
@@ -347,7 +369,7 @@ export async function getSpeechForText(
 
     onProgress?.("正在合成语音...");
 
-    const chunks = splitTextIntoChunks(cleanedText, 150);
+    const chunks = splitTextIntoChunks(cleanedText, 150, true);
     if (chunks.length === 0) {
       throw new Error("无有效分段合成台词");
     }

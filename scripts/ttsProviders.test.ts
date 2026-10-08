@@ -153,6 +153,16 @@ try {
   });
   assert.equal(elevenLabsBlob.type, "audio/mpeg");
 
+  const elevenLabsEmotionBlob = await fetchSingleTtsSegment("太好了！", {
+    ...elevenLabsOptions,
+    model: "eleven_v4",
+    emotion: "happy",
+    emotionEnabled: true,
+  });
+  assert.equal(capturedUrl, "/api/elevenlabs-tts");
+  assert.equal(JSON.parse(String(capturedInit?.body)).text, "[happy] 太好了！");
+  assert.equal(elevenLabsEmotionBlob.type, "audio/mpeg");
+
   const beforeConcurrentSynthesis = fetchCount;
   const originalWarn = console.warn;
   console.warn = () => {};

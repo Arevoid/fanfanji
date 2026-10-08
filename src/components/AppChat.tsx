@@ -48,6 +48,7 @@ import { evaluateProactiveAction } from "../features/chat/services/proactiveActi
 import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallMessage";
 import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
 import { getVoiceMessagePreview, getVoiceMessageSummary, isVoiceMessageContent, normalizeVoiceTranslation } from "../features/chat/services/voiceMessageContent";
+import { trackShortTermChatEmotion } from "../features/chat/services/chatEmotionTracker";
 import { recordCharacterBlockReaction } from "../features/characterPhone/characterPhoneBlockReaction";
 import { generateCharacterBlockAiResponse } from "../features/characterPhone/characterBlockAi";
 import {
@@ -1975,6 +1976,10 @@ export default function AppChat({
     setVoiceTimer,
     showToast,
     onUpdateMessage,
+    resolveEmotion: (message) => trackShortTermChatEmotion(
+      [...messages.filter((candidate) => candidate.characterId === message.characterId), message],
+      message.characterId,
+    ).character.emotion,
   });
   const onSendMessage = createChatMessageDeliveryHandler({
     settings,

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Character, Message, UserSettings } from "../../../types";
 import { audioDb } from "../../../utils/audioDb";
 import { getSpeechForText, getTtsCacheKey } from "../../../utils/minimaxTts";
+import { inferTtsEmotion, supportsTtsEmotion, type TtsEmotion } from "../../../utils/ttsEmotion";
 import { buildCharacterTtsOptions, canPlayTtsMessage, getTtsProvider, getTtsProviderLabel, resolveTtsCharacter } from "../../voice/ttsConfig";
 
 interface ChatCallSpeechPlaybackOptions {
@@ -17,6 +18,7 @@ interface ChatCallSpeechPlaybackOptions {
   setVoiceTimer: (timer: ReturnType<typeof setInterval> | null) => void;
   showToast: (message: string) => void;
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, original: Message) => void;
+  resolveEmotion?: (message: Message) => TtsEmotion;
 }
 
 export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions) {
@@ -184,7 +186,7 @@ export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions
     let ttsProviderName = getTtsProviderLabel(getTtsProvider(options.settings));
     try {
       const msgChar = resolveTtsCharacter(options.characters, msg.characterId, msg.senderId);
-      const ttsOptions = buildCharacterTtsOptions(options.settings, msgChar);
+      const baseTtsOptions = buildCharacterTtsOptions(options.settings, msgChar);
       let cleanText = msg.content;
       if (cleanText.startsWith("[语音]|")) cleanText = cleanText.split("|").slice(2).join("|") || "";
       cleanText = cleanText.replace(/\([^\)]*\)/g, "").replace(/（[^）]*）/g, "").trim();
@@ -195,6 +197,14 @@ export function useChatCallSpeechPlayback(options: ChatCallSpeechPlaybackOptions
         if (isQueuedCallSpeech) finishQueuedCallSpeechOnce(); else playNextMessageInQueue(msg.id);
         return;
       }
+      const emotionEnabled = options.settings.ttsEmotionEnabled === true
+        && supportsTtsEmotion(baseTtsOptions.provider, baseTtsOptions.model);
+      const ttsOptions = {
+        ...baseTtsOptions,
+        emotionEnabled,
+        emotion: emotionEnabled ? (options.resolveEmotion?.(msg) || inferTtsEmotion(cleanText)) : "neutral" as const,
+        emotionIntensity: options.settings.ttsEmotionIntensity || "natural" as const,
+      };
       const blob = await getSpeechForText(cleanText, ttsOptions);
       if (isCancelledCallSpeech()) return;
       const cacheKey = getTtsCacheKey(cleanText, ttsOptions);

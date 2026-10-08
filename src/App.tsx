@@ -602,6 +602,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   mosslandModel: "moss-tts",
   elevenlabsApiEndpoint: "https://api.elevenlabs.io",
   elevenlabsModel: "eleven_multilingual_v2",
+  ttsEmotionEnabled: false,
+  ttsEmotionIntensity: "natural",
   activeApiPresetId: "preset-gemini",
   apiPresets: [
     {

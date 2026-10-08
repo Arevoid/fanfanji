@@ -17,6 +17,8 @@ export function useSettingsVoiceConfigState(settings: UserSettings) {
   const [elevenlabsApiEndpoint, setElevenlabsApiEndpoint] = useState(settings.elevenlabsApiEndpoint || "https://api.elevenlabs.io");
   const [elevenlabsApiKey, setElevenlabsApiKey] = useState(settings.elevenlabsApiKey || "");
   const [elevenlabsModel, setElevenlabsModel] = useState(settings.elevenlabsModel || "eleven_multilingual_v2");
+  const [ttsEmotionEnabled, setTtsEmotionEnabled] = useState(settings.ttsEmotionEnabled === true);
+  const [ttsEmotionIntensity, setTtsEmotionIntensity] = useState<"natural" | "clear" | "strong">(settings.ttsEmotionIntensity || "natural");
   const [showElevenlabsPassword, setShowElevenlabsPassword] = useState(false);
   const [showMosslandPassword, setShowMosslandPassword] = useState(false);
 
@@ -27,6 +29,7 @@ export function useSettingsVoiceConfigState(settings: UserSettings) {
     mosslandApiEndpoint, setMosslandApiEndpoint, mosslandApiKey, setMosslandApiKey, mosslandModel, setMosslandModel,
     showMosslandPassword, setShowMosslandPassword,
     elevenlabsApiEndpoint, setElevenlabsApiEndpoint, elevenlabsApiKey, setElevenlabsApiKey, elevenlabsModel, setElevenlabsModel,
+    ttsEmotionEnabled, setTtsEmotionEnabled, ttsEmotionIntensity, setTtsEmotionIntensity,
     showElevenlabsPassword, setShowElevenlabsPassword,
   };
 }

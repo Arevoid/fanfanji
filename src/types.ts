@@ -882,6 +882,10 @@ export interface UserSettings {
   elevenlabsApiEndpoint?: string;
   elevenlabsApiKey?: string;
   elevenlabsModel?: string;
+  /** Enables request-time emotional delivery for supported TTS models. */
+  ttsEmotionEnabled?: boolean;
+  /** Controls how strongly the inferred delivery tag is expressed. */
+  ttsEmotionIntensity?: "natural" | "clear" | "strong";
 
   // OpenAI Images compatible settings. Disabled by default so no image request
   // can occur until both this and the canonical Character setting are enabled.

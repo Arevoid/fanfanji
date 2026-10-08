@@ -4,6 +4,7 @@ import { apiSummarizePersonality } from "../utils/apiHelper";
 import { Plus, Trash2, User, ChevronLeft, AlertCircle, X, Image, Sparkles, Brain, BookOpen, FileText, MessageSquare, Volume2, Download } from "lucide-react";
 import { parsePngChunks, decodeCharaData, mapSillyTavernToCharacter, mapSillyTavernEntry, compressImage, safeParseDocx } from "../utils/pngParser";
 import { getSpeechForText } from "../utils/minimaxTts";
+import { inferTtsEmotion, supportsTtsEmotion } from "../utils/ttsEmotion";
 import { buildCharacterExport, characterExportFilename, createCharacterFromImportedProfile, createCharacterFromRawDocument } from "../features/archives/characterExport";
 import { buildCharacterTtsOptions, getTtsProviderLabel, type TtsProvider } from "../features/voice/ttsConfig";
 import { decodeJsonStorageText, readString } from "../core/storage/storageAdapter";
@@ -151,13 +152,20 @@ export default function AppArchives({
         console.error(e);
       }
 
-      const ttsOptions = buildCharacterTtsOptions(settings as UserSettings, {
+      const auditionText = "您好！我已经成功绑定了此项语音。请问您喜欢我的这个声音吗？";
+      const baseTtsOptions = buildCharacterTtsOptions(settings as UserSettings, {
         minimaxVoiceId,
         mosslandVoiceId,
         elevenlabsVoiceId,
       }, provider);
+      const ttsOptions = {
+        ...baseTtsOptions,
+        emotionEnabled: settings.ttsEmotionEnabled === true
+          && supportsTtsEmotion(baseTtsOptions.provider, baseTtsOptions.model),
+        emotion: inferTtsEmotion(auditionText),
+        emotionIntensity: settings.ttsEmotionIntensity || "natural" as const,
+      };
 
-      const auditionText = "您好！我已经成功绑定了此项语音。请问您喜欢我的这个声音吗？";
       const blob = await getSpeechForText(auditionText, ttsOptions);
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
