@@ -4,6 +4,7 @@ import type { CharacterRelationship } from "../../../domain/relationship/charact
 import { requestAiReply } from "./aiReplyService";
 import { createGroupCharacterMessage } from "./messageFactory";
 import { containsNonChineseText } from "../../../utils/textLanguage";
+import { normalizeVoiceTranslation } from "./voiceMessageContent";
 import { cleanAiReplyText, normalizePaymentMarkup } from "./messageParser";
 import { suppressCharacterEmoji } from "./characterEmojiPolicy";
 import { matchGroupReplyMembers, parseGroupReplies } from "./groupReplyParser";
@@ -213,7 +214,7 @@ export async function generateGroupReplyCandidates(input: {
     id: input.createId(item.index), characterId: input.groupId, senderId: item.member.id,
     conversationId: `group:${input.groupId}`,
     content: item.content, timestamp: input.currentTime(),
-    translation: containsNonChineseText(item.content) ? item.structuredReply?.translation : undefined,
+    translation: containsNonChineseText(item.content) ? normalizeVoiceTranslation(item.structuredReply?.translation) : undefined,
     redPacketAction: item.structuredReply?.redPacketAction,
   }));
   const innerVoices: Array<{ message: Message; member: Character; content: InlineInnerVoicePayload }> = [];

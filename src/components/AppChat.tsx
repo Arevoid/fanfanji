@@ -47,7 +47,7 @@ import { enqueueProactiveAction, takePendingProactiveAction } from "../features/
 import { evaluateProactiveAction } from "../features/chat/services/proactiveActionPolicy";
 import { createVoiceCallUserMessage } from "../features/chat/services/voiceCallMessage";
 import { createChatMessageDeliveryHandler } from "../features/chat/services/chatMessageDelivery";
-import { getVoiceMessagePreview } from "../features/chat/services/voiceMessageContent";
+import { getVoiceMessagePreview, normalizeVoiceTranslation } from "../features/chat/services/voiceMessageContent";
 import { recordCharacterBlockReaction } from "../features/characterPhone/characterPhoneBlockReaction";
 import { generateCharacterBlockAiResponse } from "../features/characterPhone/characterBlockAi";
 import {
@@ -9101,6 +9101,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               // longer create these fragments in the first place.
               if (msg.sender === "character" && isLegacyMcpMediaFragment(msg.content)) return null;
               const systemNoticeType = getSystemNoticeType(msg);
+              const translationText = normalizeVoiceTranslation(msg.translation);
               const previousVisibleMessage = idx > 0 ? visibleChatMessages[idx - 1] : undefined;
               const interveningOfflineStories = getOfflineTimelineStoriesBetween(previousVisibleMessage?.timestamp, msg.timestamp);
               // Calculate WeChat timestamp divider
@@ -9674,13 +9675,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               </button>
                             </div>
 
-                            {msg.translation && !collapsedTranslations.has(msg.id) && (
+                            {translationText && !collapsedTranslations.has(msg.id) && (
                               <div className={`chat-message--voice-translation px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative max-w-[240px] ${
                                 isSelf
                                   ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
                                   : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100")
                               } ${isSelf ? "self-end" : "self-start"}`}>
-                                <span className="whitespace-pre-wrap">{msg.translation}</span>
+                                <span className="whitespace-pre-wrap">{translationText}</span>
                                 <button
                                   type="button"
                                   onClick={() => setCollapsedTranslations((previous) => new Set(previous).add(msg.id))}
@@ -9742,11 +9743,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               </>
                             ) : <div className="text-left" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}><ChatTextWithLinks text={msg.content} /></div>;
                           })()}
-                          {msg.translation && !collapsedTranslations.has(msg.id) && (
+                          {translationText && !collapsedTranslations.has(msg.id) && (
                             <>
                               <div className={`my-1.5 border-t border-dashed ${isSelf ? "border-white/20" : "border-stone-200"}`} />
                               <div className={`flex items-start gap-2 text-left text-[11px] leading-relaxed ${isSelf ? "text-white/90" : "text-stone-500"}`}>
-                                <span className="min-w-0 flex-1 whitespace-pre-wrap">{msg.translation}</span>
+                                <span className="min-w-0 flex-1 whitespace-pre-wrap">{translationText}</span>
                                 <button
                                   type="button"
                                   onClick={() => setCollapsedTranslations((previous) => new Set(previous).add(msg.id))}

@@ -42,6 +42,12 @@ assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句\n[15:10
 assert.deepEqual(createDirectReplyCandidates(candidateContext("第一句\n[消息发送于 2026-08-02 18:11]\n第二句\n[消息发送于 2026-08-02 18:11]")).messages.map((message) => message.content), ["第一句", "第二句"]);
 assert.equal(createDirectReplyCandidates(candidateContext("引用回复")).messages[0].content, "引用回复");
 assert.deepEqual(createDirectReplyCandidates(candidateContext("阿砚：我到了\n饭饭：那你进来吧\n阿砚：好")).messages.map((message) => message.content), ["我到了"], "invented user turns and the character's self-answer must be discarded");
+const translatedVoice = createDirectReplyCandidates({
+  ...candidateContext("Hello"),
+  translationText: "[语音]|4|你好",
+  transformBubble: (text) => `[语音]|2|${text}`,
+});
+assert.equal(translatedVoice.messages[0].translation, "你好", "voice translation wrappers are not persisted");
 assert.equal(request.systemInstruction.includes("worldbook"), true);
 assert.equal(request.systemInstruction.includes("memory"), true);
 assert.equal(request.systemInstruction.includes("time"), true);

@@ -51,3 +51,12 @@ export function getVoiceMessagePreview(content: string, fallbackDuration?: numbe
 export const isVoiceMessageContent = (content: string, isVoiceMessage = false, hasAudioUrl = false): boolean => (
   isVoiceMessage || hasAudioUrl || content.trim().startsWith("[语音")
 );
+
+/** Removes a legacy or model-copied voice wrapper from a translation value. */
+export const normalizeVoiceTranslation = (translation: string | undefined): string | undefined => {
+  const normalized = translation?.trim();
+  if (!normalized) return undefined;
+  if (!normalized.startsWith("[语音")) return normalized;
+  const transcript = getVoiceMessagePreview(normalized).transcript;
+  return transcript || undefined;
+};

@@ -3,6 +3,7 @@ import { cleanAiReplyText, normalizeDirectReplyBubbles, normalizePaymentMarkup, 
 import { ensureExplicitStickerDelivery, suppressCharacterEmoji } from "./characterEmojiPolicy";
 import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatServiceTypes";
 import { containsNonChineseText } from "../../../utils/textLanguage";
+import { normalizeVoiceTranslation } from "./voiceMessageContent";
 
 export function createDirectReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
   const replyText = ensureExplicitStickerDelivery(context.rawText, context.requestedStickerMessage);
@@ -27,7 +28,7 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
       replyBatchId: context.replyBatchId,
       context: context.context,
       content: context.transformBubble ? context.transformBubble(bubbleText, index) : bubbleText,
-      translation: containsNonChineseText(bubbleText) ? translatedBubbles[index] : undefined,
+      translation: containsNonChineseText(bubbleText) ? normalizeVoiceTranslation(translatedBubbles[index]) : undefined,
       timestamp: context.currentTime(index),
     })),
   };
