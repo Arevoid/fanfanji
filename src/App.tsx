@@ -4425,15 +4425,17 @@ export default function App() {
         :root, .phone-screen-container {
           --app-icon-radius: ${settings.iconBorderRadius !== undefined ? settings.iconBorderRadius : 35}%;
           --app-icon-bg-opacity: ${(settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100) / 100};
-          --app-icon-border-width: ${settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1}px;
-          --app-icon-border-opacity: ${(settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100) / 100};
+          --app-icon-border-width: ${settings.iconBorderEnabled === false ? 0 : (settings.iconBorderWidth !== undefined ? settings.iconBorderWidth : 1)}px;
+          --app-icon-border-opacity: ${settings.iconBorderEnabled === false ? 0 : ((settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100) / 100)};
           --app-default-icon-color: ${settings.desktopIconMode === "dark" ? "#1d1d1f" : "#f3f3f5"};
           --app-default-icon-surface: ${hexToRgba(settings.desktopIconMode === "dark" ? "#ffffff" : "#17181b", settings.iconBgOpacity !== undefined ? settings.iconBgOpacity : 100)};
-          --app-default-icon-border: ${settings.desktopIconMode === "dark" ? "#e5e5e2" : "#2d2e33"};
+          --app-default-icon-border: ${hexToRgba(settings.desktopIconMode === "dark" ? "#e5e5e2" : "#2d2e33", settings.iconBorderEnabled === false ? 0 : (settings.iconBorderOpacity !== undefined ? settings.iconBorderOpacity : 100))};
           --desktop-app-text-color: ${settings.desktopAppTextColor || "#000000"};
         }
         .phone-screen-container .app-icon-surface {
           background-color: var(--app-default-icon-surface) !important;
+          border-width: var(--app-icon-border-width, 1px) !important;
+          border-style: solid !important;
           border-color: var(--app-default-icon-border) !important;
           color: var(--app-default-icon-color) !important;
         }
@@ -4462,7 +4464,7 @@ export default function App() {
         .phone-screen-container button.bg-white[style*="--app-icon-radius"]:not(.app-icon-surface) {
           background-color: rgba(255, 255, 255, var(--app-icon-bg-opacity, 1)) !important;
           border-width: var(--app-icon-border-width, 1px) !important;
-          border-color: rgba(240, 240, 243, var(--app-icon-border-opacity, 1)) !important;
+          border-color: var(--app-default-icon-border) !important;
           border-style: solid !important;
         }
         body, button, input, textarea, select, div, p, span, h1, h2, h3, h4, h5, h6 {
@@ -4934,6 +4936,16 @@ export default function App() {
         }
 
         ${settings.globalCss || ""}
+        /* The appearance setting must win over utility classes and custom/theme CSS. */
+        .phone-screen-container .app-icon-surface,
+        .phone-screen-container div[style*="--app-icon-radius"]:not(.app-icon-surface),
+        .phone-screen-container button[style*="--app-icon-radius"]:not(.app-icon-surface),
+        .phone-screen-container div.bg-white[style*="--app-icon-radius"]:not(.app-icon-surface),
+        .phone-screen-container button.bg-white[style*="--app-icon-radius"]:not(.app-icon-surface) {
+          border-width: var(--app-icon-border-width, 1px) !important;
+          border-style: solid !important;
+          border-color: var(--app-default-icon-border) !important;
+        }
         @keyframes slide-up {
           from { transform: translateY(100%); opacity: 0; }
           to { transform: translateY(0); opacity: 1; }
