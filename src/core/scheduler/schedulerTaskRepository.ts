@@ -3,6 +3,16 @@ import { storageKeys } from "../storage/storageKeys";
 import { getSchedulerNow } from "./schedulerClock";
 import { announceSchedulerLease, announceSchedulerLeaseRelease, hasActivePeerLease } from "./schedulerLeaseChannel";
 
+const RUNTIME_STORAGE_WRITE_OPTIONS = {
+  notifyOnFailure: false,
+  source: "background-scheduler",
+} as const;
+
+// When the browser refuses LocalStorage writes, keep a short-lived lease in
+// this tab so a running task can renew and release it normally. BroadcastChannel
+// still provides the best-effort cross-tab advisory signal in that mode.
+const volatileLeases = new Map<string, BackgroundTaskLease>();
+
 export type BackgroundTaskPayloadValue = string | number | boolean | null | BackgroundTaskPayloadValue[] | { [key: string]: BackgroundTaskPayloadValue };
 
 export interface PersistedBackgroundTaskSnapshot {
@@ -84,7 +94,7 @@ export function loadRecoverableBackgroundTaskSnapshots(now = getSchedulerNow()):
 export function savePersistedBackgroundTaskSnapshot(snapshot: PersistedBackgroundTaskSnapshot): boolean {
   const snapshots = loadPersistedBackgroundTaskSnapshots().filter((entry) => entry.id !== snapshot.id);
   snapshots.push({ ...snapshot });
-  const result = writeJson(storageKeys.backgroundSchedulerTasks, snapshots.slice(-100));
+  const result = writeJson(storageKeys.backgroundSchedulerTasks, snapshots.slice(-100), RUNTIME_STORAGE_WRITE_OPTIONS);
   return result.success;
 }
 
@@ -104,10 +114,24 @@ export function acquireBackgroundTaskLease(id: string, ownerId: string, now = ge
   if (hasActivePeerLease(id, ownerId, now)) return false;
   if (typeof window === "undefined" || !window.localStorage || typeof window.localStorage.getItem !== "function") return true;
   const active = readLeases().filter((lease) => lease.expiresAt > now && lease.id !== id);
-  const current = readLeases().find((lease) => lease.id === id);
+  const current = readLeases().find((lease) => lease.id === id) || volatileLeases.get(id);
+  if (current && current.expiresAt <= now) volatileLeases.delete(id);
   if (current && current.ownerId !== ownerId && current.expiresAt > now) return false;
-  active.push({ id, ownerId, expiresAt: now + Math.max(1000, leaseMs) });
-  if (!writeJson(storageKeys.backgroundSchedulerLeases, active).success) return false;
+  const expiresAt = now + Math.max(1000, leaseMs);
+  active.push({ id, ownerId, expiresAt });
+  const persisted = writeJson(storageKeys.backgroundSchedulerLeases, active, RUNTIME_STORAGE_WRITE_OPTIONS);
+  if (!persisted.success) {
+    // Scheduler metadata is recoverable runtime state, not user content. If the
+    // LocalStorage bucket is full, keep the task alive using the advisory
+    // BroadcastChannel lease instead of blocking all background work.
+    if (persisted.error === "quota") {
+      volatileLeases.set(id, { id, ownerId, expiresAt });
+      announceSchedulerLease(id, ownerId, expiresAt);
+      return true;
+    }
+    return false;
+  }
+  volatileLeases.delete(id);
   // localStorage has no transaction primitive; verify our write won the last
   // read-after-write race instead of claiming a lease optimistically.
   const acquired = readLeases().some((lease) => lease.id === id && lease.ownerId === ownerId && lease.expiresAt > now);
@@ -119,11 +143,21 @@ export function acquireBackgroundTaskLease(id: string, ownerId: string, now = ge
 export function renewBackgroundTaskLease(id: string, ownerId: string, now = getSchedulerNow(), leaseMs = 30_000): boolean {
   if (typeof window === "undefined" || !window.localStorage || typeof window.localStorage.getItem !== "function") return true;
   const leases = readLeases();
-  const current = leases.find((lease) => lease.id === id && lease.ownerId === ownerId);
+  const current = leases.find((lease) => lease.id === id && lease.ownerId === ownerId)
+    || volatileLeases.get(id);
   if (!current || current.expiresAt <= now) return false;
   const expiresAt = now + Math.max(1000, leaseMs);
   const updated = leases.map((lease) => lease.id === id && lease.ownerId === ownerId ? { ...lease, expiresAt } : lease);
-  if (!writeJson(storageKeys.backgroundSchedulerLeases, updated).success) return false;
+  const persisted = writeJson(storageKeys.backgroundSchedulerLeases, updated, RUNTIME_STORAGE_WRITE_OPTIONS);
+  if (!persisted.success) {
+    if (persisted.error === "quota") {
+      volatileLeases.set(id, { id, ownerId, expiresAt });
+      announceSchedulerLease(id, ownerId, expiresAt);
+      return true;
+    }
+    return false;
+  }
+  volatileLeases.delete(id);
   const renewed = readLeases().some((lease) => lease.id === id && lease.ownerId === ownerId && lease.expiresAt > now);
   if (renewed) announceSchedulerLease(id, ownerId, expiresAt);
   return renewed;
@@ -132,7 +166,9 @@ export function renewBackgroundTaskLease(id: string, ownerId: string, now = getS
 export function releaseBackgroundTaskLease(id: string, ownerId: string): boolean {
   if (typeof window === "undefined" || !window.localStorage || typeof window.localStorage.getItem !== "function") return true;
   const remaining = readLeases().filter((lease) => !(lease.id === id && lease.ownerId === ownerId));
-  const released = writeJson(storageKeys.backgroundSchedulerLeases, remaining).success;
+  const persisted = writeJson(storageKeys.backgroundSchedulerLeases, remaining, RUNTIME_STORAGE_WRITE_OPTIONS);
+  const released = persisted.success || persisted.error === "quota";
+  volatileLeases.delete(id);
   if (released) announceSchedulerLeaseRelease(id, ownerId);
   return released;
 }

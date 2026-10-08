@@ -45,7 +45,7 @@ export function StorageDiagnosticsCard({
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">本地存储诊断</h3>
-            <p className="mt-1 text-[10px] leading-relaxed text-slate-400">完整聊天、角色和线下故事优先保存在 IndexedDB，不再重复占用 LocalStorage。</p>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-400">聊天和线下故事迁移后会先保留可验证的旧副本；设置、世界书、关系和运行时状态仍可能使用 LocalStorage。</p>
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={onRefresh} className="rounded-[10px] bg-slate-100 px-3 py-2 text-[10px] font-bold text-slate-600">检查空间</button>
@@ -55,6 +55,8 @@ export function StorageDiagnosticsCard({
         {diagnostics && (
           <div className="rounded-[12px] bg-slate-50 p-3 text-[10px] text-slate-600 space-y-1">
             <div>LocalStorage：{formatStorageBytes(diagnostics.localStorageBytes)}（有独立容量上限；下方状态仅表示浏览器总配额）</div>
+            <div>可清理的聊天/线下旧副本：{formatStorageBytes(diagnostics.retainedContentCopyBytes)}（需先确认 IndexedDB 条目库可读）</div>
+            <div>运行时元数据：{formatStorageBytes(diagnostics.runtimeMetadataBytes)}（调度器状态，不是聊天或角色资料）</div>
             <div>浏览器总占用：{diagnostics.usage === undefined ? "不可用" : formatStorageBytes(diagnostics.usage)} / {diagnostics.quota === undefined ? "未知" : formatStorageBytes(diagnostics.quota)}</div>
             <div>应用版本：v{appVersion}</div>
             <div>数据版本：{diagnostics.dataSchemaVersion || "未设置（兼容模式）"}</div>

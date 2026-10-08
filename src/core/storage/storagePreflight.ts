@@ -225,6 +225,12 @@ export async function runStoragePreflight(options: StoragePreflightOptions = {})
     createModuleSummary("messages", "聊天消息", [indexedMessages, localMessages, legacyMessages]),
     createModuleSummary("offlineStories", "线下故事", [indexedOfflineStories, localOfflineStories]),
   ];
+  if (isMessageEntryStoreEnabled() && (localMessages.bytes > 0 || legacyMessages.bytes > 0)) {
+    warnings.push("聊天已启用 IndexedDB，但 LocalStorage 仍保留旧副本；确认条目库可读后可在存储诊断中清理。");
+  }
+  if (isOfflineStoryEntryStoreEnabled() && localOfflineStories.bytes > 0) {
+    warnings.push("线下故事已启用 IndexedDB，但 LocalStorage 仍保留旧副本；确认条目库可读后可在存储诊断中清理。");
+  }
   const invalidCount = modules.reduce((total, module) => total + module.sources.reduce((sum, source) => sum + source.invalidRecords + source.duplicateIds, 0), 0);
   if (invalidCount > 0) warnings.push("发现重复 ID 或无法解析的记录，迁移前需要先导出备份并人工处理。未自动修复或删除任何数据。");
 

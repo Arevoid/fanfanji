@@ -5,9 +5,17 @@ const LZString = ((LZStringModule as typeof LZStringModule & { default?: typeof 
 const COMPRESSED_SETTINGS_PREFIX = "lz-settings-v1:";
 export const STORAGE_WRITE_FAILURE_EVENT = "fanfanji-storage-write-failed";
 
-function notifyJsonWriteFailure(key: string, error: StorageWriteResult["error"]): void {
+export interface StorageWriteOptions {
+  /** Runtime/cache writes can opt out of the user-data warning banner. */
+  notifyOnFailure?: boolean;
+  /** Optional diagnostic source for consumers that record non-blocking failures. */
+  source?: string;
+}
+
+function notifyJsonWriteFailure(key: string, error: StorageWriteResult["error"], options?: StorageWriteOptions): void {
+  if (options?.notifyOnFailure === false) return;
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function" || typeof CustomEvent === "undefined") return;
-  window.dispatchEvent(new CustomEvent(STORAGE_WRITE_FAILURE_EVENT, { detail: { key, error } }));
+  window.dispatchEvent(new CustomEvent(STORAGE_WRITE_FAILURE_EVENT, { detail: { key, error, source: options?.source } }));
 }
 
 /** Decodes the versioned compact representation of the settings JSON. */
@@ -132,7 +140,7 @@ export function writeString(key: string, value: string): StorageWriteResult {
   return { success: false, error: "verification" };
 }
 
-export function writeJson<T>(key: string, value: T): StorageWriteResult {
+export function writeJson<T>(key: string, value: T, options?: StorageWriteOptions): StorageWriteResult {
   try {
     const serialized = JSON.stringify(value);
     if (serialized === undefined) {
@@ -141,11 +149,11 @@ export function writeJson<T>(key: string, value: T): StorageWriteResult {
     }
     JSON.parse(serialized);
     const result = writeString(key, encodeJsonStorageText(key, serialized));
-    if (!result.success) notifyJsonWriteFailure(key, result.error);
+    if (!result.success) notifyJsonWriteFailure(key, result.error, options);
     return result;
   } catch (error) {
     console.warn(`[storage] Failed to serialize "${key}".`, error);
-    notifyJsonWriteFailure(key, "serialize");
+    notifyJsonWriteFailure(key, "serialize", options);
     return { success: false, error: "serialize" };
   }
 }

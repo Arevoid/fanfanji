@@ -33,7 +33,10 @@ export function getSchedulerNow(wallClock = Date.now()): number {
         typeof previous?.observedWallClock === "number" ? previous.observedWallClock : 0,
       ),
       logicalNow,
-    } satisfies SchedulerClockState);
+    } satisfies SchedulerClockState, {
+      notifyOnFailure: false,
+      source: "background-scheduler",
+    });
   }
   return logicalNow;
 }

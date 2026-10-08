@@ -25,6 +25,10 @@ export interface LocalStorageUsageEntry {
 export interface StorageDiagnostics {
   localStorageBytes: number;
   localStorageEntries: LocalStorageUsageEntry[];
+  /** Bytes in legacy content copies that are safe to remove only after IDB verification. */
+  retainedContentCopyBytes: number;
+  /** Bytes used by non-user-facing runtime metadata such as scheduler state. */
+  runtimeMetadataBytes: number;
   usage?: number;
   quota?: number;
   persisted?: boolean;
@@ -204,6 +208,18 @@ const HEALTH_COLLECTION_KEYS = [
   storageKeys.forumProfiles,
   storageKeys.imageGenerationRecords,
 ] as const;
+
+const RETAINED_CONTENT_COPY_KEYS = new Set<string>([
+  storageKeys.messages,
+  storageKeys.legacyMessages,
+  storageKeys.offlineStories,
+]);
+
+const RUNTIME_METADATA_KEYS = new Set<string>([
+  storageKeys.backgroundSchedulerTasks,
+  storageKeys.backgroundSchedulerLeases,
+  storageKeys.backgroundSchedulerClock,
+]);
 
 function inspectStorageHealth(storage: Storage): StorageHealthReport {
   const findings: StorageHealthFinding[] = [];
@@ -639,6 +655,12 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
   }
   entries.sort((left, right) => right.bytes - left.bytes);
   const localStorageBytes = entries.reduce((total, entry) => total + entry.bytes, 0);
+  const retainedContentCopyBytes = entries
+    .filter((entry) => RETAINED_CONTENT_COPY_KEYS.has(entry.key))
+    .reduce((total, entry) => total + entry.bytes, 0);
+  const runtimeMetadataBytes = entries
+    .filter((entry) => RUNTIME_METADATA_KEYS.has(entry.key))
+    .reduce((total, entry) => total + entry.bytes, 0);
   const estimate = typeof navigator !== "undefined" && navigator.storage?.estimate
     ? await navigator.storage.estimate()
     : {};
@@ -663,6 +685,8 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
   return {
     localStorageBytes,
     localStorageEntries: entries,
+    retainedContentCopyBytes,
+    runtimeMetadataBytes,
     usage,
     quota,
     persisted,
