@@ -86,6 +86,7 @@ import { McpSettingsPanel } from "../features/mcp/components/McpSettingsPanel";
 import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
 import { DetectionLogsPanel } from "../features/settings/components/DetectionLogsPanel";
 import { sortIdentitiesForDisplay } from "../domain/relationship/characterRelationship";
+import { getTtsEmotionCapability } from "../utils/ttsEmotion";
 import {
   WELCOME_WIDGET_ID,
   ensureWelcomeWidgetProfile,
@@ -514,6 +515,7 @@ export default function AppSettings({
     onSaveSettings,
     voiceState: voiceConfigState,
   });
+  const ttsEmotionCapability = getTtsEmotionCapability(ttsProvider, ttsProvider === "minimax" ? minimaxModel : ttsProvider === "mossland" ? mosslandModel : elevenlabsModel);
 
   const { handleSave, handleSaveAsync } = useSettingsScopedSave({ onSaveSettings, onSaveSettingsAsync });
 
@@ -2905,6 +2907,7 @@ export default function AppSettings({
                       className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-bold"
                     >
                       <option value="speech-2.8-hd">speech-2.8-hd (超高解析度精品推荐)</option>
+                      <option value="speech-2.8-turbo">speech-2.8-turbo (低延迟)</option>
                       <option value="speech-2">speech-2 (高性价比第二代)</option>
                       <option value="speech-01-24h">speech-01-24h (24小时稳定流式)</option>
                     </select>
@@ -3019,6 +3022,8 @@ export default function AppSettings({
                       <label className="block text-xs font-semibold text-slate-500 mb-1">合成模型 (TTS Model)</label>
                       <select value={mosslandModel} onChange={(event) => setMosslandModel(event.target.value)} className="w-full px-3 py-2 rounded-[8px] bg-[var(--input-bg)] border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] text-xs font-bold">
                         <option value="moss-tts">moss-tts</option>
+                        <option value="moss-tts-1.5-flash">moss-tts-1.5-flash (快速)</option>
+                        <option value="moss-tts-1.0-pro">moss-tts-1.0-pro (表现力)</option>
                       </select>
                     </div>
                   </div>
@@ -3066,42 +3071,46 @@ export default function AppSettings({
                         <option value="eleven_v4_turbo">Eleven v4 Turbo（低延迟）</option>
                       </select>
                     </div>
-                    <div className="rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-3 space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <span className="block text-xs font-bold text-[var(--text-primary)]">情绪语音</span>
-                          <span className="block mt-0.5 text-[10px] leading-relaxed text-[var(--text-tertiary)]">根据角色台词和上下文调整语气；只影响音频，不会把标签显示在聊天里。</span>
-                        </div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={ttsEmotionEnabled}
-                          aria-label="情绪语音"
-                          onClick={() => setTtsEmotionEnabled((enabled) => !enabled)}
-                          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${ttsEmotionEnabled ? "bg-[var(--button-primary-bg)]" : "bg-[var(--surface-muted)] border border-[var(--border)]"}`}
-                        >
-                          <span className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${ttsEmotionEnabled ? "translate-x-5" : "translate-x-0"}`} />
-                        </button>
-                      </div>
-                      <label className="block text-[10px] font-semibold text-[var(--text-tertiary)]">
-                        表现强度
-                        <select
-                          value={ttsEmotionIntensity}
-                          onChange={(event) => setTtsEmotionIntensity(event.target.value as "natural" | "clear" | "strong")}
-                          className="mt-1 w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-2.5 py-2 text-xs font-bold text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)]"
-                        >
-                          <option value="natural">自然</option>
-                          <option value="clear">明显</option>
-                          <option value="strong">强烈</option>
-                        </select>
-                      </label>
-                      {ttsEmotionEnabled && !["eleven_v3", "eleven_v4", "eleven_v4_turbo"].includes(elevenlabsModel) && (
-                        <p className="text-[10px] leading-relaxed text-amber-700">当前模型不支持情绪标签，保存后仍会使用普通语音。</p>
-                      )}
-                    </div>
                   </div>
                 </div>
               )}
+
+              <div className="space-y-3 border-t border-[var(--divider)] px-4 py-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="block text-xs font-bold text-[var(--text-primary)]">情绪语音</span>
+                    <span className="mt-0.5 block text-[10px] leading-relaxed text-[var(--text-tertiary)]">根据角色台词和上下文调整语气；只影响音频，不会把标签显示在聊天里。</span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={ttsEmotionEnabled}
+                    aria-label="情绪语音"
+                    onClick={() => setTtsEmotionEnabled((enabled) => !enabled)}
+                    className={`relative mt-0.5 inline-flex h-7 w-12 min-w-[48px] shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] ${ttsEmotionEnabled ? "bg-[var(--button-primary-bg)]" : "bg-[var(--surface-muted)] border border-[var(--border)]"}`}
+                  >
+                    <span className={`inline-block h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${ttsEmotionEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                  </button>
+                </div>
+                <label className="block text-[10px] font-semibold text-[var(--text-tertiary)]">
+                  表现强度
+                  <select
+                    value={ttsEmotionIntensity}
+                    onChange={(event) => setTtsEmotionIntensity(event.target.value as "natural" | "clear" | "strong")}
+                    className="mt-1 min-h-[44px] w-full rounded-[8px] border border-[var(--border)] bg-[var(--input-bg)] px-2.5 py-2 text-xs font-bold text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)]"
+                  >
+                    <option value="natural">自然</option>
+                    <option value="clear">明显</option>
+                    <option value="strong">强烈</option>
+                  </select>
+                </label>
+                <p className={`text-[10px] leading-relaxed ${ttsEmotionCapability === "none" ? "text-amber-700" : "text-[var(--text-tertiary)]"}`}>
+                  {ttsEmotionCapability === "native" && "当前模型支持原生情绪标签，表现最完整。"}
+                  {ttsEmotionCapability === "interjection" && "当前 MiniMax 2.8 模型使用语气插入词（如叹气、轻笑）增强表现。"}
+                  {ttsEmotionCapability === "approximate" && "当前 Mossland 模型使用标点和停顿做轻量语气近似，不改变角色内容。"}
+                  {ttsEmotionCapability === "none" && "当前模型不支持情绪表现，开启后仍会使用普通语音。"}
+                </p>
+              </div>
               </section>
 
               {/* Action Save Button */}

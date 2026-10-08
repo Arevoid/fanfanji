@@ -11,7 +11,15 @@ import { getTtsCacheKey, splitTextIntoChunks } from "../src/utils/minimaxTts";
 assert.equal(supportsTtsEmotion("elevenlabs", "eleven_v3"), true);
 assert.equal(supportsTtsEmotion("elevenlabs", "eleven_v4_turbo"), true);
 assert.equal(supportsTtsEmotion("elevenlabs", "eleven_multilingual_v2"), false);
-assert.equal(supportsTtsEmotion("minimax", "eleven_v4"), false);
+assert.equal(supportsTtsEmotion("minimax", "speech-2.8-hd"), true);
+assert.equal(supportsTtsEmotion("minimax", "speech-2"), false);
+assert.equal(supportsTtsEmotion("mossland", "moss-tts-1.5-flash"), true);
+
+assert.equal(inferTtsEmotion("真的假的！居然是你。"), "surprised");
+assert.equal(inferTtsEmotion("放心吧，我会陪着你。"), "reassuring");
+assert.equal(inferTtsEmotion("被你这样夸，我有点害羞。"), "embarrassed");
+assert.equal(inferTtsEmotion("我等了这么久，真的很失望。"), "disappointed");
+assert.equal(inferTtsEmotion("我已经迫不及待了！"), "excited");
 
 assert.equal(inferTtsEmotion("你怎么现在才告诉我，真的很担心。"), "anxious");
 assert.equal(inferTtsEmotion("太好了！你真的来了。"), "happy");
@@ -35,6 +43,24 @@ assert.equal(
     emotionEnabled: true,
   }),
   "太好了！",
+);
+assert.equal(
+  buildTtsSynthesisText("太好了！", {
+    provider: "minimax",
+    model: "speech-2.8-hd",
+    emotion: "happy",
+    emotionEnabled: true,
+  }),
+  "(chuckle) 太好了！",
+);
+assert.equal(
+  buildTtsSynthesisText("我真的很难过。", {
+    provider: "mossland",
+    model: "moss-tts-1.5-flash",
+    emotion: "sad",
+    emotionEnabled: true,
+  }),
+  "……我真的很难过。",
 );
 assert.equal(cleanTtsText("[happy] 太好了！", false), "太好了！");
 assert.equal(cleanTtsText("[happy] 太好了！", true), "[happy] 太好了！");

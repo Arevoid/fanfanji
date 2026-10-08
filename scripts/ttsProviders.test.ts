@@ -142,6 +142,24 @@ try {
   });
   assert.equal(minimaxBlob.type, "audio/mpeg");
 
+  const minimaxEmotionBlob = await fetchSingleTtsSegment("太好了！", {
+    ...minimaxOptions,
+    emotion: "happy",
+    emotionEnabled: true,
+  });
+  assert.equal(capturedUrl, "/api/minimax-tts");
+  assert.equal(JSON.parse(String(capturedInit?.body)).text, "(chuckle) 太好了！");
+  assert.equal(minimaxEmotionBlob.type, "audio/mpeg");
+
+  const mosslandEmotionBlob = await fetchSingleTtsSegment("我真的很难过。", {
+    ...buildCharacterTtsOptions({ ...mosslandSettings, mosslandModel: "moss-tts-1.5-flash" }, { mosslandVoiceId: "moss-voice" }),
+    emotion: "sad",
+    emotionEnabled: true,
+  });
+  assert.equal(capturedUrl, "/api/mossland-tts");
+  assert.equal(JSON.parse(String(capturedInit?.body)).text, "……我真的很难过。");
+  assert.equal(mosslandEmotionBlob.type, "audio/mpeg");
+
   const elevenLabsBlob = await fetchSingleTtsSegment("你好", elevenLabsOptions);
   assert.equal(capturedUrl, "/api/elevenlabs-tts", "ElevenLabs must use the app proxy by default");
   assert.deepEqual(JSON.parse(String(capturedInit?.body)), {
