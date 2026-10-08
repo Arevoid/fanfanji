@@ -12,5 +12,6 @@ assert.match(hook, /text: sourceText/);
 assert.match(hook, /onUpdateMessage\(msg\.id, \{ translation: translatedText \}, msg\)/);
 assert.match(hook, /翻译结果与原文相同/);
 assert.match(hook, /翻译失败，请检查 API 配置/);
+assert.match(appChat, /voiceTranscribed\[msg\.id\] && translationText/);
 
 console.log("PASS chat message translation is isolated behind a behavior-preserving hook");

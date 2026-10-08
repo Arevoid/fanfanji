@@ -9662,7 +9662,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation(); // prevent playing the audio
-                                  setVoiceTranscribed((prev) => ({ ...prev, [msg.id]: !prev[msg.id] }));
+                                  setVoiceTranscribed((prev) => {
+                                    const nextValue = !prev[msg.id];
+                                    if (nextValue) {
+                                      setCollapsedTranslations((collapsed) => {
+                                        if (!collapsed.has(msg.id)) return collapsed;
+                                        const next = new Set(collapsed);
+                                        next.delete(msg.id);
+                                        return next;
+                                      });
+                                    }
+                                    return { ...prev, [msg.id]: nextValue };
+                                  });
                                 }}
                                 className={`w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold border transition-all shrink-0 active:scale-90 shadow-sm ${
                                   voiceTranscribed[msg.id]
@@ -9675,21 +9686,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               </button>
                             </div>
 
-                            {translationText && !collapsedTranslations.has(msg.id) && (
+                            {voiceTranscribed[msg.id] && translationText && !collapsedTranslations.has(msg.id) && (
                               <div className={`chat-message--voice-translation px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed shadow-sm cv-bubble message-content message-bubble relative max-w-[240px] ${
                                 isSelf
                                   ? (isFloatingCute ? "bg-[#f2f2f2] text-[#222] border border-slate-300/60 chat-bubble-self" : "bg-blue-500 text-white chat-bubble-self")
                                   : (isFloatingCute ? "bg-white text-[#222] border border-slate-300/60 chat-bubble-other" : "bg-white text-slate-800 chat-bubble-other border border-slate-100")
                               } ${isSelf ? "self-end" : "self-start"}`}>
                                 <span className="whitespace-pre-wrap">{translationText}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => setCollapsedTranslations((previous) => new Set(previous).add(msg.id))}
-                                  className="ml-2 text-[10px] opacity-70 hover:opacity-100"
-                                  aria-label="收起翻译"
-                                >
-                                  收起
-                                </button>
                               </div>
                             )}
 
@@ -13607,8 +13610,19 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             {activeMenuMsg.content.startsWith("[语音") && (
               <button
                 onClick={() => {
-                  const msgId = activeMenuMsg.id;
-                  setVoiceTranscribed((prev) => ({ ...prev, [msgId]: !prev[msgId] }));
+                const msgId = activeMenuMsg.id;
+                  setVoiceTranscribed((prev) => {
+                    const nextValue = !prev[msgId];
+                    if (nextValue) {
+                      setCollapsedTranslations((collapsed) => {
+                        if (!collapsed.has(msgId)) return collapsed;
+                        const next = new Set(collapsed);
+                        next.delete(msgId);
+                        return next;
+                      });
+                    }
+                    return { ...prev, [msgId]: nextValue };
+                  });
                   setActiveMenuMsg(null);
                 }}
                 className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-indigo-600 transition-colors"
