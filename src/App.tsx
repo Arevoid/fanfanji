@@ -4636,15 +4636,6 @@ export default function App() {
           height: 20px;
           border-radius: 50% !important;
         }
-        .phone-screen-container [data-settings-shell] button[role="switch"].settings-emotion-toggle {
-          width: 48px;
-          height: 28px;
-          min-width: 48px;
-        }
-        .phone-screen-container [data-settings-shell] button[role="switch"].settings-emotion-toggle > span {
-          width: 24px;
-          height: 24px;
-        }
         .phone-screen-container [data-settings-shell] .settings-compact-toggle > span,
         .phone-screen-container [data-settings-shell] .settings-compact-toggle > div {
           width: 20px;

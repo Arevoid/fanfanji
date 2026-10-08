@@ -912,7 +912,7 @@ export default function AppWorldBook({
                   }`}
                 >
                   <span
-                    className={`pointer-events-none absolute left-0.5 top-0.5 inline-block h-4 w-4 transform rounded-full shadow-sm transition duration-200 ease-in-out ${
+                    className={`pointer-events-none absolute left-[1px] top-[1px] inline-block h-4 w-4 transform rounded-full shadow-sm transition duration-200 ease-in-out ${
                       isActive
                         ? "translate-x-4 bg-[var(--toggle-mono-on-thumb)]"
                         : "translate-x-0 bg-[var(--toggle-mono-off-thumb)]"
@@ -1165,7 +1165,7 @@ export default function AppWorldBook({
                                       title={isActive ? "已启用此词条" : "已禁用此词条"}
                                     >
                                       <span
-                                        className={`pointer-events-none absolute left-0.5 top-0.5 inline-block h-3 w-3 transform rounded-full shadow-sm transition duration-200 ease-in-out ${
+                                        className={`pointer-events-none absolute left-[1px] top-[1px] inline-block h-3 w-3 transform rounded-full shadow-sm transition duration-200 ease-in-out ${
                                           isActive
                                             ? "translate-x-3.5 bg-[var(--toggle-mono-on-thumb)]"
                                             : "translate-x-0 bg-[var(--toggle-mono-off-thumb)]"
