@@ -6,12 +6,19 @@ import { sanitizeCharacterActionText } from "../services/characterActionProtocol
 interface UseChatMessageTranslationOptions {
   settings: UserSettings;
   onUpdateMessage?: (messageId: string, patch: { translation: string }, original: Message) => void;
+  onTranslationReady?: (message: Message, translatedText: string) => void;
   showToast: (message: string) => void;
 }
 
-export function useChatMessageTranslation({ settings, onUpdateMessage, showToast }: UseChatMessageTranslationOptions) {
+export function useChatMessageTranslation({ settings, onUpdateMessage, onTranslationReady, showToast }: UseChatMessageTranslationOptions) {
   const handleTranslateMessage = (msg: Message) => {
     if (!onUpdateMessage) return;
+
+    if (msg.translation?.trim()) {
+      onTranslationReady?.(msg, msg.translation.trim());
+      showToast("已显示已有译文");
+      return;
+    }
     
     const isVoice = isVoiceMessageContent(msg.content, msg.isVoiceMessage === true, Boolean(msg.audioUrl));
     const sourceText = sanitizeCharacterActionText(
@@ -34,6 +41,7 @@ export function useChatMessageTranslation({ settings, onUpdateMessage, showToast
       const translatedText = sanitizeCharacterActionText(res?.text?.trim() || "");
       if (translatedText && translatedText !== sourceText) {
         onUpdateMessage(msg.id, { translation: translatedText }, msg);
+        onTranslationReady?.({ ...msg, translation: translatedText }, translatedText);
         showToast("翻译完成");
       } else if (translatedText) {
         showToast("翻译结果与原文相同");

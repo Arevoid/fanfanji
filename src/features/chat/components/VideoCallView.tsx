@@ -17,6 +17,7 @@ interface VideoCallViewProps {
   inputMode: VideoCallInputMode;
   transcript: readonly CallTranscriptItem[];
   scene: string;
+  sceneTranslation?: string;
   selfScene: string;
   sceneHistory: readonly VideoCallSceneEntry[];
   onInputTextChange: (value: string) => void;
@@ -27,6 +28,8 @@ interface VideoCallViewProps {
   onEnd: () => void;
   onCameraFrame: (imageDataUrl: string) => void;
   onRegenerateCallTurn: (item: CallTranscriptItem) => void;
+  onTranslateCallTranscript: (item: CallTranscriptItem) => void;
+  translatingTranscriptId?: string | null;
 }
 
 const formatDuration = (duration: number) => `${Math.floor(duration / 60).toString().padStart(2, "0")}:${(duration % 60).toString().padStart(2, "0")}`;
@@ -43,6 +46,7 @@ export function VideoCallView({
   inputMode,
   transcript,
   scene,
+  sceneTranslation,
   selfScene,
   sceneHistory,
   onInputTextChange,
@@ -53,6 +57,8 @@ export function VideoCallView({
   onEnd,
   onCameraFrame,
   onRegenerateCallTurn,
+  onTranslateCallTranscript,
+  translatingTranscriptId,
 }: VideoCallViewProps) {
   const [showSceneHistory, setShowSceneHistory] = useState(false);
   const [showSelfSceneTicker, setShowSelfSceneTicker] = useState(false);
@@ -378,6 +384,7 @@ export function VideoCallView({
 
           <div className="absolute inset-x-5 top-1/2 -translate-y-1/2 text-center text-[12px] leading-relaxed text-white/90 drop-shadow-lg">
             <p>{status === "connected" ? (sceneText || "等待对方画面...") : "视频通话准备中"}</p>
+            {status === "connected" && sceneTranslation?.trim() && <p className="mt-1 text-[11px] text-white/65">{sceneTranslation}</p>}
           </div>
 
           {status === "connected" && (transcript.length > 0 || isTyping) && <div ref={transcriptViewportRef} onScroll={handleTranscriptScroll} className="absolute inset-x-1 bottom-3 flex max-h-[34%] flex-col gap-1 overflow-y-auto overscroll-contain pr-1 text-[12px] leading-relaxed [scrollbar-width:thin]" data-video-call-subtitles>
@@ -407,6 +414,7 @@ export function VideoCallView({
                 onPointerCancel={clearTranscriptLongPress}
               >
                 <span className="mr-1 text-[10px] text-white/55">{isUserMessage ? "我：" : `${characterName}：`}</span>{getVideoCallDisplayText(item.content)}
+                {!isUserMessage && item.translation?.trim() && <p className="mt-1 border-t border-white/10 pt-1 text-[11px] text-white/65">{item.translation}</p>}
               </div>;
             })}
             {isTyping && <div className="flex w-fit items-center gap-1 rounded-lg bg-black/40 px-3 py-2 text-white/80 shadow-lg backdrop-blur-sm" aria-live="polite" aria-label="对方正在说话"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/80" style={{ animationDelay: "0ms" }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/80" style={{ animationDelay: "140ms" }} /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/80" style={{ animationDelay: "280ms" }} /></div>}
@@ -427,18 +435,37 @@ export function VideoCallView({
       >
         <button
           type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            regenerateTranscriptTurn(transcriptMenu.item);
-          }}
+            onClick={(event) => {
+              event.stopPropagation();
+              regenerateTranscriptTurn(transcriptMenu.item);
+            }}
           className="absolute inline-flex items-center gap-1 rounded-lg border border-white/20 bg-[#11131c]/95 px-2.5 py-1.5 text-[11px] text-white shadow-xl backdrop-blur-md"
-          style={{
-            left: Math.max(10, Math.min(window.innerWidth - 92, transcriptMenu.x - 12)),
+            style={{
+            left: Math.max(10, Math.min(window.innerWidth - 180, transcriptMenu.x - 12)),
             top: Math.max(10, Math.min(window.innerHeight - 54, transcriptMenu.y - 48)),
           }}
           aria-label="重回这轮视频通话回复"
         >
           <RefreshCw className="h-3 w-3" />重回
+        </button>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            const target = transcriptMenu.item;
+            setTranscriptMenu(null);
+            clearTranscriptLongPress();
+            onTranslateCallTranscript(target);
+          }}
+          disabled={translatingTranscriptId === transcriptMenu.item.id}
+          className="absolute inline-flex items-center gap-1 rounded-lg border border-white/20 bg-[#11131c]/95 px-2.5 py-1.5 text-[11px] text-white shadow-xl backdrop-blur-md disabled:opacity-50"
+          style={{
+            left: Math.max(10, Math.min(window.innerWidth - 180, transcriptMenu.x + 76)),
+            top: Math.max(10, Math.min(window.innerHeight - 54, transcriptMenu.y - 48)),
+          }}
+          aria-label="翻译这轮视频通话回复"
+        >
+          {translatingTranscriptId === transcriptMenu.item.id ? "翻译中…" : transcriptMenu.item.translation?.trim() ? "重新翻译" : "翻译"}
         </button>
       </div>}
 
@@ -469,7 +496,7 @@ export function VideoCallView({
             <button type="button" onClick={() => setShowSceneHistory(false)} className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white/75" aria-label="关闭历史画面"><X className="h-4 w-4" /></button>
           </div>
           <div className="max-h-[calc(62vh-72px)] space-y-2 overflow-y-auto p-3 [scrollbar-width:thin]">
-            {sceneHistory.length === 0 ? <p className="py-8 text-center text-xs text-white/50">暂时还没有画面记录</p> : sceneHistory.slice().reverse().map((entry) => <div key={entry.id} className="rounded-xl bg-white/10 px-3 py-2 text-xs leading-relaxed text-white/85"><p>{entry.content}</p><p className="mt-1 text-[10px] text-white/40">{new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p></div>)}
+            {sceneHistory.length === 0 ? <p className="py-8 text-center text-xs text-white/50">暂时还没有画面记录</p> : sceneHistory.slice().reverse().map((entry) => <div key={entry.id} className="rounded-xl bg-white/10 px-3 py-2 text-xs leading-relaxed text-white/85"><p>{entry.content}</p>{entry.translation?.trim() && <p className="mt-1 border-t border-white/10 pt-1 text-[11px] text-white/60">{entry.translation}</p>}<p className="mt-1 text-[10px] text-white/40">{new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p></div>)}
           </div>
         </div>
       </div>}

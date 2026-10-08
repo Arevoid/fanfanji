@@ -2,7 +2,12 @@ import type { Message, RedPacketPayload } from "../../../types";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
 
 export type ChatMessageVisualType = "image" | "text-image" | "sticker" | "red-packet" | "transfer" | "call" | "voice" | "file" | "location" | "text";
-export type CallTranscriptItem = Pick<Message, "id" | "sender" | "content" | "timestamp">;
+export interface CallTranscriptItem extends Pick<Message, "id" | "sender" | "content" | "timestamp"> {
+  /** Chinese translation generated for the spoken line, shown on demand or in call records. */
+  translation?: string;
+  /** Translation of the visual description in a video-call response. */
+  sceneTranslation?: string;
+}
 export type VoiceCallStatus = "completed" | "rejected" | "cancelled";
 export type VoiceCallDirection = "incoming" | "outgoing";
 

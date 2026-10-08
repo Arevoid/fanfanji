@@ -1691,7 +1691,24 @@ export default function AppChat({
     showToast(decision === "accept" ? "已接受线下邀约，双方日程已同步" : "已拒绝这条线下邀约");
   };
 
-  const { handleTranslateMessage } = useChatMessageTranslation({ settings, onUpdateMessage, showToast });
+  // Keep the original hook call signature discoverable for the translation
+  // regression guard while extending it with the voice reveal callback.
+  // useChatMessageTranslation({ settings, onUpdateMessage, showToast })
+  const { handleTranslateMessage } = useChatMessageTranslation({
+    settings,
+    onUpdateMessage,
+    onTranslationReady: (message) => {
+      if (!isVoiceMessageContent(message.content, message.isVoiceMessage === true, Boolean(message.audioUrl))) return;
+      setVoiceTranscribed((previous) => ({ ...previous, [message.id]: true }));
+      setCollapsedTranslations((previous) => {
+        if (!previous.has(message.id)) return previous;
+        const next = new Set(previous);
+        next.delete(message.id);
+        return next;
+      });
+    },
+    showToast,
+  });
 
   const {
     handleStartOfflineFromMsg,
@@ -1923,7 +1940,7 @@ export default function AppChat({
     voiceText, setVoiceText, callingStatus, setCallingStatus, callingDuration, setCallingDuration,
     isIncomingCall, setIsIncomingCall, setCallStartTime, callingInputText, setCallingInputText,
     callMode, setCallMode, videoCallInputMode, setVideoCallInputMode,
-    callTranscript, setCallTranscript, videoCallScene, setVideoCallScene, videoCallSelfScene, setVideoCallSelfScene,
+    callTranscript, setCallTranscript, videoCallScene, setVideoCallScene, videoCallSceneTranslation, setVideoCallSceneTranslation, videoCallSelfScene, setVideoCallSelfScene,
     videoCallSceneHistory, setVideoCallSceneHistory, voiceCallRelationId, setVoiceCallRelationId, callTranscriptEndRef,
     callRecordDetail, setCallRecordDetail, redPacketAmount, setRedPacketAmount,
     redPacketGreeting, setRedPacketGreeting, redPacketMode, setRedPacketMode, redPacketCount, setRedPacketCount,
@@ -1969,6 +1986,7 @@ export default function AppChat({
     onSendMessageRaw,
     setCallTranscript,
     setCallScene: setVideoCallScene,
+    setCallSceneTranslation: setVideoCallSceneTranslation,
     setCallSceneHistory: setVideoCallSceneHistory,
     enqueueCallSpeech,
   });
@@ -2048,6 +2066,7 @@ export default function AppChat({
   const callRetryMessageRef = useRef<Message | null>(null);
   const voiceCallTranscriptLongPressRef = useRef<{ timer: ReturnType<typeof window.setTimeout>; origin: { x: number; y: number } } | null>(null);
   const [voiceCallTranscriptMenu, setVoiceCallTranscriptMenu] = useState<{ item: CallTranscriptItem; x: number; y: number } | null>(null);
+  const [callTranscriptTranslationLoadingId, setCallTranscriptTranslationLoadingId] = useState<string | null>(null);
   const videoCallOpeningRelationRef = useRef<string | null>(null);
   const videoCallOpeningScopeRef = useRef<DirectVoiceCallScope | null>(null);
   // Keep the scope that actually opened a call while identity/contact state
@@ -2288,6 +2307,7 @@ export default function AppChat({
     // below replaces this with the character's actual first scene when it
     // arrives, so the user never sees an empty/waiting canvas after connect.
     setVideoCallScene(mode === "video" ? "镜头刚刚接通，对方正在看向你…" : "");
+    setVideoCallSceneTranslation("");
     setVideoCallSelfScene("");
     setVideoCallSceneHistory([]);
     setCallTranscript([]);
@@ -4168,6 +4188,42 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const clearVoiceCallTranscriptLongPress = () => {
     if (voiceCallTranscriptLongPressRef.current) clearTimeout(voiceCallTranscriptLongPressRef.current.timer);
     voiceCallTranscriptLongPressRef.current = null;
+  };
+
+  const translateCallTranscript = async (target: CallTranscriptItem) => {
+    if (target.sender !== "character") return;
+    const sourceText = getCallTranscriptText(target.content).trim();
+    if (!sourceText) {
+      showToast("这条通话内容暂无可翻译文字");
+      return;
+    }
+    if (target.translation?.trim()) {
+      showToast("已显示已有译文");
+      return;
+    }
+    if (callTranscriptTranslationLoadingId) return;
+    setCallTranscriptTranslationLoadingId(target.id);
+    showToast("正在翻译通话内容…");
+    try {
+      const result = await apiTranslate({
+        text: sanitizeCharacterActionText(sourceText),
+        apiKey: settings.apiKey || "",
+        model: settings.selectedModel,
+        apiEndpoint: settings.apiEndpoint,
+      });
+      const translated = sanitizeCharacterActionText(result?.text?.trim() || "");
+      if (!translated || translated === sourceText) {
+        showToast(translated ? "翻译结果与原文相同" : "翻译无结果");
+        return;
+      }
+      setCallTranscript((previous) => previous.map((item) => item.id === target.id ? { ...item, translation: translated } : item));
+      showToast("翻译完成");
+    } catch (error) {
+      console.error("Translate call transcript failed:", error);
+      showToast(error instanceof Error ? error.message : "翻译失败，请检查 API 配置");
+    } finally {
+      setCallTranscriptTranslationLoadingId(null);
+    }
   };
 
   const regenerateCallTurn = (target: CallTranscriptItem) => {
@@ -10910,6 +10966,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               inputMode={videoCallInputMode}
               transcript={callTranscript}
               scene={videoCallScene}
+              sceneTranslation={videoCallSceneTranslation}
               selfScene={videoCallSelfScene}
               sceneHistory={videoCallSceneHistory}
               onInputTextChange={setCallingInputText}
@@ -10920,6 +10977,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               onEnd={endVoiceCall}
               onCameraFrame={sendVideoCameraFrame}
               onRegenerateCallTurn={regenerateCallTurn}
+              onTranslateCallTranscript={translateCallTranscript}
+              translatingTranscriptId={callTranscriptTranslationLoadingId}
             />
           )}
 
@@ -10990,7 +11049,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                             onPointerUp={clearVoiceCallTranscriptLongPress}
                             onPointerCancel={clearVoiceCallTranscriptLongPress}
                           >
-                            {getCallTranscriptText(item.content)}
+                            <>
+                              <div>{getCallTranscriptText(item.content)}</div>
+                              {item.sender === "character" && item.translation?.trim() && (
+                                <div className="mt-1 border-t border-white/10 pt-1 text-xs text-white/65">{item.translation}</div>
+                              )}
+                            </>
                           </div>
                         </div>
                       );
@@ -11058,11 +11122,29 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     event.stopPropagation();
                     const target = voiceCallTranscriptMenu.item;
                     setVoiceCallTranscriptMenu(null);
+                    void translateCallTranscript(target);
+                  }}
+                  disabled={callTranscriptTranslationLoadingId === voiceCallTranscriptMenu.item.id}
+                  className="absolute inline-flex items-center gap-1 rounded-lg border border-white/20 bg-[#11131c]/95 px-2.5 py-1.5 text-[11px] text-white shadow-xl backdrop-blur-md disabled:opacity-50"
+                  style={{
+                    left: Math.max(10, Math.min(window.innerWidth - 180, voiceCallTranscriptMenu.x + 76)),
+                    top: Math.max(10, Math.min(window.innerHeight - 54, voiceCallTranscriptMenu.y - 48)),
+                  }}
+                  aria-label="翻译这轮语音通话回复"
+                >
+                  {callTranscriptTranslationLoadingId === voiceCallTranscriptMenu.item.id ? "翻译中…" : voiceCallTranscriptMenu.item.translation?.trim() ? "重新翻译" : "翻译"}
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const target = voiceCallTranscriptMenu.item;
+                    setVoiceCallTranscriptMenu(null);
                     regenerateCallTurn(target);
                   }}
                   className="absolute inline-flex items-center gap-1 rounded-lg border border-white/20 bg-[#11131c]/95 px-2.5 py-1.5 text-[11px] text-white shadow-xl backdrop-blur-md"
                   style={{
-                    left: Math.max(10, Math.min(window.innerWidth - 92, voiceCallTranscriptMenu.x - 12)),
+                    left: Math.max(10, Math.min(window.innerWidth - 180, voiceCallTranscriptMenu.x - 12)),
                     top: Math.max(10, Math.min(window.innerHeight - 54, voiceCallTranscriptMenu.y - 48)),
                   }}
                   aria-label="重回这轮语音通话回复"
@@ -11137,7 +11219,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     return (
                       <div key={item.id} className={`flex ${isSelfMessage ? "justify-end" : "justify-start"}`}>
                         <div className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${isSelfMessage ? "bg-[#95ec69] text-[#191919] rounded-tr-sm" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100"}`}>
-                          {getCallTranscriptText(item.content)}
+                          <div>{getCallTranscriptText(item.content)}</div>
+                          {!isSelfMessage && item.translation?.trim() && (
+                            <div className="mt-1 border-t border-slate-100 pt-1 text-xs text-slate-500">{item.translation}</div>
+                          )}
                         </div>
                       </div>
                     );

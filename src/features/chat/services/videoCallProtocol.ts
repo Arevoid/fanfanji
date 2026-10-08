@@ -15,6 +15,7 @@ export interface ParsedVideoCallResponse {
 export interface VideoCallSceneEntry {
   id: string;
   content: string;
+  translation?: string;
   timestamp: number;
 }
 

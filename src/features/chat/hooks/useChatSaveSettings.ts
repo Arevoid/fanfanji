@@ -5,6 +5,8 @@ import { apiTranslate } from "../../../utils/apiHelper";
 import { containsNonChineseText } from "../../../utils/textLanguage";
 import { createProactiveOfflinePreferencePatch } from "../../../domain/schedule/proactiveOfflinePreference";
 import { sanitizeCharacterActionText } from "../services/characterActionProtocol";
+import { getVoiceMessagePreview, isVoiceMessageContent } from "../services/voiceMessageContent";
+import { isCallRecordMarkup } from "../services/messageParser";
 
 interface UseChatSaveSettingsOptions {
   activeCharacter: Character | undefined;
@@ -156,16 +158,23 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
       );
 
       currentChatMessages.forEach((msg) => {
-        if (containsNonChineseText(msg.content)) {
+        // Call records already persist per-line translations inside their
+        // encoded transcript. Do not send the record wrapper/JSON to the
+        // translator as if it were user-visible prose.
+        if (isCallRecordMarkup(msg.content)) return;
+        const sourceText = isVoiceMessageContent(msg.content, msg.isVoiceMessage === true, Boolean(msg.audioUrl))
+          ? getVoiceMessagePreview(msg.content, msg.audioDuration).transcript
+          : msg.content;
+        if (containsNonChineseText(sourceText)) {
           apiTranslate({
-            text: sanitizeCharacterActionText(msg.content),
+            text: sanitizeCharacterActionText(sourceText),
             apiKey: settings.apiKey || "",
             model: settings.selectedModel,
             apiEndpoint: settings.apiEndpoint,
           })
             .then((res) => {
               const translatedText = sanitizeCharacterActionText(res?.text || "");
-              if (translatedText && translatedText !== msg.content) {
+              if (translatedText && translatedText !== sourceText) {
                 onUpdateMessage(msg.id, { translation: translatedText }, msg);
               }
             })

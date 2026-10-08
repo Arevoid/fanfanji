@@ -18,5 +18,6 @@ assert.equal(getVoiceMessageSummary("[语音]|18|Hello, how are you?"), '语音 
 assert.equal(getVoiceMessageSummary('[语音: "晚安" (5秒)]'), '语音 5"');
 assert.equal(normalizeVoiceTranslation("[语音]|4|饭饭先生……！"), "饭饭先生……！");
 assert.equal(normalizeVoiceTranslation("普通翻译"), "普通翻译");
+assert.equal(normalizeVoiceTranslation("普通翻译\\\"}"), "普通翻译");
 
 console.log("PASS voice message content parsing and translation source contract");

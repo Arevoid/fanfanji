@@ -62,7 +62,14 @@ export const isVoiceMessageContent = (content: string, isVoiceMessage = false, h
 export const normalizeVoiceTranslation = (translation: string | undefined): string | undefined => {
   const normalized = translation?.trim();
   if (!normalized) return undefined;
-  if (!normalized.startsWith("[语音")) return normalized;
+  // Older structured-response fallbacks occasionally left the closing quote
+  // and brace from the JSON envelope in the translated bubble. They are
+  // protocol residue, never part of the character's translation.
+  const removeLegacyEnvelopeTail = (value: string): string => value
+    .replace(/(?:\\?["'])?\}\s*$/u, "")
+    .trim();
+  if (!normalized.startsWith("[语音")) return removeLegacyEnvelopeTail(normalized);
   const transcript = getVoiceMessagePreview(normalized).transcript;
-  return transcript || undefined;
+  const cleanedTranscript = removeLegacyEnvelopeTail(transcript);
+  return cleanedTranscript || undefined;
 };

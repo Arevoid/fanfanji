@@ -1,6 +1,7 @@
 import type { Character, Message, UserSettings } from "../../../types";
 import { getCallTranscriptText } from "./messageParser";
 import { getVideoCallDisplayText, parseVideoCallResponse } from "./videoCallProtocol";
+import { getCallTranslationParts } from "./callTranscriptTranslation";
 import { attachDirectScope, type DirectInteractionScope } from "../context/directInteractionScope";
 import { shouldQueueCallSpeech } from "../../voice/ttsConfig";
 
@@ -8,6 +9,8 @@ export interface CallTranscriptEntry {
   id: string;
   sender: Message["sender"];
   content: string;
+  translation?: string;
+  sceneTranslation?: string;
   timestamp: number;
 }
 
@@ -21,7 +24,8 @@ export interface ChatMessageDeliveryOptions {
   onSendMessageRaw: (message: Message) => void;
   setCallTranscript: (update: (previous: CallTranscriptEntry[]) => CallTranscriptEntry[]) => void;
   setCallScene?: (scene: string) => void;
-  setCallSceneHistory?: (update: (previous: Array<{ id: string; content: string; timestamp: number }>) => Array<{ id: string; content: string; timestamp: number }>) => void;
+  setCallSceneTranslation?: (translation: string) => void;
+  setCallSceneHistory?: (update: (previous: Array<{ id: string; content: string; translation?: string; timestamp: number }>) => Array<{ id: string; content: string; translation?: string; timestamp: number }>) => void;
   enqueueCallSpeech: (message: Message, revealSubtitle: () => void) => Promise<void>;
 }
 
@@ -72,11 +76,20 @@ export function createChatMessageDeliveryHandler(options: ChatMessageDeliveryOpt
       const parsedVideo = options.callMode === "video" && normalizedMessage.sender === "character"
         ? parseVideoCallResponse(rawSubtitleContent)
         : undefined;
+      const translatedParts = normalizedMessage.sender === "character"
+        ? getCallTranslationParts(normalizedMessage.content, normalizedMessage.translation, options.callMode)
+        : {};
       if (parsedVideo?.scene) {
         options.setCallScene?.(parsedVideo.scene);
+        options.setCallSceneTranslation?.(translatedParts.scene || "");
         options.setCallSceneHistory?.((previous) => previous.some((item) => item.id === normalizedMessage.id)
           ? previous
-          : [...previous, { id: normalizedMessage.id, content: parsedVideo.scene!, timestamp: normalizedMessage.timestamp }]);
+          : [...previous, {
+            id: normalizedMessage.id,
+            content: parsedVideo.scene!,
+            ...(translatedParts.scene ? { translation: translatedParts.scene } : {}),
+            timestamp: normalizedMessage.timestamp,
+          }]);
       }
       const subtitleContent = parsedVideo ? parsedVideo.speech : getVideoCallDisplayText(rawSubtitleContent);
       // Scene narration belongs in the central visual area and scene history;
@@ -92,6 +105,8 @@ export function createChatMessageDeliveryHandler(options: ChatMessageDeliveryOpt
             id: normalizedMessage.id,
             sender: normalizedMessage.sender,
             content: subtitleContent,
+            ...(translatedParts.speech ? { translation: translatedParts.speech } : {}),
+            ...(translatedParts.scene ? { sceneTranslation: translatedParts.scene } : {}),
             timestamp: normalizedMessage.timestamp,
           }]);
       };
