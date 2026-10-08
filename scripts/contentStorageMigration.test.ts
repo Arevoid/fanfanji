@@ -53,6 +53,10 @@ const stories = [{
   updatedAt: 2,
   mode: "continue" as const,
   messages,
+  // Legacy records may append metadata after messages. The entry-store
+  // round-trip legitimately reorders those keys and must still verify.
+  archivedAt: 3,
+  memorySyncStatus: "pending" as const,
 }];
 
 await createDatabase("FanfanjiReadingMetadataDB", "metadata", (store) => store.put(messages, "messages-v4"));

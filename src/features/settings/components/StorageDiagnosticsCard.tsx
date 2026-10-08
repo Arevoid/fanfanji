@@ -76,6 +76,7 @@ export function StorageDiagnosticsCard({
             <div>持久化许可：{diagnostics.persisted === undefined ? "未知" : diagnostics.persisted ? "已启用" : "未启用"}</div>
             {diagnostics.migrationState && <div>迁移状态：{diagnostics.migrationState.phase}（{diagnostics.migrationState.completedModules.length} 个模块已完成）</div>}
             {diagnostics.migrationState && diagnostics.migrationState.phase !== "completed" && <button type="button" disabled={contentMigrationRunning} onClick={onResumeInterruptedMigration} className="mt-2 rounded-[10px] bg-amber-600 px-3 py-2 font-bold text-white disabled:opacity-50">{diagnostics.migrationState.phase === "failed" || diagnostics.migrationState.phase === "cancelled" ? "重新校验并重试迁移" : "恢复未完成迁移"}</button>}
+            {diagnostics.migrationState?.error && <div className="text-amber-700">迁移失败原因：{diagnostics.migrationState.error}</div>}
             {diagnostics.migrationState?.report && <div>迁移报告：完成 {diagnostics.migrationState.report.completed}，跳过 {diagnostics.migrationState.report.skipped}，修复 {diagnostics.migrationState.report.repaired}，失败 {diagnostics.migrationState.report.failed}</div>}
             {diagnostics.migrationLock && <div>迁移锁：{diagnostics.migrationLock.ownerId}，有效至 {new Date(diagnostics.migrationLock.expiresAt).toLocaleString()}</div>}
             <div>浏览器总配额状态：{diagnostics.pressure === "critical" ? "空间严重不足" : diagnostics.pressure === "warning" ? "空间偏高" : diagnostics.pressure === "normal" ? "正常" : "未知"}</div>

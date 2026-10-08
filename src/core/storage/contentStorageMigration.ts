@@ -85,14 +85,37 @@ function saveStateOrThrow(state: StorageMigrationState): void {
   if (!result.success) throw new ContentStorageMigrationError(`无法保存迁移状态：${result.error || "write"}`);
 }
 
+/**
+ * IndexedDB reconstruction can change object-key insertion order while
+ * preserving every value. Canonicalize object keys for verification, but keep
+ * array order significant because message/story order is user-visible.
+ */
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined ? "undefined" : serialized;
+  }
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`)
+    .join(",")}}`;
+}
+
+function sameContent(left: unknown, right: unknown): boolean {
+  return stableSerialize(left) === stableSerialize(right);
+}
+
 function verifyMessages(source: readonly Message[], restored: readonly Message[]): void {
-  if (source.length !== restored.length || JSON.stringify(source) !== JSON.stringify(restored)) {
+  if (source.length !== restored.length || !sameContent(source, restored)) {
     throw new ContentStorageMigrationError("聊天消息校验失败：数量、顺序或关键字段不一致。");
   }
 }
 
 function verifyOfflineStories(source: readonly OfflineStory[], restored: readonly OfflineStory[]): void {
-  if (source.length !== restored.length || JSON.stringify(source) !== JSON.stringify(restored)) {
+  if (source.length !== restored.length || !sameContent(source, restored)) {
     throw new ContentStorageMigrationError("线下故事校验失败：数量、消息顺序或关键字段不一致。");
   }
 }
