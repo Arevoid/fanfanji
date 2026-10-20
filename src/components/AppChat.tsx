@@ -13,8 +13,8 @@ import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proact
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
 import type { Appointment, AppointmentMode } from "../domain/schedule/scheduleTypes";
-import { canConfirmAppointment, getCurrentAppointmentProposal } from "../domain/schedule/appointmentPolicy";
-import { decideAppointmentInvitation } from "../domain/schedule/appointmentInvitation";
+import { getCurrentAppointmentProposal } from "../domain/schedule/appointmentPolicy";
+import { OfflineInvitationCard } from "../features/chat/components/OfflineInvitationCard";
 import { startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
@@ -1683,15 +1683,6 @@ export default function AppChat({
     setTimeout(() => setToastMessage(null), 1500);
   };
 
-  const decidePendingOfflineInvitation = (decision: "accept" | "decline") => {
-    if (!pendingOfflineAppointment || !onSaveAppointment) return;
-    const updated = decideAppointmentInvitation(pendingOfflineAppointment, decision, Date.now());
-    if (!updated || !onSaveAppointment(updated)) {
-      showToast("这条线下邀约暂时无法更新，请重试");
-      return;
-    }
-    showToast(decision === "accept" ? "已接受线下邀约，双方日程已同步" : "已拒绝这条线下邀约");
-  };
 
   // Keep the original hook call signature discoverable for the translation
   // regression guard while extending it with the voice reveal callback.
@@ -10026,29 +10017,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           </MessageList>
 
           {pendingOfflineAppointment && !isMultiSelectDeleteMode && (
-            <div className="chat-appointment-invitation mx-3 mb-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 shadow-sm">
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">线下邀约 · 待你确认</div>
-                  <div className="mt-1 truncate text-sm font-bold text-[var(--text-primary)]">
-                    {getCurrentAppointmentProposal(pendingOfflineAppointment)?.activity || pendingOfflineAppointment.title}
-                  </div>
-                  <div className="mt-1 text-[10px] leading-5 text-[var(--text-secondary)]">
-                    {(() => {
-                      const proposal = getCurrentAppointmentProposal(pendingOfflineAppointment);
-                      if (!proposal?.startAt) return pendingOfflineAppointment.mode === "immediate" ? "现在见面 · 等你选择" : "时间待确认";
-                      const date = new Date(proposal.startAt);
-                      return `${date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })} ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}${proposal.location ? ` · ${proposal.location}` : ""}`;
-                    })()}
-                  </div>
-                </div>
-                <span className="shrink-0 rounded-full bg-[var(--surface-raised)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">待你确认</span>
-              </div>
-              <div className="mt-3 flex gap-2">
-                <button type="button" onClick={() => decidePendingOfflineInvitation("decline")} className="flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-[11px] font-bold text-[var(--text-secondary)]">拒绝</button>
-                <button type="button" disabled={!canConfirmAppointment(pendingOfflineAppointment)} onClick={() => decidePendingOfflineInvitation("accept")} className="flex-1 rounded-xl bg-[var(--button-primary-bg)] px-3 py-2 text-[11px] font-bold text-[var(--button-primary-text)] disabled:cursor-not-allowed disabled:opacity-40">接受</button>
-              </div>
-            </div>
+            <React.Fragment key={pendingOfflineAppointment.id}>
+              <OfflineInvitationCard appointment={pendingOfflineAppointment}
+                onSave={appointment => onSaveAppointment?.(appointment) ?? false} onNotice={showToast} />
+            </React.Fragment>
           )}
 
           {readyOfflineAppointment && !isMultiSelectDeleteMode && (
