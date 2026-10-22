@@ -1,6 +1,5 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
 import './index.css';
 import { ThemeProvider } from './features/theme/ThemeProvider.tsx';
 import { isDevLoopbackOrigin } from './core/runtime/devOrigin.ts';
@@ -9,14 +8,26 @@ import { initializeMemoryAdmissionV2Promotion } from './features/chat/services/d
 
 installDevRuntimeProbe();
 initializeMemoryAdmissionV2Promotion();
+const applicationRoot = createRoot(document.getElementById('root')!);
+async function mountApplication() {
+  applicationRoot.render(<div role="status" style={{ padding: 24, fontFamily: 'system-ui' }}>正在打开米饭机…</div>);
+  const appModule = await import('./App.tsx');
+  if (import.meta.env.DEV && window.location.hostname === '127.0.0.3' && window.location.port === '3103'
+    && new URLSearchParams(window.location.search).get('chatPerformanceFixture') === '1') {
+    const fixture = await import('./features/chat/dev/chatPerformanceFixture');
+    await fixture.prepareChatPerformanceFixture(appModule.DEFAULT_SETTINGS);
+  }
+  const App = appModule.default;
 
-createRoot(document.getElementById('root')!).render(
+applicationRoot.render(
   <StrictMode>
     <ThemeProvider>
       <App />
     </ThemeProvider>
   </StrictMode>,
 );
+}
+void mountApplication().catch(() => applicationRoot.render(<div role="alert" style={{ padding: 24 }}>页面暂时无法打开。<button onClick={() => window.location.reload()}>重新加载</button></div>));
 
 // Register service worker for PWA capability and listen to beforeinstallprompt
 if (typeof window !== "undefined") {

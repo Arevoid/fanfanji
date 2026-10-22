@@ -1,7 +1,7 @@
 import type { Message } from "../../types";
 
 export const MESSAGE_ENTRY_DB_NAME = "FanfanjiMessageEntryDB";
-export const MESSAGE_ENTRY_DB_VERSION = 2;
+export const MESSAGE_ENTRY_DB_VERSION = 3;
 export const MESSAGE_ENTRY_STORE_NAME = "messages";
 
 interface MessageEntryRecord {
@@ -21,6 +21,14 @@ export interface MessageEntryQuery {
   offset?: number;
   limit: number;
 }
+export interface MessageEntryPageQuery {
+  characterId: string;
+  relationId?: string;
+  conversationId?: string;
+  before?: { timestamp: number; id: string };
+  limit: number;
+}
+export interface MessageEntryPage { items: Message[]; hasEarlier: boolean; cursor?: { timestamp: number; id: string } }
 
 const clone = <T>(value: T): T => typeof structuredClone === "function"
   ? structuredClone(value)
@@ -66,6 +74,12 @@ class MessageEntryDB {
         if (!store.indexNames.contains("byConversationId")) store.createIndex("byConversationId", "conversationId", { unique: false });
         if (!store.indexNames.contains("byTimestamp")) store.createIndex("byTimestamp", "timestamp", { unique: false });
         if (oldVersion < 2 && !store.indexNames.contains("byPosition")) store.createIndex("byPosition", "position", { unique: false });
+        // Index existing records in-place. No record rewriting or snapshot deletion.
+        for (const [name, keys] of [
+          ["byCharacterTimeline", ["characterId", "timestamp", "message.id", "position"]],
+          ["byRelationTimeline", ["characterId", "relationId", "timestamp", "message.id", "position"]],
+          ["byConversationTimeline", ["characterId", "conversationId", "timestamp", "message.id", "position"]],
+        ] as const) if (!store.indexNames.contains(name)) store.createIndex(name, [...keys], { unique: false });
       };
       request.onsuccess = () => {
         this.db = request.result;
@@ -93,7 +107,7 @@ class MessageEntryDB {
       request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result as MessageEntryRecord[] : []);
       request.onerror = () => reject(request.error);
     });
-    this.persistedEntries = entries.map((entry) => clone(entry));
+    this.persistedEntries = entries;
     return fromEntries(entries);
   }
 
@@ -103,26 +117,48 @@ class MessageEntryDB {
     if (!limit) return [];
     const database = await this.init();
     return new Promise<Message[]>((resolve, reject) => {
-      const request = database.transaction(MESSAGE_ENTRY_STORE_NAME, "readonly")
-        .objectStore(MESSAGE_ENTRY_STORE_NAME).index("byPosition").openCursor();
+      const store = database.transaction(MESSAGE_ENTRY_STORE_NAME, "readonly").objectStore(MESSAGE_ENTRY_STORE_NAME);
+      const selector = query.conversationId ? ["byConversationId", query.conversationId] : query.relationId ? ["byRelationId", query.relationId] : query.characterId ? ["byCharacterId", query.characterId] : undefined;
+      const request = selector ? store.index(selector[0]).openCursor(IDBKeyRange.only(selector[1])) : store.index("byPosition").openCursor();
       const result: MessageEntryRecord[] = [];
-      let skipped = 0;
       request.onsuccess = () => {
         const cursor = request.result;
         if (!cursor) {
-          resolve(fromEntries(result));
+          resolve(fromEntries(result).slice(offset, offset + limit));
           return;
         }
         const entry = cursor.value as MessageEntryRecord;
         const matches = (!query.characterId || entry.characterId === query.characterId)
           && (!query.relationId || entry.relationId === query.relationId)
           && (!query.conversationId || entry.conversationId === query.conversationId);
-        if (matches) {
-          if (skipped < offset) skipped += 1;
-          else if (result.length < limit) result.push(clone(entry));
+        if (matches) result.push(entry);
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async loadPage(query: MessageEntryPageQuery): Promise<MessageEntryPage> {
+    const limit = Math.max(1, Math.min(100, Math.floor(query.limit) || 50));
+    const database = await this.init();
+    const prefix: IDBValidKey[] = [query.characterId];
+    const name = query.relationId ? "byRelationTimeline" : query.conversationId ? "byConversationTimeline" : "byCharacterTimeline";
+    if (query.relationId) prefix.push(query.relationId); else if (query.conversationId) prefix.push(query.conversationId);
+    const upper = query.before ? [...prefix, query.before.timestamp, query.before.id] : [...prefix, []];
+    const bounds = IDBKeyRange.bound(prefix, upper, false, true);
+    return new Promise<MessageEntryPage>((resolve, reject) => {
+      const request = database.transaction(MESSAGE_ENTRY_STORE_NAME, "readonly").objectStore(MESSAGE_ENTRY_STORE_NAME).index(name).openCursor(bounds, "prev");
+      const items: Message[] = [];
+      const finish = (hasEarlier: boolean) => { items.reverse(); const first = items[0]; resolve({ items, hasEarlier, cursor: first ? { timestamp: first.timestamp, id: first.id } : undefined }); };
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return finish(false);
+        const record = cursor.value as MessageEntryRecord;
+        if ((!query.relationId || record.relationId === query.relationId) && (!query.conversationId || record.conversationId === query.conversationId)) {
+          if (items.length === limit) return finish(true);
+          items.push(record.message);
         }
-        if (result.length >= limit) resolve(fromEntries(result));
-        else cursor.continue();
+        cursor.continue();
       };
       request.onerror = () => reject(request.error);
     });
@@ -136,7 +172,7 @@ class MessageEntryDB {
       store.clear();
       entries.forEach((entry) => store.put(entry));
       transaction.oncomplete = () => {
-        this.persistedEntries = entries.map((entry) => clone(entry));
+        this.persistedEntries = entries;
         resolve();
       };
       transaction.onerror = () => reject(transaction.error);
@@ -159,7 +195,7 @@ class MessageEntryDB {
         if (!old || JSON.stringify(old) !== JSON.stringify(entry)) store.put(entry);
       });
       transaction.oncomplete = () => {
-        this.persistedEntries = entries.map((entry) => clone(entry));
+        this.persistedEntries = entries;
         resolve();
       };
       transaction.onerror = () => reject(transaction.error);

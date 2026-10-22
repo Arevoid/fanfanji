@@ -38,6 +38,7 @@ interface UseChatSaveSettingsOptions {
   draftProactiveChatInterval: any;
   draftDisableBracketActions: any;
   draftHistoryMemoryLimit: any;
+  draftChatHistoryPageSize?: number;
   draftContextMemoryLimit: any;
   draftRetrievalHistoryLimit: any;
   draftArchiveTemplateType: any;
@@ -74,7 +75,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
     draftEnableAutoTranslate, draftEnableProactiveChat, draftProactiveStartTime, draftProactiveEndTime,
     draftEnableProactiveOffline, draftRemark, draftAvatar, draftIsPinned, draftGroupMemorySyncEnabled, draftChatBg, draftCustomCss,
     draftChatIcons, draftChatStylePreset, draftEnableProactiveCall, draftEnableStickerAssociation, draftProactiveChatInterval,
-    draftDisableBracketActions, draftHistoryMemoryLimit, draftContextMemoryLimit, draftRetrievalHistoryLimit,
+    draftDisableBracketActions, draftHistoryMemoryLimit, draftChatHistoryPageSize, draftContextMemoryLimit, draftRetrievalHistoryLimit,
     draftArchiveTemplateType, draftEnableTimeAwareness,
     draftMinimaxVoiceId, draftMosslandVoiceId, draftElevenlabsVoiceId, draftMinimaxSpeed, draftVoiceFrequency,
     draftEnableImageGeneration, draftEnableProactiveImageGeneration, draftImageAppearancePrompt, draftImageNegativePrompt,
@@ -130,6 +131,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
       }),
       disableBracketActions: draftDisableBracketActions,
       historyMemoryLimit: draftHistoryMemoryLimit,
+      chatHistoryPageSize: [20, 50, 100].includes(draftChatHistoryPageSize || 0) ? draftChatHistoryPageSize : 50,
       contextMemoryLimit: draftContextMemoryLimit,
       retrievalHistoryLimit: draftRetrievalHistoryLimit,
       archiveTemplateType: draftArchiveTemplateType,

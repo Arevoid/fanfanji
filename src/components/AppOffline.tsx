@@ -84,6 +84,8 @@ interface AppOfflineProps {
   onSaveAppointment?: (appointment: Appointment) => boolean;
   /** Story requested by the previous chat screen; consumed by the story opener. */
   openStoryId?: string | null;
+  historyTarget?: { storyId: string; id: string; requestId: number };
+  onHistoryTargetHandled?: () => void;
   onOpenOfflineStoryHandled?: (storyId: string) => void;
 }
 
@@ -109,6 +111,8 @@ export default function AppOffline({
   appointments = [],
   onSaveAppointment,
   openStoryId = null,
+  historyTarget,
+  onHistoryTargetHandled,
   onOpenOfflineStoryHandled,
 }: AppOfflineProps) {
   const activeIdentityId = ownerIdentityId || settings.activeIdentityId || "identity-1";
@@ -296,11 +300,8 @@ export default function AppOffline({
       })
     : null;
 
-  useEffect(() => {
-    if (workspaceEndRef.current) {
-      workspaceEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [activeStory?.messages, isGenerating]);
+  // MessageList owns anchoring and new-message following; unconditional
+  // scrollIntoView here would override a history-search jump.
 
   const getMemoryRepairNeeds = (story: OfflineStory) => getOfflineStoryMemoryRepairNeeds(story, memories);
   const needsLegacyHandoffRepair = (story: OfflineStory) => getMemoryRepairNeeds(story).legacyHandoff;
@@ -977,6 +978,11 @@ export default function AppOffline({
             )}
 
             <MessageList
+              key={`${activeIdentityId}:${activeStory.id}`}
+              conversationKey={`offline:${activeIdentityId}:${activeStory.id}`}
+              renderWindowSize={120}
+              jumpToMessage={historyTarget?.storyId === activeStory.id ? historyTarget : undefined}
+              onJumpHandled={onHistoryTargetHandled}
               messages={visibleStoryMessages}
               scrollRef={workspaceScrollRef}
               className="offline-story-scroll"

@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-export type ChatAdvancedSettingsSection = "memory" | "voiceImage" | "appearance";
+export type ChatAdvancedSettingsSection = "memory" | "voiceImage" | "history" | "appearance";
 
 export function useChatSettingsPanelState() {
   const [isShowingCardModal, setIsShowingCardModal] = useState(false);
@@ -10,7 +10,7 @@ export function useChatSettingsPanelState() {
     ? "记忆设置"
     : advancedSettingsSection === "voiceImage"
       ? "语音图片"
-      : advancedSettingsSection === "appearance"
+      : advancedSettingsSection === "history" ? "查找聊天记录" : advancedSettingsSection === "appearance"
         ? "美化样式"
         : "设置";
 

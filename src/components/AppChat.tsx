@@ -1,3 +1,8 @@
+import { ChatHistorySearch, emptyChatHistorySearchState } from "../features/chat/components/ChatHistorySearch";
+import { projectChatDisplayMessage } from "../features/chat/services/chatDisplayProjection";
+import { createOfflineTimelineLookup } from "../features/chat/services/offlineTimelineLookup";
+import { indexChatTurnEnds, resolveChatPageSize } from "../domain/chat/chatTimelineIndex";
+import { deferForegroundTask } from "../core/runtime/deferredForegroundTask";
 import React, { useState, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
@@ -248,7 +253,7 @@ import { ChatTopBar } from "../features/chat/components/ChatTopBar";
 import { InnerVoiceModal } from "../features/chat/components/InnerVoiceModal";
 import { ContactList } from "../features/chat/components/ContactList";
 import { ConversationList } from "../features/chat/components/ConversationList";
-import { MessageList } from "../features/chat/components/MessageList";
+import { MessageList, hasChatViewportSnapshot } from "../features/chat/components/MessageList";
 import { ChatTextWithLinks, isLegacyMcpMediaFragment } from "../features/chat/components/ChatTextWithLinks";
 import { parseQuoteReply, QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
 import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
@@ -462,7 +467,7 @@ interface AppChatProps {
   onSaveAppointment?: (appointment: Appointment) => boolean;
   offlineStories?: OfflineStory[];
   onSaveOfflineStory?: (story: OfflineStory) => boolean | void | Promise<boolean>;
-  onOpenOfflineStory?: (storyId: string) => void;
+  onOpenOfflineStory?: (storyId: string, messageId?: string) => void;
   onDeleteOfflineStory?: (storyId: string) => void;
   onDeleteCharacter?: (id: string, skipConfirm?: boolean, preserveGroupMemories?: boolean) => void;
   onDeleteRelationshipMusic?: (relationId: string) => void;
@@ -1147,16 +1152,12 @@ export default function AppChat({
       timestamp: record.createdAt,
     })), [activeBlockedDeliveries, activeRelationship?.conversationId]);
   const visibleChatMessages = useMemo<Message[]>(() => [...projectedVisibleChatMessages, ...blockedChatMessages]
-    .sort((left, right) => left.timestamp - right.timestamp)
-    .map((message) => ({
-      ...message,
-      // Older persisted turns may still contain the private action envelope.
-      // Sanitize the render projection as a final boundary so historical
-      // messages cannot leak protocol text while the underlying action data
-      // remains available to the runtime and migration paths.
-      ...(message.sender === "character" ? { content: sanitizeCharacterActionText(message.content) } : {}),
-      ...(message.translation ? { translation: sanitizeCharacterActionText(message.translation) } : {}),
-    })), [blockedChatMessages, projectedVisibleChatMessages]);
+    .sort((left, right) => left.timestamp - right.timestamp), [blockedChatMessages, projectedVisibleChatMessages]);
+  const chatTurnEnds = useMemo(() => indexChatTurnEnds(visibleChatMessages), [visibleChatMessages]);
+  const chatViewportKey = [activeChatCharId || "none", activeRelationship?.id || "group", activeIdentityId].join(":");
+  const [chatHistorySearchState, setChatHistorySearchState] = useState(emptyChatHistorySearchState);
+  const [chatHistoryJump, setChatHistoryJump] = useState<{ id: string; requestId: number }>();
+  useEffect(() => { setChatHistorySearchState(emptyChatHistorySearchState()); setChatHistoryJump(undefined); }, [chatViewportKey]);
   const activeDirectScope = resolveDirectInteractionScope({
     characterId: activeCharacter?.id,
     activeIdentityId,
@@ -1166,6 +1167,7 @@ export default function AppChat({
   });
   useEffect(() => {
     if (!activeDirectScope) return;
+    return deferForegroundTask(() => {
     const scopeClaims = loadKnowledgeClaims().value.filter((claim) =>
       claim.relationId === activeDirectScope.relationId
       && claim.characterId === activeDirectScope.characterId
@@ -1177,6 +1179,7 @@ export default function AppChat({
       && summary.userIdentityId === activeDirectScope.userIdentityId
       && summary.conversationId === activeDirectScope.conversationId);
     void persistTruthVectorIndex(scopeClaims, scopeSummaries, activeDirectScope);
+    });
   }, [activeDirectScope?.relationId, activeDirectScope?.characterId, activeDirectScope?.userIdentityId, activeDirectScope?.conversationId, messages.length]);
   const isActiveChatScopeValid = Boolean(activeCharacter && (activeCharacter.isGroupChat
     ? !activeChatRelationId
@@ -1263,17 +1266,14 @@ export default function AppChat({
       summaries: loadConversationSummaries().value,
     });
   };
-  const getOfflineTimelineStoriesBetween = (previousAt: number | undefined, currentAt: number): OfflineStory[] => {
-    return getOfflineTimelineStoriesBetweenFromContext({
-      previousAt,
-      currentAt,
-      relationId: activeRelationship?.id,
-      isGroup: Boolean(activeCharacter?.isGroupChat),
-      offlineStories,
-      memories: memories || [],
-      summaries: loadConversationSummaries().value,
-    });
-  };
+  const [timelineEvidenceRevision, setTimelineEvidenceRevision] = useState(0);
+  useEffect(() => { const refresh = () => setTimelineEvidenceRevision(value => value + 1);
+    window.addEventListener("fanfanji:memory-evidence-updated", refresh);
+    return () => window.removeEventListener("fanfanji:memory-evidence-updated", refresh); }, []);
+  const getOfflineTimelineStoriesBetween = useMemo(() => createOfflineTimelineLookup({
+    relationId: activeRelationship?.id, isGroup: Boolean(activeCharacter?.isGroupChat), offlineStories,
+    memories: memories || [], summaries: loadConversationSummaries().value,
+  }), [activeRelationship?.id, activeCharacter?.isGroupChat, offlineStories, memories, timelineEvidenceRevision, currentChatMessages]);
   const activeStylePreset = resolveActiveChatStylePreset(
     activeCharacter?.chatStylePreset,
     settings.globalChatStylePreset,
@@ -1922,7 +1922,7 @@ export default function AppChat({
     draftEnableStickerAssociation, setDraftEnableStickerAssociation,
     draftProactiveChatInterval, draftProactiveStartTime, setDraftProactiveStartTime,
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
-    draftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
+    draftHistoryMemoryLimit, draftChatHistoryPageSize, setDraftChatHistoryPageSize, draftContextMemoryLimit, setDraftContextMemoryLimit,
     draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType,
     draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
     draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,
@@ -4770,13 +4770,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const momentsForMainPersona = momentSource
     .filter((moment) => isMomentVisibleToUser(moment, momentsFeedIdentityId));
 
-  const latestActiveMessageId = messages
-    .filter((message) => !message.isOffline && (activeRelationship
-      ? message.relationId === activeRelationship.id
-      : message.characterId === activeChatCharId && activeCharacter?.isGroupChat))
-    .at(-1)?.id || null;
+  const latestActiveMessageId = currentChatMessages.at(-1)?.id || null;
 
   // Auto scroll in chats with smart detection
+  const latestScrollMessageRef = useRef<string>();
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!activeChatCharId || !container) {
@@ -4789,24 +4786,23 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       return;
     }
 
-    const currentChatMsgs = messages.filter((message) => !message.isOffline && (activeRelationship
-      ? message.relationId === activeRelationship.id
-      : message.characterId === activeChatCharId && activeCharacter?.isGroupChat));
+    const currentChatMsgs = currentChatMessages;
     const msgCount = currentChatMsgs.length;
 
-    const isFreshOpen = lastActiveCharIdRef.current !== activeChatCharId;
+    const isFreshOpen = lastActiveCharIdRef.current !== chatViewportKey;
     const lastMsg = currentChatMsgs[currentChatMsgs.length - 1];
-    const isUserSent = lastMsg && lastMsg.sender === "user";
+    const isUserSent = !isFreshOpen && lastMsg && lastMsg.sender === "user" && latestScrollMessageRef.current !== lastMsg.id;
+    latestScrollMessageRef.current = lastMsg?.id;
 
     // Measure distance to bottom
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const isNearBottom = distanceToBottom < 250;
 
     // Update refs for next run
-    lastActiveCharIdRef.current = activeChatCharId;
+    lastActiveCharIdRef.current = chatViewportKey;
     lastMsgCountRef.current = msgCount;
 
-    if (isFreshOpen || isUserSent || isNearBottom || isTyping) {
+    if ((isFreshOpen && !hasChatViewportSnapshot(chatViewportKey)) || isUserSent || (!isFreshOpen && isNearBottom)) {
       const behavior = isFreshOpen ? "auto" : "smooth";
       // The message list can finish its layout one or more frames after the
       // chat shell mounts, especially on mobile.
@@ -4824,7 +4820,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         window.clearTimeout(lateTimer);
       };
     }
-  }, [messages.length, activeChatCharId, activeChatRelationId, latestActiveMessageId, isTyping, activeBlockedDeliveries.length]);
+  }, [currentChatMessages.length, activeChatCharId, activeChatRelationId, latestActiveMessageId, activeBlockedDeliveries.length]);
 
   // The root viewport controller owns sizing. Only keep the latest message visible
   // when the reader was already near the bottom; opening the keyboard must not pull
@@ -4918,6 +4914,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     draftProactiveChatInterval,
     draftDisableBracketActions,
     draftHistoryMemoryLimit,
+    draftChatHistoryPageSize,
     draftContextMemoryLimit,
     draftRetrievalHistoryLimit,
     draftArchiveTemplateType,
@@ -8162,6 +8159,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   setAdvancedSettingsSection(null);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
+                aria-label="聊天设置"
                 className="app-nav-icon-button w-8 h-8 flex items-center justify-center hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button chat-header-control--plain"
               >
                 <span className="cv-menu-icon flex items-center justify-center w-full h-full">
@@ -8183,6 +8181,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     if (isShowingAdvancedSettings) setAdvancedSettingsSection(null);
                     else setIsShowingCardModal(false);
                   }}
+                  aria-label={isShowingAdvancedSettings ? "返回聊天设置" : "返回聊天"}
                   className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
                 >
                   <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -8515,6 +8514,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
                  {isShowingAdvancedSettings ? (
                    <>
+                     {advancedSettingsSection === "history" && <>
+                       <ChatHistorySearch messages={currentChatMessages} stories={offlineStories}
+                         scope={{ characterId: activeCharacter.id, relationId: activeRelationship?.id, conversationId: activeRelationship?.conversationId, userIdentityId: activeIdentityId, group: activeCharacter.isGroupChat }}
+                         state={chatHistorySearchState} onStateChange={setChatHistorySearchState} characterName={activeCharacterDisplayName}
+                         onSelect={result => {
+                           if (result.storyId) { setIsShowingCardModal(false); setAdvancedSettingsSection(null); onOpenOfflineStory?.(result.storyId, result.messageId); return; }
+                           setIsShowingCardModal(false); setAdvancedSettingsSection(null);
+                           setChatHistoryJump({ id: result.messageId, requestId: Date.now() });
+                         }} />
+                     </>}
                      {advancedSettingsSection === "memory" && (
                        <>
                      {/* Three-Layer Memory Optimization System Panel */}
@@ -8779,11 +8788,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         { key: "memory", label: "记忆设置" },
                         { key: "voiceImage", label: "语音图片" },
                         { key: "appearance", label: "美化样式" },
+                        { key: "history", label: "查找聊天记录" },
                       ].map(({ key, label }) => (
                         <button
                           key={key}
                           type="button"
-                          onClick={() => setAdvancedSettingsSection(key as "memory" | "voiceImage" | "appearance")}
+                          onClick={() => setAdvancedSettingsSection(key as "memory" | "voiceImage" | "history" | "appearance")}
                           className="w-full h-[52px] px-4 flex items-center gap-3 text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
                           aria-label={`打开${label}`}
                         >
@@ -9174,7 +9184,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             key={`${activeChatCharId ?? "none"}:${activeRelationship?.id ?? activeChatRelationId ?? "none"}:${isOfflineModeActive ? "offline" : "online"}`}
             messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
-            renderWindowSize={120}
+            conversationKey={chatViewportKey}
+            jumpToMessage={chatHistoryJump}
+            onJumpHandled={() => setChatHistoryJump(undefined)}
+            renderWindowSize={resolveChatPageSize(activeCharacter.chatHistoryPageSize)}
             className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-0 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg
@@ -9184,6 +9197,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             }}
             contentClassName="chat-message-list-content"
             renderMessage={(msg, idx) => {
+              msg = projectChatDisplayMessage(msg);
               // Do not show URL suffix fragments persisted by pre-fix builds.
               // The actual image bubble remains visible, while new messages no
               // longer create these fragments in the first place.
@@ -9487,14 +9501,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               // Inline inner voice records are attached to the last delivered
               // bubble, so use that bubble as the lookup key when the avatar is
               // clicked. This keeps the visible avatar aligned with the record.
-              let innerVoiceTriggerMessage = msg;
-              if (!isSelf && !activeCharacter.isGroupChat) {
-                for (let nextIndex = idx + 1; nextIndex < visibleChatMessages.length; nextIndex += 1) {
-                  const candidate = visibleChatMessages[nextIndex];
-                  if (candidate.isNarration || candidate.sender !== msg.sender) break;
-                  innerVoiceTriggerMessage = candidate;
-                }
-              }
+              const innerVoiceTriggerMessage = !isSelf && !activeCharacter.isGroupChat ? chatTurnEnds.get(msg.id) || msg : msg;
               const renderBubbleInner = () => {
                 return (
                   <div 

@@ -74,6 +74,8 @@ export interface Character {
   disableBracketActions?: boolean;
   /** Number of chat messages processed per automatic/manual archive batch. */
   historyMemoryLimit?: number;
+  /** Display batch size only; never controls model context or memory extraction. */
+  chatHistoryPageSize?: number;
   contextMemoryLimit?: number; // 10~300 messages, default 150
   /** Long-term memory items retrieved and injected per chat turn. */
   retrievalHistoryLimit?: number; // 10~100, default 50

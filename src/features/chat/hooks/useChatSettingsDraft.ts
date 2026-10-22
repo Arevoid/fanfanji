@@ -3,6 +3,7 @@ import { sanitizeChatIcons, type Character, type ChatIconOverrides } from "../..
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { isProactiveOfflineEnabled } from "../../../domain/schedule/proactiveOfflinePreference";
 import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../services/chatMemoryRetrievalSettings";
+import { resolveChatPageSize } from "../../../domain/chat/chatTimelineIndex";
 
 export function useChatSettingsDraft() {
   const [draftRemark, setDraftRemark] = useState("");
@@ -26,6 +27,7 @@ export function useChatSettingsDraft() {
   const [draftProactiveEndTime, setDraftProactiveEndTime] = useState("22:00");
   const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
   const [draftHistoryMemoryLimit, setDraftHistoryMemoryLimit] = useState(150);
+  const [draftChatHistoryPageSize, setDraftChatHistoryPageSize] = useState(50);
   const [draftContextMemoryLimit, setDraftContextMemoryLimit] = useState(150);
   const [draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit] = useState(50);
   const [draftArchiveTemplateType, setDraftArchiveTemplateType] = useState<"refined" | "delicate">("refined");
@@ -63,6 +65,7 @@ export function useChatSettingsDraft() {
     setDraftProactiveEndTime(character.proactiveEndTime || "22:00");
     setDraftDisableBracketActions(character.disableBracketActions || false);
     setDraftHistoryMemoryLimit(character.historyMemoryLimit || 150);
+    setDraftChatHistoryPageSize(resolveChatPageSize(character.chatHistoryPageSize));
     setDraftContextMemoryLimit(resolveChatContextMemoryLimit(character.contextMemoryLimit));
     setDraftRetrievalHistoryLimit(resolveChatLongTermMemoryLimit(character.retrievalHistoryLimit));
     setDraftArchiveTemplateType(character.archiveTemplateType || "refined");
@@ -96,7 +99,7 @@ export function useChatSettingsDraft() {
     draftEnableStickerAssociation, setDraftEnableStickerAssociation,
     draftProactiveChatInterval, setDraftProactiveChatInterval, draftProactiveStartTime, setDraftProactiveStartTime,
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
-    draftHistoryMemoryLimit, setDraftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
+    draftHistoryMemoryLimit, setDraftHistoryMemoryLimit, draftChatHistoryPageSize, setDraftChatHistoryPageSize, draftContextMemoryLimit, setDraftContextMemoryLimit,
     draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType, setDraftArchiveTemplateType,
     draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
     draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,

@@ -130,7 +130,7 @@ import {
 } from "./features/home/homeGrid";
 import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./features/music/services/dualMusicRecommendationService";
 import { isNeteaseMusicTrack, normalizeMusicTrack } from "./features/music/services/musicTrackModel";
-import { getNeteaseTrackStreamUrl, preloadNeteaseMusicLibrary } from "./features/music/services/neteaseMusicApi";
+import { getNeteaseTrackStreamUrl } from "./features/music/services/neteaseMusicApi";
 import { loadMusicPlaybackHistory, recordMusicPlayback } from "./core/storage/repositories/musicPlaybackHistoryRepository";
 import type { MusicPlaybackHistoryItem } from "./types";
 import type { NeteaseMusicQuality } from "./features/music/neteaseTypes";
@@ -275,22 +275,6 @@ const preloadApp = (appId: string) => {
 
 const IDLE_PRELOAD_APP_IDS = [
   "chat",
-  "archives",
-  "worldbook",
-  "music",
-  "forum",
-  "notes",
-  "diary",
-  "store",
-  "settings",
-  "memory",
-  "offline",
-  "schedule",
-  "reading",
-  "cinema",
-  "character-phone",
-  "relationship-network",
-  "sms",
 ] as const;
 
 // Use the same bounded retry for the component that is actually rendered.
@@ -568,7 +552,7 @@ const CHARACTER_PHONE_TEST_CHARACTER: Character = {
   greeting: "今天也有好好吃饭吗？",
 };
 
-const DEFAULT_SETTINGS: UserSettings = {
+export const DEFAULT_SETTINGS: UserSettings = {
   name: "饭饭",
   avatar: "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png",
   signature: "今天你也想我了吗",
@@ -746,19 +730,17 @@ export default function App() {
   useEffect(() => {
     const preloadIdleApps = () => {
       IDLE_PRELOAD_APP_IDS.forEach((appId) => preloadApp(appId));
-      // Warm the authenticated cloud library while the user is still on the
-      // desktop so the music home screen can render without a second wait.
-      void preloadNeteaseMusicLibrary().catch(() => undefined);
+      // Other apps and authenticated libraries load on explicit navigation.
     };
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
     };
     if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(preloadIdleApps, { timeout: 1500 });
+      const handle = idleWindow.requestIdleCallback(preloadIdleApps, { timeout: 4000 });
       return () => idleWindow.cancelIdleCallback?.(handle);
     }
-    const handle = window.setTimeout(preloadIdleApps, 600);
+    const handle = window.setTimeout(preloadIdleApps, 1500);
     return () => window.clearTimeout(handle);
   }, []);
 
@@ -1152,6 +1134,7 @@ export default function App() {
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
   const [pendingOfflineStoryId, setPendingOfflineStoryId] = useState<string | null>(null);
+  const [pendingOfflineHistoryTarget, setPendingOfflineHistoryTarget] = useState<{ storyId: string; id: string; requestId: number }>();
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => hydrateRelationshipNetworkRelationships(loadRelationships([]).value));
@@ -5510,7 +5493,8 @@ export default function App() {
                     onSaveAppointment={handleSaveAppointment}
                     offlineStories={offlineStories}
                     onSaveOfflineStory={handleSaveOfflineStory}
-                    onOpenOfflineStory={(storyId) => {
+                    onOpenOfflineStory={(storyId, messageId) => {
+                      setPendingOfflineHistoryTarget(messageId ? { storyId, id: messageId, requestId: Date.now() } : undefined);
                       setPendingOfflineStoryId(storyId);
                       setActiveApp("offline");
                     }}
@@ -5851,6 +5835,8 @@ export default function App() {
                       ownerIdentityId={activeIdentityId}
                       offlineStories={offlineStories}
                       openStoryId={pendingOfflineStoryId}
+                      historyTarget={pendingOfflineHistoryTarget}
+                      onHistoryTargetHandled={() => setPendingOfflineHistoryTarget(undefined)}
                       onOpenOfflineStoryHandled={(storyId) => {
                         setPendingOfflineStoryId((current) => current === storyId ? null : current);
                       }}
