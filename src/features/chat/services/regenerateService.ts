@@ -7,7 +7,7 @@ import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatService
 export function createRegeneratedReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
   const replyText = ensureExplicitStickerDelivery(context.rawText, context.requestedStickerMessage);
   const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(
-    stripSimulatedUserTurns(stripOuterDialogueQuotes(cleanAiReplyText(replyText, context.disableBracketActions)), context),
+    stripSimulatedUserTurns(stripOuterDialogueQuotes(cleanAiReplyText(replyText, context.disableBracketActions, context.preserveProse)), context),
     context.allowEmoji,
   ));
   // Never restore raw model output after the sanitizer intentionally removed

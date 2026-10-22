@@ -132,7 +132,7 @@ export function MessageList({ messages, scrollRef, className, style, renderMessa
   }, [pageSize]);
   return <div ref={scrollRef} className={className} style={{ ...style, overflowAnchor: "none" }} onScroll={fitWindow}>
     <div ref={content} className={contentClassName}>
-      <div ref={heading}>{header}{loadedStart > 0 && <button type="button" className="mx-auto my-3 block min-h-11 rounded-full bg-[var(--surface-raised)] px-5 text-sm text-[var(--text-secondary)]"
+      <div ref={heading}>{header}{loadedStart > 0 && <button type="button" className="mx-auto my-3 block rounded-full bg-[var(--surface-raised)] px-2.5 py-0.5 text-[11.5px] font-normal text-[var(--text-secondary)]"
         onClick={() => { rememberAnchor(); atEnd.current = false; setAwayFromEnd(true); pending.current = { ...anchor.current }; const next = Math.max(0, loadedStart - pageSize); setLoadedStart(next);
           previous.current.loadedId = messages[next]?.id; setRange({ start: next, end: Math.min(messages.length, next + pageSize * 3) }); }}>查看更早的消息（还有 {loadedStart} 条）</button>}</div>
       <div aria-hidden="true" style={{ height: Math.max(0, offsets[start] - offsets[loadedStart]) }} />
@@ -142,6 +142,6 @@ export function MessageList({ messages, scrollRef, className, style, renderMessa
       </div>)}
       <div aria-hidden="true" style={{ height: Math.max(0, offsets[messages.length] - offsets[end]) }} />{children}
     </div>
-    {(awayFromEnd || newCount > 0) && <button type="button" onClick={goLatest} className="sticky bottom-2 ml-auto block min-h-11 rounded-full bg-[var(--button-primary-bg)] px-4 text-sm text-[var(--button-primary-text)]">{newCount > 0 ? `有 ${newCount} 条新消息，查看最新` : "回到最新消息"}</button>}
+    {(awayFromEnd || newCount > 0) && <button type="button" onClick={goLatest} className="sticky bottom-2 ml-auto block h-[22px] rounded-full bg-[var(--button-primary-bg)] px-2 text-[10px] text-[var(--button-primary-text)]">{newCount > 0 ? `有 ${newCount} 条新消息，查看最新` : "回到最新消息"}</button>}
   </div>;
 }

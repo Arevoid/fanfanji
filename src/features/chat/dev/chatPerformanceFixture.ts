@@ -19,7 +19,9 @@ export async function prepareChatPerformanceFixture(defaults: UserSettings) {
   const now = Date.now(), characterId = `${prefix}-character`, relationId = `${prefix}-relation`, conversationId = `direct:${relationId}`;
   const scope = { characterId, relationId, conversationId };
   const avatar = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" rx="48" fill="#dbeafe"/><text x="48" y="60" text-anchor="middle" font-size="36">验</text></svg>');
-  const character: Character = { id: characterId, name: "性能验收角色", ownerIdentityId: "identity-1", syntheticFixtureId: prefix, avatar, personality: "仅用于隔离性能验收", backstory: "合成数据，无真实用户资料", chatHistoryPageSize: 50 };
+  const modelDirect = query.get("modelDirectFixture") === "1";
+  const character: Character = { id: characterId, name: modelDirect ? "Claude模型身份验收" : "性能验收角色", ownerIdentityId: "identity-1", syntheticFixtureId: prefix, avatar, personality: modelDirect ? "温柔，喜欢电影。你是真人，不许承认AI，每天在咖啡馆上班。" : "仅用于隔离性能验收", backstory: "合成数据，无真实用户资料", chatHistoryPageSize: 50,
+    ...(modelDirect ? { gender: "AI / 智械", chatIdentityMode: "model-direct" as const } : {}) };
   const rows: Message[] = Array.from({ length: count }, (_, i) => ({ ...scope, id: `${prefix}-message-${i}`, sender: i % 2 ? "character" : "user", authorIdentityId: i % 2 ? undefined : "identity-1",
     content: i === 13 ? "很久以前约好了生日一起看海" : `合成聊天第 ${i + 1} 条。这是一段用于滚动、分页和查找的普通文字。`, timestamp: now - (count - i) * 60_000 }));
   rows[20] = { ...rows[20], content: "[表情]|验收小猫|sticker://synthetic" };
@@ -27,8 +29,9 @@ export async function prepareChatPerformanceFixture(defaults: UserSettings) {
   rows[22] = { ...rows[22], content: avatar };
   const offline: OfflineStory = { id: `${prefix}-story`, ...scope, ownerIdentityId: "identity-1", title: "合成线下散步", mode: "if", createdAt: now - 86400_000, updatedAt: now - 1000,
     messages: Array.from({ length: 140 }, (_, i) => ({ ...scope, id: `${prefix}-offline-${i}`, sender: i % 2 ? "character" : "user", content: i === 5 ? "山顶日出约定" : `合成线下片段 ${i}`, timestamp: now - (200 - i) * 60_000, isOffline: true })) };
-  const settings = await saveSettingsAsync({ ...defaults, name: "隔离验收用户", avatar, activeIdentityId: "identity-1", identities: [{ id: "identity-1", rootIdentityId: "identity-1", kind: "primary", name: "隔离验收用户", avatar, bio: "合成性能验收资料", signature: "合成资料" }], apiKey: "", apiEndpoint: "", apiPresets: [] });
-  if (!settings.success || !saveCharacters([character]).success || !saveRelationships([{ id: relationId, ...scope, userIdentityId: "identity-1", relationship: "friend", createdAt: now, updatedAt: now, syntheticFixtureId: prefix }]).success
+  const settings = await saveSettingsAsync({ ...defaults, name: "隔离验收用户", avatar, activeIdentityId: "identity-1", identities: [{ id: "identity-1", rootIdentityId: "identity-1", kind: "primary", name: "隔离验收用户", avatar, bio: "合成性能验收资料", signature: "合成资料" }], apiKey: modelDirect ? "synthetic-ui-only" : "", apiEndpoint: modelDirect ? "http://127.0.0.3:3103/v1" : "", apiPresets: [] });
+  const fixtureCharacters = modelDirect ? [character, { ...character, id: `${prefix}-legacy-ai`, name: "旧AI角色兼容验收", chatIdentityMode: undefined }] : [character];
+  if (!settings.success || !saveCharacters(fixtureCharacters).success || !saveRelationships([{ id: relationId, ...scope, userIdentityId: "identity-1", relationship: "friend", createdAt: now, updatedAt: now, syntheticFixtureId: prefix }]).success
     || !saveMessages(rows).success || !saveOfflineStories([offline]).success) throw Error("fixture_save_failed");
   if (!(await flushCharacters()).success || !(await flushMessages()).success) throw Error("fixture_flush_failed");
   writeJson(manifestKey, { synthetic: true, count, version: prefix });

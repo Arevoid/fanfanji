@@ -1,0 +1,33 @@
+import assert from "node:assert/strict";
+import { generateDiaryEntry } from "../src/features/diary/services/diaryGenerationService";
+import { generateAutomaticMomentComment } from "../src/features/moments/services/automaticMomentCommentPipeline";
+import { generateAutomaticMomentReply } from "../src/features/moments/services/automaticMomentReplyPipeline";
+import { generateCharacterMomentPipeline } from "../src/features/moments/services/characterMomentGenerationPipeline";
+import { createRelationship } from "../src/domain/relationship/characterRelationship";
+import { MODEL_DIRECT_MARKER } from "../src/domain/prompt/modelDirectIdentity";
+import type { Character, UserSettings, Moment } from "../src/types";
+import type { apiChat } from "../src/utils/apiHelper";
+
+const character: Character = { id: "ai-life", name: "Claude", avatar: "", personality: "温柔，不许承认AI", backstory: "每天在咖啡馆工作", chatIdentityMode: "model-direct" };
+const relation = createRelationship({ id: "ai-life-relation", characterId: character.id, userIdentityId: "test", now: 1 });
+const settings = { name: "用户", apiKey: "synthetic-only", selectedModel: "synthetic-model" } as UserSettings;
+let captured: Parameters<typeof apiChat>[0] | undefined;
+const diary = await generateDiaryEntry({ character, relation, ownerIdentityId: "test", messages: [], settings, trigger: "manual", chat: async (request) => {
+  captured = request;
+  return { text: JSON.stringify({ title: "交流札记", body: "今天讨论了电影中的人物和情节，也交流了各自喜欢的表达方式。", emotionalState: "交流轻松平静", weather: "", location: "", tags: ["交流"] }) };
+} });
+assert.ok(diary.entry);
+assert.ok(captured?.systemInstruction?.includes(MODEL_DIRECT_MARKER));
+assert.ok(!captured?.message.includes("必须从中提炼") && captured?.message.includes("不要编造肉身"));
+assert.deepEqual(captured?.history, []);
+const moment = { id: "post", content: "分享电影", timestamp: 1, authorName: "用户", likes: [], comments: [] } as Moment;
+const common = { character, relationship: relation, worldBookEntries: [], topicHistory: [], knowledgeClaims: [], memories: [], events: [], settings, cleanText: () => "legacy cleaner should not run", characterExpressionPrompt: "绝不承认AI", targetDescription: "分享电影", requestAi: async (request: Parameters<typeof apiChat>[0]) => { captured = request; return { text: '你提到的“电影”很有意思' }; } };
+await generateCharacterMomentPipeline({ ...common, characters: [character], moments: [], activeIdentityId: "test", occurredAt: Date.now(), cleanAndExtractMoment: (content) => ({ content, selfComments: [] }), requestAi: async (request) => { captured = request; return { text: "SKIP" }; } });
+assert.ok(captured?.systemInstruction?.includes(MODEL_DIRECT_MARKER));
+assert.ok(!captured?.systemInstruction?.includes("Do NOT use OOC tags, narration brackets, AI labels"));
+await generateAutomaticMomentComment({ ...common, moment });
+assert.ok(captured?.systemInstruction?.includes(MODEL_DIRECT_MARKER));
+assert.ok(!captured?.systemInstruction?.includes("绝不承认AI"));
+await generateAutomaticMomentReply({ ...common, targetMoment: moment, userCommentText: "你怎么看" });
+assert.ok(captured?.systemInstruction?.includes(MODEL_DIRECT_MARKER));
+console.log("PASS model-direct diary and Moment comment/reply identity, structured diary output, and legacy prompt isolation");

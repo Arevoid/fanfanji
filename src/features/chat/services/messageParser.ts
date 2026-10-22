@@ -57,8 +57,8 @@ export function removeFakeImageNarration(text: string): string {
     .trim();
 }
 
-export const cleanAiReplyText = (text: string, disableBracketActions: boolean): string =>
-  removeFakeImageNarration(cleanOnlineMessage(removeFakeImageNarration(text), disableBracketActions));
+export const cleanAiReplyText = (text: string, disableBracketActions: boolean, preserveProse = false): string =>
+  removeFakeImageNarration(cleanOnlineMessage(removeFakeImageNarration(text), disableBracketActions, preserveProse));
 export const splitAiReplyBubbles = splitIntoWeChatBubbles;
 
 /** Remove only a dialogue bubble's outer pair of quotes. Inner quotes remain intact. */

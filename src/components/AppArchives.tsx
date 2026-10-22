@@ -9,6 +9,7 @@ import { buildCharacterExport, characterExportFilename, createCharacterFromImpor
 import { buildCharacterTtsOptions, getTtsProviderLabel, type TtsProvider } from "../features/voice/ttsConfig";
 import { decodeJsonStorageText, readString } from "../core/storage/storageAdapter";
 import { createCharacterFromInput } from "../domain/character/characterCreation";
+import { resolveChatIdentityMode, type ChatIdentityMode } from "../domain/prompt/modelDirectIdentity";
 
 interface AppArchivesProps {
   characters: Character[];
@@ -111,6 +112,7 @@ export default function AppArchives({
   const [name, setName] = useState("");
   const [age, setAge] = useState<number | "" | "∞">("");
   const [gender, setGender] = useState("");
+  const [chatIdentityMode, setChatIdentityMode] = useState<ChatIdentityMode>("roleplay");
   const [mbti, setMbti] = useState("");
   const [avatar, setAvatar] = useState("");
   const [personality, setPersonality] = useState("");
@@ -195,6 +197,7 @@ export default function AppArchives({
     setName("");
     setAge("");
     setGender("");
+    setChatIdentityMode("roleplay");
     setMbti("");
     setAvatar("");
     setPersonality("");
@@ -219,8 +222,9 @@ export default function AppArchives({
   const handleEdit = (char: Character) => {
     setEditingId(char.id);
     setName(char.name);
-    setAge(char.age);
+    setAge(char.age ?? "");
     setGender(char.gender);
+    setChatIdentityMode(resolveChatIdentityMode(char));
     setMbti(char.mbti);
     setAvatar(char.avatar);
     setMinimaxVoiceId(char.minimaxVoiceId || "");
@@ -406,6 +410,7 @@ export default function AppArchives({
       name: name.trim(),
       age,
       gender,
+      chatIdentityMode,
       mbti,
       avatar: finalAvatar,
       personality: finalPersonality,
@@ -708,7 +713,8 @@ export default function AppArchives({
                 </label>
                 <select
                   value={gender}
-                  onChange={(e) => setGender(e.target.value)}
+                  aria-label="性别"
+                  onChange={(e) => { setGender(e.target.value); if (!editingId) setChatIdentityMode(e.target.value === "AI / 智械" ? "model-direct" : "roleplay"); }}
                   className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
                 >
                   <option value="">请选择性别 (选填)</option>
@@ -744,14 +750,25 @@ export default function AppArchives({
                 type="text"
                 value={replyLanguage}
                 onChange={(e) => setReplyLanguage(e.target.value)}
-                placeholder="例如：日语、English；留空则从人设/国籍自动识别"
+                placeholder={chatIdentityMode === "model-direct" ? "例如：中文、English；留空跟随当前对话语言" : "例如：日语、English；留空则从人设/国籍自动识别"}
                 className="w-full px-3 py-2 rounded-[8px] bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950 text-sm font-medium"
               />
             </div>
 
             <div>
+              {gender === "AI / 智械" && <>
               <label className="block text-xs font-semibold text-slate-500 mb-1">
-                详细人设与背景 (选填)
+                聊天身份模式
+              </label>
+              <select aria-label="聊天身份模式" value={chatIdentityMode} onChange={event => setChatIdentityMode(event.target.value as ChatIdentityMode)} className="mb-2 min-h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
+                <option value="model-direct">模型直接聊天</option>
+                <option value="roleplay">{gender === "AI / 智械" ? "虚构 AI 角色" : "人物角色扮演"}</option>
+              </select>
+              <p className="mb-4 text-xs leading-5 text-slate-500">{chatIdentityMode === "model-direct" ? "以当前配置的模型进行 AI 身份交流。姓名作为昵称，人设仅作为风格参考；否认 AI、冒认模型和真实身体经历等冲突设定不生效。" : "按人物设定扮演；AI／智械也可以是故事中的机器人角色。"}</p>
+              {editingId && chatIdentityMode === "model-direct" && <p className="mb-4 text-xs leading-5 text-slate-500">保存后以 AI 身份交流。原聊天和记忆保留，此前虚构经历不会作为本体模型的真实经历继续使用。</p>}
+              </>}
+              <label className="block text-xs font-semibold text-slate-500 mb-1">
+                {chatIdentityMode === "model-direct" ? "交流风格与偏好 (选填)" : "详细人设与背景 (选填)"}
               </label>
               <textarea
                 rows={8}

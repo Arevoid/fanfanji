@@ -423,6 +423,8 @@ async function directClientFetchModels(apiKey: string, apiEndpoint?: string, led
 
 // 2. Exported Wrapper Functions that try Backend first, then Fallback
 
+import { bindRequestModelIdentity } from "../domain/prompt/modelDirectIdentity";
+
 export type ApiChatParams = {
   message: string;
   history: any[];
@@ -538,6 +540,7 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
 }
 
 export async function apiChat(params: ApiChatParams): Promise<{ text: string }> {
+  params = { ...params, systemInstruction: bindRequestModelIdentity(params.systemInstruction, params.model) };
   const inputCharacters = params.message.length
     + String(params.systemInstruction || "").length
     + params.history.reduce((total, entry) => total + String(entry?.text || entry?.content || "").length, 0);

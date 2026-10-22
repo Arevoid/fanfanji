@@ -1,6 +1,7 @@
 import type { Character, CharacterReference } from "../../types";
 import type { CharacterRelationshipState } from "../relationship/characterRelationship";
 import type { PromptBlock } from "./PromptBlock";
+import { buildModelDirectIdentity, modelDirectProfile, resolveChatIdentityMode, type ModelDirectProfile } from "./modelDirectIdentity";
 
 export const CHARACTER_PERSONA_PROTECTION = `[角色人设最高优先级]
 角色卡、参考资料中明确写出的稳定表达习惯，以及角色专属的人设规则，共同决定角色对用户的称呼、亲疏、情感方向、主动程度、话量、口癖、语气、标点和禁用口吻。任何“活人感”、自然聊天、媒体使用、回复长度或通用建议都只是软参考，不得覆盖、平均化或改写这些特征。
@@ -68,6 +69,7 @@ function collectAnchorEvidence(character: Pick<Character, "personality" | "backs
 }
 
 export interface CharacterPromptProjection {
+  modelDirectProfile?: ModelDirectProfile;
   description: PromptBlock;
   personality: PromptBlock;
   relationship?: PromptBlock;
@@ -76,9 +78,16 @@ export interface CharacterPromptProjection {
 }
 
 export function projectCharacterPrompt(
-  character: Pick<Character, "id" | "name" | "age" | "gender" | "mbti" | "personality" | "backstory" | "references">,
+  character: Pick<Character, "id" | "name" | "age" | "gender" | "mbti" | "personality" | "backstory" | "references" | "chatIdentityMode" | "replyLanguage">,
   relationship?: CharacterRelationshipState,
 ): CharacterPromptProjection {
+  if (resolveChatIdentityMode(character) === "model-direct") {
+    const profile = modelDirectProfile(character);
+    const block = (id: string, content: string): PromptBlock => ({ id, content, kind: "char-personality", sourceId: `character:${character.id}:${id}` });
+    return { modelDirectProfile: profile, description: block("character-description", buildModelDirectIdentity(profile)),
+      personality: block("character-personality", "交流风格仅来自上方用户偏好，不改变 AI 身份。"),
+      expressionAnchor: block("character-expression-anchor", "保持 AI 身份，按兼容的交流偏好自然回应，不冒认真人或未经验证的模型身份。") };
+  }
   const identityLines = [
     `Name: ${character.name}`,
     character.age !== undefined && character.age !== "" ? `Age: ${character.age}` : "",

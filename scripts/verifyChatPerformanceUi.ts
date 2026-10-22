@@ -74,6 +74,8 @@ try {
     await app.locator("[data-chat-message-id]").first().waitFor();
     const openMs = Date.now() - start;
     assert.equal(await app.locator("[data-chat-message-id]").count(), 50);
+    const earlierSize = await app.getByRole("button", { name: /查看更早的消息/ }).evaluate((element: HTMLElement) => ({ font: parseFloat(getComputedStyle(element).fontSize), height: element.getBoundingClientRect().height }));
+    assert.equal(earlierSize.font, 11.5); assert.ok(earlierSize.height <= 25);
     await app.locator(".chat-header__more-button").click(); await app.getByRole("button", { name: "打开查找聊天记录" }).click();
     const search = app.getByRole("searchbox", { name: "搜索聊天记录" }); const searchStart = Date.now();
     await search.fill("生日");
@@ -81,6 +83,7 @@ try {
     await app.getByText("很久以前约好了生日一起看海", { exact: true }).waitFor();
     const rect = await app.getByText("很久以前约好了生日一起看海", { exact: true }).boundingBox(); assert.ok(rect && rect.y > 0 && rect.y < 800);
     assert.ok(await app.locator("[data-chat-message-id]").count() <= 150);
+    const latestSize = await app.getByRole("button", { name: "回到最新消息", exact: true }).boundingBox(); assert.ok(latestSize && latestSize.height <= 24);
     await app.getByRole("button", { name: "回到最新消息", exact: true }).click();
     await app.waitForTimeout(100);
     const latestMessage = await app.locator(`[data-chat-message-id="chat-perf-20261023-message-${count - 1}"]`).boundingBox();
@@ -91,6 +94,11 @@ try {
     const region = app.getByRole("region", { name: "查找聊天记录", exact: true });
     await region.getByRole("button", { name: "文字", exact: true }).click();
     await app.waitForTimeout(300); assert.equal(await region.locator("[data-chat-history-result]").count(), 50);
+    const resultArea = await region.getByRole("status").evaluate((element: HTMLElement) => {
+      const box = element.parentElement!.getBoundingClientRect();
+      return { bottom: box.bottom, height: box.height, viewportHeight: window.innerHeight, scrollable: element.parentElement!.scrollHeight > element.parentElement!.clientHeight };
+    });
+    assert.ok(resultArea.bottom >= resultArea.viewportHeight - 90 && resultArea.scrollable, `results must fill the available page: ${JSON.stringify(resultArea)}`);
     const firstResult = await region.locator("[data-chat-history-result]").first().getAttribute("data-chat-history-result");
     await region.getByRole("button", { name: "查看更多结果" }).click(); await region.getByRole("status").filter({ hasText: "第 2 页" }).waitFor();
     assert.equal(await region.locator("[data-chat-history-result]").count(), 50);

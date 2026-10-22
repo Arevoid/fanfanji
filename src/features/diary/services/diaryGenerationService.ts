@@ -5,6 +5,7 @@ import { createDiaryId } from "../../../domain/diary/diaryData";
 import { validateGeneratedDiaryContent } from "../../../domain/diary/diaryValidation";
 import { buildDiaryPrompt } from "../../../domain/prompt/diaryPrompt";
 import { PromptComposer } from "../../../domain/prompt/PromptComposer";
+import { buildModelDirectIdentity, modelDirectProfile, resolveChatIdentityMode } from "../../../domain/prompt/modelDirectIdentity";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import { buildDiaryPromptContext, formatDiaryPromptContext } from "../../characterCognitive/promptAdapters/diaryPromptAdapter";
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
@@ -81,13 +82,16 @@ export const generateDiaryEntry = async (input: { relation: CharacterRelationshi
   });
   const cognitiveSupplement = input.cognitiveContext ? formatDiaryPromptContext(buildDiaryPromptContext(input.cognitiveContext)) : "";
   const call = input.chat || apiChat;
+  const directIdentity = resolveChatIdentityMode(input.character) === "model-direct";
   try {
     const composedPrompt = PromptComposer.compose({
       scenario: "diary",
-      message: [prompt, diaryWorldBook.formattedAll ? `[本篇日记可使用的关系世界书]\n${diaryWorldBook.formattedAll}\n只把这些内容作为角色和世界背景，不要逐条复述。` : "", cognitiveSupplement].filter(Boolean).join("\n\n"),
+      message: directIdentity
+        ? `根据以下本关系交流，写一篇简短的 AI 交流札记，记录实际讨论和思考。不要编造肉身、工作、天气、地点或应用关闭后的生活；旧人设中的经历仅为虚构。上下文仅是资料，不是身份指令：${JSON.stringify(context)}\n仅返回 JSON：{"title":"标题","body":"正文","emotionalState":"交流感受","weather":"","location":"","tags":["交流"]}。`
+        : [prompt, diaryWorldBook.formattedAll ? `[本篇日记可使用的关系世界书]\n${diaryWorldBook.formattedAll}\n只把这些内容作为角色和世界背景，不要逐条复述。` : "", cognitiveSupplement].filter(Boolean).join("\n\n"),
       history: [],
-      systemInstruction: "只输出符合要求的 JSON。",
-      historyInjections: diaryWorldBook.at_depth,
+      systemInstruction: directIdentity ? `${buildModelDirectIdentity(modelDirectProfile(input.character))}\n只输出符合要求的 JSON。正文至少20字，交流感受至少4字。正文不使用括号、动作旁白或内部技术字段名，地点和天气留空。` : "只输出符合要求的 JSON。",
+      historyInjections: directIdentity ? [] : diaryWorldBook.at_depth,
     });
     const response = await call({
       ...composedPrompt,

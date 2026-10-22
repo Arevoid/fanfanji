@@ -44,14 +44,14 @@ export function ChatHistorySearch({ messages, stories, scope, state, onStateChan
     })(); }, 200);
     return () => { clearTimeout(timer); abort.abort(); };
   }, [candidates, state.query, state.category, state.pages]);
-  return <section aria-label="查找聊天记录" className="flex min-h-0 flex-col gap-3">
+  return <section aria-label="查找聊天记录" className="flex min-h-0 flex-1 flex-col gap-3">
     <div className="sticky top-0 z-10 space-y-3 bg-[var(--surface)] pb-2">
       <label className="block text-sm"><span className="sr-only">搜索聊天记录</span><input aria-label="搜索聊天记录" type="search" placeholder="搜索当前聊天记录" value={state.query} onChange={event => update({ query: event.target.value })}
         className="min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-sm" /></label>
       <div role="group" aria-label="聊天记录分类" className="grid grid-cols-6 gap-1">{CHAT_HISTORY_CATEGORIES.map(item => <button key={item.id} type="button" aria-pressed={state.category === item.id} onClick={() => update({ category: item.id })}
         className={`h-8 min-w-0 whitespace-nowrap rounded-full border border-[var(--border)] px-1 text-xs ${state.category === item.id ? "bg-[var(--button-primary-bg)] text-[var(--button-primary-text)]" : "bg-[var(--surface)] text-[var(--text-primary)]"}`}>{item.label}</button>)}</div>
     </div>
-    <div ref={scroller} className="max-h-[55dvh] min-h-0 overflow-y-auto" onScroll={event => { scrollPosition.current = event.currentTarget.scrollTop; }}>
+    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto" onScroll={event => { scrollPosition.current = event.currentTarget.scrollTop; }}>
       <p role="status" className="mb-2 text-xs text-[var(--text-secondary)]">{busy ? "正在查找…" : error || (results.length ? `第 ${state.pages} 页，显示 ${results.length} 条${hasMore ? "，可继续查看" : ""}` : "没有找到匹配的聊天记录")}</p>
       {results.map(result => <button type="button" disabled={busy} key={result.key} data-chat-history-result={result.key} onClick={() => { onStateChange({ ...state, scrollTop: scrollPosition.current }); onSelect(result); }} className="mb-2 block w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left">
         <span className="mb-2 flex flex-wrap justify-between gap-2 text-xs text-[var(--text-secondary)]"><span>{result.storyId ? `线下 · ${result.title || "剧情"}` : result.sender === "user" ? "你" : characterName}</span><time>{new Date(result.timestamp).toLocaleString("zh-CN")}</time></span>

@@ -9,7 +9,7 @@ import { sanitizeCharacterActionText } from "./characterActionProtocol";
 export function createDirectReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
   const replyText = sanitizeCharacterActionText(ensureExplicitStickerDelivery(context.rawText, context.requestedStickerMessage));
   const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(
-    stripSimulatedUserTurns(stripOuterDialogueQuotes(cleanAiReplyText(replyText, context.disableBracketActions)), context),
+    stripSimulatedUserTurns(stripOuterDialogueQuotes(cleanAiReplyText(replyText, context.disableBracketActions, context.preserveProse)), context),
     context.allowEmoji,
   ));
   // Never fall back to rawText here: it may consist solely of a model's fake

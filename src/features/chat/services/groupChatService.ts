@@ -18,6 +18,7 @@ import { createLocalInnerVoiceFallback, INLINE_GROUP_INNER_VOICE_INSTRUCTION, pa
 import type { InlineInnerVoicePayload } from "./chatTurnResponseProtocol";
 import { DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT, MAX_CHAT_CONTEXT_MEMORY_LIMIT } from "./chatMemoryRetrievalSettings";
 import { buildWorldBookScanText } from "../../../domain/worldbook/worldBookTriggerScan";
+import { buildModelDirectIdentity, modelDirectProfile, resolveChatIdentityMode } from "../../../domain/prompt/modelDirectIdentity";
 
 export type GroupChatTurnGenerator = (input: {
   prompt: {
@@ -123,6 +124,7 @@ export function buildGroupMemberPromptContexts(input: {
     const memberWorldBookText = memberOnlyWorldBook.length
       ? `\n- 该角色专属世界书背景/日程/时间线设定:\n${memberOnlyWorldBook.map((entry) => `【设定 - ${entry.title}】\n${entry.content}`).join("\n\n")}`
       : "";
+    if (resolveChatIdentityMode(member) === "model-direct") return `[群聊成员 ${index + 1}: ${member.name}]\n${buildModelDirectIdentity(modelDirectProfile(member))}`;
     return `[群聊成员 ${index + 1}: ${member.name}]
 - 角色人设/性格: ${member.personality}
 - 背景设定: ${member.backstory}
@@ -209,7 +211,7 @@ export async function generateGroupReplyCandidates(input: {
     // Match by the original reply index, not sender name: a member may send
     // several bubbles in one turn, each with a different inner voice/action.
     structuredReply: structured?.[item.index],
-    content: normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(sanitizeCharacterActionText(item.reply.content.trim()), input.disableBracketActions))),
+    content: normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(sanitizeCharacterActionText(item.reply.content.trim()), input.disableBracketActions, resolveChatIdentityMode(item.member) === "model-direct"))),
   })).filter((item) => Boolean(item.content) || item.structuredReply?.redPacketAction === "claim_silent" || item.structuredReply?.redPacketAction === "silent");
   const messages = valid.map((item) => createGroupCharacterMessage({
     id: input.createId(item.index), characterId: input.groupId, senderId: item.member.id,

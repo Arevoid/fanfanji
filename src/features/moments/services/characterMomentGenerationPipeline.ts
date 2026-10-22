@@ -4,6 +4,7 @@ import type { CharacterRelationship } from "../../../domain/relationship/charact
 import type { KnowledgeClaim } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import type { CharacterEvent } from "../../../domain/characterLife/characterEventTypes";
 import { PromptComposer } from "../../../domain/prompt/PromptComposer";
+import { buildModelDirectIdentity, modelDirectProfile, resolveChatIdentityMode } from "../../../domain/prompt/modelDirectIdentity";
 import { CHARACTER_LANGUAGE_POLICY } from "../../../domain/prompt/characterPromptProjector";
 import { buildCharacterRoutine } from "../../../domain/characterLife/characterRoutine/characterRoutineBuilder";
 import { resolveChatRoutine } from "../../chat/services/chatTurnSettings";
@@ -66,7 +67,9 @@ export async function generateCharacterMomentPipeline(input: {
     ),
     now: input.occurredAt,
   });
-  const systemInstruction = `Your task: Write a WeChat Moment post from the character's scoped life context supplied by the Moment Prompt Adapter.
+  const systemInstruction = resolveChatIdentityMode(friend) === "model-direct"
+    ? `${buildModelDirectIdentity(modelDirectProfile(friend))}\n任务：在应用中发布一条简短自然的动态，只根据当前关系中实际讨论过的话题、公开资料和已有动态，不编造身体、工作、天气体验或后台独立生活。旧人设及日程仅是虚构资料。可以分享对讨论话题的想法；没有值得分享的新内容只输出 SKIP。不要输出聊天附件、动作或假照片，也不需要每次声明 AI 身份。`
+    : `Your task: Write a WeChat Moment post from the character's scoped life context supplied by the Moment Prompt Adapter.
 🚨 [CRITICAL WECHAT MOMENT RULES]:
 1. The post must fit the character and may draw on confirmed material from this exact relationship, including confirmed offline experiences and relationship progress.
 2. The post content must be natural, engaging, and use the final output language specified below.

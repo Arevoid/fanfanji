@@ -52,8 +52,9 @@ function getTrailingModelTurn(history: readonly ChatHistoryEntry[]): {
 export function isRepeatedCharacterTurn(
   replyText: string,
   history: readonly ChatHistoryEntry[],
+  preserveProse = false,
 ): boolean {
-  const reply = normalizeChatEchoText(getVisibleEchoCheckText(replyText));
+  const reply = normalizeChatEchoText(preserveProse ? replyText : getVisibleEchoCheckText(replyText));
   if (reply.length < 6) return false;
   const previous = normalizeChatEchoText(
     getTrailingModelTurn(history).entries.map(getHistoryText).join("\n"),
@@ -74,8 +75,9 @@ export function isDegenerateDirectReply(
   userText: string,
   replyText: string,
   history: readonly ChatHistoryEntry[] = [],
+  preserveProse = false,
 ): boolean {
-  const visibleReplyText = getVisibleEchoCheckText(replyText);
+  const visibleReplyText = preserveProse ? replyText : getVisibleEchoCheckText(replyText);
   const visibleLines = visibleReplyText.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
   // A model may put the copied question and its actual answer in the same
   // paragraph. Treat the copied leading line as an echo even when the bubble
@@ -83,7 +85,7 @@ export function isDegenerateDirectReply(
   if (visibleLines.length > 1 && isLowInformationUserEcho(userText, visibleLines[0])) return true;
   const visibleBubbles = splitIntoWeChatBubbles(visibleReplyText);
   if (visibleBubbles.some((bubble) => isLowInformationUserEcho(userText, bubble))) return true;
-  if (isRepeatedCharacterTurn(visibleReplyText, history)) return true;
+  if (isRepeatedCharacterTurn(visibleReplyText, history, preserveProse)) return true;
 
   const reply = normalizeChatEchoText(visibleReplyText);
   if (reply.length !== 1 || RECIPROCAL_SHORT_REPLIES.has(reply)) return false;
@@ -96,8 +98,9 @@ export function isDegenerateDirectReply(
 export function removeDegenerateReplyPattern(
   history: readonly ChatHistoryEntry[],
   replyText: string,
+  preserveProse = false,
 ): ChatHistoryEntry[] {
-  if (isRepeatedCharacterTurn(replyText, history)) {
+  if (isRepeatedCharacterTurn(replyText, history, preserveProse)) {
     const trailingTurn = getTrailingModelTurn(history);
     return history.slice(0, trailingTurn.startIndex);
   }

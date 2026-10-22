@@ -15,6 +15,7 @@ import { createId } from "../core/id/createId";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
 import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, MomentVisibility, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type InnerVoiceRecord, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "../types";
 import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proactiveOfflinePreference";
+import { resolveChatIdentityMode } from "../domain/prompt/modelDirectIdentity";
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
 import type { Appointment, AppointmentMode } from "../domain/schedule/scheduleTypes";
@@ -3795,6 +3796,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
             return {
               rawText: data.text,
+              preserveProse: resolveChatIdentityMode(activeCharacter) === "model-direct",
               requestedStickerMessage: userMsg?.content,
               disableBracketActions: turnSettings.disableBracketActions,
               keepPeriods,
@@ -5426,6 +5428,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       }
 
       const systemInstruction = buildProactiveChatSystemInstruction({
+        modelDirectProfile: proactiveCharacterProjection.modelDirectProfile,
         characterName: friend.name,
         description: proactiveCharacterProjection.description.content,
         personality: proactiveCharacterProjection.personality.content,
@@ -8202,10 +8205,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               </div>
 
               {/* Body */}
-              <div className="flex-1 overflow-y-auto p-4 pb-[34px] space-y-3">
+              <div className={`flex-1 p-4 pb-[34px] ${advancedSettingsSection === "history" ? "flex min-h-0 flex-col overflow-hidden" : "overflow-y-auto space-y-3"}`}>
                  {!isShowingAdvancedSettings && (
                     <>
                   {/* Character Profile Summary & Remark Settings */}
+                {activeCharacter.chatIdentityMode === "model-direct" && <p className="rounded-xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">模型直接聊天 · 当前配置模型：{settings.selectedModel || "未配置"}。昵称不代表模型身份；接口标识不能验证中转服务的实际后端。</p>}
                 <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] overflow-hidden flex items-center gap-3">
                   <div className="relative shrink-0">
                     <RenderAvatar

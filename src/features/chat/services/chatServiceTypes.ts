@@ -12,6 +12,8 @@ export interface ReplyCandidateContext {
   rawText: string;
   translationText?: string;
   disableBracketActions: boolean;
+  /** Model-direct replies are prose; quotation marks do not delimit roleplay speech. */
+  preserveProse?: boolean;
   keepPeriods: boolean;
   characterId?: string;
   characterName?: string;

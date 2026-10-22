@@ -22,6 +22,8 @@ export function sanitizeChatIcons(value: unknown): ChatIconOverrides {
 }
 
 export interface Character {
+  /** Absent on legacy records: keep their original roleplay behavior. */
+  chatIdentityMode?: "roleplay" | "model-direct";
   id: string;
   /** Optional dev-only synthetic fixture namespace; production records omit it. */
   syntheticFixtureId?: string;
