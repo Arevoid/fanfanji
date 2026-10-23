@@ -28,6 +28,8 @@ export interface SmsTimeline {
 }
 
 export interface SmsMessage {
+  replyBatchId?: string;
+  translation?: string;
   id: string;
   timelineId: string;
   characterId: string;

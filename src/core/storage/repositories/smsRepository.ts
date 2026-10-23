@@ -69,7 +69,7 @@ const normalizeMessage = (value: unknown): SmsMessage | null => {
   const ownerIdentityId = text(item.ownerIdentityId);
   const phoneNumber = text(item.phoneNumber);
   return id && timelineId && characterId && ownerIdentityId && content && isSmsPhoneNumber(phoneNumber)
-    ? { id, timelineId, characterId, ownerIdentityId, phoneNumber, sender, content, receivedAt: time(item.receivedAt), readAt: typeof item.readAt === "number" ? item.readAt : undefined, timelineTime: text(item.timelineTime) || undefined }
+    ? { id, timelineId, characterId, ownerIdentityId, phoneNumber, sender, content, receivedAt: time(item.receivedAt), readAt: typeof item.readAt === "number" ? item.readAt : undefined, timelineTime: text(item.timelineTime) || undefined, replyBatchId: text(item.replyBatchId) || undefined, translation: text(item.translation) || undefined }
     : null;
 };
 

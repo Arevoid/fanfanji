@@ -29,7 +29,9 @@ import {
 import { createAnchoredSmsTimeline, createUnanchoredSmsTimeline } from "../features/sms/smsTimeline";
 import { resolveSmsConversationActivity } from "../features/sms/smsInbox";
 import { buildSmsHistory, buildSmsMemoryNote, buildSmsSystemPrompt, selectSmsWorldBookEntries } from "../features/sms/smsPrompt";
-import { apiChat } from "../utils/apiHelper";
+import { apiChat, apiTranslate } from "../utils/apiHelper";
+import { createId } from "../core/id/createId";
+import { replaceSmsMessages, smsReplyTarget, smsTimelineMessages } from "../features/sms/smsMessageActions";
 import { ChatAvatar } from "../features/chat/components/ChatAvatar";
 import { getVoiceMessageSummary, isVoiceMessageContent } from "../features/chat/services/voiceMessageContent";
 
@@ -91,6 +93,15 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
   const [anchorDraft, setAnchorDraft] = useState({ label: "恋人时间线", kind: "custom" as SmsTimelineKind, timelineTime: "", relationshipHint: "恋人", knowsCurrentTimeline: false });
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const messagesViewportRef = useRef<HTMLElement | null>(null);
+  const [messageMenu, setMessageMenu] = useState<SmsMessage | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState<SmsMessage | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const operation = useRef(false);
+  const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number }>();
+  const [hiddenTranslations, setHiddenTranslations] = useState<Set<string>>(new Set());
+  const cancelPress = () => { if (press.current) clearTimeout(press.current.timer); press.current = undefined; };
+  useEffect(() => { setMessageMenu(null); setDeleteMessage(null); cancelPress(); }, [page, selectedTimelineId, selectedIdentityId]);
+  useEffect(() => () => cancelPress(), []);
 
   useEffect(() => {
     storeRef.current = store;
@@ -139,7 +150,7 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
       && (!selectedCharacterId || timeline.characterId === selectedCharacterId))
     : timelinesForCharacter[0];
   const selectedMessages = selectedTimeline
-    ? store.messages.filter((message) => message.timelineId === selectedTimeline.id).sort((a, b) => a.receivedAt - b.receivedAt)
+    ? smsTimelineMessages(store, selectedTimeline)
     : [];
 
   useEffect(() => {
@@ -245,7 +256,7 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
 
   const sendMessage = async () => {
     const content = draft.trim();
-    if (!content || !selectedCharacter || !selectedTimeline || isSending) return;
+    if (!content || !selectedCharacter || !selectedTimeline || isSending || operation.current) return;
     const now = Date.now();
     const userMessage: SmsMessage = {
       id: `sms-${now}-user`,
@@ -267,7 +278,7 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
       const memory = storeRef.current.memories.find((item) => item.timelineId === selectedTimeline.id);
       const response = await apiChat({
         message: content,
-        history: buildSmsHistory(storeRef.current.messages.filter((message) => message.timelineId === selectedTimeline.id && message.id !== userMessage.id)),
+        history: buildSmsHistory(smsTimelineMessages(storeRef.current, selectedTimeline).filter(message => message.id !== userMessage.id)),
         systemInstruction: buildSmsSystemPrompt({ character: selectedCharacter, timeline: selectedTimeline, activeIdentity: selectedIdentity, worldBookEntries: scopedWorldBook, memory }),
         apiKey: settings.apiKey,
         model: settings.selectedModel,
@@ -282,7 +293,9 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
         maxOutputTokens: 700,
       });
       const replyParts = response.text.split(/\n{2,}/u).map((part) => part.trim()).filter(Boolean).slice(0, 6);
+      const replyBatchId = createId("sms-reply");
       replyParts.forEach((part, index) => appendMessage({
+        replyBatchId,
         id: `sms-${Date.now()}-${index}-character`,
         timelineId: selectedTimeline.id,
         characterId: selectedCharacter.id,
@@ -298,6 +311,49 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
     } finally {
       setIsSending(false);
     }
+  };
+
+  const translateMessage = async (message: SmsMessage) => {
+    setMessageMenu(null);
+    if (message.translation) {
+      setHiddenTranslations(current => { const next = new Set(current); if (next.has(message.id)) next.delete(message.id); else next.add(message.id); return next; });
+      return;
+    }
+    if (operation.current || isSending) return;
+    operation.current = true; setActionBusy(true); setError(null);
+    try {
+      const response = await apiTranslate({ text: message.content, apiKey: settings.apiKey, model: settings.selectedModel, apiEndpoint: settings.apiEndpoint, targetLanguage: "zh-CN", characterId: message.characterId, conversationId: `sms:${message.timelineId}` });
+      if (!response.text.trim()) throw Error("没有返回有效译文，请重试。");
+      const current = storeRef.current;
+      persistStore({ ...current, messages: current.messages.map(item => item.id === message.id && item.timelineId === message.timelineId && item.content === message.content ? { ...item, translation: response.text.trim() } : item) });
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "翻译失败，请重试。"); }
+    finally { operation.current = false; setActionBusy(false); }
+  };
+
+  const regenerateMessage = async (message: SmsMessage) => {
+    if (!selectedTimeline || !selectedCharacter || operation.current || isSending) return;
+    const scope = selectedTimeline, character = selectedCharacter;
+    const target = smsReplyTarget(storeRef.current, scope, message.id);
+    setMessageMenu(null);
+    if (!target) { setError("这条回复没有对应的用户短信，暂时无法重新生成。"); return; }
+    operation.current = true; setActionBusy(true); setError(null);
+    try {
+      const notes = [...target.prefix, target.user].map(item => buildSmsMemoryNote(item.sender, item.content)).filter((note): note is string => Boolean(note)).slice(-20);
+      const response = await apiChat({ message: target.user.content, history: buildSmsHistory(target.prefix),
+        systemInstruction: buildSmsSystemPrompt({ character, timeline: scope, worldBookEntries: selectSmsWorldBookEntries(worldBookEntries, character.id, scope.ownerIdentityId), memory: { timelineId: scope.id, characterId: character.id, ownerIdentityId: scope.ownerIdentityId, phoneNumber: scope.phoneNumber, notes, updatedAt: target.user.receivedAt } }),
+        apiKey: settings.apiKey, model: settings.selectedModel, apiEndpoint: settings.apiEndpoint, apiTemperature: settings.apiTemperature, streamCompatible: false,
+        scenario: "sms-time-space", purpose: "chat_reply", characterId: character.id, conversationId: `sms:${scope.id}`, contextItems: ["sms-only-history", "sms-timeline", "worldbook"], maxOutputTokens: 700 });
+      const parts = response.text.split(/\n{2,}/u).map(part => part.trim()).filter(Boolean).slice(0, 6);
+      if (!parts.length) throw Error("没有返回有效回复，原短信已保留。");
+      const latestTarget = smsReplyTarget(storeRef.current, scope, message.id);
+      if (!latestTarget || JSON.stringify(latestTarget.messages) !== JSON.stringify(target.messages)) throw Error("原短信已发生变化，请重新操作。");
+      const first = target.messages[0], batch = createId("sms-reply");
+      const nextTime = smsTimelineMessages(storeRef.current, scope).find(item => item.receivedAt > target.messages.at(-1)!.receivedAt)?.receivedAt;
+      const step = nextTime ? Math.min(1, Math.max(0, nextTime - first.receivedAt) / (parts.length + 1)) : 1;
+      const replacements: SmsMessage[] = parts.map((content, index) => ({ ...first, id: createId("sms"), replyBatchId: batch, content, translation: undefined, receivedAt: first.receivedAt + index * step, readAt: Date.now() }));
+      persistStore(replaceSmsMessages(storeRef.current, scope, target.messages.map(item => item.id), replacements));
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "重新生成失败，原短信已保留。"); }
+    finally { operation.current = false; setActionBusy(false); }
   };
 
   const createManualTimeline = () => {
@@ -394,14 +450,28 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
             <div className="mx-auto mb-5 flex max-w-[25rem] items-center justify-center gap-2 text-[10px] text-[var(--text-secondary)]"><Clock3 className="h-3.5 w-3.5" /><span>真实收发时间与时间线时间分开保存</span></div>
             {selectedMessages.length === 0 && <div className="mx-auto mt-20 max-w-[17rem] rounded-2xl bg-[var(--surface)]/80 px-4 py-3 text-center text-xs leading-5 text-[var(--text-secondary)] shadow-sm"><ShieldQuestion className="mx-auto mb-2 h-5 w-5 text-[var(--accent)]" />这是一个陌生号码。先发一条短信，看看这个时空里的 {selectedCharacter.name} 会如何回应。</div>}
             <div className="mx-auto flex max-w-[25rem] flex-col gap-2">
-              {selectedMessages.map((message, index) => <React.Fragment key={message.id}><div className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}><div className={`max-w-[78%] rounded-[20px] px-3.5 py-2.5 text-[15px] leading-6 shadow-sm ${message.sender === "user" ? "rounded-br-[7px] bg-[var(--accent)] text-[var(--accent-contrast)]" : message.sender === "system" ? "bg-transparent px-1 text-center text-xs text-[var(--text-secondary)] shadow-none" : "rounded-bl-[7px] bg-[var(--surface)] text-[var(--text-primary)]"}`}>{message.content}</div></div>{(index === selectedMessages.length - 1 || selectedMessages[index + 1]?.sender !== message.sender) && <div className={`text-[9px] text-[var(--text-secondary)] ${message.sender === "user" ? "text-right" : "text-left"}`}>{formatTime(message.receivedAt)}{message.timelineTime ? ` · ${message.timelineTime}` : ""}</div>}</React.Fragment>)}
+              {selectedMessages.map((message, index) => <React.Fragment key={message.id}>
+                <div className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}>
+                  <div data-sms-message-id={message.id} role={message.sender === "system" ? undefined : "button"} tabIndex={message.sender === "system" ? undefined : 0} aria-label={message.sender === "system" ? undefined : `短信：${message.content}`}
+                    onContextMenu={event => { event.preventDefault(); cancelPress(); if (message.sender !== "system" && !isSending && !actionBusy) setMessageMenu(message); }}
+                    onKeyDown={event => { if (event.key === "Enter" || event.key === " " || event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); if (message.sender !== "system" && !isSending && !actionBusy) setMessageMenu(message); } }}
+                    onPointerDown={event => { cancelPress(); if (message.sender === "system" || isSending || actionBusy || event.button !== 0) return; press.current = { x: event.clientX, y: event.clientY, timer: setTimeout(() => { setMessageMenu(message); press.current = undefined; }, 500) }; }}
+                    onPointerMove={event => { if (press.current && Math.hypot(event.clientX - press.current.x, event.clientY - press.current.y) > 10) cancelPress(); }} onPointerUp={cancelPress} onPointerCancel={cancelPress} onPointerLeave={cancelPress}
+                    className={`max-w-[78%] select-none rounded-[20px] px-3.5 py-2.5 text-[15px] leading-6 shadow-sm ${message.sender === "user" ? "rounded-br-[7px] bg-[var(--accent)] text-[var(--accent-contrast)]" : message.sender === "system" ? "bg-transparent px-1 text-center text-xs text-[var(--text-secondary)] shadow-none" : "rounded-bl-[7px] bg-[var(--surface)] text-[var(--text-primary)]"}`} style={{ WebkitTouchCallout: "none" }}>
+                    <span className="whitespace-pre-wrap break-words">{message.content}</span>
+                    {message.translation && !hiddenTranslations.has(message.id) && <div className="mt-2 border-t border-current/15 pt-2 text-xs leading-5 opacity-75" aria-label="短信译文">{message.translation}</div>}
+                  </div>
+                </div>
+                {(index === selectedMessages.length - 1 || selectedMessages[index + 1]?.sender !== message.sender) && <div className={`text-[9px] text-[var(--text-secondary)] ${message.sender === "user" ? "text-right" : "text-left"}`}>{formatTime(message.receivedAt)}{message.timelineTime ? ` · ${message.timelineTime}` : ""}</div>}
+              </React.Fragment>)}
+              {actionBusy && <p role="status" className="text-center text-xs text-[var(--text-secondary)]">正在处理短信…</p>}
               {isSending && <div className="flex justify-start"><div className="rounded-[20px] rounded-bl-[7px] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--text-secondary)] shadow-sm">正在输入…</div></div>}
             </div>
           </main>
           {error && <button type="button" onClick={() => setError(null)} className="shrink-0 border-t border-rose-100 bg-rose-50 px-4 py-2 text-left text-[11px] leading-5 text-rose-600">{error}</button>}
           <footer className="flex shrink-0 items-center gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 pb-[calc(env(safe-area-inset-bottom,0px)+10px)]">
             <textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} rows={1} placeholder="短信内容…" className="sms-composer-input h-10 min-h-10 max-h-28 flex-1 resize-none rounded-[20px] border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-2.5 text-sm leading-5 text-[var(--text-primary)] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20" />
-            <button type="button" onClick={() => void sendMessage()} disabled={!draft.trim() || isSending} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] shadow-sm transition-transform active:scale-95 disabled:cursor-not-allowed disabled:bg-[var(--surface-muted)] disabled:text-[var(--text-secondary)]" aria-label="发送短信"><Send className="h-4 w-4" /></button>
+            <button type="button" onClick={() => void sendMessage()} disabled={!draft.trim() || isSending || actionBusy} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] shadow-sm transition-transform active:scale-95 disabled:cursor-not-allowed disabled:bg-[var(--surface-muted)] disabled:text-[var(--text-secondary)]" aria-label="发送短信"><Send className="h-4 w-4" /></button>
           </footer>
         </>
       )}
@@ -443,6 +513,20 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
           </div>
         </div>
       )}
+      {messageMenu && <div className="absolute inset-0 z-[60] flex items-end justify-center bg-black/30 p-3 sm:items-center" onClick={() => setMessageMenu(null)} onKeyDown={event => { if (event.key === "Escape") setMessageMenu(null); }}>
+        <div role="dialog" aria-modal="true" aria-label="短信操作" className="w-full max-w-sm overflow-hidden rounded-2xl bg-[var(--surface)] p-2 shadow-xl" onClick={event => event.stopPropagation()}>
+          <button type="button" autoFocus className="block min-h-11 w-full rounded-xl px-4 text-left text-sm" onClick={() => void translateMessage(messageMenu)}>{messageMenu.translation ? hiddenTranslations.has(messageMenu.id) ? "展开翻译" : "收起翻译" : "翻译"}</button>
+          {messageMenu.sender === "character" && <button type="button" disabled={!selectedTimeline || !smsReplyTarget(storeRef.current, selectedTimeline, messageMenu.id)} className="block min-h-11 w-full rounded-xl px-4 text-left text-sm disabled:opacity-40" onClick={() => void regenerateMessage(messageMenu)}>重新生成回复</button>}
+          <button type="button" className="block min-h-11 w-full rounded-xl px-4 text-left text-sm text-red-500" onClick={() => { setDeleteMessage(messageMenu); setMessageMenu(null); }}>删除短信</button>
+          <button type="button" className="block min-h-11 w-full rounded-xl px-4 text-center text-sm text-[var(--text-secondary)]" onClick={() => setMessageMenu(null)}>取消</button>
+        </div>
+      </div>}
+      {deleteMessage && selectedTimeline && <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/30 p-4">
+        <div role="dialog" aria-modal="true" aria-label="删除这条短信" className="w-full max-w-sm rounded-2xl bg-[var(--surface)] p-5 shadow-xl">
+          <h2 className="font-bold">删除这条短信？</h2><p className="mt-2 text-sm text-[var(--text-secondary)]">删除后无法恢复，对应短信笔记也会同步更新。</p>
+          <div className="mt-4 flex justify-end gap-3"><button type="button" autoFocus className="min-h-11 px-3 text-sm" onClick={() => setDeleteMessage(null)}>取消</button><button type="button" className="min-h-11 px-3 text-sm text-red-500" onClick={() => { if (!operation.current && !isSending) persistStore(replaceSmsMessages(storeRef.current, selectedTimeline, [deleteMessage.id], [])); setDeleteMessage(null); }}>确认删除</button></div>
+        </div>
+      </div>}
     </div>
   );
 }
