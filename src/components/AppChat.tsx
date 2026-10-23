@@ -210,6 +210,8 @@ import { COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE } from "../features/chat/styles/
 import { ChatSettingsSwitch as SettingsSwitch } from "../features/chat/components/ChatSettingsSwitch";
 import { ChatAvatar as RenderAvatar } from "../features/chat/components/ChatAvatar";
 import { StoredChatImage } from "../features/chat/components/StoredChatImage";
+import { PreviewableImage } from "./media/ImagePreview";
+import { StoredMomentImage } from "../features/moments/components/StoredMomentImage";
 import { createChatRuntimeContext, type ChatRuntimeContext } from "../features/chat/context/chatRuntimeContext";
 import { isMessageInDirectScope, resolveDirectInteractionScope, toDirectChatRuntimeContext, type MessageMutationScope } from "../features/chat/context/directInteractionScope";
 import { captureRelationshipCreatedEvent, removeCharacterLifeEventsForRelations } from "../features/characterLife/services/characterEventCaptureService";
@@ -9584,7 +9586,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       })() : msg.imageAssetId ? (
                         <StoredChatImage assetId={msg.imageAssetId} alt="generated chat image" generated={msg.imageSource === "generated"} />
                       ) : msg.content.startsWith("data:image/") ? (
-                        <img
+                        <PreviewableImage
                           src={msg.content}
                           alt="chat-pic"
                           className="chat-message--image max-w-[160px] rounded-lg object-cover cursor-zoom-in shadow-sm bg-stone-100"
@@ -12912,7 +12914,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                           )}
 
                           {/* Photo if attached */}
-                          {textImageDescription && !mom.image && (
+                          {textImageDescription && !mom.image && !mom.imageAssetId && (
                             <div className="relative mt-2.5 max-w-[200px] min-h-28 rounded-lg border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-50 px-4 py-3 text-left shadow-[0_2px_8px_rgba(15,23,42,0.08)]" title="长按/右键 弹出菜单" onContextMenu={(event) => handleMomentTextContextMenu(event, mom.id, momentContextText, momAuthorName, momAuthorAvatar, mom.characterId === undefined || mom.characterId === null, mom.timestamp)} onPointerDown={(event) => handleMomentTextPointerDown(event, mom.id, momentContextText, momAuthorName, momAuthorAvatar, mom.characterId === undefined || mom.characterId === null, mom.timestamp)} onPointerUp={handleMomentTextPointerUpOrLeave} onPointerLeave={handleMomentTextPointerUpOrLeave} onPointerMove={handleMomentTextPointerMove}>
                               <span className="absolute left-4 top-2 text-[10px] leading-5 text-slate-400">文字图</span>
                               <button type="button" onClick={() => setViewingImageDescription(textImageDescription)} className={`block w-full ${isShortTextImageDescription ? "flex min-h-[5rem] items-center justify-center pt-5 text-center" : "pt-5 text-left"}`}>
@@ -12921,9 +12923,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                               {momentImageAction}
                             </div>
                           )}
-                          {mom.image && (
+                          {(mom.image || mom.imageAssetId) && (
                             <div className="relative mt-2.5 inline-flex max-w-full rounded-lg overflow-hidden border border-slate-100 bg-slate-50 align-top">
-                              <img src={mom.image} alt={mom.imageDescription || "朋友圈配图"} width={mom.imageWidth} height={mom.imageHeight} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />
+                              {mom.imageAssetId ? <StoredMomentImage assetId={mom.imageAssetId} alt={mom.imageDescription || "朋友圈配图"} width={mom.imageWidth} height={mom.imageHeight} /> : <PreviewableImage src={mom.image} alt={mom.imageDescription || "朋友圈配图"} width={mom.imageWidth} height={mom.imageHeight} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />}
                               {momentImageAction}
                             </div>
                           )}

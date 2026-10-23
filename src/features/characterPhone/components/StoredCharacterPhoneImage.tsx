@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { imageAssetDb } from "../../../utils/imageAssetDb";
+import { PreviewableImage } from "../../../components/media/ImagePreview";
+import type { PreviewImageSource } from "../../../utils/imageSave";
 
 interface StoredCharacterPhoneImageProps {
   assetId: string;
   alt: string;
   className?: string;
   placeholderClassName?: string;
+  previewImages?: readonly PreviewImageSource[];
+  previewIndex?: number;
 }
 
 /** Loads a gallery image from IndexedDB without putting binary data in phone metadata. */
@@ -14,6 +18,7 @@ export function StoredCharacterPhoneImage({
   alt,
   className = "h-full w-full object-cover",
   placeholderClassName = "h-full w-full bg-neutral-200",
+  previewImages, previewIndex,
 }: StoredCharacterPhoneImageProps) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
 
@@ -33,6 +38,6 @@ export function StoredCharacterPhoneImage({
   }, [assetId]);
 
   return objectUrl
-    ? <img src={objectUrl} alt={alt} className={className} />
+    ? previewImages ? <PreviewableImage src={objectUrl} alt={alt} className={className} previewImages={previewImages} previewIndex={previewIndex} /> : <img src={objectUrl} alt={alt} className={className} />
     : <span className={placeholderClassName} aria-label={`${alt}加载中`} />;
 }

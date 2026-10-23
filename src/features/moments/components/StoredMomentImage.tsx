@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { imageAssetDb } from "../../../utils/imageAssetDb";
+import { PreviewableImage } from "../../../components/media/ImagePreview";
 
 interface StoredMomentImageProps {
   assetId: string;
@@ -15,6 +16,7 @@ export function StoredMomentImage({ assetId, alt, width, height }: StoredMomentI
   useEffect(() => {
     let objectUrl: string | null = null;
     let active = true;
+    setUrl(null);
     imageAssetDb.getImage(assetId).then((blob) => {
       if (!active || !blob) return;
       objectUrl = URL.createObjectURL(blob);
@@ -30,5 +32,5 @@ export function StoredMomentImage({ assetId, alt, width, height }: StoredMomentI
     return <div className="h-32 w-40 animate-pulse rounded-lg bg-slate-100" aria-label="正在加载朋友圈图片" />;
   }
 
-  return <img src={url} alt={alt} width={width} height={height} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />;
+  return <PreviewableImage src={url} alt={alt} previewImages={[{ src: url, alt, load: () => imageAssetDb.getImage(assetId) }]} width={width} height={height} className="block h-auto w-auto max-w-[200px] max-h-52 object-contain rounded-lg" />;
 }

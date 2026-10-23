@@ -122,6 +122,7 @@ import { TimeWidget } from "./HomeScreenWidgets";
 import { resolveDesktopBackground } from "../features/theme/desktopBackground";
 import type { ResolvedTheme } from "../features/theme/theme";
 import { StoredCharacterPhoneImage } from "../features/characterPhone/components/StoredCharacterPhoneImage";
+import { ImageSaveButton, PreviewableImage } from "./media/ImagePreview";
 import { detectErrorPage, getErrorPageMessage } from "../utils/errorPageDetection";
 import { imageAssetDb } from "../utils/imageAssetDb";
 import { normalizeCharacterPhoneBrowserHistory } from "../features/characterPhone/characterPhoneContent";
@@ -2953,6 +2954,8 @@ export default function AppCharacterPhone({
   const selectedGalleryIndex = selectedGallery
     ? gallerySequence.findIndex((item) => item.id === selectedGallery.id)
     : -1;
+  const galleryPreviewItems = selectedGallery && !gallerySequence.some(item => item.id === selectedGallery.id) ? [selectedGallery, ...gallerySequence] : gallerySequence;
+  const galleryPreviewImages = galleryPreviewItems.filter(item => getCharacterPhoneGalleryImageDataUrl(item) || item.imageAssetId).map(item => ({ id: item.id, src: getCharacterPhoneGalleryImageDataUrl(item) || undefined, alt: item.title, load: item.imageAssetId ? () => imageAssetDb.getImage(item.imageAssetId!) : undefined }));
   const moveGallerySelection = (direction: -1 | 1) => {
     if (selectedGalleryIndex < 0) return;
     const next = gallerySequence[selectedGalleryIndex + direction];
@@ -3182,7 +3185,7 @@ export default function AppCharacterPhone({
                 </div>
               </div>
               <p className="mt-1 whitespace-pre-wrap rounded p-1 text-xs leading-relaxed text-[var(--text-primary)]">{post.content}</p>
-              {post.image && <img src={post.image} alt={post.imageDescription || "朋友圈配图"} className="mt-2 max-h-52 max-w-[200px] rounded-lg object-contain" />}
+              {post.image && <PreviewableImage src={post.image} alt={post.imageDescription || "朋友圈配图"} className="mt-2 max-h-52 max-w-[200px] rounded-lg object-contain" />}
               {!post.image && post.imageDescription && <div className="mt-2 max-w-[200px] rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-4 text-xs leading-relaxed text-[var(--text-primary)]">{post.imageDescription}</div>}
               <div className="mt-3 flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
@@ -3756,7 +3759,7 @@ export default function AppCharacterPhone({
                   </button>
                 </div>
               </div>
-              {post.image && <img src={post.image} alt={post.imageDescription || "朋友圈配图"} className="mt-2 max-h-52 max-w-[200px] rounded-lg object-contain" />}
+              {post.image && <PreviewableImage src={post.image} alt={post.imageDescription || "朋友圈配图"} className="mt-2 max-h-52 max-w-[200px] rounded-lg object-contain" />}
               {!post.image && post.imageDescription && <div className="mt-2 rounded-xl bg-black/5 px-3 py-4 text-sm leading-6">{post.imageDescription}</div>}
               <p className="mt-3 text-sm leading-6">{post.content}</p>
               <div className="mt-3 flex items-center justify-between gap-4 text-[10px] text-neutral-500">
@@ -3890,10 +3893,12 @@ export default function AppCharacterPhone({
               onPointerCancel={() => { gallerySwipeStartRef.current = null; }}
             >
               {getCharacterPhoneGalleryImageDataUrl(selectedGallery) ? (
-                <img src={getCharacterPhoneGalleryImageDataUrl(selectedGallery)} alt={selectedGallery.title} draggable={false} className="max-h-[58vh] w-full rounded-2xl object-contain" />
+                <PreviewableImage src={getCharacterPhoneGalleryImageDataUrl(selectedGallery)} alt={selectedGallery.title} draggable={false} className="max-h-[58vh] w-full rounded-2xl object-contain" previewImages={galleryPreviewImages} previewIndex={galleryPreviewImages.findIndex(item => item.id === selectedGallery.id)} />
               ) : selectedGallery.imageAssetId ? (
                 <StoredCharacterPhoneImage
                   assetId={selectedGallery.imageAssetId}
+                  previewImages={galleryPreviewImages}
+                  previewIndex={galleryPreviewImages.findIndex(item => item.id === selectedGallery.id)}
                   alt={selectedGallery.title}
                   className="max-h-[58vh] w-full rounded-2xl object-contain"
                   placeholderClassName="flex h-72 w-full items-center justify-center rounded-2xl bg-neutral-800 text-3xl text-white/50"
@@ -3911,6 +3916,7 @@ export default function AppCharacterPhone({
               </p>
             </div>
             <div className="flex shrink-0 items-center justify-center gap-9 border-t border-white/15 py-4 text-white/80">
+              {(getCharacterPhoneGalleryImageDataUrl(selectedGallery) || selectedGallery.imageAssetId) && <ImageSaveButton key={selectedGallery.id} source={galleryPreviewImages.find(item => item.id === selectedGallery.id)!} />}
               <button
                 type="button"
                 onClick={() =>
