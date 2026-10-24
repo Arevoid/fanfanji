@@ -1,18 +1,22 @@
-import type { Message, UserSettings } from "../../../types";
+import {resolveCharacterApiSettings} from "../../../domain/character/characterApiSettings";
+import type { Character, Message, UserSettings } from "../../../types";
 import { apiTranslate } from "../../../utils/apiHelper";
 import { getVoiceMessagePreview, isVoiceMessageContent } from "../services/voiceMessageContent";
 import { sanitizeCharacterActionText } from "../services/characterActionProtocol";
 
 interface UseChatMessageTranslationOptions {
   settings: UserSettings;
+  character?: Character;
+  characters?: readonly Character[];
   onUpdateMessage?: (messageId: string, patch: { translation: string }, original: Message) => void;
   onTranslationReady?: (message: Message, translatedText: string) => void;
   showToast: (message: string) => void;
 }
 
-export function useChatMessageTranslation({ settings, onUpdateMessage, onTranslationReady, showToast }: UseChatMessageTranslationOptions) {
+export function useChatMessageTranslation({ settings:globalSettings, character,characters, onUpdateMessage, onTranslationReady, showToast }: UseChatMessageTranslationOptions) {
   const handleTranslateMessage = (msg: Message) => {
     if (!onUpdateMessage) return;
+    let settings;try{settings=resolveCharacterApiSettings(globalSettings,character,characters);}catch(error){showToast(error instanceof Error?error.message:"API configuration invalid");return;}
 
     if (msg.translation?.trim()) {
       onTranslationReady?.(msg, msg.translation.trim());

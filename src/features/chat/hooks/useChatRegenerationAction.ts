@@ -1,3 +1,4 @@
+import {resolveCharacterApiSettings} from "../../../domain/character/characterApiSettings";
 import type { Message, OfflineStory } from "../../../types";
 import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../services/chatMemoryRetrievalSettings";
 import { buildAliasIdentityBoundaryPrompt, buildAliasIdentityFinalGuardPrompt } from "../../../domain/prompt/aliasIdentityBoundary";
@@ -11,10 +12,10 @@ import { formatCharacterActionPrompt, parseCharacterActionDirective } from "../s
 /** Mechanical extraction of the existing regeneration path; dependencies stay explicit in the page context. */
 export function useChatRegenerationAction(context: Record<string, any>) {
   const {
-    activeChatCharId, activeCharacter, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
+    activeChatCharId, activeCharacter, showToast, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
     activeRelationship, listCharacterEventsByRelation, buildRelationshipCognitiveProjection, buildCharacterCognitiveContext,
     createDirectChatKnowledgeBoundary, resolveChatRoutine, buildCharacterRoutine, resolveChatTurnSettings, setIsTyping,
-    latestActiveCharacterRef, settings, serializeMessageContentForPrompt,
+    latestActiveCharacterRef, settings: globalSettings, serializeMessageContentForPrompt,
     activeAttachModal, callingStatus, callTranscript, detectCallTopicShift,
     buildDirectChatMainPrompt,
     buildDirectChatContextSnapshot,
@@ -41,6 +42,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
 
   const handleRegenerateResponse = async (targetMsg: Message, oocComment = "") => {
     if (!activeChatCharId || !activeCharacter) return;
+    let settings;try{settings=resolveCharacterApiSettings(globalSettings,activeCharacter,context.characters||[]);}catch(error){showToast(error instanceof Error?error.message:"API configuration invalid");return;}
 
     // Scope regeneration to the selected reply's complete model turn. Later
     // user messages belong to a different turn and must not become the prompt

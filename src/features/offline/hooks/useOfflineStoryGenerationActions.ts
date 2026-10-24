@@ -1,3 +1,4 @@
+import {resolveCharacterApiSettings} from "../../../domain/character/characterApiSettings";
 import type { Character, MemoryItem, Message, OfflineStory, UserSettings, WorldBookEntry } from "../../../types";
 import type { Dispatch, SetStateAction } from "react";
 import { apiChat } from "../../../utils/apiHelper";
@@ -29,6 +30,7 @@ interface UseOfflineStoryGenerationActionsOptions {
   activeIdentityId: string;
   memories: readonly MemoryItem[];
   settings: UserSettings;
+  request?: typeof apiChat;
   worldBookEntries: WorldBookEntry[];
   selectedChar: Character;
   inputText: string;
@@ -51,7 +53,8 @@ export function useOfflineStoryGenerationActions({
   relationships,
   activeIdentityId,
   memories,
-  settings,
+  settings: globalSettings,
+  request = apiChat,
   worldBookEntries,
   selectedChar,
   inputText,
@@ -124,6 +127,7 @@ export function useOfflineStoryGenerationActions({
     setIsGenerating(true);
 
     try {
+      const settings=resolveCharacterApiSettings(globalSettings,characters.find(c=>c.id===storyAtSend.characterId)||selectedChar,characters);
       // Assemble history context
       // If we added a user message in this turn, exclude it from historyContext because it will be passed as the separate 'message' parameter.
       const msgsForHistory = (text && !forceAIOnly && updatedStory.messages.length > 0 && updatedStory.messages[updatedStory.messages.length - 1].sender === "user")
@@ -420,12 +424,12 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
         systemInstruction: boundedPrompt.systemInstruction,
         historyInjections: boundedHistoryInjections,
       });
-      const response = await apiChat({
+      const response = await request({
         ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature || 0.8,
+        apiTemperature: settings.apiTemperature ?? 0.8,
         streamCompatible: settings.streamCompatible,
         maxOutputTokens: segmentOutputTokens,
         purpose: "offline_story_generate",

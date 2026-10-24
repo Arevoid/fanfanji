@@ -1,12 +1,12 @@
 import { useState } from "react";
 
-export type ChatAdvancedSettingsSection = "memory" | "voiceImage" | "history" | "appearance";
+export type ChatAdvancedSettingsSection = "roleApi" | "memory" | "voiceImage" | "history" | "appearance";
 
 export function useChatSettingsPanelState() {
   const [isShowingCardModal, setIsShowingCardModal] = useState(false);
   const [advancedSettingsSection, setAdvancedSettingsSection] = useState<ChatAdvancedSettingsSection | null>(null);
   const isShowingAdvancedSettings = advancedSettingsSection !== null;
-  const advancedSettingsTitle = advancedSettingsSection === "memory"
+  const advancedSettingsTitle = advancedSettingsSection === "roleApi" ? "角色API" : advancedSettingsSection === "memory"
     ? "记忆设置"
     : advancedSettingsSection === "voiceImage"
       ? "语音图片"

@@ -1,3 +1,4 @@
+import {resolveCharacterApiSettings} from "../../../domain/character/characterApiSettings";
 import type { Dispatch, SetStateAction } from "react";
 import type { Character, Message, UserSettings } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
@@ -20,6 +21,7 @@ interface UseChatSaveSettingsOptions {
   setIsEditingRemark: Dispatch<SetStateAction<boolean>>;
   setAdvancedSettingsSection: Dispatch<SetStateAction<any>>;
   setIsShowingCardModal: Dispatch<SetStateAction<boolean>>;
+  draftCharacterApi?: Character["characterApi"];
   draftEnableAutoTranslate: any;
   draftEnableProactiveChat: any;
   draftProactiveStartTime: any;
@@ -72,7 +74,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
     ...drafts
   } = options;
   const {
-    draftEnableAutoTranslate, draftEnableProactiveChat, draftProactiveStartTime, draftProactiveEndTime,
+    draftCharacterApi,draftEnableAutoTranslate, draftEnableProactiveChat, draftProactiveStartTime, draftProactiveEndTime,
     draftEnableProactiveOffline, draftRemark, draftAvatar, draftIsPinned, draftGroupMemorySyncEnabled, draftChatBg, draftCustomCss,
     draftChatIcons, draftChatStylePreset, draftEnableProactiveCall, draftEnableStickerAssociation, draftProactiveChatInterval,
     draftDisableBracketActions, draftHistoryMemoryLimit, draftChatHistoryPageSize, draftContextMemoryLimit, draftRetrievalHistoryLimit,
@@ -84,6 +86,8 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
   // Save settings draft
   const handleSaveSettings = async (): Promise<boolean> => {
     if (!activeCharacter) return false;
+    let resolvedApi:UserSettings;
+    try{resolvedApi=resolveCharacterApiSettings(settings,{...activeCharacter,characterApi:draftCharacterApi});}catch(error){if(typeof alert!=="undefined")alert(error instanceof Error?error.message:"API configuration invalid");return false;}
 
     const isEnablingAutoTranslate = draftEnableAutoTranslate && !activeCharacter.enableAutoTranslate;
 
@@ -109,6 +113,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
 
     const persisted = await onSaveCharacter({
       ...activeCharacter,
+      ...(draftCharacterApi!==undefined?{characterApi:draftCharacterApi}:{}),
       name: activeCharacter.isGroupChat ? (draftRemark.trim() || activeCharacter.name) : activeCharacter.name,
       remark: activeCharacter.isGroupChat ? undefined : (draftRemark.trim() || undefined),
       // The avatar draft belongs to every character profile, not only group
@@ -170,9 +175,9 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
         if (containsNonChineseText(sourceText)) {
           apiTranslate({
             text: sanitizeCharacterActionText(sourceText),
-            apiKey: settings.apiKey || "",
-            model: settings.selectedModel,
-            apiEndpoint: settings.apiEndpoint,
+            apiKey: resolvedApi.apiKey || "",
+            model: resolvedApi.selectedModel,
+            apiEndpoint: resolvedApi.apiEndpoint,
           })
             .then((res) => {
               const translatedText = sanitizeCharacterActionText(res?.text || "");

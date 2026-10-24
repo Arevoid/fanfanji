@@ -3120,7 +3120,7 @@ export default function App() {
       ? { ...existingCharacter, ...char, ownerIdentityId }
       : { ...char, ownerIdentityId };
     const nextCharacters = existingCharacter
-      ? currentCharacters.map((candidate) => candidate.id === char.id ? savedCharacter : candidate)
+      ? currentCharacters.map((candidate) => candidate.id === char.id ? savedCharacter : Object.prototype.hasOwnProperty.call(char,"characterApi")&&resolveCanonicalCharacterId(candidate.id,currentCharacters)===resolveCanonicalCharacterId(char.id,currentCharacters)?{...candidate,characterApi:char.characterApi}:candidate)
       : [...currentCharacters, savedCharacter];
     charactersRef.current = nextCharacters;
     setCharacters(nextCharacters);

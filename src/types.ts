@@ -33,6 +33,8 @@ export interface Character {
   age?: number | "" | "∞";
   avatar: string; // URL, emoji, or base64
   gender?: string;
+  /** Optional role-wide text API selection; absent/disabled inherits global settings. */
+  characterApi?: CharacterApiConfig;
   mbti?: string;
   personality: string;
   backstory: string;
@@ -901,6 +903,12 @@ export interface UserSettings {
 }
 
 export type UserSettingsUpdate = UserSettings | ((previous: UserSettings) => UserSettings);
+
+export interface CharacterApiConfig {
+  enabled: boolean;
+  presetId?: string;
+  custom?: Omit<ApiPreset, "id">;
+}
 
 export interface ApiPreset {
   id: string;

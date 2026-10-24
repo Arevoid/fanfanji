@@ -1,3 +1,5 @@
+import {CharacterApiSettings} from "../features/chat/components/CharacterApiSettings";
+import {resolveCharacterApiSettings} from "../domain/character/characterApiSettings";
 import { ChatHistorySearch, emptyChatHistorySearchState } from "../features/chat/components/ChatHistorySearch";
 import { projectChatDisplayMessage } from "../features/chat/services/chatDisplayProjection";
 import { createOfflineTimelineLookup } from "../features/chat/services/offlineTimelineLookup";
@@ -1700,7 +1702,7 @@ export default function AppChat({
   // regression guard while extending it with the voice reveal callback.
   // useChatMessageTranslation({ settings, onUpdateMessage, showToast })
   const { handleTranslateMessage } = useChatMessageTranslation({
-    settings,
+    settings,character:activeCharacter,characters,
     onUpdateMessage,
     onTranslationReady: (message) => {
       if (!isVoiceMessageContent(message.content, message.isVoiceMessage === true, Boolean(message.audioUrl))) return;
@@ -1918,6 +1920,7 @@ export default function AppChat({
     isDeleteMemberMode, setIsDeleteMemberMode, showAddMemberModal, setShowAddMemberModal,
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
     draftGroupMemorySyncEnabled, setDraftGroupMemorySyncEnabled,
+    draftCharacterApi,setDraftCharacterApi,
     draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
@@ -2763,6 +2766,7 @@ export default function AppChat({
     }));
   };
 
+  const globalApiSettings=settings;
   const executeDirectReplyPipeline = async (
     userMsg: Message | null,
     customHistoryOverride?: Message[],
@@ -2854,6 +2858,8 @@ export default function AppChat({
     // may have been created by an earlier render, so its captured character
     // must never decide the next prompt or output filtering.
     const turnCharacter = latestActiveCharacterRef.current || activeCharacter;
+    let settings:UserSettings;
+    try{settings=resolveCharacterApiSettings(globalApiSettings,turnCharacter,characters);}catch(error){publishReplyError(error instanceof Error?error.message:"API configuration invalid");return buildOutcome("failed");}
     const turnRelationship = latestActiveRelationshipRef.current;
     const turnSettings = resolveChatTurnSettings(turnCharacter);
     // Resolve the active identity before building any prompt history. The
@@ -4220,6 +4226,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     setCallTranscriptTranslationLoadingId(target.id);
     showToast("正在翻译通话内容…");
     try {
+      const settings=resolveCharacterApiSettings(globalApiSettings,activeCharacter,characters);
       const result = await apiTranslate({
         text: sanitizeCharacterActionText(sourceText),
         apiKey: settings.apiKey || "",
@@ -4890,6 +4897,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   // Manual Trigger Proactive Message simulation
 
   const { handleSaveSettings } = useChatSaveSettings({
+    draftCharacterApi,
     activeCharacter,
     activeRelationship,
     settings,
@@ -5265,7 +5273,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   };
 
   const { handleRegenerateResponse } = useChatRegenerationAction({
-    activeChatCharId, activeCharacter, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
+    activeChatCharId, activeCharacter, characters, showToast, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
     activeRelationship, listCharacterEventsByRelation, buildRelationshipCognitiveProjection, buildCharacterCognitiveContext,
     createDirectChatKnowledgeBoundary, resolveChatRoutine, buildCharacterRoutine, resolveChatTurnSettings, setIsTyping,
     latestActiveCharacterRef, settings, serializeMessageContentForPrompt,
@@ -5305,6 +5313,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
     proactiveMessageInFlightRef.current.add(relationId);
     try {
+      const settings=resolveCharacterApiSettings(globalApiSettings,friend,characters);
       let instructionsPrompt = `Instructions:
 1. Follow the character's configured language and nationality according to the character language policy. Maintain character role-play thoroughly.
 2. Use a natural WeChat style. Reply length, warmth, initiative, and emotional intensity must follow the character profile and relationship.
@@ -8208,7 +8217,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               </div>
 
               {/* Body */}
-              <div className={`flex-1 p-4 pb-[34px] ${advancedSettingsSection === "history" ? "flex min-h-0 flex-col overflow-hidden" : "overflow-y-auto space-y-3"}`}>
+              <div key={advancedSettingsSection === "roleApi" ? "roleApi" : "settings"} className={`flex-1 p-4 pb-[34px] ${advancedSettingsSection === "history" ? "flex min-h-0 flex-col overflow-hidden" : "overflow-y-auto space-y-3"}`}>
                  {!isShowingAdvancedSettings && (
                     <>
                   {/* Character Profile Summary & Remark Settings */}
@@ -8521,6 +8530,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
                  {isShowingAdvancedSettings ? (
                    <>
+                     {advancedSettingsSection === "roleApi" && <CharacterApiSettings global={settings} value={draftCharacterApi} onChange={setDraftCharacterApi} onSave={handleSaveSettings} onSaveGlobal={onSaveSettings}/>}
                      {advancedSettingsSection === "history" && <>
                        <ChatHistorySearch messages={currentChatMessages} stories={offlineStories}
                          scope={{ characterId: activeCharacter.id, relationId: activeRelationship?.id, conversationId: activeRelationship?.conversationId, userIdentityId: activeIdentityId, group: activeCharacter.isGroupChat }}
@@ -8792,15 +8802,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   ) : (
                     <div className="bg-white rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] divide-y divide-slate-100 overflow-hidden">
                       {[
-                        { key: "memory", label: "记忆设置" },
+                        { key: "roleApi", label: "角色API" },
                         { key: "voiceImage", label: "语音图片" },
+                        { key: "memory", label: "记忆设置" },
                         { key: "appearance", label: "美化样式" },
                         { key: "history", label: "查找聊天记录" },
                       ].map(({ key, label }) => (
                         <button
                           key={key}
                           type="button"
-                          onClick={() => setAdvancedSettingsSection(key as "memory" | "voiceImage" | "history" | "appearance")}
+                          onClick={() => setAdvancedSettingsSection(key as "roleApi" | "memory" | "voiceImage" | "history" | "appearance")}
                           className="w-full h-[52px] px-4 flex items-center gap-3 text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
                           aria-label={`打开${label}`}
                         >

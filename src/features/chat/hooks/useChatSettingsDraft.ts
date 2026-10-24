@@ -6,6 +6,7 @@ import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from ".
 import { resolveChatPageSize } from "../../../domain/chat/chatTimelineIndex";
 
 export function useChatSettingsDraft() {
+  const [draftCharacterApi,setDraftCharacterApi]=useState<Character["characterApi"]>();
   const [draftRemark, setDraftRemark] = useState("");
   const [isEditingRemark, setIsEditingRemark] = useState(false);
   const [draftAvatar, setDraftAvatar] = useState<string | undefined>();
@@ -46,6 +47,7 @@ export function useChatSettingsDraft() {
   const [draftImageReferenceMimeType, setDraftImageReferenceMimeType] = useState<string | undefined>();
 
   const loadCharacterDraft = (character: Character, relationship?: CharacterRelationship) => {
+    setDraftCharacterApi(character.characterApi);
     setDraftRemark(character.isGroupChat ? character.name : (character.remark || ""));
     setIsEditingRemark(false);
     setDraftAvatar(character.avatar);
@@ -88,7 +90,7 @@ export function useChatSettingsDraft() {
   };
 
   return {
-    draftRemark, setDraftRemark, isEditingRemark, setIsEditingRemark, draftAvatar, setDraftAvatar,
+    draftCharacterApi,setDraftCharacterApi,    draftRemark, setDraftRemark, isEditingRemark, setIsEditingRemark, draftAvatar, setDraftAvatar,
     isDeleteMemberMode, setIsDeleteMemberMode, showAddMemberModal, setShowAddMemberModal,
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
     draftGroupMemorySyncEnabled, setDraftGroupMemorySyncEnabled,
