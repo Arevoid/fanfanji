@@ -211,7 +211,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): TextProviderDiagnosti
     observedContent = summary.kind;
     contentPartCount = summary.count;
     if (Array.isArray(content)) {
-      result = content.map((part) => typeof part === "string" ? part : part?.text || "").join("");
+      result = content.filter((part:any)=>typeof part==="string"||!part?.type||part.type==="text"||part.type==="output_text").map((part) => typeof part === "string" ? part : part?.text || "").join("");
     } else {
       result = typeof content === "string" ? content : "";
     }
@@ -246,7 +246,7 @@ export function parseGeminiTextWithTelemetry(raw: string): TextProviderDiagnosti
   const candidates = hasCandidates ? parsed.candidates : [];
   const parts = candidates[0]?.content?.parts;
   const summary = contentKind(parts);
-  const text = Array.isArray(parts) ? parts.map((part: any) => part?.text || "").join("") : "";
+  const text = Array.isArray(parts) ? parts.filter((part:any)=>!part?.thought).map((part: any) => part?.text || "").join("") : "";
   const usage = normalizeProviderUsage(parsed.usageMetadata || parsed.usage);
   const finishReason = finishReasonKind(candidates[0]?.finishReason || parsed?.promptFeedback?.blockReason);
   return {

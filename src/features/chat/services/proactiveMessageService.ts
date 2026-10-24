@@ -55,7 +55,7 @@ export async function generateProactiveReplyCandidates(input: {
     return input.keepPeriods ? normalized : normalized.replace(/。+$/u, "").trim();
   };
   const bubbles = cleanedText
-    ? removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, input.keepPeriods).map(normalizeProactiveBubble))
+    ? request.systemInstruction?.includes(MODEL_DIRECT_MARKER) ? [cleanedText] : removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, input.keepPeriods).map(normalizeProactiveBubble))
     : [];
   return {
     data,

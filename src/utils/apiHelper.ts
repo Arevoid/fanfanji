@@ -266,7 +266,7 @@ async function directClientChatImpl(params: {
         collectToolCalls(dataFetch.choices || []);
         const content = dataFetch.choices?.[0]?.message?.content ?? dataFetch.choices?.[0]?.text;
         aiText = Array.isArray(content)
-          ? content.map((part: any) => typeof part === "string" ? part : part?.text || "").join("")
+          ? content.filter((part: any)=>typeof part==="string"||!part?.type||part.type==="text"||part.type==="output_text").map((part: any) => typeof part === "string" ? part : part?.text || "").join("")
           : typeof content === "string" ? content : "";
       } catch (jsonErr) {
         aiText = trimmedText;
@@ -361,7 +361,7 @@ async function directClientChatImpl(params: {
     try { dataFetch = JSON.parse(responseText); } catch {
       throw new ApiChatError("Gemini 返回了无法解析的响应。", { status: 502, code: "provider_invalid_response" });
     }
-    const aiText = dataFetch.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || "").join("") || "";
+    const aiText = dataFetch.candidates?.[0]?.content?.parts?.filter((part: any) => !part?.thought).map((part: any) => part?.text || "").join("") || "";
     const usage = normalizeProviderUsage(dataFetch.usageMetadata || dataFetch.usage);
     if (aiText.trim()) {
       return { text: aiText, ...(usage ? { usage } : {}) };

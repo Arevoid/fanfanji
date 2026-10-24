@@ -135,7 +135,7 @@ const requestDirectChatResponse = async (input: {
 }): Promise<NormalizedDirectChatResponse> => {
   const first = normalizeDirectChatResponse(
     await requestAiReply(input.requestAi, input.request),
-    Boolean(input.includeInnerVoice),
+    Boolean(input.includeInnerVoice || input.request.systemInstruction?.includes(MODEL_DIRECT_MARKER)),
   );
   if (!first.formatIssue) {
     recordDirectReplyRuntimeLifecycleStage("initial_parse_success");
@@ -262,6 +262,7 @@ export async function requestDirectChatTurn(input: {
   // One chat call must produce both fields. A provider that omits the sidecar
   // still gets a usable no-token fallback; it must never trigger a second
   // model request or hold the actual reply hostage.
+  if (preserveProse) { const {innerVoice: _ignored,...visible}=response; return visible; }
   if (input.includeInnerVoice && response.text.trim() && !response.innerVoice) {
     response = { ...response, innerVoice: createLocalInnerVoiceFallback() };
   }
@@ -298,7 +299,9 @@ export async function generateRegeneratedChatTurn(input: {
     purpose: "regenerate" as const,
     parentActionId: createAiActionId(),
   };
-  let data = await requestAiReply(requestAi, request);
+  let data = request.systemInstruction?.includes(MODEL_DIRECT_MARKER)
+    ? await requestDirectChatResponse({requestAi,request,includeInnerVoice:false})
+    : await requestAiReply(requestAi, request);
   const violation = input.aliasIdentityGuard
     ? detectAliasIdentityBoundaryViolation(data.text, input.aliasIdentityGuard)
     : undefined;
@@ -313,7 +316,7 @@ export async function generateRegeneratedChatTurn(input: {
     });
     if (corrected.text.trim()) data = corrected;
   }
-  return { data, candidates: data?.text ? createRegeneratedReplyCandidates({ ...input.candidateContext, preserveProse: Boolean(input.prompt.systemInstruction?.includes(MODEL_DIRECT_MARKER)), rawText: data.text }) : null };
+  return { data, candidates: data?.text ? createRegeneratedReplyCandidates({ ...input.candidateContext, preserveProse: Boolean(input.prompt.systemInstruction?.includes(MODEL_DIRECT_MARKER)), translationText: (data as ParsedAiChatResponse).translation, rawText: data.text }) : null };
 }
 
 export function generateProactiveChatTurn(input: {

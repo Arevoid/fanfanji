@@ -351,6 +351,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         : undefined;
 
       const systemInstruction = buildDirectChatSystemInstruction({
+        modelDirectAutoTranslate: Boolean(activeCharacter.enableAutoTranslate),
         mainPromptText,
         musicContext,
         forumContext,

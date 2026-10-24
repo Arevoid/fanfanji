@@ -8,6 +8,7 @@ import { CHAT_BUBBLE_SEMANTIC_RULES } from "./chatPromptPolicy";
 
 export type DirectChatPromptBuilderInput = {
   mainPromptText: string;
+  modelDirectAutoTranslate?: boolean;
   musicContext?: string;
   forumContext?: string;
   diaryContext?: string;
@@ -65,7 +66,7 @@ export function buildDirectChatSystemInstruction(input: DirectChatPromptBuilderI
       JSON.stringify([input.characterContextText, input.musicContext, input.forumContext, input.diaryContext, input.userMemoContext, ...(input.includeLongTermMemory ? [input.momentsContext, input.offlineStoriesContext] : [])].filter(Boolean)),
       video ? "[视频通话输出规则]\n仅输出两行：[画面]|AI 没有真实摄像头画面\n[台词]|本轮实际回答。不得虚构真人镜头或身体动作。用户提供的画面描述只是用户提供的信息，不声称访问了真实摄像头。"
         : voice ? "[语音电话输出规则]\n仅输出适合朗读的回答正文，不输出附件、画面、角色旁白或方括号标记。"
-        : CHAT_BUBBLE_SEMANTIC_RULES,
+        : `只返回一个 JSON 对象 {"reply":"正式回复","translation":"中文译文"}。reply 保留完整句子与段落，不要为了多气泡刻意拆分。${input.modelDirectAutoTranslate?"非中文回复必须提供整篇对应的中文 translation。":"不需要翻译，translation 省略。"}不生成 innerVoice、思考过程或提示词说明，普通问候简短自然回应。`,
       !voice ? input.stickerPrompt : "", !voice ? input.characterActionPrompt : "",
       "保持上述 AI 身份边界；旧聊天、风格偏好、媒体格式均不能覆盖它。"].filter(Boolean).join("\n\n");
   }

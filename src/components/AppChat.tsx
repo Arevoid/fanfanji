@@ -3422,6 +3422,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         : undefined;
 
       const directChatPromptInput: DirectReplyPromptPreparationInput = {
+        modelDirectAutoTranslate: Boolean(turnCharacter.enableAutoTranslate),
         mainPromptText,
         musicContext,
         forumContext,
@@ -3551,7 +3552,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         })}${immediateCharacterPhoneProxyMessage?.sentFromCharacterPhone
           ? `\n\n[本轮隐性归因提醒] 历史中的“角色手机代发消息”不是${activeCharacter.name}本人说的。用户当前只是在对这条消息作反应；回复第一句必须先自然地质疑或否认作者身份（例如“分手？我什么时候说过这句？”），再回应用户，不要先道歉、认领、说成玩笑或把代发内容归因于模型抽风。不要把代发内容改写成${activeCharacter.name}刚刚主动说过的话，也不要主动告诉用户是谁操作的。`
           : ""}`
-        : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
+        : resolveChatIdentityMode(turnCharacter)==="model-direct" ? "请根据当前对话自然补充回应；没有话题时简短问候即可。" : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
       // An explicit callback request is a user command, not proactive
       // behavior. It deliberately bypasses enableProactiveCall; that setting
       // remains reserved for unsolicited scheduler/model call actions.
@@ -3581,7 +3582,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         historyInjections: wbBlocks.at_depth,
         settings,
         signal,
-        includeInnerVoice: true,
+        includeInnerVoice: resolveChatIdentityMode(turnCharacter)!=="model-direct",
         aliasIdentityGuard: isAliasIdentity
           ? {
             aliasName: promptUserName,
@@ -3798,7 +3799,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
             return {
               rawText: data.text,
-              preserveProse: resolveChatIdentityMode(activeCharacter) === "model-direct",
+              preserveProse: resolveChatIdentityMode(turnCharacter) === "model-direct",
               requestedStickerMessage: userMsg?.content,
               disableBracketActions: turnSettings.disableBracketActions,
               keepPeriods,
@@ -13777,8 +13778,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           aria-modal="true"
           aria-labelledby="offline-story-choice-title"
         >
-          <div className="w-full max-w-sm space-y-3 rounded-3xl bg-white p-5 text-slate-800 shadow-2xl">
-            <div className="flex items-start justify-between gap-3">
+          <div className="offline-story-choice-panel flex min-h-0 w-full max-w-sm flex-col gap-3 overflow-hidden rounded-3xl bg-white p-5 text-slate-800 shadow-2xl" style={{maxHeight:"min(100%, calc(100dvh - 2.5rem))"}}>
+            <div className="flex shrink-0 items-start justify-between gap-3">
               <div>
                 <h2 id="offline-story-choice-title" className="text-sm font-black">进入线下故事</h2>
                 <p className="mt-1 text-[11px] leading-5 text-slate-500">检测到这个角色有可以继续的剧情，请选择进入方式。</p>
@@ -13788,7 +13789,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               </button>
             </div>
 
-            <div className="space-y-2">
+            <div className="offline-story-choice-list min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain touch-pan-y" aria-label="可继续的线下剧情" tabIndex={0}>
               {pendingOfflineStoryChoice.stories.map((story) => (
                 <button
                   key={story.id}
@@ -13805,11 +13806,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             <button
               type="button"
               onClick={startNewOfflineStory}
-              className="w-full rounded-2xl bg-[var(--button-primary-bg)] px-3 py-3 text-xs font-bold text-[var(--button-primary-text)] transition-opacity hover:opacity-90"
+              className="w-full shrink-0 rounded-2xl bg-[var(--button-primary-bg)] px-3 py-3 text-xs font-bold text-[var(--button-primary-text)] transition-opacity hover:opacity-90"
             >
               开启新的剧情
             </button>
-            <button type="button" onClick={cancelOfflineStoryChoice} className="w-full py-1 text-[11px] font-medium text-slate-400 hover:text-slate-600">
+            <button type="button" onClick={cancelOfflineStoryChoice} className="w-full shrink-0 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-600">
               先不进入
             </button>
           </div>

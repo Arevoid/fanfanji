@@ -1,3 +1,4 @@
+import { createDirectReplyCandidates } from "./directChatService";
 import { createCharacterTextMessage } from "./messageFactory";
 import { cleanAiReplyText, normalizeDirectReplyBubbles, normalizePaymentMarkup, removeRedundantCharacterBubbles, splitAiReplyBubbles, stripOuterDialogueQuotes, stripSimulatedUserTurns } from "./messageParser";
 import { ensureExplicitStickerDelivery, suppressCharacterEmoji } from "./characterEmojiPolicy";
@@ -5,6 +6,7 @@ import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatService
 
 /** Regeneration preserves its legacy non-payment-normalizing parse path. */
 export function createRegeneratedReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
+  if(context.preserveProse)return createDirectReplyCandidates(context);
   const replyText = ensureExplicitStickerDelivery(context.rawText, context.requestedStickerMessage);
   const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(
     stripSimulatedUserTurns(stripOuterDialogueQuotes(cleanAiReplyText(replyText, context.disableBracketActions, context.preserveProse)), context),
