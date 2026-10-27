@@ -91,6 +91,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
   const [discussionMessages, setDiscussionMessages] = useState<ReadingDiscussionMessage[]>([]);
   const [discussionDraft, setDiscussionDraft] = useState("");
   const [isAiResponding, setIsAiResponding] = useState(false);
+  const discussionInFlight = useRef(false);
   const [isImmersiveMode, setIsImmersiveMode] = useState(true);
   const [discussionBallPosition, setDiscussionBallPosition] = useState({ left: 86, top: 48 });
   const discussionBallDragRef = useRef<{ pointerId: number; moved: boolean } | null>(null);
@@ -514,7 +515,8 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
       ? flatParagraphs.find((item) => item.paragraph.anchor.id === activeDiscussion.targetParagraphAnchorId)
       : undefined;
     const context = anchoredContext || getDiscussionParagraph();
-    if (!room || !context || !prompt || isAiResponding) return;
+    if (!room || !context || !prompt || discussionInFlight.current) return;
+    discussionInFlight.current = true;
     setDiscussionDraft("");
     setIsAiResponding(true);
     let activeDiscussionId = discussionId;
@@ -552,12 +554,12 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
       }
       setToolMessage(reason instanceof Error ? reason.message : "实时讨论暂时失败");
     } finally {
+      discussionInFlight.current = false;
       setIsAiResponding(false);
     }
   };
 
-  const sendDiscussionFromButton = (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
+  const sendDiscussionFromButton = () => {
     discussionInputRef.current?.blur();
     void sendDiscussionMessage();
   };
@@ -886,7 +888,7 @@ export default function ReadingReader({ userIdentityId, bookId, room, settings, 
               {isAiResponding && <div className="mr-auto flex items-center gap-2 rounded-2xl bg-[var(--surface-raised)] px-3 py-2 text-xs text-[var(--text-muted)]"><LoaderCircle className="h-3.5 w-3.5 animate-spin" />{room.characterSnapshot.name} 正在回应…</div>}
               {toolMessage && <div role="status" className="rounded-xl bg-rose-500/10 px-3 py-2 text-xs leading-5 text-rose-600">{toolMessage}</div>}
             </div>
-            <div className="flex gap-2 border-t border-[var(--border)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><textarea ref={discussionInputRef} value={discussionDraft} onChange={(event) => { setDiscussionDraft(event.target.value); setToolMessage(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendDiscussionMessage(); } }} placeholder="讨论当前内容…" rows={1} className="h-10 min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-sm leading-5 outline-none" /><button type="button" onPointerDown={sendDiscussionFromButton} disabled={!discussionDraft.trim() || isAiResponding} className="flex h-10 w-10 items-center justify-center self-end rounded-xl bg-[var(--text-primary)] text-[var(--surface)] disabled:opacity-30"><Send className="h-4 w-4" /></button></div>
+            <div className="flex gap-2 border-t border-[var(--border)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><textarea ref={discussionInputRef} value={discussionDraft} onChange={(event) => { setDiscussionDraft(event.target.value); setToolMessage(null); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); if (!event.repeat) sendDiscussionFromButton(); } }} placeholder="讨论当前内容…" rows={1} className="h-10 min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-sm leading-5 outline-none" /><button type="button" onClick={sendDiscussionFromButton} disabled={!discussionDraft.trim() || isAiResponding} className="flex h-10 w-10 items-center justify-center self-end rounded-xl bg-[var(--text-primary)] text-[var(--surface)] disabled:opacity-30"><Send className="h-4 w-4" /></button></div>
           </div>
         </div>
       )}

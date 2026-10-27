@@ -56,7 +56,7 @@ assert.match(reader, /role="status"/);
 assert.match(reader, /container\.scrollTop = container\.scrollHeight/);
 assert.match(reader, /placeholder="讨论当前内容…" rows=\{1\}/);
 assert.match(reader, /discussionInputRef\.current\?\.blur\(\)/);
-assert.match(reader, /onPointerDown=\{sendDiscussionFromButton\}/);
+assert.match(reader, /onClick=\{sendDiscussionFromButton\}/);
 assert.match(reader, /event\.key === "Enter" && !event\.shiftKey/);
 assert.match(reader, /setDiscussionMessages\(listDiscussionMessages\(room, activeDiscussionId\)\)/);
 assert.match(reader, /discussionThreads\.map\(\(\{ discussion, messages \}\)/);

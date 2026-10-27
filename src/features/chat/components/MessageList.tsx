@@ -91,6 +91,10 @@ export function MessageList({ messages, scrollRef, className, style, renderMessa
     } else if (old.lastId !== last?.id && messages.length > old.length) {
       if (atEnd.current || last?.sender === "user") goLatest();
       else { setNewCount(count => count + messages.length - old.length); pending.current = { ...anchor.current }; }
+    } else if (atEnd.current && newReplyPosition === "bottom" && !jumpToMessage) {
+      // Streaming, translation and media can grow an existing message without
+      // changing its ID or the message count. Keep a following reader pinned.
+      pending.current = { offset: 0, bottom: true };
     } else if (old.length !== messages.length && !atEnd.current) pending.current = { ...anchor.current };
     previous.current = { length: messages.length, lastId: last?.id, loadedId: messages[loadedStart]?.id };
     previousMessages.current = messages;
@@ -118,13 +122,18 @@ export function MessageList({ messages, scrollRef, className, style, renderMessa
     const rows = getRows(); let frame = 0;
     const measure = () => {
       frame = 0; let changed = false;
+      // Loading indicators and late media layout can change content height
+      // without adding a row. Follow those changes only for bottom readers.
+      if (atEnd.current && newReplyPosition === "bottom" && !jumpToMessage) container.scrollTop = container.scrollHeight;
       for (const row of rows) { const height = row.getBoundingClientRect().height, id = row.dataset.chatMessageId!;
         if (height > 0 && Math.abs((heights.current.get(id) ?? 76) - height) > 1) { heights.current.set(id, height); changed = true; } }
       if (changed) { pending.current = atEnd.current ? { offset: 0, bottom: true } : { ...anchor.current }; setMeasurement(value => value + 1); }
     }; measure();
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => { if (!frame) frame = requestAnimationFrame(measure); });
-    rows.forEach(row => observer?.observe(row)); return () => { observer?.disconnect(); if (frame) cancelAnimationFrame(frame); };
-  }, [start, end, messages, measurement]);
+    rows.forEach(row => observer?.observe(row));
+    if (content.current) observer?.observe(content.current);
+    return () => { observer?.disconnect(); if (frame) cancelAnimationFrame(frame); };
+  }, [start, end, messages, measurement, newReplyPosition, jumpToMessage]);
   useLayoutEffect(() => {
     if (!jumpToMessage) pending.current = initial.current && !initial.current.atEnd ? { id: initial.current.anchorId, offset: initial.current.offset } : { offset: 0, bottom: true };
     setMeasurement(value => value + 1);

@@ -4798,7 +4798,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     lastMsgCountRef.current = msgCount;
 
     if ((isFreshOpen && !hasChatViewportSnapshot(chatViewportKey)) || isUserSent || (!isFreshOpen && isNearBottom)) {
-      const behavior = isFreshOpen ? "auto" : "smooth";
+      // MessageList also follows incoming replies. Smooth scrolling here can
+      // emit intermediate positions that mark that list as reading history,
+      // especially while a translated reply grows beyond one screen.
+      const behavior = "auto";
       // The message list can finish its layout one or more frames after the
       // chat shell mounts, especially on mobile.
       const scrollAfterLayout = () => {
