@@ -34,6 +34,8 @@ export interface MemoryRetrievalContext {
 }
 
 export interface MemoryExtractionContext {
+  /** Runtime-only observer; never serialized into a request or saved result. */
+  onFailedResponse?: (response: Readonly<MemoryExtractionApiResult>) => void;
   singlePass?:boolean;
   memorySettings?:readonly {id:string;text:string}[];
   /** Formal writers require a bounded semantic comparison when the extractor omitted a fact slot. */
@@ -103,6 +105,7 @@ export interface MemoryExtractionApiParams {
 }
 
 export interface MemoryExtractionApiResult {
+  text?: string;
   identityReviews?: unknown[];
   semanticReviews?: unknown[];
   items?: unknown;

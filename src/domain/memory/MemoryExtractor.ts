@@ -210,6 +210,7 @@ export async function extractMemories(
   // keep a stable response shape. Preserve the error before interpreting that
   // empty array as an honest "no durable facts" extraction.
   if (data.error) {
+    try { context.onFailedResponse?.(data); } catch { /* Diagnostics cannot change extraction behavior. */ }
     return withSourceEnvelope({
       extractedMemories: [],
       acceptedClaims: [],

@@ -11,6 +11,7 @@ import {loadKnowledgeClaims} from "../../../core/storage/repositories/characterK
 import {authorizedMemorySettings} from "../../characterKnowledge/services/memorySettingReviewService";
 import {loadWorldBookEntries} from "../../../core/storage/repositories/worldBookRepository";
 import {apiChat} from "../../../utils/apiHelper";
+import {clearOfflineFailureResponse,rememberOfflineFailureResponse} from "./offlineFailureResponse";
 
 /** One extraction request per bounded window. Admission and source checks are local. */
 export async function extractOfflineArchiveWithCheckpoint(input:{story:OfflineStory;character:Character;scope:CharacterTruthScope;settings:UserSettings;
@@ -39,12 +40,15 @@ export async function extractOfflineArchiveWithCheckpoint(input:{story:OfflineSt
   })&&messages.some(message=>message.content.includes(claim.source.evidenceQuote||claim.statement));
  if(exact&&work.candidates.some(claim=>!validCandidate(claim)))throw Error("offline_archive_checkpoint_source_changed");
  if(!work.extracted){
+  clearOfflineFailureResponse(input.story);
+  let logicalRequests=0;
   // Old failure paths saved candidates but no cursor. Reuse only evidence-bearing,
   // unchanged sources, leaving messages without verifiable coverage to extraction.
   const recovered=work.candidates.length?work.candidates:(input.readClaims?.()||loadKnowledgeClaims().value).filter(validCandidate);
   const covered=new Set(recovered.flatMap(claim=>claim.source.messageIds||[]));
   const missing=messages.filter(message=>!covered.has(message.id));
-  const result=missing.length?await MemoryService.extractMemoryBatches({...input.context,singlePass:true,memorySettings,recentMessages:missing,reviewAuthorizedSettings:undefined},input.extractApi):
+  const result=missing.length?await MemoryService.extractMemoryBatches({...input.context,singlePass:true,memorySettings,recentMessages:missing,reviewAuthorizedSettings:undefined,
+    onFailedResponse:response=>rememberOfflineFailureResponse(input.story,response,logicalRequests)},params=>{logicalRequests++;return input.extractApi(params);}):
     {acceptedClaims:[],extractedMemories:[],rejectedCandidateCount:0} as MemoryExtractionResult;
   if(result.apiError)return result;
   work={...work,extracted:true,impressionCandidates:result.impressionCandidates,candidates:[...new Map([...recovered,...result.acceptedClaims].map(claim=>[claim.id,{...claim,offlineArchiveManaged:true}])).values()],

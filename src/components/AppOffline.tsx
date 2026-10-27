@@ -1,6 +1,7 @@
 import { shouldArchiveOfflineProgress } from "../domain/memory/offlineArchivePolicy";
 import React, { useEffect, useState } from "react";
-import { 
+import {OfflineFailureResponse} from "../features/offline/components/OfflineFailureResponse";
+import {
   ArrowLeft, Plus, Trash2, Pencil, Send, Sparkles, BookOpen,
   Link2, Calendar, MessageSquare, ChevronRight, UserRound, Users,
   RefreshCw, Layers
@@ -730,6 +731,7 @@ export default function AppOffline({
                       最近一批：已归档 {activeStory.memorySyncReport.retained} 条。{activeStory.memorySyncReport.failed>0&&`还有 ${activeStory.memorySyncReport.failed} 条整理未完成，可以重试。`}
                     </p>}
                     {activeStory.memoryRepair&&<p className="text-xs leading-5 text-[#8E8E93]" role="status">完整剧情修复：已完成 {activeStory.memoryRepair.nextBatch}/{activeStory.memoryRepair.totalBatches} 批。完成前旧记忆继续调用，已完成的批次不会重跑。</p>}
+                    {activeStory.lastMemorySyncError && <OfflineFailureResponse story={activeStory}/>}
                     {activeStory.lastMemorySyncError && <p className="text-xs leading-5 text-amber-700" role="status">
                       {activeStory.lastMemorySyncError}。原文和已完成进度保留。{activeStory.memoryRepair?.checkpoint?.extracted||activeStory.memoryRepair&&activeStory.memoryRepair.nextBatch===activeStory.memoryRepair.totalBatches?"已提取内容复用，本地校验不会追加 API 请求。":"未完成的提取需要重新请求当前批次，可能产生 API 费用，不会自动重试。"}
                     </p>}
