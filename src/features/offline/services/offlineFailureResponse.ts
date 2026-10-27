@@ -17,7 +17,7 @@ export function rememberOfflineFailureResponse(story: OfflineStory, response: Re
   const text = typeof response.text === "string" ? response.text : "";
   records.delete(key(story));
   records.set(key(story), { text: text.slice(0,65536), previewTruncated:text.length>65536,
-    category:metadata?.failureReasonCode || "unknown", wrapper:metadata?.wrapperKind || "unknown",
+    category:response.errorDetails?.code==="provider_safety"?"provider_safety":metadata?.failureReasonCode || "unknown", wrapper:metadata?.wrapperKind || "unknown",
     schema:metadata?.schemaRejectReasonCode || "unknown",
     modelTruncated:metadata?.failureReasonCode==="truncated_json" || metadata?.finishReasonKind==="length",
     logicalRequests });

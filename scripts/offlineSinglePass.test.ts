@@ -25,7 +25,8 @@ try{
  globalThis.fetch=(async(url,init)=>{requests.push({url:String(url),body:JSON.parse(String(init?.body))});return Response.json({text:JSON.stringify(candidate())});}) as typeof fetch;
  const result=await run();assert.equal(result.apiError,undefined);assert.equal(result.acceptedClaims.length,1);assert.equal(result.acceptedClaims[0].admissionStatus,"retained");
  assert.equal(requests.length,1);assert.equal(reviews,0);assert.equal(registries,0);assert.equal(requests[0].url,"/api/chat");
- assert.ok(requests[0].body.message.includes("单次整理"));assert.ok(requests[0].body.message.includes(character.personality));assert.equal("singleAttempt" in requests[0].body,false);
+ assert.ok(requests[0].body.message.includes("单次整理"));assert.ok(!requests[0].body.message.includes(character.personality),"unrelated persona must not be copied into extraction");assert.equal("singleAttempt" in requests[0].body,false);
+ assert.ok(requests[0].body.message.includes(message.content),"source message is sent unchanged, never scrubbed to evade provider review");
  await run();assert.equal(requests.length,1,"a durable checkpoint is reused without any model call");
  story={...story,memoryArchiveWork:undefined};requests=[];
  globalThis.fetch=(async()=>{requests.push({});return Response.json({text:JSON.stringify(candidate("uncertain"))});}) as typeof fetch;

@@ -24,6 +24,12 @@ export interface TextApiErrorDetails {
 const SAFETY_PATTERN = /PROHIBITED_CONTENT|content[_ -]?filter|content[_ -]?safety|prompt[_ -]?blocked|safety|harmful|unsafe|policy|responsible\s*ai|内容安全|安全策略|内容被拦截|请求被拦截/iu;
 const CREDENTIAL_PATTERN = /api[_ -]?key|authentication|unauthorized|invalid[_ -]?(?:key|credential)|quota|billing|余额不足|权限不足/iu;
 const CONTEXT_PATTERN = /context[_ -]?(?:length|window)|max[_ -]?tokens?|token[_ -]?limit|too[_ -]?long|prompt[_ -]?too[_ -]?large|输入过长|上下文(?:太长|过长|超出)|令牌数量/iu;
+/** Only explicit provider notices, not general discussion of safety policies. */
+export function isProviderSafetyNotice(text: string): boolean {
+  return /^\s*The prompt could not be submitted[.\s]*[\s\S]{0,800}(?:sensitive words|Prohibited Use policy)/iu.test(text)
+    || /^\s*(?:Your|This) (?:prompt|request) (?:was|has been|is) (?:blocked|rejected)[\s\S]{0,200}(?:safety|content policy)/iu.test(text)
+    || /^\s*(?:本次请求|请求|提示词|内容)(?:已被|被)(?:供应商)?(?:内容安全策略|安全策略)(?:拦截|拒绝)/u.test(text);
+}
 const KNOWN_CODES = new Set<TextApiErrorCode>([
   "configuration", "provider_auth", "provider_rate_limit", "provider_safety", "context_too_large", "provider_request",
   "provider_unavailable", "provider_empty", "provider_invalid_response", "timeout", "network", "aborted", "unknown",

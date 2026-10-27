@@ -166,7 +166,7 @@ export async function extractMemories(
     singlePass:context.singlePass,memorySettings:context.memorySettings,
     history,
     characterName: context.character.name,
-    characterProfile: [
+    characterProfile: context.scenario==="offline" ? undefined : [
       context.character.personality,
       context.character.backstory,
       ...(context.character.references || []).map((reference) => `${reference.title}：${reference.content}`),
@@ -495,7 +495,7 @@ export async function extractMemories(
       const value = assessKnowledgeValue(decision.claim, payload.valueAssessment);
       if (!value.retain) { rejectedCandidateCount += 1;valueSkippedCount++; return; }
       decision.claim = value.claim;
-      if(!ownExperience&&context.singlePass&&context.memorySettings?.length){
+      if(!ownExperience&&context.singlePass&&context.memorySettings!==undefined){
         const review=payload.settingReview,setting=context.memorySettings.find(s=>s.id===review?.settingId);
         const valid=review&&Number.isFinite(review.confidence)&&review.confidence>=.8&&review.confidence<=1&&Boolean(review.reason?.trim());
         const exactDuplicate=valid&&review.decision==="duplicate_setting"&&review.confidence>=.95&&setting&&review.settingQuote?.trim()

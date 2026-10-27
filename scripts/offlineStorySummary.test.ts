@@ -271,7 +271,7 @@ const tests: Array<[string, () => void | Promise<void>]> = [
       formatContent: (items, options) => `【心境归档】\n${(options?.displayItems || items).join("\n\n")}`,
     }, async (params) => {
       assert.equal(params.templateType, "refined", "both display styles use the same factual extraction contract");
-      assert.match(params.characterProfile || "", /嘴硬心软/);
+      assert.equal(params.characterProfile,undefined,"offline factual extraction does not transmit role voice profiles");
       return { candidates: [{
         statement: objectiveStatement,
         memoryText: diaryText,

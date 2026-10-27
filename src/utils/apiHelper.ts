@@ -23,7 +23,7 @@ import {
   type AiRequestLedgerInput,
   type AiRequestLedgerSession,
 } from "../core/monitoring/aiRequestLedger";
-import { emptyTextApiErrorDetails, parseTextApiErrorPayload, type TextApiErrorCode } from "./textApiError";
+import { emptyTextApiErrorDetails, parseTextApiErrorPayload, isProviderSafetyNotice, type TextApiErrorCode } from "./textApiError";
 import { isStructuredOutputTelemetry, withStructuredOutputTelemetry, type StructuredOutputTelemetry } from "../features/characterKnowledge/services/structuredOutputTelemetry";
 
 type ApiProviderUsage = AiRequestUsage;
@@ -1174,6 +1174,9 @@ export function normalizeMemoryExtractionResponse(response: MemoryExtractionResp
     || (response.structuredCandidatesV2?.length || 0) > 0
     || response.v2MetadataPresent === true;
   if (response.error || hasStructuredItems || !response.text?.trim()) return response;
+  if (isProviderSafetyNotice(response.text)) return { ...response,
+    error: "本次记忆提取被供应商内容安全策略拦截，旧记忆保留，未自动重试",
+    errorDetails: { status: 200, code: "provider_safety" } };
   const telemetry = response.structuredOutputTelemetry
     ?? parseKnowledgeExtractionOutputWithV2WithTelemetry(response.text, new Set()).structuredOutputTelemetry;
   if (telemetry.jsonParseSucceeded && telemetry.failureReasonCode === "valid_empty"
@@ -1209,7 +1212,7 @@ export async function apiExtractMemoriesWithModelFallback(
   const requestParams = routeCharacterTextRequest({ ...params, logicalActionId });
   const primary = normalizeMemoryExtractionResponse(await request(requestParams));
   const normalizedFallback = fallbackModel?.trim();
-  if (params.singlePass||params.scenario==="offline"&&params.singlePass!==false||!primary.error || !normalizedFallback || normalizedFallback === requestParams.model.trim() || requestParams.model !== params.model || routeCharacterTextRequest({...requestParams,model:normalizedFallback}).model !== normalizedFallback) return primary;
+  if (primary.errorDetails?.code==="provider_safety"||params.singlePass||params.scenario==="offline"&&params.singlePass!==false||!primary.error || !normalizedFallback || normalizedFallback === requestParams.model.trim() || requestParams.model !== params.model || routeCharacterTextRequest({...requestParams,model:normalizedFallback}).model !== normalizedFallback) return primary;
   console.warn(`Memory extraction model '${params.model}' failed; retrying with the active chat model '${normalizedFallback}'.`);
   const fallbackResult = normalizeMemoryExtractionResponse(await request({ ...requestParams, model: normalizedFallback }));
   return fallbackResult.structuredOutputTelemetry

@@ -12,6 +12,7 @@ import {authorizedMemorySettings} from "../../characterKnowledge/services/memory
 import {loadWorldBookEntries} from "../../../core/storage/repositories/worldBookRepository";
 import {apiChat} from "../../../utils/apiHelper";
 import {clearOfflineFailureResponse,rememberOfflineFailureResponse} from "./offlineFailureResponse";
+import {selectOfflineExtractionSettings} from "../../../domain/memory/offlineExtractionSettings";
 
 /** One extraction request per bounded window. Admission and source checks are local. */
 export async function extractOfflineArchiveWithCheckpoint(input:{story:OfflineStory;character:Character;scope:CharacterTruthScope;settings:UserSettings;
@@ -19,10 +20,8 @@ export async function extractOfflineArchiveWithCheckpoint(input:{story:OfflineSt
  reviewRequest?:typeof apiChat;readClaims?:()=>readonly KnowledgeClaim[]}):Promise<MemoryExtractionResult>{
  const messages=input.context.recentMessages;
  const settingsRead=loadWorldBookEntries([]);if(!settingsRead.valid)throw Error("setting_store_unavailable");
- let settingsBudget=8000;
- const memorySettings=authorizedMemorySettings(input.character,input.scope,"offline",settingsRead.value).flatMap(setting=>{
-  if(settingsBudget<=0)return [];const text=setting.text.slice(0,settingsBudget);settingsBudget-=text.length;return [{id:setting.id,text}];
- });
+ const memorySettings=selectOfflineExtractionSettings(
+  authorizedMemorySettings(input.character,input.scope,"offline",settingsRead.value),messages.map(m=>m.content).join("\n"));
  const sourceRevisions=Object.fromEntries(messages.map(message=>[message.id,offlineMemorySourceRevision(message)]));
  const raw=input.story.memoryArchiveWork?.[input.character.id];
  const stored=raw&&raw.version===1&&Array.isArray(raw.candidates)&&raw.candidates.every(claim=>normalizeKnowledgeClaim(claim))

@@ -106,6 +106,7 @@ export interface MemoryExtractionApiParams {
 
 export interface MemoryExtractionApiResult {
   text?: string;
+  errorDetails?: { status?: number; code?: string };
   identityReviews?: unknown[];
   semanticReviews?: unknown[];
   items?: unknown;
