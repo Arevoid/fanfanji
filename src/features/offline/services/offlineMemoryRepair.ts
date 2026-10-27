@@ -87,7 +87,12 @@ export async function rebuildOfflineStoryMemory(input:Input):Promise<OfflineStor
    lease();
    if(result.apiError||result.reviewFailures?.length)throw Error(result.apiError||"部分记忆整理未完成，已保存进度");
    if(result.acceptedClaims.some(c=>!isExactTruthScope(c,scope)||c.source.storyId!==input.story.id))throw Error("提取结果关系范围不匹配，未切换旧记忆");
-   if(!result.acceptedClaims.length&&!result.valueSkippedCount)throw Error("本批没有可验证的结果，旧记忆保持不变");
+   if(!result.acceptedClaims.length&&!result.valueSkippedCount){
+    // An empty extraction is not a completed rebuild. Do not cache it forever
+    // as extracted=true: an explicit later retry may request this batch again.
+    work={...work,checkpoint:undefined};
+    throw Error("本批未提取到可验证记忆，旧记忆保留；修复未完成，不会自动重试");
+   }
    const rebased=result.acceptedClaims.map(claim=>({...claim,source:{...claim.source,messageRevisions:Object.fromEntries((claim.source.messageIds||[]).map(id=>[id,sourceRevision(originals.get(id)?.content||"")]))}}));
    work={...work,nextBatch:work.nextBatch+1,checkpoint:undefined,stagedClaims:[...work.stagedClaims,...rebased]};await save();
   }

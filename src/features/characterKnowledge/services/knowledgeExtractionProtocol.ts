@@ -293,8 +293,14 @@ function parseRawValuesWithTelemetry(rawText: string): RawValuesTelemetry {
   }
   try {
     const parsed = JSON.parse(text) as unknown;
+    // Accept explicit collection envelopes without guessing fields, repairing
+    // JSON, or weakening each candidate's source/schema validation.
+    const collections = isRecord(parsed) && !('statement' in parsed)
+      && !parsed.error && !parsed.refusal && parsed.success !== false
+      ? ["items", "candidates", "memories"].filter(key => Array.isArray(parsed[key])) : [];
+    const values = collections.length === 1 ? (parsed as Record<string, unknown[]>)[collections[0]] : parsed;
     return {
-      rawValues: Array.isArray(parsed) ? parsed : [parsed], wrapperKind: detectedWrapper,
+      rawValues: Array.isArray(values) ? values : [values], wrapperKind: detectedWrapper,
       jsonParseStage: "json", jsonParseSucceeded: true, jsonRootKind: rootKind(parsed),
       jsonlAttempted: false, jsonlAcceptedCount: 0, jsonlRejectedCount: 0,
       failureStage: "none", failureReasonCode: "none",

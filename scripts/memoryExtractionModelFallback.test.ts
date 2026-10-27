@@ -41,6 +41,6 @@ const malformedFinal = await apiExtractMemoriesWithModelFallback(base, "working-
   items: [],
   candidates: [],
 }));
-assert.match(malformedFinal.error || "", /无法识别的结构化结果/);
+assert.match(malformedFinal.error || "", /未通过结构校验/);
 
 console.log("memory extraction model fallback tests passed");

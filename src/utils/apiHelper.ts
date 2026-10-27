@@ -8,6 +8,7 @@ import {
   normalizeKnowledgeExtractionLineageTransport,
   parseOrRepairKnowledgeExtractionOutputWithDiagnostics,
   parseMemoryExtractionCandidateV2Output,
+  parseKnowledgeExtractionOutputWithV2WithTelemetry,
   type ExtractedKnowledgeCandidatePayload,
   type KnowledgeExtractionHistoryItem,
 } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
@@ -1173,9 +1174,24 @@ export function normalizeMemoryExtractionResponse(response: MemoryExtractionResp
     || (response.structuredCandidatesV2?.length || 0) > 0
     || response.v2MetadataPresent === true;
   if (response.error || hasStructuredItems || !response.text?.trim()) return response;
+  const telemetry = response.structuredOutputTelemetry
+    ?? parseKnowledgeExtractionOutputWithV2WithTelemetry(response.text, new Set()).structuredOutputTelemetry;
+  if (telemetry.jsonParseSucceeded && telemetry.failureReasonCode === "valid_empty"
+    && telemetry.structuredEntryCount === 0) return response;
+  const reason = telemetry.failureReasonCode;
+  const sourceRejected = telemetry.schemaRejectReasonCode === "invalid_source_refs"
+    || telemetry.schemaRejectReasonCode === "missing_source_refs" || telemetry.schemaRejectReasonCode === "missing_evidence_quote";
+  const error = reason === "truncated_json" ? "记忆提取结果不完整，JSON可能被截断"
+    : reason === "schema_rejected" && sourceRejected ? "记忆提取结果的来源引用或原文证据未通过校验"
+    : reason === "schema_rejected" ? "记忆提取JSON缺少必要字段或字段格式不符合要求"
+    : reason === "json_parse_failed" || reason === "prose_wrapper" || reason === "jsonl_no_valid_entries"
+      ? "记忆提取结果不是可解析的JSON或JSONL，未通过结构校验"
+      : "记忆提取模型返回了无法识别的结构化结果";
   return {
     ...response,
-    error: "记忆提取模型返回了无法识别的结构化结果",
+    structuredOutputTelemetry: telemetry,
+    error,
+    errorDetails: { status: 200, code: "provider_invalid_response" },
   };
 }
 

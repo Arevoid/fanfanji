@@ -160,7 +160,7 @@ const failedExtraction = await apiExtractMemories({
   apiKey: "synthetic-key",
   model: "synthetic-model",
 });
-assert.match(failedExtraction.error || "", /无法识别的结构化结果/);
+assert.match(failedExtraction.error || "", /未通过结构校验/);
 const failureLedger = loadAiRequestLedger(Date.now() + 1_000);
 assert.equal(failureLedger.length, 1);
 assert.equal(failureLedger[0].status, "failure");
