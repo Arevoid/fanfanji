@@ -1,10 +1,18 @@
+import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
 import { Character, Message, UserSettings } from "../../../types";
+import { getChatArchiveRoundLimit, splitChatArchiveTurnBatches } from "../../../domain/memory/chatArchiveTurns";
 import type { MemoryArchiveStats } from "../../../types";
 import type { ConversationSummaryRecord } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
-import { useRef } from "react";
+import { useRef,useEffect } from "react";
+import {loadCommittedMessages} from "../../../core/storage/repositories/messageRepository";
+import {parseCallRecord,isCallRecordMarkup} from "../services/messageParser";
+import { prepareMemoryIdentityRegistry } from "../../characterKnowledge/services/memoryIdentityRegistryService";
+import { createMemorySettingReviewer } from "../../characterKnowledge/services/memorySettingReviewService";
+import { applyArchivedImpressions } from "../../characterKnowledge/services/characterContinuityService";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { findRelationshipForCanonicalCharacter } from "../../../domain/relationship/characterRelationship";
 import { createId } from "../../../core/id/createId";
+import { evaluateMemoryExtractionCheapFilter } from "../../../domain/memory/memoryExtractionCheapFilter";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims } from "../../../core/storage/repositories/characterKnowledgeRepository";
 import { conversationSummaryRepository } from "../../../core/storage/repositories/conversationSummaryRepository";
 import { createConversationSummaryRecord } from "../../characterKnowledge/services/conversationSummaryService";
@@ -18,6 +26,7 @@ import {
   type MemoryProjectionEnqueueResult,
 } from "../../../core/memory/memoryProjectionEnqueue";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "../../../utils/apiHelper";
+import { beginMemoryExtractionTask, finishMemoryExtractionTask, memoryExtractionSourcesStillCurrent,isMemoryExtractionTaskPending } from "../../characterKnowledge/services/memoryExtractionTaskService";
 import { createAiActionId } from "../../../core/monitoring/aiRequestLedger";
 import { observeDirectChatMemoryAdmissionShadow } from "../services/directChatMemoryAdmissionShadow";
 import {
@@ -64,6 +73,7 @@ type DirectScope = { characterId: string; relationId: string; userIdentityId: st
 export type MemoryExtractionPersistenceMode = "production_equivalent_write" | "observation_only";
 
 export interface MemoryExtractionRunOptions {
+  preserveArchiveCursor?:boolean;
   persistenceMode?: MemoryExtractionPersistenceMode;
   /** Dev-only characterization may opt into the additive V2 prompt. */
   enableV2Metadata?: boolean;
@@ -111,6 +121,14 @@ export function splitChatArchiveBatches(messages: readonly Message[], batchSize:
   return batches;
 }
 
+export function getChatArchiveBatchSize(character:Pick<Character,"historyMemoryLimit"|"summaryTriggerRound">,automatic:boolean):number{
+  if(automatic){
+    return getChatArchiveRoundLimit(character.summaryTriggerRound);
+  }
+  const configured=Number.isFinite(character.historyMemoryLimit)?Math.round(character.historyMemoryLimit!):100;
+  return Math.min(200,Math.max(10,configured));
+}
+
 export interface ChatMemoryExtractionOptions {
   activeChatCharId?: string | null;
   activeCharacter?: Character | null;
@@ -141,7 +159,7 @@ export function useChatMemoryExtraction({
   activeDirectScope,
   currentChatMessages,
   memories,
-  settings,
+  settings: globalSettings,
   recallSettings,
   setIsCompressingMemory,
   onSaveMemories,
@@ -153,6 +171,7 @@ export function useChatMemoryExtraction({
   relationships = [],
   activeIdentityId,
 }: ChatMemoryExtractionOptions) {
+  const settings = globalSettings;
   const lastArchiveFeedbackRef = useRef<MemoryArchiveStats | null>(null);
   const lastRunDiagnosticsRef = useRef<MemoryExtractionRunDiagnostics>({
     status: "NO_MESSAGES",
@@ -192,7 +211,9 @@ export function useChatMemoryExtraction({
       persistenceMode,
     };
     setIsCompressingMemory(true);
+    const ownedTasks: NonNullable<ReturnType<typeof beginMemoryExtractionTask>>[] = [];
     try {
+      const settings=resolveCharacterTextSettings(globalSettings,activeCharacter);
       const activeRelationship = activeDirectScope
         ? relationships.find((relationship) => relationship.id === activeDirectScope.relationId)
         : undefined;
@@ -215,11 +236,10 @@ export function useChatMemoryExtraction({
         };
         return 0;
       }
-      const configuredBatchSize = Number.isFinite(activeCharacter.historyMemoryLimit)
-        ? Math.round(activeCharacter.historyMemoryLimit as number)
-        : 100;
-      const archiveBatchSize = Math.min(200, Math.max(10, configuredBatchSize));
-      const archiveBatches = splitChatArchiveBatches(unarchivedMessages, archiveBatchSize);
+      const archiveBatchSize = getChatArchiveBatchSize(activeCharacter,isAutomaticDirectChat);
+      const archiveBatches = isAutomaticDirectChat
+        ? splitChatArchiveTurnBatches(unarchivedMessages, archiveBatchSize)
+        : splitChatArchiveBatches(unarchivedMessages, archiveBatchSize);
       // A formal long-evidence window needs the same admission observation
       // seam even when the standalone Shadow/Canary toggles are off. This is
       // dev-only metadata ingestion; it does not grant write authority or
@@ -270,6 +290,7 @@ export function useChatMemoryExtraction({
         || canaryEnabled
         || longEvidenceEnabled;
       const markArchiveProgress = async (lastMessage: Message): Promise<boolean> => {
+        if(runOptions.preserveArchiveCursor)return true;
         if (activeCharacter.isGroupChat) {
           if (onUpdateCharacter) {
             const result = await onUpdateCharacter(activeCharacter.id, { lastImmediateSummaryMsgId: lastMessage.id });
@@ -301,7 +322,7 @@ export function useChatMemoryExtraction({
             history: [],
             systemInstruction: "你是群聊记忆整理器。输出 80 到 180 字的中文摘要。",
             apiKey: settings.apiKey,
-            model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
+            model: (settings.selectedModel || "gemini-3.5-flash"),
             apiEndpoint: settings.apiEndpoint,
             purpose: "memory_extract",
             characterId: activeChatCharId,
@@ -397,6 +418,9 @@ export function useChatMemoryExtraction({
       }
       const extractionScope = activeDirectScope;
       for (const messagesToCompress of archiveBatches) {
+        const task = persistenceMode === "observation_only" ? undefined : beginMemoryExtractionTask(extractionScope, messagesToCompress);
+        if (persistenceMode !== "observation_only" && !task) return -1;
+        if (task) ownedTasks.push(task);
         archiveStats.sourceMessageCount += messagesToCompress.length;
         const longEvidenceBefore = longEvidenceEnabled
           ? await readDirectChatMemoryCanonicalReadback(extractionScope).catch(() => undefined)
@@ -427,12 +451,18 @@ export function useChatMemoryExtraction({
           messageCount: unarchivedMessages.length,
         };
         const result = await MemoryService.extractMemories({
+          singlePass: true,
+          requireFactResolution: true,
           character: activeCharacter,
           characterId: activeChatCharId,
           relationId: extractionScope.relationId,
           userIdentityId: extractionScope.userIdentityId,
           conversationId: extractionScope.conversationId,
           recentMessages: messagesToCompress,
+          existingClaims: loadKnowledgeClaims().value,
+          reviewAuthorizedSettings: createMemorySettingReviewer(activeCharacter, {characterId:activeChatCharId,...extractionScope}, activeCharacter.isGroupChat?"group":"chat",{...settings,selectedModel:settings.selectedModel}),
+          prepareSemanticRegistry: (query) => prepareMemoryIdentityRegistry({ characterId: activeChatCharId, relationId: extractionScope.relationId,
+            userIdentityId: extractionScope.userIdentityId, conversationId: extractionScope.conversationId }, settings, query),
           existingMemories: [],
           scenario: "chat",
           // The controller supplies an explicit eligible batch for automatic
@@ -446,7 +476,7 @@ export function useChatMemoryExtraction({
             ? { enableAdmissionShadowObservation: true }
             : {}),
           apiKey: settings.apiKey,
-          model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
+          model: (settings.selectedModel || "gemini-3.5-flash"),
           apiEndpoint: settings.apiEndpoint,
           templateType: activeCharacter.archiveTemplateType,
           createId: () => createId("moment"),
@@ -548,15 +578,30 @@ export function useChatMemoryExtraction({
           continue;
         }
         let finalCanonicalClaims = canaryFilteredAcceptedClaims;
+        if (task && !memoryExtractionSourcesStillCurrent(task)) return -1;
         let canonicalSnapshotAvailable = false;
         let finalCanonicalSnapshot: CanonicalMemoryCommitSnapshot | undefined;
         let extractedSummary: ConversationSummaryRecord | undefined;
+        // A bounded user-facing episode is separate from the rebuildable
+        // all-history projection and survives asynchronous projection cutover.
+        let archiveEpisode:ConversationSummaryRecord|undefined;
         let enqueueResult: MemoryProjectionEnqueueResult | undefined;
         let cutoverDecision: DirectChatSummaryCutoverDecision | undefined = isAutomaticDirectChat && canaryFilteredAcceptedClaims.length === 0
           ? resolveDirectChatSummaryCutover({ automatic: true, canonicalSnapshotAvailable: true, zeroCandidates: true })
           : undefined;
         const write = await commitMemoryWriteBundle({
           claims: canaryFilteredAcceptedClaims,
+          buildEpisodes:()=>{
+            if(!isAutomaticDirectChat)return [];
+            const current=loadKnowledgeClaims();if(!current.valid)throw Error("episode_source_unavailable");
+            archiveEpisode=createConversationSummaryRecord({
+              id:`conversation-episode:${extractionScope.relationId}:${messagesToCompress[0]?.id}:${messagesToCompress[messagesToCompress.length-1]?.id}`,
+              scope:extractionScope,claims:current.value,sourceMessageIds:messagesToCompress.map(message=>message.id),
+              generatedAt:Date.now(),generator:"conversation-episode.v2",layer:"episode",
+              rangeStartAt:messagesToCompress[0]?.timestamp,rangeEndAt:messagesToCompress[messagesToCompress.length-1]?.timestamp,
+            });
+            return archiveEpisode?[archiveEpisode]:[];
+          },
           buildSummary: () => {
             if (isAutomaticDirectChat && (!cutoverDecision || !cutoverDecision.writeSynchronousSummary)) {
               return undefined;
@@ -567,11 +612,11 @@ export function useChatMemoryExtraction({
               // Normal automatic Direct Chat uses the same exact-scope final
               // canonical snapshot as the durable projection. Manual archive
               // remains on its historical batch-local path.
-              claims: canonicalSnapshot?.activeClaims || canaryFilteredAcceptedClaims,
+              claims: canonicalSnapshot?.activeClaims || loadKnowledgeClaims().value,
               sourceMessageIds: canonicalSnapshot?.sourceMessageIds || messagesToCompress.map((message) => message.id),
               ...(canonicalSnapshot ? { canonicalRevision: canonicalSnapshot.canonicalRevision } : {}),
               generatedAt: Date.now(),
-              layer: "episode",
+              layer: canonicalSnapshot?"projection":"episode",
             });
             return extractedSummary;
           },
@@ -618,6 +663,7 @@ export function useChatMemoryExtraction({
           console.error("Knowledge claims could not be persisted.", write.error);
           return -1;
         }
+        if (result.impressionCandidates?.length) applyArchivedImpressions(extractionScope, result.impressionCandidates);
         const fallbackSummaryWritten = Boolean(
           write.summaryWritten
           && finalCanonicalSnapshot
@@ -632,7 +678,7 @@ export function useChatMemoryExtraction({
             fallbackSummaryWritten,
           })
           : resolveDirectChatSummaryCutover({ automatic: false, canonicalSnapshotAvailable: true });
-        if (!write.summaryWritten && (!isAutomaticDirectChat || finalCutoverDecision.requiresSynchronousFallback)) {
+        if (!write.summaryWritten && (archiveEpisode || !isAutomaticDirectChat || finalCutoverDecision.requiresSynchronousFallback)) {
           // Do not move the archive marker past a batch whose derived summary
           // did not persist. A later retry can safely rebuild the canonical
           // summary without deleting the original chat history.
@@ -647,11 +693,13 @@ export function useChatMemoryExtraction({
         archiveStats.summaryCount += write.summaryWritten ? 1 : 0;
         archiveStats.rejectedCandidateCount += result.rejectedCandidateCount + canarySuppressedCount;
         totalExtracted += canaryFilteredAcceptedClaims.length;
+        // A successful empty extraction advances once; failed requests retain the source window.
         const cursorAdvanced = await markArchiveProgress(messagesToCompress[messagesToCompress.length - 1]);
         if (!cursorAdvanced) {
           console.error("Direct chat archive cursor could not be persisted.");
           return -1;
         }
+        if (task && !finishMemoryExtractionTask(task, "completed")) return -1;
         const observerGateReason = !longEvidenceEnabled
           ? "long_evidence_disabled" as const
           : !logicalActionId
@@ -729,6 +777,9 @@ export function useChatMemoryExtraction({
         }
       }
       lastArchiveFeedbackRef.current = { ...archiveStats };
+      if (persistenceMode !== "observation_only" && totalExtracted > 0 && typeof document !== "undefined") {
+        document.dispatchEvent(new Event("fanfanji:memory-evidence-updated"));
+      }
       lastRunDiagnosticsRef.current = {
         ...lastRunDiagnosticsRef.current,
         status: "completed",
@@ -742,10 +793,36 @@ export function useChatMemoryExtraction({
         status: "FAILED",
       };
     } finally {
+      ownedTasks.forEach((task) => finishMemoryExtractionTask(task, "failed"));
       setIsCompressingMemory(false);
     }
     return -1;
   };
+
+  const callExtractionInFlight=useRef(false);
+  useEffect(()=>{
+    if(typeof document==="undefined"||!activeDirectScope||activeCharacter?.isGroupChat||(!settings.apiKey&&!activeCharacter?.characterApi?.enabled))return;
+    let stopped=false;
+    const resume=async()=>{
+      if(stopped||document.visibilityState!=="visible"||callExtractionInFlight.current)return;
+      callExtractionInFlight.current=true;
+      try{
+        const saved=await loadCommittedMessages();if(!saved.valid||stopped)return;
+        const record=saved.value.find(message=>message.characterId===activeDirectScope.characterId&&message.relationId===activeDirectScope.relationId
+          &&message.conversationId===activeDirectScope.conversationId&&!message.recalledAt&&isCallRecordMarkup(message.content)
+          &&parseCallRecord(message.content).status==="completed"&&parseCallRecord(message.content).transcript.some(turn=>turn.content?.trim())
+          &&isMemoryExtractionTaskPending(activeDirectScope,[message]));
+        if(record)await handleExtractMemories([record],{automatic:true,preserveArchiveCursor:true});
+      }catch(error){
+        // Persisted extraction tasks retain their failed/running lease and are
+        // retried by the bounded queue; never leak a background rejection.
+        console.error("Call memory archive retry deferred",error);
+      }finally{callExtractionInFlight.current=false;}
+    };
+    void resume();const timer=setInterval(()=>void resume(),30_000);
+    document.addEventListener("visibilitychange",resume);
+    return()=>{stopped=true;clearInterval(timer);document.removeEventListener("visibilitychange",resume);};
+  },[activeDirectScope?.characterId,activeDirectScope?.userIdentityId,activeDirectScope?.conversationId,activeDirectScope?.relationId,currentChatMessages,settings.apiKey,settings.apiEndpoint,settings.selectedModel]);
 
   return {
     handleExtractMemories,

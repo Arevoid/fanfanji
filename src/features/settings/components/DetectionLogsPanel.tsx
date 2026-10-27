@@ -23,6 +23,9 @@ const PURPOSE_LABELS: Record<string, string> = {
   regenerate: "聊天 · 重新生成",
   proactive_message: "聊天 · 主动消息",
   memory_extract: "记忆 · 提取",
+  memory_migration: "旧记忆 · 迁移",
+  memory_organization: "记忆 · 整理核对",
+  memory_continuity: "角色 · 认知与生活",
   translation: "翻译 · 生成",
   personality_summary: "人设 · 总结",
   inner_voice: "心声 · 生成",
@@ -50,6 +53,9 @@ const PURPOSE_CONTEXT_ITEMS: Record<string, string[]> = {
   regenerate: ["角色人设", "聊天历史", "原回复"],
   proactive_message: ["角色人设", "关系上下文", "最近对话"],
   memory_extract: ["待提取聊天历史"],
+  memory_migration: ["本批旧记忆", "授权设定"],
+  memory_organization: ["待整理记忆", "相关设定"],
+  memory_continuity: ["相处证据", "已有认识", "生活状态"],
   moment_generate: ["角色人设", "朋友圈历史", "关系权限"],
   moment_comment: ["角色人设", "朋友圈正文", "关系权限"],
   moment_reply: ["角色人设", "朋友圈评论区", "关系权限"],
@@ -201,6 +207,7 @@ export function DetectionLogsPanel() {
                       <div className="flex items-start gap-2"><span className="w-16 shrink-0 text-slate-400">输出</span><span className="min-w-0 flex-1 break-words">{output.value === undefined ? "Token 暂无" : `${formatNumber(output.value)} Token · ${tokenSourceLabel(output.source)}`} · {record.outputCharacters === undefined ? "字数暂无" : `${formatNumber(record.outputCharacters)} 字`}</span></div>
                       <div className="flex items-start gap-2"><span className="w-16 shrink-0 text-slate-400">本次总计</span><span className="min-w-0 flex-1 break-words">{total.value === undefined ? "Token 暂无" : `${formatNumber(total.value)} Token · ${tokenSourceLabel(total.source)}`}</span></div>
                     </div>
+                    {record.parentActionId && <p className="mt-2 break-all text-slate-500">所属任务：{record.parentActionId}</p>}
                     {record.status === "failure" && <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-rose-700">本次调用未成功：{record.errorCategory}</p>}
                   </div>
                 )}

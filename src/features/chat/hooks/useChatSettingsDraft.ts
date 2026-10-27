@@ -3,8 +3,10 @@ import { sanitizeChatIcons, type Character, type ChatIconOverrides } from "../..
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { isProactiveOfflineEnabled } from "../../../domain/schedule/proactiveOfflinePreference";
 import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../services/chatMemoryRetrievalSettings";
+import { resolveChatPageSize } from "../../../domain/chat/chatTimelineIndex";
 
 export function useChatSettingsDraft() {
+  const [draftCharacterApi,setDraftCharacterApi]=useState<Character["characterApi"]>();
   const [draftRemark, setDraftRemark] = useState("");
   const [isEditingRemark, setIsEditingRemark] = useState(false);
   const [draftAvatar, setDraftAvatar] = useState<string | undefined>();
@@ -20,12 +22,14 @@ export function useChatSettingsDraft() {
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
   const [draftEnableProactiveOffline, setDraftEnableProactiveOffline] = useState(false);
   const [draftEnableProactiveCall, setDraftEnableProactiveCall] = useState(false);
+  const [draftEnableMomentGeneration, setDraftEnableMomentGeneration] = useState(true);
   const [draftEnableStickerAssociation, setDraftEnableStickerAssociation] = useState(false);
   const [draftProactiveChatInterval, setDraftProactiveChatInterval] = useState(3);
   const [draftProactiveStartTime, setDraftProactiveStartTime] = useState("09:00");
   const [draftProactiveEndTime, setDraftProactiveEndTime] = useState("22:00");
   const [draftDisableBracketActions, setDraftDisableBracketActions] = useState(false);
   const [draftHistoryMemoryLimit, setDraftHistoryMemoryLimit] = useState(150);
+  const [draftChatHistoryPageSize, setDraftChatHistoryPageSize] = useState(50);
   const [draftContextMemoryLimit, setDraftContextMemoryLimit] = useState(150);
   const [draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit] = useState(50);
   const [draftArchiveTemplateType, setDraftArchiveTemplateType] = useState<"refined" | "delicate">("refined");
@@ -44,6 +48,7 @@ export function useChatSettingsDraft() {
   const [draftImageReferenceMimeType, setDraftImageReferenceMimeType] = useState<string | undefined>();
 
   const loadCharacterDraft = (character: Character, relationship?: CharacterRelationship) => {
+    setDraftCharacterApi(character.characterApi);
     setDraftRemark(character.isGroupChat ? character.name : (character.remark || ""));
     setIsEditingRemark(false);
     setDraftAvatar(character.avatar);
@@ -58,11 +63,13 @@ export function useChatSettingsDraft() {
     setDraftEnableProactiveOffline(isProactiveOfflineEnabled(relationship));
     setDraftEnableProactiveCall(character.enableProactiveCall || false);
     setDraftEnableStickerAssociation(character.enableStickerAssociation === true);
+    setDraftEnableMomentGeneration(character.enableMomentGeneration !== false);
     setDraftProactiveChatInterval(character.proactiveChatInterval || 3);
     setDraftProactiveStartTime(character.proactiveStartTime || "09:00");
     setDraftProactiveEndTime(character.proactiveEndTime || "22:00");
     setDraftDisableBracketActions(character.disableBracketActions || false);
     setDraftHistoryMemoryLimit(character.historyMemoryLimit || 150);
+    setDraftChatHistoryPageSize(resolveChatPageSize(character.chatHistoryPageSize));
     setDraftContextMemoryLimit(resolveChatContextMemoryLimit(character.contextMemoryLimit));
     setDraftRetrievalHistoryLimit(resolveChatLongTermMemoryLimit(character.retrievalHistoryLimit));
     setDraftArchiveTemplateType(character.archiveTemplateType || "refined");
@@ -85,7 +92,7 @@ export function useChatSettingsDraft() {
   };
 
   return {
-    draftRemark, setDraftRemark, isEditingRemark, setIsEditingRemark, draftAvatar, setDraftAvatar,
+    draftCharacterApi,setDraftCharacterApi,    draftRemark, setDraftRemark, isEditingRemark, setIsEditingRemark, draftAvatar, setDraftAvatar,
     isDeleteMemberMode, setIsDeleteMemberMode, showAddMemberModal, setShowAddMemberModal,
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
     draftGroupMemorySyncEnabled, setDraftGroupMemorySyncEnabled,
@@ -94,9 +101,10 @@ export function useChatSettingsDraft() {
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
     draftEnableProactiveCall, setDraftEnableProactiveCall,
     draftEnableStickerAssociation, setDraftEnableStickerAssociation,
+    draftEnableMomentGeneration, setDraftEnableMomentGeneration,
     draftProactiveChatInterval, setDraftProactiveChatInterval, draftProactiveStartTime, setDraftProactiveStartTime,
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
-    draftHistoryMemoryLimit, setDraftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
+    draftHistoryMemoryLimit, setDraftHistoryMemoryLimit, draftChatHistoryPageSize, setDraftChatHistoryPageSize, draftContextMemoryLimit, setDraftContextMemoryLimit,
     draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType, setDraftArchiveTemplateType,
     draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
     draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,

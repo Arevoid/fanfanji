@@ -12,6 +12,8 @@ import {
 } from "../../characterKnowledge/services/truthRetrievalService";
 
 export interface GroupMemberPrivateContextInput {
+  truthContext?: string;
+  mentionChannel?: string;
   member: Character;
   characters: readonly Character[];
   relationships: readonly CharacterRelationship[];
@@ -49,6 +51,7 @@ export function buildGroupMemberPrivateContext(input: GroupMemberPrivateContextI
     conversationId: relationship.conversationId,
   };
   const truth = retrieveTruthForPrivatePrompt({
+    mentionChannel: input.mentionChannel,
     scope,
     queryText: input.queryText,
     limit: input.limit,
@@ -59,10 +62,9 @@ export function buildGroupMemberPrivateContext(input: GroupMemberPrivateContextI
   });
 
   const privateParts = [
-    relationship.compressedMemory?.trim()
-      ? `- 与用户的私聊关系摘要：\n${relationship.compressedMemory.trim()}`
-      : "",
-    formatTruthRetrievalForPrompt(truth),
+    // Legacy compressed text must pass migrated-summary source/forget gates.
+    // Appending the raw relationship field would resurrect deleted evidence.
+    input.truthContext ?? formatTruthRetrievalForPrompt(truth),
   ].filter(Boolean);
   if (privateParts.length === 0) return "";
 

@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import {recommendDualMusicTrack} from "../src/features/music/services/dualMusicRecommendationService";
+import {saveKnowledgeClaims} from "../src/core/storage/repositories/characterKnowledgeRepository";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+const values=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>values.set(k,v),removeItem:(k:string)=>values.delete(k)}}});
+const relation={id:"r",characterId:"c",userIdentityId:"u",conversationId:"conv",relationship:"friend"};
+const claim={characterId:"c",relationId:"r",userIdentityId:"u",conversationId:"conv",id:"new",kind:"preference",subject:"user",statement:"用户喜欢爵士乐",temporalStatus:"present",truthStatus:"asserted",status:"active",admissionStatus:"retained",schemaVersion:1,visibility:"relation_private",confidence:1,userConfirmed:false,recordedAt:1,source:{producer:"synthetic",messageIds:["m"],kind:"user_message",authorship:"user",evidenceKey:"music:synthetic"}} as KnowledgeClaim;
+saveKnowledgeClaims([claim,{...claim,id:"paused",statement:"PAUSED_LEGACY_SECRET 爵士乐",recallDisabled:true},{...claim,id:"other",relationId:"other",statement:"OTHER_RELATION_SECRET 爵士乐"}]);
+let prompt="";const input:any={character:{id:"c",name:"角色"},relationship:relation,tracks:[{id:"song",title:"爵士乐",artist:"测试"}],messages:[],memories:[{id:"legacy",characterId:"c",relationId:"r",content:"RAW_OLD_MEMORY_BYPASS",timestamp:10}],settings:{apiKey:"synthetic",selectedModel:"synthetic"},requestAi:async(p:any)=>{prompt=p.systemInstruction;return{text:'{"trackId":"song"}'};}};
+await recommendDualMusicTrack(input);assert.match(prompt,/用户喜欢爵士乐/);assert.doesNotMatch(prompt,/RAW_OLD_MEMORY_BYPASS|PAUSED_LEGACY_SECRET|OTHER_RELATION_SECRET/);
+saveKnowledgeClaims([{...claim,recallDisabled:true}]);await recommendDualMusicTrack(input);assert.doesNotMatch(prompt,/用户喜欢爵士乐/);
+saveKnowledgeClaims([]);await recommendDualMusicTrack(input);assert.doesNotMatch(prompt,/用户喜欢爵士乐|RAW_OLD_MEMORY_BYPASS/);
+console.log("PASS music final request uses canonical recall: active fact present, paused/deleted/foreign and legacy raw bypass absent");

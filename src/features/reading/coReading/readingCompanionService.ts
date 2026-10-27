@@ -1,13 +1,17 @@
+import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
+import { CHARACTER_EXPERIENCE_INSTRUCTION, normalizeCharacterExperience } from "../../../domain/memory/characterExperience";
 import type { Character, UserSettings } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { ReadingRoom } from "../../../domain/reading/coReadingTypes";
 import type { ReadingParagraphView } from "../reader/readingReader";
 import { apiChat } from "../../../utils/apiHelper";
+import { buildMemoryContext } from "../../characterKnowledge/services/memoryContextGateway";
 import { buildAiReadingContext } from "./aiReadingBoundary";
 import { buildReadingPromptProjection, type ReadingPromptDiscussionMessage } from "./readingPromptAdapter";
 import { validateReadingAiResponse, type ReadingAiResponse, type ReadingAiResponseKind } from "./readingAiResponseProtocol";
 
 export interface ReadingCompanionRequest {
+  request?: typeof apiChat;
   room: ReadingRoom;
   character: Character;
   relationship: CharacterRelationship;
@@ -29,6 +33,7 @@ function parseJsonObject(text: string): unknown {
 }
 
 export async function requestReadingCompanionResponse(input: ReadingCompanionRequest): Promise<ReadingAiResponse | undefined> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   if (!input.settings.apiKey || !input.settings.selectedModel) throw new Error("请先配置 API 和模型，才能让好友参与共读讨论");
   const fragment = { anchor: input.paragraph.anchor, textSnapshot: input.paragraph.text };
   const aiContext = buildAiReadingContext(input.room, [fragment]);
@@ -46,19 +51,25 @@ export async function requestReadingCompanionResponse(input: ReadingCompanionReq
   const outputContract = [
     input.autonomous ? "如果没有想评论的内容，只输出 SKIP。" : "必须回应用户。",
     "body 必须是角色本人用第一人称对用户说的聊天内容，不要写角色自己的动作、表情或旁白。",
+    "共同经历和偏好应体现在措辞、关心和回应方式里。用户没有询问往事或记忆来源时，直接回应眼前的需要，不用‘我记得你’或‘你之前说过’作为关心的开场，也不要展示资料标签。",
     "否则只输出一个 JSON 对象，不要 Markdown：",
     `{"kind":"${input.kind}","body":"自然的中文回复","targetParagraphAnchorId":"${input.paragraph.anchor.id}","source":"known","isSpoiler":false}`,
+    CHARACTER_EXPERIENCE_INSTRUCTION,
   ].join("\n");
-  const baseSystemInstruction = input.worldBookContext?.trim()
+  const memoryContext = await buildMemoryContext({ surface: "reading", relation: input.relationship, characterId: input.character.id,
+    userIdentityId: input.relationship.userIdentityId, settings: input.settings, audience: "relation_private",
+    query: input.userPrompt || input.paragraph.text,
+    alreadyPromptedTexts: input.recentMessages?.slice(-8).map(message => message.body.trim().slice(0, 1200)) });
+  const baseSystemInstruction = (input.worldBookContext?.trim()
     ? `${projection.system}\n【当前关系可见的世界书】\n${input.worldBookContext.trim().slice(0, 12000)}`
-    : projection.system;
+    : projection.system) + memoryContext;
   let lastError: unknown;
   // A transient provider failure or one malformed JSON response should not
   // leave a persisted user message without its single expected reply.
   // Retry the request once; no message is persisted until validation passes.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const response = await apiChat({
+      const response = await (input.request || apiChat)({
         message: `${projection.user}\n\n【本轮输出要求】\n${outputContract}${attempt > 0 ? "\n上一次输出未通过校验，请重新生成符合格式的直接回复。" : ""}`,
         history: [],
         systemInstruction: baseSystemInstruction,
@@ -73,9 +84,11 @@ export async function requestReadingCompanionResponse(input: ReadingCompanionReq
         conversationId: input.room.id,
       });
       if (input.autonomous && /^\s*SKIP[。.!！]?\s*$/i.test(response.text)) return undefined;
-      const validation = validateReadingAiResponse(parseJsonObject(response.text), { scope: input.room, projection: aiContext, kind: input.kind });
+      const raw = parseJsonObject(response.text);
+      const validation = validateReadingAiResponse(raw, { scope: input.room, projection: aiContext, kind: input.kind });
       if ("error" in validation) throw new Error(validation.error);
-      return validation.value;
+      const experience = normalizeCharacterExperience((raw as { experience?: unknown }).experience, validation.value.body);
+      return { ...validation.value, ...(experience ? { experience } : {}) };
     } catch (error) {
       lastError = error;
     }

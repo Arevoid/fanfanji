@@ -5,6 +5,10 @@ import {
   type ConversationSummaryRecord,
 } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import { isExactTruthScope } from "../../../domain/characterKnowledge/knowledgeConflictPolicy";
+import { getConversationSummaryLayer, createConversationSummaryRecord } from "../../../domain/characterKnowledge/conversationSummaryProjection";
+import { normalizeKnowledgeClaim } from "../../../domain/characterKnowledge/knowledgeWritePolicy";
+import { reconcileOfflineSources } from "../../../domain/characterKnowledge/offlineSourceValidity";
+import { loadOfflineStories, readOfflineSourceStories } from "./offlineRepository";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import { readArray, writeArray } from "./repositoryUtils";
@@ -50,6 +54,7 @@ export function normalizeConversationSummary(value: unknown): ConversationSummar
       : {}),
     ...(isNonEmpty(value.canonicalRevision) ? { canonicalRevision: value.canonicalRevision.trim() } : {}),
     sourceMessageIds,
+    ...(isRecord(value.sourceMessageRevisions)&&Object.values(value.sourceMessageRevisions).every(isNonEmpty)?{sourceMessageRevisions:value.sourceMessageRevisions as Record<string,string>}:{}),
     sourceClaimIds,
     ...(isFiniteNumber(value.rangeStartAt) ? { rangeStartAt: value.rangeStartAt } : {}),
     ...(isFiniteNumber(value.rangeEndAt) ? { rangeEndAt: value.rangeEndAt } : {}),
@@ -77,22 +82,38 @@ export const normalizeConversationSummaries = (values: readonly unknown[]): Conv
   const records = new Map<string, ConversationSummaryRecord>();
   values.map(normalizeConversationSummary).forEach((item) => {
     if (!item) return;
+    const layer=getConversationSummaryLayer(item);
     const meaningKey = [
       item.relationId,
       item.characterId,
       item.userIdentityId,
       item.conversationId || "",
-      normalizeSummaryMeaning(item.summary),
+      layer,
+      layer==="episode"?`${item.id}:${item.status}`:normalizeSummaryMeaning(item.summary),
     ].join("\u0000");
     const previous = records.get(meaningKey);
-    records.set(meaningKey, previous ? mergeSummary(previous, item) : item);
+    records.set(meaningKey, previous ? layer==="episode"?(item.generatedAt>=previous.generatedAt?item:previous):mergeSummary(previous, item) : item);
   });
   return Array.from(records.values());
 };
 
 export const loadConversationSummaries = (): StorageResult<ConversationSummaryRecord[]> => {
   const result = readArray<unknown>(storageKeys.conversationSummaries, []);
-  return { ...result, value: normalizeConversationSummaries(result.value) };
+  const summaries = normalizeConversationSummaries(result.value);
+  if (!summaries.some(summary => summary.id.startsWith("offline-story-summary:"))) return { ...result, value: summaries };
+  const raw = readArray<unknown>(storageKeys.characterKnowledgeClaims, []);
+  const stories = readOfflineSourceStories() ?? loadOfflineStories([]).value;
+  const claims = reconcileOfflineSources(raw.value.map(normalizeKnowledgeClaim).filter((claim): claim is NonNullable<typeof claim> => Boolean(claim)), stories);
+  return { ...result, value: summaries.map(summary => {
+    const invalid = claims.filter(claim => isExactTruthScope(claim, summary) && summary.sourceClaimIds.includes(claim.id)
+      && claim.retractionReason === "offline_source_changed");
+    if (!invalid.length || summary.status !== "active") return summary;
+    // The handoff uses summaries too. Reproject valid atoms locally so an old
+    // cached paragraph cannot reintroduce withdrawn facts into the next prompt.
+    const rebuilt = createConversationSummaryRecord({ ...summary, scope: summary,
+      claims: claims.filter(claim => !claim.recallDisabled && !claim.supersededById && !claim.validTo) });
+    return rebuilt ?? { ...summary, status: "stale" as const };
+  }) };
 };
 export const saveConversationSummaries = (records: readonly ConversationSummaryRecord[]): StorageWriteResult =>
   writeArray(storageKeys.conversationSummaries, normalizeConversationSummaries(records));

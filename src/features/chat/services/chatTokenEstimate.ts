@@ -1,5 +1,4 @@
 import type { Character, MemoryItem, Message } from "../../../types";
-import { DEFAULT_MEMORY_RECALL_CHARACTER_LIMIT, selectMemoryItemsWithinBudget } from "../../../domain/memory/MemoryService";
 
 export interface ChatTokenEstimate {
   total: number;
@@ -93,10 +92,9 @@ export function estimateChatTokens(input: {
     && (!input.userIdentityId || !memory.userIdentityId || memory.userIdentityId === input.userIdentityId)
     && !memory.sourceKnowledgeClaimIds?.length,
   );
-  const selectedMemories = selectMemoryItemsWithinBudget(activeMemories, {
-    maxItems: input.recallCount ?? 5,
-    maxCharacters: DEFAULT_MEMORY_RECALL_CHARACTER_LIMIT,
-  });
+  // Match the count-only direct-chat policy; a character cap here would make
+  // the cost preview under-report long selected memories.
+  const selectedMemories = activeMemories.slice(0, input.recallCount ?? 5);
   const memoryText = input.retrievalText?.trim() || selectedMemories.map((memory) => memory.content).join("\n");
   const contextText = [historyText, input.currentMessageText || ""].filter(Boolean).join("\n");
   const tokenEstimate = estimatePromptTextTokens([

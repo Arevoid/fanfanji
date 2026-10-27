@@ -192,4 +192,10 @@ await planForumActivity({
 });
 assert.doesNotMatch(virtualRequests[0].message, /PUBLIC FORUM ACTIVITY COGNITIVE CONTEXT/);
 
+const roleRequests:Array<{model:string;apiKey:string;characterId?:string}>=[];
+await planForumActivity({trigger:"automatic",ownerIdentityId:relationship.userIdentityId,thread:userThread,replies:[],actorStates:[],relationships:[relationship],
+ characters:[{...character,characterApi:{enabled:true,custom:{name:"synthetic",apiKey:"synthetic-role",selectedModel:"role-model",apiEndpoint:"https://role.test",apiTemperature:.4,streamCompatible:false}}}],messages:[],memories:[],worldBookEntries:[],settings:{...settings,apiKey:""},now:15,random:()=>0,
+ aiCall:async request=>{roleRequests.push(request);return {text:JSON.stringify({events:[{localId:"e1",actorSlot:"relation-1",kind:"reply",body:"Gardening tools should be cleaned after use.",replyTo:{type:"thread"},delaySeconds:30}]})};}});
+assert.equal(roleRequests.length,1,"mixed public activity still uses one billed call");assert.equal(roleRequests[0].apiKey,"synthetic-role");assert.equal(roleRequests[0].model,"role-model");assert.equal(roleRequests[0].characterId,character.id);
+
 console.log("PASS public Forum activity prompt adapter public filtering, activity integration, legacy compatibility, and no private side effects");

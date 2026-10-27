@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { getLastTruthRetrievalDiagnostics, retrieveTruthForPrivatePrompt } from "../src/features/characterKnowledge/services/truthRetrievalService";
+import { getLastTruthRetrievalDiagnostics, retrieveTruthForPrivatePrompt, formatTruthRetrievalForPrompt } from "../src/features/characterKnowledge/services/truthRetrievalService";
 import type { KnowledgeClaim } from "../src/domain/characterKnowledge/characterKnowledgeTypes";
 
 const scope = { relationId: "relation-diagnostics", characterId: "char-diagnostics", userIdentityId: "identity-diagnostics", conversationId: "direct:diagnostics" };
@@ -30,8 +30,11 @@ const result = retrieveTruthForPrivatePrompt({
 });
 assert.ok(result.diagnostics);
 assert.equal(result.diagnostics?.candidateClaimCount, 2);
-assert.deepEqual(result.diagnostics?.injectedClaimIds, ["claim-hit"]);
-assert.equal(result.diagnostics?.vectorFallbackUsed, true);
+assert.deepEqual(result.diagnostics?.selectedClaimIds, ["claim-hit"]);
+assert.deepEqual(result.diagnostics?.injectedClaimIds, []);
+formatTruthRetrievalForPrompt(result);
+assert.deepEqual(result.diagnostics?.injectedClaimIds, []);
+assert.equal(result.diagnostics?.vectorFallbackUsed, false, "local retrieval must not claim that an embedding was used");
 assert.deepEqual(getLastTruthRetrievalDiagnostics(scope)?.injectedClaimIds, ["claim-hit"]);
 
 console.log("PASS production Truth retrieval diagnostics expose candidate, injected, and fallback counts");

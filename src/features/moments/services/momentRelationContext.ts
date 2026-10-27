@@ -6,6 +6,8 @@ import type { CharacterCognitiveContext } from "../../../domain/characterCogniti
 import { buildCharacterRoutine } from "../../../domain/characterLife/characterRoutine/characterRoutineBuilder";
 import { resolveChatRoutine } from "../../chat/services/chatTurnSettings";
 import { buildMomentCognitiveContext } from "./momentCognitiveContext";
+import { isExactTruthScope } from "../../../domain/characterKnowledge/knowledgeConflictPolicy";
+import { isKnowledgeTemporallyActive } from "../../../domain/characterKnowledge/knowledgeTemporalPolicy";
 
 export function buildRelationMomentContext(input: {
   character: Character;
@@ -14,12 +16,16 @@ export function buildRelationMomentContext(input: {
   knowledgeClaims: readonly KnowledgeClaim[];
   memories: readonly MemoryItem[];
   events: readonly CharacterEvent[];
+  publicSurface?: boolean;
 }): CharacterCognitiveContext {
   const confirmedClaimMemories: MemoryItem[] = input.knowledgeClaims
-    .filter((claim) => claim.relationId === input.relationship.id
-      && claim.characterId === input.relationship.characterId
-      && claim.userIdentityId === input.relationship.userIdentityId
-      && claim.status === "active"
+    .filter(() => !input.publicSurface)
+    .filter((claim) => isExactTruthScope(claim, {
+      relationId: input.relationship.id, characterId: input.relationship.characterId,
+      userIdentityId: input.relationship.userIdentityId, conversationId: input.relationship.conversationId,
+    })
+      && isKnowledgeTemporallyActive(claim, input.occurredAt)
+      && !claim.recallDisabled && !claim.supersededById
       && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
     .map((claim) => ({
       id: `moment-claim:${claim.id}`,
@@ -30,14 +36,14 @@ export function buildRelationMomentContext(input: {
       importance: 5,
     }));
   const explicitManualMemories = input.memories.filter((memory) =>
-    memory.characterId === input.character.id
+    !input.publicSurface && memory.characterId === input.character.id
     && memory.relationId === input.relationship.id
     && memory.isManual === true);
   return buildMomentCognitiveContext({
     character: input.character,
     relationship: input.relationship,
     memories: [...confirmedClaimMemories, ...explicitManualMemories],
-    events: input.events,
+    events: input.publicSurface ? input.events.filter((event) => event.visibility === "public") : input.events,
     occurredAt: input.occurredAt,
     routine: resolveChatRoutine(
       buildCharacterRoutine(input.character.routine),

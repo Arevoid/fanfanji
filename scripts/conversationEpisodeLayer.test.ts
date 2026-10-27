@@ -22,7 +22,7 @@ assert.equal(getConversationSummaryLayer(episode), "episode");
 assert.equal(getConversationSummaryLayer({ ...episode, layer: undefined, generator: "memory-projection.conversation-summary.v1" }), "projection");
 assert.equal(getConversationSummaryLayer({ ...episode, layer: undefined, generator: "legacy-memory.v1", sourceRecordId: "legacy-1" }), "legacy");
 
-const result = retrieveTruthForPrivatePrompt({ scope, claims: [], summaries: [episode], corrections: [] });
+const result = retrieveTruthForPrivatePrompt({ scope, queryText: "约定", claims: [], summaries: [episode], corrections: [] });
 const prompt = formatTruthRetrievalForPrompt(result);
 assert.match(prompt, /Episode memory \/ 场景经历/);
 assert.match(prompt, /昨晚约定今天继续完成任务/);

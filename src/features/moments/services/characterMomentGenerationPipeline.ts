@@ -1,3 +1,5 @@
+import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
+import { buildModelDirectIdentity, modelDirectProfile, resolveChatIdentityMode } from "../../../domain/prompt/modelDirectIdentity";
 import type { apiChat } from "../../../utils/apiHelper";
 import type { Character, MemoryItem, Moment, UserSettings, WorldBookEntry } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
@@ -13,6 +15,7 @@ import { calculateCharacterMomentOccurredAt, requestCharacterMomentOnce } from "
 import { buildRelationMomentContext, formatMomentSourceText } from "./momentRelationContext";
 import { createMomentTemporalContext } from "./momentTemporalContext";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
+import { publicLifeMaterial } from "../../characterKnowledge/services/publicLifeSharingService";
 
 export async function generateCharacterMomentPipeline(input: {
   relationship: CharacterRelationship;
@@ -38,6 +41,9 @@ export async function generateCharacterMomentPipeline(input: {
 }): Promise<Awaited<ReturnType<typeof requestCharacterMomentOnce>>> {
   const friend = findMomentRelationshipCharacter(input.characters, input.relationship);
   if (!friend) throw new Error("Moment character is unavailable for the relationship scope.");
+  input = {...input,settings:resolveCharacterTextSettings(input.settings,friend)};
+  if(input.activeIdentityId!==input.relationship.userIdentityId)throw new Error("Moment identity scope mismatch.");
+  const sharedLife=publicLifeMaterial(friend.id,input.activeIdentityId,input.occurredAt);
   const ownerMomentHistory = input.moments
     .filter((moment) => Boolean(moment.characterId))
     .filter((moment) => moment.characterId === friend.id)
@@ -52,6 +58,7 @@ export async function generateCharacterMomentPipeline(input: {
     knowledgeClaims: input.knowledgeClaims,
     memories: input.memories,
     events: input.events,
+    publicSurface: true,
   });
   const relationWorldKnowledge = buildMomentWorldKnowledge(
     [...input.worldBookEntries], friend, input.relationship, formatMomentSourceText(relationContext),
@@ -66,7 +73,10 @@ export async function generateCharacterMomentPipeline(input: {
     ),
     now: input.occurredAt,
   });
-  const systemInstruction = `Your task: Write a WeChat Moment post from the character's scoped life context supplied by the Moment Prompt Adapter.
+  publicContext.authorizedPublicLife=sharedLife.map(({summary,occurredAt})=>({summary,occurredAt}));
+  const systemInstruction = resolveChatIdentityMode(friend) === "model-direct"
+    ? `${buildModelDirectIdentity(modelDirectProfile(friend))}\n任务：在应用中发布一条简短自然的动态，只根据当前关系中实际讨论过的话题、公开资料和已有动态，不编造身体、工作、天气体验或后台独立生活。旧人设及日程仅是虚构资料。可以分享对讨论话题的想法；没有值得分享的新内容只输出 SKIP。不要输出聊天附件、动作或假照片，也不需要每次声明 AI 身份。`
+    : `Your task: Write a WeChat Moment post from the character's scoped life context supplied by the Moment Prompt Adapter.
 🚨 [CRITICAL WECHAT MOMENT RULES]:
 1. The post must fit the character and may draw on confirmed material from this exact relationship, including confirmed offline experiences and relationship progress.
 2. The post content must be natural, engaging, and use the final output language specified below.
@@ -77,7 +87,7 @@ export async function generateCharacterMomentPipeline(input: {
 7. Decide explicitly whether this post benefits from a visual. When a concrete scene, food, object, ticket, music, street view, outfit, or shared outing is central, prefer a text-image card. Add one final separate line in exactly this format: "(配图：图片描述)". This is an allowed Moment-only rendering instruction, not a chat attachment or body text.
 8. Do NOT write mock self-comments like "(评论区自己补了一条：...)" inside parentheses. If you want to add a self-comment under your own post, write it at the very end of your response as a separate line starting with "评论：".
 9. Do not reuse the same topic, angle, sentence pattern, opening, image idea, or emotional conclusion from the supplied feed history. Prefer a specific detail from the scoped context over generic weather, tiredness, coffee, work, or vague feelings.
-10. Never use material from another character, relationship, or user identity. Never use director/IF/hypothetical content, unconfirmed offline content, or AI-inferred events. Preserve the original actor for every confirmed action or object (for example, if the user sent the soup, do not rewrite it as the character sending it). ${input.allowProfileDrivenPost ? "This is an explicit request to let this NPC post now; if there is no fresh event, you may create a small, concrete profile-grounded daily observation from the NPC's confirmed public profile instead of outputting SKIP." : "If there is no fresh scoped topic, output exactly \"SKIP\" and nothing else."}
+10. Never use material from another character, relationship, or user identity. Never use director/IF/hypothetical content, unconfirmed offline content, or unsupported AI-inferred real-world events. Recorded solo virtual-life material explicitly authorized for public sharing below is an allowed fresh topic; do not turn it into a real-world or shared user event. Preserve the original actor for every confirmed action or object (for example, if the user sent the soup, do not rewrite it as the character sending it). ${input.allowProfileDrivenPost ? "This is an explicit request to let this NPC post now; if there is no fresh event, you may create a small, concrete profile-grounded daily observation from the NPC's confirmed public profile instead of outputting SKIP." : "If there is no fresh scoped topic, output exactly \"SKIP\" and nothing else."}
 ${input.momentAuthorIdentityHint ? `11. 发帖身份锁定：${input.momentAuthorIdentityHint}。正文中的“我”只能指这个发帖人；不得把用户、目标角色或其他人物送出的物品/做过的事改写成发帖人做的。无法确认归属时输出 SKIP。` : ""}
 
 ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(friend, relationWorldKnowledge.map((entry) => `${entry.title}\n${entry.content}`)))}
@@ -88,12 +98,17 @@ ${CHARACTER_LANGUAGE_POLICY}
     scenario: "moment-post",
     message: input.allowProfileDrivenPost
       ? `用户明确要求这个 NPC 现在发布一条朋友圈。请根据 NPC 的公开资料、当前关系和公开动态历史，写一条具体、自然且明显不同于历史动态的内容；不要编造未确认事件。${input.momentPromptHint ? `这次触发背景是：${input.momentPromptHint} 请优先自然回应这个背景，但不要把触发说明原样写进朋友圈。` : ""}`
-      : "请仅根据角色公开资料与公开动态历史，判断是否有值得发布且明显不同于历史动态的新内容；有则写一条，没有则只输出 SKIP。不要为了完成任务硬发。",
+      : "请仅根据角色公开资料、已明确允许公开的自身虚拟生活与公开动态历史，判断是否有值得发布且明显不同于历史动态的新内容；有则写一条，没有则只输出 SKIP。不要为了完成任务硬发。",
     history: [],
     systemInstruction,
   });
   return requestCharacterMomentOnce({
-    requestAi: input.requestAi,
+    requestAi: async request => {
+      const response=await input.requestAi(request);
+      const current=publicLifeMaterial(friend.id,input.activeIdentityId,input.occurredAt);
+      if(sharedLife.some(old=>!current.some(e=>e.id===old.id&&e.revision===old.revision)))throw new Error("公开生活来源已修改或撤销，取消本次生成。");
+      return response;
+    },
     request: {
       ...composedPrompt,
       apiKey: input.settings.apiKey,

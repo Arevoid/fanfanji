@@ -1,3 +1,4 @@
+import type {MemoryReviewFailure} from "./memoryReviewFailure";
 import type { Character, MemoryItem, Message } from "../../types";
 import type { KnowledgeClaim } from "../characterKnowledge/characterKnowledgeTypes";
 import type { ExtractedKnowledgeCandidatePayload } from "../../features/characterKnowledge/services/knowledgeExtractionProtocol";
@@ -33,6 +34,13 @@ export interface MemoryRetrievalContext {
 }
 
 export interface MemoryExtractionContext {
+  singlePass?:boolean;
+  memorySettings?:readonly {id:string;text:string}[];
+  /** Formal writers require a bounded semantic comparison when the extractor omitted a fact slot. */
+  requireFactResolution?: boolean;
+  reviewAuthorizedSettings?: (claims: readonly KnowledgeClaim[]) => Promise<{ claims: KnowledgeClaim[]; skipped: number; failures?:MemoryReviewFailure[] }>;
+  prepareSemanticRegistry?: (query: string) => Promise<readonly { id: string }[]>;
+  existingClaims?: readonly KnowledgeClaim[];
   character: Character;
   characterId: string;
   relationId?: string;
@@ -48,6 +56,7 @@ export interface MemoryExtractionContext {
   /** Optional lineage supplied by the owning runtime; never model-authored. */
   parentActionId?: string;
   extractionActionId?: string;
+  streamCompatible?: boolean;
   apiKey: string;
   model: string;
   apiEndpoint?: string;
@@ -65,11 +74,19 @@ export interface MemoryExtractionContext {
 }
 
 export interface MemoryExtractionApiParams {
+  singlePass?:boolean;
+  memorySettings?:readonly {id:string;text:string}[];
+  identityReview?: readonly {index:number;statement:string;currentText:string;recoverCandidate?:boolean;sourceMessageIds?:readonly string[]}[];
+  semanticReview?: readonly import("../characterKnowledge/semanticTransitionReview").SemanticTransitionProposal[];
+  semanticRegistry?: readonly { id: string; statement: string; subject: string; condition?: string; value?: string }[];
+  knownAttributes?: readonly string[];
+  knownActivities?: readonly string[];
   history: { id: string; role: "user" | "model"; text: string }[];
   /** Provider transport uses M# refs only for the direct-chat path. */
   sourceReferenceMode?: "canonical" | "local";
   characterName: string;
   characterProfile?: string;
+  streamCompatible?: boolean;
   apiKey: string;
   model: string;
   apiEndpoint?: string;
@@ -86,6 +103,8 @@ export interface MemoryExtractionApiParams {
 }
 
 export interface MemoryExtractionApiResult {
+  identityReviews?: unknown[];
+  semanticReviews?: unknown[];
   items?: unknown;
   candidates?: ExtractedKnowledgeCandidatePayload[];
   /** Additive V2 metadata; old API responses continue to use candidates. */
@@ -98,6 +117,10 @@ export interface MemoryExtractionApiResult {
 }
 
 export interface MemoryExtractionResult {
+  impressionCandidates?: readonly unknown[];
+  reviewFailures?: MemoryReviewFailure[];
+  discardedClaims?: KnowledgeClaim[];
+  valueSkippedCount?: number;
   extractedMemories: MemoryItem[];
   acceptedClaims: KnowledgeClaim[];
   rejectedCandidateCount: number;

@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import {loadMemorySettings,saveMemorySettings} from "../src/core/storage/repositories/memoryRepository";
+import {storageKeys} from "../src/core/storage/storageKeys";
+const values=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>values.set(k,v),removeItem:(k:string)=>values.delete(k)}}});
+const defaults={extractModel:"default-chat-model",recallCount:50,autoExtract:true,extractInterval:20};
+assert.equal(loadMemorySettings(defaults).value.extractModel,"default-chat-model");
+values.set(storageKeys.memoryVaultSettings,JSON.stringify({...defaults,extractModel:"gemini-3.5-flash"}));
+assert.equal(loadMemorySettings(defaults).value.extractModel,"default-chat-model");assert.equal(loadMemorySettings(defaults).value.legacyExtractModel,"gemini-3.5-flash");
+saveMemorySettings({...defaults,extractModel:"gemini-3.5-flash",extractModelConfigured:true});assert.equal(loadMemorySettings(defaults).value.extractModel,"default-chat-model");
+saveMemorySettings({...defaults,extractModel:"dedicated-model"});assert.equal(loadMemorySettings(defaults).value.extractModel,"default-chat-model");
+console.log("PASS extraction model: old default compatibility, preserved original, new-user follow and legacy custom models follow chat");

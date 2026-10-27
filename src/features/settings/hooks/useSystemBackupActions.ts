@@ -7,6 +7,7 @@ import { mergeOfflineStoryCollections } from "../../../core/storage/repositories
 import { buildSystemBackup, checksumPayload, filterSystemBackupLocalStorageForRestore, inspectSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb, snapshotSystemBackupIndexedDb, splitSystemBackupJson } from "../systemBackup";
 import { readString, remove as removeStoredValue, writeString } from "../../../core/storage/storageAdapter";
 import { storageKeys } from "../../../core/storage/storageKeys";
+import { missingMemoryBackupKeys } from "../../../core/storage/memoryBackupKeys";
 
 interface UseSystemBackupActionsOptions {
   backupKeys: ReadonlySet<string>;
@@ -123,6 +124,11 @@ export function useSystemBackupActions({ backupKeys, fullBackupKeys, lightBackup
         const hasOfflineEntryBackup = Array.isArray(parsedBackup.indexedDb["offline-story-entry-v1"]);
         const restoredOfflineStories = hasOfflineEntryBackup ? undefined : entries.find(([key]) => key === "phone_offline_stories")?.[1];
         try {
+          for (const key of missingMemoryBackupKeys(parsedBackup.localStorage)) {
+            writtenKeys.push(key);
+            const removed = removeStoredValue(key);
+            if (!removed.success) throw new Error(`清理旧记忆进度失败：${key}`);
+          }
           for (const [key, value] of entriesToWrite) {
             if (typeof value !== "string") continue;
             writtenKeys.push(key);

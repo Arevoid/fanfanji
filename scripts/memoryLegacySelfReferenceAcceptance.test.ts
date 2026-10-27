@@ -1,0 +1,34 @@
+import assert from "node:assert/strict";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+import {normalizeKnowledgeClaims,appendToKnowledgeClaims} from "../src/core/storage/repositories/characterKnowledgeRepository";
+import {authorizeSemanticTransition} from "../src/domain/characterKnowledge/semanticTransitionReview";
+const scope={characterId:"a",relationId:"r",userIdentityId:"u",conversationId:"c"};
+const fact=(id:string,statement:string):KnowledgeClaim=>({...scope,id,statement,kind:"fact",subject:"user",temporalStatus:"present",truthStatus:"asserted",confidence:.95,userConfirmed:false,status:"active",visibility:"relation_private",schemaVersion:1,recordedAt:1,source:{kind:"user_message",authorship:"user",producer:"synthetic",evidenceKey:id,messageIds:[id],evidenceQuote:statement}});
+const old=normalizeKnowledgeClaims([fact("old","我只养了一只橘猫，它叫芝麻。")])[0];
+const duplicate={...fact("duplicate","原来的橘猫还是叫芝麻"),factDecision:{targetClaimId:old.id,entityReferenceId:old.id,entity:"原来的橘猫",attribute:"名字",value:"芝麻",operation:"duplicate" as const,confidence:.96,reason:"同一动物的同一名字",previousQuote:"它叫芝麻",currentQuote:"原来的橘猫还是叫芝麻"}};
+const broad={...fact("broad","原来的橘猫还是叫芝麻，最近新来的小狗叫糯米"),factDecision:{targetClaimId:old.id,entity:"用户",attribute:"饲养宠物情况",value:"原来的橘猫还是叫芝麻，最近新来的小狗叫糯米",operation:"change" as const,confidence:.96,reason:"宠物构成变化",previousQuote:old.statement,currentQuote:"原来的橘猫还是叫芝麻，最近新来的小狗叫糯米"}};
+const dog={...fact("dog","最近新来的小狗叫糯米"),factDecision:{entity:"新来的小狗",attribute:"名字",value:"糯米",operation:"new" as const,confidence:.96,reason:"另一只动物",currentQuote:"最近新来的小狗叫糯米"}};
+authorizeSemanticTransition(duplicate,old);authorizeSemanticTransition(broad,old);
+const result=appendToKnowledgeClaims([old],[duplicate,dog,broad]);
+assert.equal(result[0].supersededById,undefined);assert.equal(result[0].factIdentity?.entityLabel,"原来的橘猫");assert.ok(result[0].mergedClaimIds?.includes(duplicate.id));
+assert.equal(result.find(r=>r.id==="dog")?.resolutionStatus,"accepted");assert.notEqual(result.find(r=>r.id==="dog")?.factIdentity?.entityId,result[0].factIdentity?.entityId);
+assert.equal(result.find(r=>r.id==="broad")?.resolutionStatus,"review","one proposal cannot reuse a lease for the pre-binding compound identity");
+const reversed=appendToKnowledgeClaims([old],[broad,dog,duplicate]);assert.equal(reversed[0].supersededById,undefined);assert.equal(reversed[0].factIdentity?.entityLabel,"原来的橘猫");assert.equal(reversed.find(r=>r.id==="broad")?.resolutionStatus,"review","model candidate order must not choose which facet the legacy record means");
+const forged=appendToKnowledgeClaims([old],[JSON.parse(JSON.stringify(duplicate))]);assert.equal(forged[0].factIdentity,undefined);assert.equal(forged[1].resolutionStatus,"review");
+const another=normalizeKnowledgeClaims([fact("another","另一只没有绑定身份的动物")])[0];
+const bad={...duplicate,id:"bad",factDecision:{...duplicate.factDecision,entityReferenceId:"another"}};authorizeSemanticTransition(bad,old);
+assert.equal(appendToKnowledgeClaims([old,another],[bad]).at(-1)?.resolutionStatus,"review");
+const source='我家唯一的橘猫从现在起叫糯米，芝麻这个名字以后不用了。';
+const count={...fact('count','我家唯一的橘猫'),factDecision:{targetClaimId:old.id,entity:'用户',attribute:'养猫数量',value:'唯一的',operation:'duplicate' as const,confidence:.99,reason:'同一数量',previousQuote:'我只养了一只橘猫',currentQuote:'我家唯一的橘猫'}};
+const rename={...fact('rename',source),factDecision:{targetClaimId:old.id,entity:'橘猫',attribute:'名字',value:'糯米',operation:'change' as const,confidence:.99,reason:'当前名字改变',previousQuote:'它叫芝麻',currentQuote:source}};
+authorizeSemanticTransition(count,old);authorizeSemanticTransition(rename,old);
+for(const batch of [[count,rename],[rename,count]]){
+ const facets=appendToKnowledgeClaims([old],batch);
+ assert.equal(facets[0].supersededById,'rename');
+ assert.equal(facets.find(c=>c.id==='count')?.resolutionStatus,'accepted');
+ assert.equal(facets.find(c=>c.id==='count')?.statement,'我家唯一的橘猫');
+ assert.equal(facets.find(c=>c.id==='rename')?.supersedesId,old.id);
+}
+const hydrated=appendToKnowledgeClaims([old],JSON.parse(JSON.stringify([count,rename])));
+assert.equal(hydrated[0].supersededById,undefined,'persisted model fields cannot authorize facet decomposition');
+console.log("PASS exact reviewed legacy self-reference binds first identity; disjoint independently reviewed facets preserve unchanged quantity and revise name; overlapping/forged transitions remain held");

@@ -1,3 +1,4 @@
+import { meaningfulMemoryValue } from "./fixtures/memoryValueFixture";
 import assert from "node:assert/strict";
 import { MemoryService } from "../src/domain/memory/MemoryService";
 import { selectKnowledgeForPrivatePrompt } from "../src/domain/characterKnowledge/knowledgeVisibilityPolicy";
@@ -49,7 +50,7 @@ const extraction = await MemoryService.extractMemories({
     subject: "user",
     temporalStatus: "present",
     sourceMessageIds: [message.id],
-    evidenceQuote: message.content,
+    evidenceQuote: message.content, valueAssessment: meaningfulMemoryValue(message.content),
   }],
   structuredCandidatesV2: [{
     schemaVersion: 2,
@@ -61,7 +62,7 @@ const extraction = await MemoryService.extractMemories({
     temporalStatus: "present",
     statement: "用户认为角色并不在乎用户。",
     sourceMessageIds: [message.id],
-    evidenceQuote: message.content,
+    evidenceQuote: message.content, valueAssessment: meaningfulMemoryValue(message.content),
   }],
 }));
 

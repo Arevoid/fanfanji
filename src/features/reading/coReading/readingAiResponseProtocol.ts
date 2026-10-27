@@ -15,6 +15,7 @@ export interface ReadingAiMemoryCandidate {
 }
 
 export interface ReadingAiResponse {
+  experience?: import("../../../domain/memory/characterExperience").CharacterExperience;
   kind: ReadingAiResponseKind;
   body: string;
   targetParagraphAnchorId?: string;

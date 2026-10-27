@@ -10,8 +10,8 @@ interface UseChatMessageCleanupActionsOptions {
   messages: readonly Message[];
   currentChatMessages: readonly Message[];
   activeDirectScope?: DirectInteractionScope;
-  onDeleteMessage?: (messageId: string, message?: Message) => void;
-  onClearMessages?: (characterId: string, keepLastCount?: number, relationId?: string) => void;
+  onDeleteMessage?: (messageId: string, message?: Message) => void | boolean | Promise<void | boolean>;
+  onClearMessages?: (characterId: string, keepLastCount?: number, relationId?: string) => void | boolean | Promise<void | boolean>;
   setRedPacketStatuses: Dispatch<SetStateAction<RedPacketStatusMap>>;
   setActiveMenuMsg: Dispatch<SetStateAction<Message | null>>;
   setIsMultiSelectDeleteMode: Dispatch<SetStateAction<boolean>>;
@@ -34,10 +34,11 @@ export function useChatMessageCleanupActions({
   selectedMessageIds,
   showToast,
 }: UseChatMessageCleanupActionsOptions) {
-  const deleteMessageAndLinkedImage = useCallback((messageId: string) => {
+  const deleteMessageAndLinkedImage = useCallback(async (messageId: string) => {
     const targetMessage = currentChatMessages.find((message) => message.id === messageId);
-    if (!targetMessage) return;
-    if (activeDirectScope && !isMessageInDirectScope(targetMessage, activeDirectScope)) return;
+    if (!targetMessage||!onDeleteMessage) return false;
+    if (activeDirectScope && !isMessageInDirectScope(targetMessage, activeDirectScope)) return false;
+    if(await onDeleteMessage(messageId,targetMessage)===false)return false;
     const records = loadImageGenerationRecords([]).value;
     const removed = records.filter((record) => record.messageId === messageId
       && record.relationId === targetMessage.relationId
@@ -50,7 +51,7 @@ export function useChatMessageCleanupActions({
       }));
       removed.forEach((record) => imageAssetDb.deleteImage(record.imageAssetId).catch((error) => console.warn("Failed to delete generated image asset:", error)));
     }
-    onDeleteMessage?.(messageId, targetMessage);
+    return true;
   }, [activeDirectScope, currentChatMessages, onDeleteMessage]);
 
   const startMultiSelectDelete = useCallback((initialMessageId: string) => {
@@ -73,20 +74,22 @@ export function useChatMessageCleanupActions({
     setSelectedMessageIds(new Set());
   }, [setIsMultiSelectDeleteMode, setSelectedMessageIds]);
 
-  const deleteSelectedMessages = useCallback(() => {
+  const deleteSelectedMessages = useCallback(async () => {
     const selectedMessages = currentChatMessages.filter((message) => selectedMessageIds.has(message.id));
     if (!selectedMessages.length) return;
     if (!window.confirm(`确定删除选中的 ${selectedMessages.length} 条消息吗？删除后无法恢复。`)) return;
-    selectedMessages.forEach((message) => deleteMessageAndLinkedImage(message.id));
+    let deleted=0;
+    for(const message of selectedMessages){if(await deleteMessageAndLinkedImage(message.id))deleted++;else break;}
     exitMultiSelectDelete();
-    showToast(`已删除 ${selectedMessages.length} 条消息`);
+    showToast(`已删除 ${deleted} 条消息${deleted<selectedMessages.length?"，其余未删除，请重试":""}`);
   }, [currentChatMessages, deleteMessageAndLinkedImage, exitMultiSelectDelete, selectedMessageIds, showToast]);
 
-  const clearMessagesAndLinkedArtifacts = useCallback((characterId: string, relationId?: string) => {
+  const clearMessagesAndLinkedArtifacts = useCallback(async (characterId: string, relationId?: string) => {
     const removedMessages = messages.filter((message) => relationId
       ? message.relationId === relationId
       : message.characterId === characterId);
     const removedMessageIds = new Set(removedMessages.map((message) => message.id));
+    if(!onClearMessages||await onClearMessages(characterId,undefined,relationId)===false)return false;
     const records = loadImageGenerationRecords([]).value;
     const removedRecords = records.filter((record) => removedMessageIds.has(record.messageId)
       && (relationId ? record.relationId === relationId : record.characterId === characterId));
@@ -102,7 +105,7 @@ export function useChatMessageCleanupActions({
         return next;
       });
     }
-    onClearMessages?.(characterId, undefined, relationId);
+    return true;
   }, [messages, onClearMessages, setRedPacketStatuses]);
 
   return {

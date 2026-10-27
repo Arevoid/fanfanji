@@ -23,7 +23,8 @@ assert.match(source, /chat-message-selection-toggle/);
 assert.match(source, /chat-multi-select-toolbar/);
 assert.match(source, /已选 \{selectedMessageIds\.size\} 条/);
 assert.match(cleanupActions, /currentChatMessages\.filter\(\(message\) => selectedMessageIds\.has\(message\.id\)\)/);
-assert.match(cleanupActions, /selectedMessages\.forEach\(\(message\) => deleteMessageAndLinkedImage\(message\.id\)\)/);
+assert.match(cleanupActions, /for\(const message of selectedMessages\)\{if\(await deleteMessageAndLinkedImage\(message\.id\)\)/, "source invalidation must finish sequentially before the next deletion");
+assert.match(cleanupActions, /await onDeleteMessage\(messageId,targetMessage\)===false/);
 assert.match(cleanupActions, /确定删除选中的 \$\{selectedMessages\.length\} 条消息吗/);
 
 console.log("PASS chat bubble menu adaptive placement and multi-select deletion UI");

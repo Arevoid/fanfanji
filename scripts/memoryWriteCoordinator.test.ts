@@ -187,4 +187,9 @@ const seamSummary = await commitMemoryWriteBundle({
 assert.deepEqual(seamCalls, ["claims", "enqueue", "summary-build", "summary-write"], "real-time enqueue stays between canonical and synchronous summary writes");
 assert.equal(seamSummary.complete, true, "enqueue failure is fail-open for the existing bundle");
 
-console.log("Memory write coordinator: ordering, failure boundaries and memory-only writes passed");
+let committedId="";
+const episodeWrite=await commitMemoryWriteBundle({claims:[claim],appendClaims:()=>{committedId="canonical-deduplicated-id";return true;},
+  buildEpisodes:()=>{assert.equal(committedId,"canonical-deduplicated-id");return [{...summary,id:"bounded-episode",sourceClaimIds:[committedId]}];},
+  appendSummaries:rows=>{assert.deepEqual(rows[0].sourceClaimIds,["canonical-deduplicated-id"]);return {success:false,error:"episode_store_unavailable"};}});
+assert.equal(episodeWrite.canonicalWritten,true);assert.equal(episodeWrite.summaryWritten,false);assert.equal(episodeWrite.complete,false,"a failed archive episode remains retryable after canonical commit");
+console.log("Memory write coordinator: ordering, failure boundaries, post-merge episode IDs and memory-only writes passed");

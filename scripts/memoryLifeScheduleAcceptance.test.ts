@@ -1,0 +1,34 @@
+import assert from "node:assert/strict";
+import { acceptLifeEpisode, applyLifeContinuation, emptyCharacterContinuity, selectCharacterContinuityContext } from "../src/domain/memory/characterContinuity";
+import { canScheduleLife } from "../src/domain/memory/lifeSchedulePolicy";
+import { isCharacterContinuityStore } from "../src/core/storage/repositories/characterContinuityRepository";
+import { loadCharacterContinuity, updateCharacterContinuity } from "../src/core/storage/repositories/characterContinuityRepository";
+import { runForegroundCharacterContinuity } from "../src/features/characterKnowledge/services/characterContinuityService";
+import type { Character, UserSettings } from "../src/types";
+const scope = { characterId: "a", userIdentityId: "u", relationId: "r", conversationId: "c" };
+const now = Date.UTC(2026, 9, 16, 3), hour=3600_000;
+const plan = acceptLifeEpisode({ summary: "准备整理书架", status: "planned", scheduleSlot: { startAt: now+hour, endAt: now+2*hour, location: "家中" } }, scope, now, "shelf", [])!;
+assert.ok(plan);
+const clash=acceptLifeEpisode({summary:"准备去公园散步",status:"planned",scheduleSlot:{startAt:now+hour,endAt:now+2*hour,location:"公园"}},scope,now,"walk",[])!;
+assert.equal(canScheduleLife(clash,[plan]),false,"same actor cannot occupy different locations at the same time");
+assert.equal(canScheduleLife({...clash,scheduleSlot:{...clash.scheduleSlot!,location:"家中"}},[plan]),false,"same place does not justify simultaneous activities");
+assert.equal(canScheduleLife({...clash,userIdentityId:"other"},[plan]),true);
+assert.equal(canScheduleLife({...clash,scheduleSlot:{startAt:now+2*hour,endAt:now+3*hour}},[plan]),true,"adjacent intervals do not overlap");
+assert.equal(canScheduleLife(clash,[{...plan,status:"cancelled"}]),true);
+assert.equal(canScheduleLife(clash,[{...plan,supersededById:"later"}]),true);
+assert.equal(acceptLifeEpisode({summary:"散步结束了",status:"completed",scheduleSlot:{startAt:now,endAt:now+hour}},scope,now,"future",[]),undefined);
+assert.equal(acceptLifeEpisode({summary:"准备整理书架",status:"planned",scheduleSlot:{startAt:now+hour,endAt:now+9*hour}},scope,now,"unbounded",[]),undefined);
+assert.equal(applyLifeContinuation([plan],{previousEpisodeId:plan.id,summary:"整理好了书架",status:"completed"},scope,now,"too-early",[],[],true).length,1,"semantic reviewer cannot waive future-time guard");
+const done=applyLifeContinuation([plan],{previousEpisodeId:plan.id,summary:"整理好了书架",status:"completed",scheduleSlot:{startAt:now+hour,endAt:now+2*hour,location:"家中"}},scope,now+2*hour,"done",[]);
+assert.equal(done.length,2);assert.equal(done[0].supersededById,"done");assert.equal(done[1].scheduleSlot?.location,"家中");
+const store={...emptyCharacterContinuity(),life:JSON.parse(JSON.stringify(done))};assert.equal(isCharacterContinuityStore(store),true);
+assert.match(selectCharacterContinuityContext(store,scope,[],"最近生活",now+2*hour,2000),/家中/);
+assert.equal(isCharacterContinuityStore({...store,life:[{...done[1],scheduleSlot:{startAt:1,endAt:0}}]}),false);
+const values=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>values.set(key,value),removeItem:(key:string)=>values.delete(key)}}});
+// Existing plan was committed yesterday, so the daily guard must not hide the conflict check.
+assert.equal(updateCharacterContinuity(()=>({...emptyCharacterContinuity(),life:[{...plan,recordedAt:now-86400_000}]})).success,true);
+let calls=0;
+assert.equal(await runForegroundCharacterContinuity({scope,character:{id:"a",name:"阿澈",personality:"安静"} as Character,settings:{apiKey:"synthetic",selectedModel:"synthetic"} as UserSettings,visible:true,now,
+  request:async params=>{calls++;assert.match(params.systemInstruction||"",/scheduleSlot/);return {text:JSON.stringify({impressions:[],lifeEvents:[{summary:clash.summary,status:"planned",scheduleSlot:clash.scheduleSlot}]})};}}),"completed");
+assert.equal(calls,1);assert.equal(loadCharacterContinuity().value.life.length,1,"actual foreground commit must reject competing location/time proposal");
+console.log("PASS L04 life schedule: persisted intervals, location/time conflict rejection, future completion guard, history and final prompt");

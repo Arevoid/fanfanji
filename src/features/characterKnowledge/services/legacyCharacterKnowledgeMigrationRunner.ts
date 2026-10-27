@@ -201,9 +201,13 @@ export function runLegacyCharacterKnowledgeMigration(
   const nextClaims = normalizeKnowledgeClaims(appendToKnowledgeClaims(claimsBefore.value, result.claims));
   const nextSummaries = appendConversationSummaries(summariesBefore.value, result.summaries);
   const nextCorrections = appendBehaviorCorrections(correctionsBefore.value, result.corrections);
+  // Keep unconverted records, including ambiguous owners, verbatim. Diagnostics
+  // are not a backup of the original content.
+  const orphanIds = new Set(result.orphanRecordIds);
+  const retainedMemories = legacyBefore.value.filter((memory) => orphanIds.has(`memory:${memory.id}`));
   const nextState = {
     ...mergeState(previousState, result, input.now, "completed"),
-    legacyMemoryStoreCleared: Boolean(legacyMemoryStore),
+    legacyMemoryStoreCleared: Boolean(legacyMemoryStore) && retainedMemories.length === 0,
   };
   const needsCanonicalRewrite = previousState.migrationVersion < CHARACTER_KNOWLEDGE_MIGRATION_VERSION;
   const rollbackErrors: string[] = [];
@@ -212,7 +216,7 @@ export function runLegacyCharacterKnowledgeMigration(
     { label: "summaries", changed: needsCanonicalRewrite || !sameJson(nextSummaries, summariesBefore.value), write: () => stores.summaries.save(nextSummaries) },
     { label: "corrections", changed: needsCanonicalRewrite || !sameJson(nextCorrections, correctionsBefore.value), write: () => stores.corrections.save(nextCorrections) },
     ...(legacyMemoryStore && legacyBefore.value.length > 0
-      ? [{ label: "legacy MemoryItem store", changed: true, write: () => legacyMemoryStore.save([]) }]
+      ? [{ label: "legacy MemoryItem store", changed: !sameJson(retainedMemories, legacyBefore.value), write: () => legacyMemoryStore.save(retainedMemories) }]
       : []),
     { label: "migration state", changed: !sameJson(nextState, previousState), write: () => stores.state.save(nextState) },
   ];
@@ -249,7 +253,7 @@ export function runLegacyCharacterKnowledgeMigration(
     !isSafeRead(summariesAfter) || !sameJson(summariesAfter.value, nextSummaries) ? "summaries" : undefined,
     !isSafeRead(correctionsAfter) || !sameJson(correctionsAfter.value, nextCorrections) ? "corrections" : undefined,
     !isSafeRead(stateAfter) || !sameJson(stateAfter.value, nextState) ? "migration state" : undefined,
-    legacyAfter && (!isSafeRead(legacyAfter) || legacyAfter.value.length > 0) ? "legacy MemoryItem store" : undefined,
+    legacyAfter && (!isSafeRead(legacyAfter) || !sameJson(legacyAfter.value, retainedMemories)) ? "legacy MemoryItem store" : undefined,
   ].filter((item): item is string => Boolean(item));
   const verificationFailed = verificationMismatches.length > 0;
   if (verificationFailed) {
@@ -271,6 +275,6 @@ export function runLegacyCharacterKnowledgeMigration(
       : "skipped",
     migration: result,
     rollbackErrors: [],
-    legacyMemoryStoreCleared: Boolean(legacyMemoryStore),
+    legacyMemoryStoreCleared: Boolean(legacyMemoryStore) && retainedMemories.length === 0,
   };
 }

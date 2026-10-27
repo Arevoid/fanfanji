@@ -1,4 +1,5 @@
 import type { apiChat } from "../../../utils/apiHelper";
+import { MODEL_DIRECT_MARKER } from "../../../domain/prompt/modelDirectIdentity";
 import type { Message } from "../../../types";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { ProactiveCognitiveContext } from "./proactiveCognitiveContext";
@@ -46,7 +47,7 @@ export async function generateProactiveReplyCandidates(input: {
     now: input.directiveNow,
     timeZone: input.timeZone,
   });
-  const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(stripOuterDialogueQuotes(cleanAiReplyText(parsed.visibleText, input.disableBracketActions))));
+  const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(stripOuterDialogueQuotes(cleanAiReplyText(parsed.visibleText, input.disableBracketActions, Boolean(request.systemInstruction?.includes(MODEL_DIRECT_MARKER))))));
   // Internal scheduling metadata is model context, never user-visible chat.
   // Do not fall back to the raw response when sanitization removes everything.
   const normalizeProactiveBubble = (content: string): string => {
@@ -54,7 +55,7 @@ export async function generateProactiveReplyCandidates(input: {
     return input.keepPeriods ? normalized : normalized.replace(/。+$/u, "").trim();
   };
   const bubbles = cleanedText
-    ? removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, input.keepPeriods).map(normalizeProactiveBubble))
+    ? request.systemInstruction?.includes(MODEL_DIRECT_MARKER) ? [cleanedText] : removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, input.keepPeriods).map(normalizeProactiveBubble))
     : [];
   return {
     data,

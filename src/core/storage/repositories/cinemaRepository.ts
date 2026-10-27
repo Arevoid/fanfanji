@@ -14,8 +14,13 @@ function normalizeStore(value: unknown): CinemaStore {
 }
 
 export function loadCinemaStore(): CinemaStore {
+  return loadCommittedCinemaStore().value;
+}
+
+/** Preserve read failure separately from an empty store for evidence consumers. */
+export function loadCommittedCinemaStore() {
   const result = readJson<unknown>(storageKeys.cinemaStore, createEmptyCinemaStore());
-  return normalizeStore(result.value);
+  return {...result,value:normalizeStore(result.value)};
 }
 
 export function saveCinemaStore(store: CinemaStore): boolean {

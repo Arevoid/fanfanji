@@ -1,0 +1,37 @@
+import assert from "node:assert/strict";
+import {resolveCharacterApiSettings} from "../src/domain/character/characterApiSettings";
+import {buildComposedAiChatRequest} from "../src/features/chat/controllers/chatGenerationController";
+import {useOfflineStoryGenerationActions} from "../src/features/offline/hooks/useOfflineStoryGenerationActions";
+import {toPortableCharacterProfile} from "../src/features/archives/characterExport";
+import type {Character,UserSettings,OfflineStory,ApiPreset} from "../src/types";
+const store=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(k:string)=>store.get(k)??null,setItem:(k:string,v:string)=>store.set(k,v),removeItem:(k:string)=>store.delete(k)}}});
+const preset:ApiPreset={id:"role-preset",name:"shared",apiKey:"synthetic-role-key",apiEndpoint:"https://role.test/v1",selectedModel:"role-model",apiTemperature:0,streamCompatible:true};
+const global={apiKey:"synthetic-global-key",apiEndpoint:"https://global.test/v1",selectedModel:"global-model",apiTemperature:.7,streamCompatible:false,apiPresets:[preset],activeApiPresetId:"global",name:"user",bio:"",identities:[]} as unknown as UserSettings;
+const role={id:"a",name:"A",personality:"",backstory:"",avatar:"",characterApi:{enabled:true,presetId:preset.id}} as Character;
+const untouched=JSON.stringify(global);
+assert.equal(resolveCharacterApiSettings(global,{...role,characterApi:undefined}),global);
+assert.equal(resolveCharacterApiSettings(global,{...role,characterApi:{enabled:false,presetId:"deleted"}}),global);
+const effective=resolveCharacterApiSettings(global,role);
+assert.equal(effective.selectedModel,preset.selectedModel);assert.equal(effective.apiKey,preset.apiKey);assert.equal(effective.apiEndpoint,preset.apiEndpoint);assert.equal(effective.apiTemperature,0);assert.equal(effective.streamCompatible,true);
+assert.equal(resolveCharacterApiSettings({...global,apiPresets:[{...preset,selectedModel:"updated"}]},role).selectedModel,"updated");
+const custom={...role,characterApi:{enabled:true,custom:{...preset,name:"custom",selectedModel:"custom-model"}}};
+assert.equal(resolveCharacterApiSettings(global,custom).selectedModel,"custom-model");
+const copy={...role,id:"contact",profileSourceId:"a",characterApi:{enabled:false}};
+assert.equal(resolveCharacterApiSettings(global,copy,[role,copy]).selectedModel,"role-model","contact copies resolve canonical role");
+assert.equal(resolveCharacterApiSettings(global,{...role,id:"b",characterApi:undefined},[role]).selectedModel,"global-model","another role inherits global");
+assert.throws(()=>resolveCharacterApiSettings({...global,apiPresets:[]},role),/已失效/);
+assert.throws(()=>resolveCharacterApiSettings(global,{...custom,characterApi:{enabled:true,custom:{...preset,apiKey:""}}}),/密钥/);
+assert.throws(()=>resolveCharacterApiSettings(global,{...custom,characterApi:{enabled:true,custom:{...preset,apiTemperature:NaN}}}),/温度/);
+assert.equal(JSON.stringify(global),untouched,"role selection never mutates global active configuration");
+assert.equal("characterApi" in toPortableCharacterProfile(custom),false,"portable character cards must not export API credentials");
+const online=buildComposedAiChatRequest({scenario:"direct-chat",message:"hello",history:[],systemInstruction:"test"},effective);
+assert.equal(online.apiKey,preset.apiKey);assert.equal(online.model,preset.selectedModel);assert.equal(online.apiEndpoint,preset.apiEndpoint);
+async function run(character:Character,expectedModel:string){
+ const story={id:"story",characterId:character.id,mode:"if",title:"test",messages:[],createdAt:1,updatedAt:1} as OfflineStory;
+ const calls:any[]=[];let error="";let saved=story;
+ await useOfflineStoryGenerationActions({activeStory:story,activeStoryRef:{current:story},characters:[character],selectableCharacters:[character],relationships:[],activeIdentityId:"u",memories:[],settings:global,selectedChar:character,inputText:"hello",isGenerating:false,worldBookEntries:[],setInputText:()=>{},setIsGenerating:()=>{},setErrorMsg:v=>{error=String(v)},resolveCharacterId:id=>id,saveActiveStorySnapshot:value=>{saved=value},showToast:()=>{},guidanceDraft:{oneTime:"",ongoing:""},setGuidanceDraft:()=>{},request:async request=>{calls.push(request);return {text:"synthetic reply"}}}).handleSendMessage();
+ assert.equal(error,"");assert.equal(calls.length,1);assert.equal(calls[0].model,expectedModel);assert.equal(saved.messages.at(-1)?.content,"synthetic reply");return calls[0];
+}
+assert.equal((await run(role,"role-model")).apiKey,preset.apiKey);
+assert.equal((await run({...role,characterApi:undefined},"global-model")).apiKey,global.apiKey);
+console.log("PASS role API inheritance, shared/live presets, custom isolation, canonical copies, invalid configs, portable export, composed online request and actual offline generation hook (synthetic requests only)");

@@ -1,3 +1,4 @@
+import { meaningfulMemoryValue } from "./fixtures/memoryValueFixture";
 import assert from "node:assert/strict";
 import { buildCharacterCognitiveContext } from "../src/domain/characterCognitive/contextBuilder";
 import type { CharacterCognitiveEventCandidate } from "../src/domain/characterCognitive/characterCognitiveTypes";
@@ -161,7 +162,7 @@ async function testMemoryTruthContract(): Promise<void> {
       subject: "user" as const,
       temporalStatus: "past" as const,
       sourceMessageIds: ["truth-a"],
-      evidenceQuote: trueEventA.replace("[CONFIRMED] ", ""),
+      evidenceQuote: trueEventA.replace("[CONFIRMED] ", ""), valueAssessment: meaningfulMemoryValue(trueEventA.replace("[CONFIRMED] ", "")),
     })) };
   });
 

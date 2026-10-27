@@ -1,3 +1,4 @@
+import { meaningfulMemoryValue } from "./fixtures/memoryValueFixture";
 import assert from "node:assert/strict";
 import {
   buildOfflineHandoffPromptBlock,
@@ -86,7 +87,7 @@ const offlineExtraction = await MemoryService.extractMemories({
   subject: "relationship",
   temporalStatus: "past",
   sourceMessageIds: ["1"],
-  evidenceQuote: "我家水管漏水了。",
+  evidenceQuote: "我家水管漏水了。", valueAssessment: meaningfulMemoryValue("我家水管漏水了。"),
 }] }));
 assert.equal(offlineExtraction.extractedMemories[0]?.importance, 4, "线下短期事件应低于默认长期事实的重要度");
 

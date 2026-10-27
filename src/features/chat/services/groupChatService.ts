@@ -1,3 +1,4 @@
+import { buildModelDirectIdentity, modelDirectProfile, resolveChatIdentityMode } from "../../../domain/prompt/modelDirectIdentity";
 import type { apiChat } from "../../../utils/apiHelper";
 import type { Character, Message, UserSettings, WorldBookEntry } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
@@ -18,6 +19,7 @@ import { createLocalInnerVoiceFallback, INLINE_GROUP_INNER_VOICE_INSTRUCTION, pa
 import type { InlineInnerVoicePayload } from "./chatTurnResponseProtocol";
 import { DEFAULT_CHAT_CONTEXT_MEMORY_LIMIT, MAX_CHAT_CONTEXT_MEMORY_LIMIT } from "./chatMemoryRetrievalSettings";
 import { buildWorldBookScanText } from "../../../domain/worldbook/worldBookTriggerScan";
+import { publicGroupAwarenessGuidance, type GroupAwarenessAction, type GroupAwarenessInput } from "./groupMemberAwareness";
 
 export type GroupChatTurnGenerator = (input: {
   prompt: {
@@ -75,6 +77,8 @@ export function buildGroupChatHistoryContext(input: {
 }
 
 export function buildGroupMemberPromptContexts(input: {
+  truthContextByMemberId?: ReadonlyMap<string,string>;
+  groupId?: string;
   groupMembers: readonly Character[];
   worldBookEntries: WorldBookEntry[];
   scanText: string;
@@ -102,12 +106,12 @@ export function buildGroupMemberPromptContexts(input: {
       scenario: "group",
       characterId: member.id,
     });
-    memberWorldBookBlocks.at_depth.forEach((entry) => groupAtDepthInjections.set(entry.sourceId, entry));
     memberAtDepthInjections.set(member.id, memberWorldBookBlocks.at_depth);
     const memberOnlyWorldBook = memberWorldBookBlocks.allTriggered
-      .filter((entry) => entry.position !== "at_depth" && !includedWorldBookEntryIds.has(entry.id));
-    memberOnlyWorldBook.forEach((entry) => includedWorldBookEntryIds.add(entry.id));
+      .filter((entry) => !input.groupWorldBookBlocks.allTriggered.some((shared) => shared.id === entry.id));
     const privateContext = buildGroupMemberPrivateContext({
+      truthContext: input.truthContextByMemberId?.get(member.id),
+      mentionChannel: input.groupId ? `group:${input.groupId}` : undefined,
       member,
       characters: input.characters,
       relationships: input.relationships,
@@ -119,20 +123,21 @@ export function buildGroupMemberPromptContexts(input: {
       limit: input.recallLimit,
       alreadyPromptedTexts: input.scanText ? [input.scanText] : [],
     });
-    if (privateContext) privateContextByMemberId.set(member.id, privateContext);
     const memberWorldBookText = memberOnlyWorldBook.length
       ? `\n- 该角色专属世界书背景/日程/时间线设定:\n${memberOnlyWorldBook.map((entry) => `【设定 - ${entry.title}】\n${entry.content}`).join("\n\n")}`
       : "";
+    if (privateContext || memberWorldBookText) privateContextByMemberId.set(member.id, `${privateContext}${memberWorldBookText}`);
+    if(resolveChatIdentityMode(member)==="model-direct")return `[群聊成员 ${index+1}: ${member.name}]\n${buildModelDirectIdentity(modelDirectProfile(member))}`;
     return `[群聊成员 ${index + 1}: ${member.name}]
 - 角色人设/性格: ${member.personality}
-- 背景设定: ${member.backstory}
 - 与机主(${input.userName})的关系: 根据人设及世界观设定
-${memberWorldBookText}`;
+`;
   });
   return { groupAtDepthInjections, memberAtDepthInjections, privateContextByMemberId, publicMemberDefinitions };
 }
 
 export async function generateIsolatedGroupChatReplies(input: {
+  decideMemberAwareness?: (input: GroupAwarenessInput) => Promise<GroupAwarenessAction>;
   userName: string;
   userBio?: string;
   groupName: string;
@@ -161,6 +166,12 @@ export async function generateIsolatedGroupChatReplies(input: {
   // look stuck while several sequential calls were in flight. Private member
   // contexts are not merged here: doing so would expose one member's private
   // memory to another member in the same model request.
+  const awareness = new Map<string, GroupAwarenessAction>();
+  if (input.decideMemberAwareness) for (const member of input.groupMembers.filter((record) => input.privateContextByMemberId.has(record.id))) {
+    if (input.signal?.aborted) return null;
+    try { awareness.set(member.id, await input.decideMemberAwareness({ member, privateContext: input.privateContextByMemberId.get(member.id)!,
+      publicHistory: input.historyText, groupId: input.groupId, settings: input.settings, signal: input.signal })); } catch { awareness.set(member.id, "neutral"); }
+  }
   const result = await input.generateTurn({
     prompt: {
       scenario: "group-chat",
@@ -172,7 +183,7 @@ export async function generateIsolatedGroupChatReplies(input: {
         userBio: input.userBio,
         groupName: input.groupName,
         worldContext: input.groupWorldContext,
-        memberDefinitions: input.publicMemberDefinitions.join("\n\n"),
+        memberDefinitions: input.publicMemberDefinitions.map((definition, index) => `${definition}\n本轮表达方式：${publicGroupAwarenessGuidance(awareness.get(input.groupMembers[index]?.id) || "neutral")}`).join("\n\n"),
       }),
       historyInjections: [...input.groupAtDepthInjections.values()],
     },
@@ -209,7 +220,7 @@ export async function generateGroupReplyCandidates(input: {
     // Match by the original reply index, not sender name: a member may send
     // several bubbles in one turn, each with a different inner voice/action.
     structuredReply: structured?.[item.index],
-    content: normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(sanitizeCharacterActionText(item.reply.content.trim()), input.disableBracketActions))),
+    content: normalizePaymentMarkup(suppressCharacterEmoji(cleanAiReplyText(sanitizeCharacterActionText(item.reply.content.trim()), input.disableBracketActions, resolveChatIdentityMode(item.member)==="model-direct"))),
   })).filter((item) => Boolean(item.content) || item.structuredReply?.redPacketAction === "claim_silent" || item.structuredReply?.redPacketAction === "silent");
   const messages = valid.map((item) => createGroupCharacterMessage({
     id: input.createId(item.index), characterId: input.groupId, senderId: item.member.id,

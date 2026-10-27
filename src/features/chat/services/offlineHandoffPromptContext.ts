@@ -21,6 +21,7 @@ export function buildPendingOfflineTimelineHandoff(input: {
   currentChatMessages: readonly Message[];
   currentOnlineAt?: number;
   summaryMemory?: MemoryItem;
+  canonicalSummary?: ConversationSummaryRecord;
 }): string {
   const offlineStartedAt = input.story.onlineHandoff?.startedAt ?? input.story.createdAt;
   return buildPendingOfflineHandoffPromptBlock({
@@ -30,6 +31,7 @@ export function buildPendingOfflineTimelineHandoff(input: {
     previousOnlineAt: latestMessageBefore(input.currentChatMessages, offlineStartedAt),
     currentOnlineAt: input.currentOnlineAt,
     summaryMemory: input.summaryMemory,
+    canonicalSummary:input.canonicalSummary,
   });
 }
 

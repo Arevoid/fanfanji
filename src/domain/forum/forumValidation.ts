@@ -1,7 +1,9 @@
+import { normalizeCharacterExperience } from "../memory/characterExperience";
 import type { ForumReply, ForumThread } from "../../types";
 import { validateForumGeneratedText } from "./forumContentSafety";
 
 export interface ForumGeneratedReplyCandidate {
+  experience?: import("../memory/characterExperience").CharacterExperience;
   body: string;
   displayName?: string;
   anonymous?: boolean;
@@ -121,6 +123,7 @@ export const parseForumThreadCandidate = (text: string): ForumGeneratedThreadCan
         if (!replyBody) return [];
         return [{
           body: replyBody,
+          experience: normalizeCharacterExperience(reply.experience, replyBody),
           ...(cleanText(reply.displayName, 24) ? { displayName: cleanText(reply.displayName, 24) } : {}),
           ...(typeof reply.anonymous === "boolean" ? { anonymous: reply.anonymous } : {}),
           ...(reply.replyToFloor === null
@@ -151,6 +154,7 @@ export const parseForumReplyCandidate = (text: string): ForumGeneratedReplyCandi
   if (!body) throw new Error("生成内容无效：回复为空。");
   return {
     body,
+    experience: normalizeCharacterExperience(record.experience, body),
     ...(typeof record.anonymous === "boolean" ? { anonymous: record.anonymous } : {}),
     ...(record.replyToFloor === null
       ? { replyToFloor: null }

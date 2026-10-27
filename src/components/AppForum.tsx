@@ -91,6 +91,7 @@ import {
 } from "../domain/forum/forumGenerationGuard";
 import {
   generateForumThreads,
+  saveGeneratedForumExperiences,
   generateInitialRepliesForUserThread,
   generateThreadActivity,
   mapForumGenerationError,
@@ -525,6 +526,7 @@ export default function AppForum({
       const nextThreads = [...generated.threads, ...currentThreads];
       const nextReplies = [...currentReplies, ...generated.replies];
       if (generated.threads.length > 0 && !commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
+      saveGeneratedForumExperiences(generated.replies);
       persistTasks(finishForumGenerationTask(
         loadForumGenerationTasks(new Set(relationships.map((relationship) => relationship.id))).value,
         begun.task.id,
@@ -678,6 +680,7 @@ export default function AppForum({
               }
             : item);
         if (!commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
+        saveGeneratedForumExperiences(generatedReplies);
       }
       persistTasks(finishForumGenerationTask(
         loadForumGenerationTasks(new Set(relationships.map((relationship) => relationship.id))).value,
@@ -796,6 +799,7 @@ export default function AppForum({
               }
             : item);
         if (!commitForumMutation({ threads: nextThreads, replies: nextReplies }).success) throw new Error("storage");
+        saveGeneratedForumExperiences(result.replies);
         if (result.outcome === "author-update") setNotice("楼主发布了新动态");
         requestAnimationFrame(() => {
           document.getElementById(`forum-reply-${result.replies[0].id}`)

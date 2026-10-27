@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { captureOfflineMemoryReadFrame } from "../../offline/services/offlineMemoryReadFrame";
 import type { Character, MemoryItem, Message, OfflineStory } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { Appointment } from "../../../domain/schedule/scheduleTypes";
@@ -163,6 +164,8 @@ export function useChatStartOfflineFromMessage({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: "continue",
+      memoryReadFrame: captureOfflineMemoryReadFrame({ memberIds: offlineParticipantIds, characters, relationships, userIdentityId: activeIdentityId,
+        relationId: activeRelationship?.id, now: snapshotTimestamp }),
       knowledgeSnapshot: activeRelationship ? Array.from(new Set([
         ...loadKnowledgeClaims().value
           .filter((claim) => claim.relationId === activeRelationship.id

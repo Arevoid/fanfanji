@@ -18,6 +18,7 @@ assert.match(groupSource, /formatTruthRetrievalForPrompt/);
 const scope = { relationId: "r", characterId: "c", userIdentityId: "i", conversationId: "d:r" };
 const bounded = retrieveTruthForPrivatePrompt({
   scope,
+  queryText: "事实",
   limit: 2,
   claims: [{
     ...scope,

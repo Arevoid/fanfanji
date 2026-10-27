@@ -95,7 +95,7 @@ const claims = [
   }),
 ];
 const summaries = [
-  makeSummary("summary-independent", "只属于当前关系的派生摘要"),
+  makeSummary("summary-independent", "只属于当前关系的电影派生摘要"),
   makeSummary("summary-repeats-truth", "重复具体事实的摘要", { sourceClaimIds: ["truth-a"] }),
   makeSummary("summary-other-relation", "另一个关系的摘要", {
     relationId: "relation-other",

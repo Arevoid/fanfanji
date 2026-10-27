@@ -4,7 +4,7 @@ import type { ForumActivityRuntimeContext } from "../services/forumActivityRunti
 import { FORUM_ACTIVITY_CHECK_MIN_MS } from "../services/forumActivityService";
 import { runAutomaticForumActivityCheck } from "../services/forumActivityRuntime";
 
-/** Runs only while the forum root is mounted and the document is visible. */
+/** Global startup/timer ticks release saved content only, never generate new content. */
 export const useForumActivityEngine = (context: ForumActivityRuntimeContext): void => {
   const contextRef = useRef(context);
   contextRef.current = context;
@@ -14,7 +14,7 @@ export const useForumActivityEngine = (context: ForumActivityRuntimeContext): vo
     intervalMs: FORUM_ACTIVITY_CHECK_MIN_MS,
     initialDelayMs: 0,
     taskType: "forum-activity",
-    reason: "scheduled-forum-activity-check",
+    reason: "release-generated-forum-activity",
     recoveryPayload: { ownerIdentityId: context.ownerIdentityId, scope: "public-forum" },
     run: async () => { await runAutomaticForumActivityCheck(contextRef.current); },
     pauseWhenHidden: true,

@@ -8,13 +8,13 @@ interface UseForumStorySchedulerOptions {
   onChanged?: () => void;
 }
 
-/** Runs public forum-story progression through the durable scheduler boundary. */
+/** Automatic paid progression is disabled; explicit story actions remain available. */
 export function useForumStoryScheduler({ settings, onChanged }: UseForumStorySchedulerOptions): void {
   const contextRef = useRef({ settings, onChanged });
   contextRef.current = { settings, onChanged };
   useBackgroundScheduler({
     id: "forum-story-progression",
-    enabled: true,
+    enabled: false,
     intervalMs: 15 * 60 * 1000,
     initialDelayMs: 30 * 1000,
     taskType: "forum-story-progression",

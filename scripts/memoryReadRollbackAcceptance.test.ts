@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import {setMemoryReadMode,getMemoryReadMode} from "../src/core/storage/repositories/memoryReadPolicyRepository";
+import {saveKnowledgeClaims,loadKnowledgeClaims} from "../src/core/storage/repositories/characterKnowledgeRepository";
+import {contributeSemanticDirectReplyTruthContext} from "../src/features/characterKnowledge/services/semanticMemoryRecallService";
+import {retrieveTruthForPrivatePrompt,formatTruthRetrievalForPrompt} from "../src/features/characterKnowledge/services/truthRetrievalService";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+const values=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>values.set(k,v),removeItem:(k:string)=>values.delete(k)}}});
+const scope={characterId:"a",relationId:"r",userIdentityId:"u",conversationId:"c"},now=Date.UTC(2026,9,16);
+const fact=(id:string,statement:string,recordedAt:number):KnowledgeClaim=>({...scope,id,statement,recordedAt,kind:"fact",subject:"user",temporalStatus:"present",truthStatus:"asserted",confidence:.9,userConfirmed:false,status:"active",visibility:"relation_private",schemaVersion:1,source:{kind:"user_message",authorship:"user",producer:"synthetic",evidenceKey:id,messageIds:[id]}});
+const claims=[{...fact("core","咖啡会使用户出现过敏反应",now-90*86400_000),coreMemory:true},fact("new","用户每天都会经过附近的咖啡店",now-3600_000)];saveKnowledgeClaims(claims);const before=JSON.stringify(loadKnowledgeClaims().value);
+const input={scope,now,queryText:"关于咖啡",claims:loadKnowledgeClaims().value,summaries:[],corrections:[],limit:2};
+assert.equal(retrieveTruthForPrivatePrompt(input).orderedClaims?.[0].id,"core");
+assert.equal(setMemoryReadMode("u","compatibility").success,true);assert.equal(getMemoryReadMode("other"),"current");
+const legacy=retrieveTruthForPrivatePrompt(input);assert.equal(legacy.orderedClaims?.[0].id,"new","actual legacy recency/local ranking is used, not a renamed current sorter");
+let indexReads=0,embedding=0;
+const recalled=await contributeSemanticDirectReplyTruthContext({visible:true,configuration:{enabled:true,apiKey:"synthetic",model:"synthetic",apiEndpoint:"https://synthetic.invalid/v1"},retrieval:input,
+ readIndex:async(s,p)=>{indexReads++;return {version:1,scope:s,provider:p,entries:[]};},request:async p=>{embedding++;return p.texts.map(()=>[1,0]);}});
+assert.equal(indexReads,0);assert.equal(embedding,0);assert.match(formatTruthRetrievalForPrompt(recalled),/咖啡/);
+assert.equal(formatTruthRetrievalForPrompt(retrieveTruthForPrivatePrompt({...input,queryText:"十七乘十三"})),"");
+assert.equal(formatTruthRetrievalForPrompt(retrieveTruthForPrivatePrompt({...input,scope:{...scope,relationId:"foreign"}})),"");
+assert.equal(JSON.stringify(loadKnowledgeClaims().value),before);assert.equal(setMemoryReadMode("u","current").success,true);assert.equal(retrieveTruthForPrivatePrompt(input).orderedClaims?.[0].id,"core");assert.equal(JSON.stringify(loadKnowledgeClaims().value),before);
+values.set("phone_memory_read_policy_v1",JSON.stringify({version:1,identities:[]}));
+assert.equal(setMemoryReadMode("u","compatibility").success,false,"invalid policy shape must not be silently overwritten");
+assert.equal(getMemoryReadMode("u"),"current");
+console.log("PASS T08 actual reversible local read path, no vector calls, same source/privacy/budget gates, identity-isolated mode and all new records preserved");

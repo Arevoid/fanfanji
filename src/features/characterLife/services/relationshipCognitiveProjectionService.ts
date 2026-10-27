@@ -5,6 +5,12 @@ import type { RelationshipState } from "../../../domain/characterLife/relationsh
 import type { RelationshipTimeline } from "../../../domain/characterLife/relationshipTimelineTypes";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { loadCharacterEvents } from "../../../core/storage/repositories/characterEventRepository";
+import { loadCharacterContinuity } from "../../../core/storage/repositories/characterContinuityRepository";
+import { loadKnowledgeClaims } from "../../../core/storage/repositories/characterKnowledgeRepository";
+import { reconcileImpressions, projectCharacterContinuityReadFrame } from "../../../domain/memory/characterContinuity";
+import { projectKnowledgeReadFrame } from "../../../domain/characterKnowledge/knowledgeReadFrame";
+import { projectImpressionGrowth } from "../../../domain/memory/impressionGrowth";
+import { isExactTruthScope } from "../../../domain/characterKnowledge/knowledgeConflictPolicy";
 
 export interface RelationshipCognitiveProjection {
   state?: RelationshipState;
@@ -33,11 +39,21 @@ export function buildRelationshipCognitiveProjection(input: {
   limit?: number;
 }): RelationshipCognitiveProjection {
   const events = (input.events || loadCharacterEvents().value)
-    .filter((event) => scopeMatches(event, input.relation))
+    .filter((event) => scopeMatches(event, input.relation) && event.recordedAt <= (input.now ?? Date.now()))
     .sort(chronological);
   let state: RelationshipState | undefined;
   for (const event of events) {
     state = projectRelationshipState(state, event) || state;
+  }
+  const continuity = loadCharacterContinuity();
+  const scope = { characterId: input.relation.characterId, relationId: input.relation.id, userIdentityId: input.relation.userIdentityId, conversationId: input.relation.conversationId };
+  const now = input.now ?? Date.now();
+  const impressions = continuity.valid ? reconcileImpressions(projectCharacterContinuityReadFrame(continuity.value, now).impressions,
+    projectKnowledgeReadFrame(loadKnowledgeClaims().value, now), now)
+    .filter((record) => record.recordedAt <= now && isExactTruthScope(record.scope, scope) && record.status === "active" && !record.paused && Boolean(record.growth) && !record.intervention) : [];
+  if (impressions.length) {
+    state = { ...(state || { ...scope, stage: input.relation.relationship, tone: "neutral", openLoops: [], boundaries: [], updatedAt: input.now ?? Date.now(), version: 1 }),
+      dimensions: projectImpressionGrowth(state?.dimensions, impressions) };
   }
   return {
     ...(state ? { state } : {}),

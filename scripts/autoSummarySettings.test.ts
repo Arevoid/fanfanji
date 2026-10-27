@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
+import {getChatArchiveRoundLimit} from "../src/domain/memory/chatArchiveTurns";
 
 const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const appMemory = readFileSync(new URL("../src/components/AppMemory.tsx", import.meta.url), "utf8");
@@ -15,6 +16,8 @@ assert.match(appMemory, /max="100"/);
 assert.match(appMemory, /step="10"/);
 assert.doesNotMatch(sideEffects, /enableAutoSummary !== false/);
 assert.match(sideEffects, /const configuredRounds = input\.activeCharacter\.summaryTriggerRound/);
-assert.match(sideEffects, /: 10;/);
+assert.equal(getChatArchiveRoundLimit(),10);
+assert.equal(getChatArchiveRoundLimit(20),20);
+assert.equal(getChatArchiveRoundLimit(200),100);
 
 console.log("Automatic summary settings: 7 acceptance checks passed");

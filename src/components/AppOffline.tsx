@@ -1,3 +1,4 @@
+import { shouldArchiveOfflineProgress } from "../domain/memory/offlineArchivePolicy";
 import React, { useEffect, useState } from "react";
 import { 
   ArrowLeft, Plus, Trash2, Pencil, Send, Sparkles, BookOpen,
@@ -11,6 +12,7 @@ import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims } from "../cor
 import { formatDelicateMemoryDiary, formatExtractedMemorySummary, MemoryService } from "../domain/memory/MemoryService";
 import { shouldAutoSyncOnlineContinuation } from "../domain/memory/offlineMemorySync";
 import { canSyncOfflineStoryToMemory } from "../domain/offlineStory/offlineStoryFactPolicy";
+import {needsOfflineMemoryRepair,estimateOfflineArchiveRequests} from "../features/offline/services/offlineMemoryRepair";
 import { loadMessages } from "../core/storage/repositories/messageRepository";
 import "./offline/offlineStory.css";
 import { OfflineGuidancePanel } from "./offline/OfflineGuidancePanel";
@@ -84,6 +86,8 @@ interface AppOfflineProps {
   onSaveAppointment?: (appointment: Appointment) => boolean;
   /** Story requested by the previous chat screen; consumed by the story opener. */
   openStoryId?: string | null;
+  historyTarget?: { storyId: string; id: string; requestId: number };
+  onHistoryTargetHandled?: () => void;
   onOpenOfflineStoryHandled?: (storyId: string) => void;
 }
 
@@ -109,6 +113,8 @@ export default function AppOffline({
   appointments = [],
   onSaveAppointment,
   openStoryId = null,
+  historyTarget,
+  onHistoryTargetHandled,
   onOpenOfflineStoryHandled,
 }: AppOfflineProps) {
   const activeIdentityId = ownerIdentityId || settings.activeIdentityId || "identity-1";
@@ -238,6 +244,7 @@ export default function AppOffline({
     hasSelectedCustomPreset, handleSaveSettings, handleCreateCustomPreset, handleDeleteCustomPreset,
   } = offlineStorySettings;
   const [offlineCssTemplateCopied, setOfflineCssTemplateCopied] = useState(false);
+  const [confirmMemoryRepair,setConfirmMemoryRepair]=useState(false);
 
   const copyOfflineCssTemplate = async () => {
     try {
@@ -296,11 +303,8 @@ export default function AppOffline({
       })
     : null;
 
-  useEffect(() => {
-    if (workspaceEndRef.current) {
-      workspaceEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [activeStory?.messages, isGenerating]);
+  // MessageList owns anchoring and new-message following; unconditional
+  // scrollIntoView here would override a history-search jump.
 
   const getMemoryRepairNeeds = (story: OfflineStory) => getOfflineStoryMemoryRepairNeeds(story, memories);
   const needsLegacyHandoffRepair = (story: OfflineStory) => getMemoryRepairNeeds(story).legacyHandoff;
@@ -383,6 +387,12 @@ export default function AppOffline({
   });
 
   const { handleSendMessage } = useOfflineStoryGenerationActions({
+    onUserGenerationComplete: story=>{
+      if(story.mode!=="continue"||!shouldArchiveOfflineProgress(story))return;
+      void storyPersistenceRef.current.then(saved=>{
+        if(saved)return handleSyncMemoryToBrain(activeStoryRef.current?.id===story.id?activeStoryRef.current:story,{userConfirmed:true,syncIntent:"automatic_end",backgroundProgress:true});
+      }).catch(()=>undefined);
+    },
     activeStory,
     activeStoryRef,
     characters,
@@ -715,16 +725,27 @@ export default function AppOffline({
                         ? "续写剧情结束时会自动总结并同步；也可以在此立即同步当前进展。"
                         : "导演和 IF 模式结束时不会自动同步。只有点击下方按钮手动确认后，剧情才会进入角色长期记忆并同步到线上。"}
                     </p>
+                    <p className="text-xs leading-5 text-[#8E8E93]">预计剩余 {estimateOfflineArchiveRequests(activeStory)} 批，默认每批请求一次 API。已完成批次不会重跑；失败后手动重试可能产生额外费用。</p>
+                    {activeStory.memorySyncReport && <p className="text-xs leading-5 text-[#8E8E93]" role="status">
+                      最近一批：已归档 {activeStory.memorySyncReport.retained} 条。{activeStory.memorySyncReport.failed>0&&`还有 ${activeStory.memorySyncReport.failed} 条整理未完成，可以重试。`}
+                    </p>}
+                    {activeStory.memoryRepair&&<p className="text-xs leading-5 text-[#8E8E93]" role="status">完整剧情修复：已完成 {activeStory.memoryRepair.nextBatch}/{activeStory.memoryRepair.totalBatches} 批。完成前旧记忆继续调用，已完成的批次不会重跑。</p>}
+                    {activeStory.lastMemorySyncError && <p className="text-xs leading-5 text-amber-700" role="status">
+                      {activeStory.lastMemorySyncError}。原文和已完成进度保留。{activeStory.memoryRepair?.checkpoint?.extracted||activeStory.memoryRepair&&activeStory.memoryRepair.nextBatch===activeStory.memoryRepair.totalBatches?"已提取内容复用，本地校验不会追加 API 请求。":"未完成的提取需要重新请求当前批次，可能产生 API 费用，不会自动重试。"}
+                    </p>}
                     <Button
                       variant="secondary"
                       size="lg"
                       fullWidth
-                      onClick={() => void handleSyncMemoryToBrain(activeStory, { userConfirmed: true, syncIntent: "manual_settings" })}
+                      onClick={() => {
+                        if(needsOfflineMemoryRepair(activeStory)&&!activeStory.memoryRepair){setConfirmMemoryRepair(true);return;}
+                        void handleSyncMemoryToBrain(activeStory, { userConfirmed: true, syncIntent: "manual_settings" });
+                      }}
                       loading={memorySyncingStoryId === activeStory.id}
                       loadingLabel="同步中，请稍候…"
                       className="text-xs"
                     >
-                      同步当前进展记忆至角色大脑
+                      {needsOfflineMemoryRepair(activeStory)?activeStory.memoryRepair?"继续修复并同步记忆":"修复并同步记忆":"同步当前进展记忆至角色大脑"}
                     </Button>
                     </div>
                   </section>
@@ -977,6 +998,12 @@ export default function AppOffline({
             )}
 
             <MessageList
+              key={`${activeIdentityId}:${activeStory.id}`}
+              conversationKey={`offline:${activeIdentityId}:${activeStory.id}`}
+              renderWindowSize={120}
+              newReplyPosition="start"
+              jumpToMessage={historyTarget?.storyId === activeStory.id ? historyTarget : undefined}
+              onJumpHandled={onHistoryTargetHandled}
               messages={visibleStoryMessages}
               scrollRef={workspaceScrollRef}
               className="offline-story-scroll"
@@ -1140,6 +1167,10 @@ export default function AppOffline({
         )}
       </AnimatePresence>
 
+      <ConfirmDialog open={confirmMemoryRepair} title="修复这篇剧情的记忆？"
+        description={`将根据完整原文分批重新整理，预计 ${activeStory?estimateOfflineArchiveRequests(activeStory):0} 批，默认每批请求一次当前角色的文本模型 API。已完成批次不会重跑；失败后手动重试可能产生额外费用。全部完成后才接替旧摘要，不影响其他剧情或全局迁移选择。`}
+        confirmLabel="开始修复" cancelLabel="取消" onClose={()=>setConfirmMemoryRepair(false)}
+        onConfirm={()=>{setConfirmMemoryRepair(false);if(activeStory)void handleSyncMemoryToBrain(activeStory,{userConfirmed:true,syncIntent:'manual_settings'});}} />
       {/* ================= STORY CREATION DIALOG / MODAL ================= */}
       <AnimatePresence>
         {showCreateModal && selectedChar && (

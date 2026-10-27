@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import {resolveChatLongTermMemoryLimit} from "../src/features/chat/services/chatMemoryRetrievalSettings";
+import {retrieveTruthForPrivatePrompt,formatTruthRetrievalForPrompt} from "../src/features/characterKnowledge/services/truthRetrievalService";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+assert.equal(resolveChatLongTermMemoryLimit(300),300);assert.equal(resolveChatLongTermMemoryLimit(900),300);assert.equal(resolveChatLongTermMemoryLimit(50),50);assert.equal(resolveChatLongTermMemoryLimit(),50);
+const scope={characterId:"a",relationId:"r",userIdentityId:"u",conversationId:"c"};
+const claims=Array.from({length:310},(_,i):KnowledgeClaim=>({...scope,id:`fact-${i}`,statement:`关于天文馆的第${i}件经历：${"那天一起研究星图和观察行星。".repeat(20)}完整结尾${i}`,kind:"fact",subject:"relationship",temporalStatus:"past",truthStatus:"asserted",confidence:.9,userConfirmed:false,recordedAt:i+1,status:"active",visibility:"relation_private",schemaVersion:1,source:{kind:"user_message",authorship:"user",producer:"synthetic",evidenceKey:`m-${i}`,messageIds:[`m-${i}`]}}));
+const result=retrieveTruthForPrivatePrompt({scope,queryText:"天文馆",claims,summaries:[],corrections:[],limit:300,unboundedMemory:true,claimExcerpts:new Map(claims.map(c=>[c.id,"仅片段"]))});
+assert.equal(result.orderedClaims?.length,300);const text=formatTruthRetrievalForPrompt(result);
+assert.ok(text.length>4800);assert.ok(new TextEncoder().encode(text).length>3000);
+for(const claim of result.orderedClaims!)assert.ok(text.includes(claim.statement),`selected ${claim.id} must be complete`);
+assert.doesNotMatch(text,/仅片段/);
+const few=retrieveTruthForPrivatePrompt({scope,queryText:"天文馆",claims:claims.slice(0,3),summaries:[],corrections:[],limit:300,unboundedMemory:true});assert.equal(few.orderedClaims?.length,3);
+assert.equal(retrieveTruthForPrivatePrompt({scope:{...scope,userIdentityId:"foreign"},queryText:"天文馆",claims,summaries:[],corrections:[],limit:300,unboundedMemory:true}).orderedClaims?.length,0);
+console.log("PASS direct chat 300: preserve settings, no character/token/excerpt clipping, no padding, exact identity boundaries");

@@ -79,7 +79,7 @@ const correction: BehaviorCorrectionRecord = {
 
 const result = retrieveTruthForPrivatePrompt({
   scope,
-  queryText: "看展",
+  queryText: "看展科幻",
   limit: 8,
   now: 200,
   claims: [futureFact, inferredFact, superseded, claim({ id: "claim-default" })],
@@ -121,6 +121,6 @@ const boundedResult = retrieveTruthForPrivatePrompt({
 });
 assert.equal(countTruthRetrievalRecords(boundedResult), 3, "Truth, correction, and summary records share one total retrieval budget");
 assert.equal(boundedResult.summaries.length, 0, "non-authoritative summaries yield to claims and corrections when the budget is full");
-assert.equal(boundedResult.corrections.length, 1);
+assert.equal(boundedResult.corrections.length, 2, "unrelated claim leaves room for both governing corrections");
 
 console.log("PASS Phase 7 semantic projection, supersession, source-aware summary, and scenario visibility checks");

@@ -1,8 +1,13 @@
+import { createOfflineStoryMemorySyncActions } from "./features/offline/hooks/useOfflineStoryMemorySyncActions";
+import { installOfflineArchiveExecutor } from "./features/offline/services/offlineArchiveQueue";
+import { installCharacterTextApiContext } from "./domain/character/characterTextApiRouting";
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { subscribeOfflineMemorySyncNotifications } from "./features/offline/services/offlineMemorySyncNotifications";
 import { createId } from "./core/id/createId";
 import { apiChat, apiExtractMemoriesWithModelFallback } from "./utils/apiHelper";
+import { prepareMemoryIdentityRegistry } from "./features/characterKnowledge/services/memoryIdentityRegistryService";
+import { createMemorySettingReviewer } from "./features/characterKnowledge/services/memorySettingReviewService";
 import { audioDb, getTrackAudioAssetId } from "./utils/audioDb";
 import { hydrateSettingsOverlays, loadSettings, resolveSettingsUpdate, saveSettings, saveSettingsAsync } from "./core/storage/repositories/settingsRepository";
 import { readString, remove as removeStoredValue, STORAGE_WRITE_FAILURE_EVENT, writeJson, writeString } from "./core/storage/storageAdapter";
@@ -26,11 +31,13 @@ import { limitMomentCommentsPerActor } from "./features/moments/services/momentC
 import { migrateMomentIdentitySnapshots, toggleMomentLike } from "./features/moments/services/momentIdentityPresentation";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
 import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
-import { loadOfflineStories, mergeOfflineStoryCollections } from "./core/storage/repositories/offlineRepository";
+import { loadOfflineStories, mergeOfflineStoryCollections, installOfflineSourceReader } from "./core/storage/repositories/offlineRepository";
 import { offlineStoryDb } from "./core/storage/offlineStoryDb";
 import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./core/storage/contentStorageFlags";
 import { isContentStorageMigrationActive } from "./core/storage/contentStorageRuntimeLock";
 import { loadRelationships, saveRelationships } from "./core/storage/repositories/relationshipRepository";
+import { startCharacterContinuityRuntime } from "./features/characterKnowledge/services/characterContinuityRuntime";
+import { mutateSourceMessages } from "./features/characterKnowledge/services/sourceMessageMutationService";
 import { appendMany as appendKnowledgeClaims, loadKnowledgeClaims, retractBySourceMessageIds, retractBySourceStoryIds } from "./core/storage/repositories/characterKnowledgeRepository";
 import { loadConversationSummaries, retractConversationSummariesBySourceMessageIds, conversationSummaryRepository } from "./core/storage/repositories/conversationSummaryRepository";
 import { loadBehaviorCorrections, retractBehaviorCorrectionsBySourceMessageIds } from "./core/storage/repositories/behaviorCorrectionRepository";
@@ -130,7 +137,7 @@ import {
 } from "./features/home/homeGrid";
 import { applyRelationshipRecommendation, recommendDualMusicTrack } from "./features/music/services/dualMusicRecommendationService";
 import { isNeteaseMusicTrack, normalizeMusicTrack } from "./features/music/services/musicTrackModel";
-import { getNeteaseTrackStreamUrl, preloadNeteaseMusicLibrary } from "./features/music/services/neteaseMusicApi";
+import { getNeteaseTrackStreamUrl } from "./features/music/services/neteaseMusicApi";
 import { loadMusicPlaybackHistory, recordMusicPlayback } from "./core/storage/repositories/musicPlaybackHistoryRepository";
 import type { MusicPlaybackHistoryItem } from "./types";
 import type { NeteaseMusicQuality } from "./features/music/neteaseTypes";
@@ -275,22 +282,6 @@ const preloadApp = (appId: string) => {
 
 const IDLE_PRELOAD_APP_IDS = [
   "chat",
-  "archives",
-  "worldbook",
-  "music",
-  "forum",
-  "notes",
-  "diary",
-  "store",
-  "settings",
-  "memory",
-  "offline",
-  "schedule",
-  "reading",
-  "cinema",
-  "character-phone",
-  "relationship-network",
-  "sms",
 ] as const;
 
 // Use the same bounded retry for the component that is actually rendered.
@@ -568,7 +559,7 @@ const CHARACTER_PHONE_TEST_CHARACTER: Character = {
   greeting: "今天也有好好吃饭吗？",
 };
 
-const DEFAULT_SETTINGS: UserSettings = {
+export const DEFAULT_SETTINGS: UserSettings = {
   name: "饭饭",
   avatar: "https://free.picui.cn/free/2026/07/08/6a4e12049700d.png",
   signature: "今天你也想我了吗",
@@ -746,19 +737,17 @@ export default function App() {
   useEffect(() => {
     const preloadIdleApps = () => {
       IDLE_PRELOAD_APP_IDS.forEach((appId) => preloadApp(appId));
-      // Warm the authenticated cloud library while the user is still on the
-      // desktop so the music home screen can render without a second wait.
-      void preloadNeteaseMusicLibrary().catch(() => undefined);
+      // Other apps and authenticated libraries load on explicit navigation.
     };
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       cancelIdleCallback?: (handle: number) => void;
     };
     if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(preloadIdleApps, { timeout: 1500 });
+      const handle = idleWindow.requestIdleCallback(preloadIdleApps, { timeout: 4000 });
       return () => idleWindow.cancelIdleCallback?.(handle);
     }
-    const handle = window.setTimeout(preloadIdleApps, 600);
+    const handle = window.setTimeout(preloadIdleApps, 1500);
     return () => window.clearTimeout(handle);
   }, []);
 
@@ -872,6 +861,7 @@ export default function App() {
   });
   useGlobalTypography(settings);
   const settingsRef = useRef<UserSettings>(settings);
+  useEffect(() => installCharacterTextApiContext(() => ({ settings: settingsRef.current, characters: charactersRef.current })), []);
   const [settingsOverlaysReady, setSettingsOverlaysReady] = useState(false);
 
   // Hydrate reference fallbacks before large IndexedDB-backed image assets.
@@ -1152,6 +1142,7 @@ export default function App() {
   const [activeChatCharId, setActiveChatCharId] = useState<string | null>(null);
   const [activeChatRelationId, setActiveChatRelationId] = useState<string | null>(null);
   const [pendingOfflineStoryId, setPendingOfflineStoryId] = useState<string | null>(null);
+  const [pendingOfflineHistoryTarget, setPendingOfflineHistoryTarget] = useState<{ storyId: string; id: string; requestId: number }>();
   const [pendingDiaryShareMessageId, setPendingDiaryShareMessageId] = useState<string | null>(null);
   const [openForumShareId, setOpenForumShareId] = useState<string | null>(null);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>(() => hydrateRelationshipNetworkRelationships(loadRelationships([]).value));
@@ -1326,6 +1317,7 @@ export default function App() {
   ));
   const offlineStoriesRef = useRef(offlineStories);
   const offlineStoriesHydratedRef = useRef(false);
+  useEffect(() => installOfflineSourceReader(() => offlineStoriesHydratedRef.current ? offlineStoriesRef.current : undefined), []);
   const deletedOfflineStoryIdsRef = useRef(new Set<string>());
   const charactersRepositoryHydrated = useRef(false);
   const characterPhoneOwnershipRepairRunRef = useRef(false);
@@ -2162,28 +2154,8 @@ export default function App() {
     if (momentsChanged) setMoments(migration.moments);
   }, [characters, memories, moments, offlineStories]);
 
-  // Truth Layer migration is a one-time cutover. The runner writes and verifies
-  // canonical stores before clearing the legacy MemoryItem store; after a
-  // successful cutover the React state must stop exposing those old records.
-  useEffect(() => {
-    if (!momentsStorageReady || characters.length === 0 || relationships.length === 0) return;
-    const result = runLegacyCharacterKnowledgeMigration({
-      characters,
-      relationships,
-      memories,
-      offlineStories,
-      now: Date.now(),
-    });
-    if (result.status === "failed") {
-      console.error("Failed to migrate legacy character knowledge:", result.error, result.rollbackErrors);
-    }
-    if (result.status === "completed" && result.legacyMemoryStoreCleared) {
-      setMemories((current) => current.length === 0 ? current : []);
-    }
-    result.migration.diagnostics.forEach((diagnostic) => {
-      console.warn(`[character truth migration] ${diagnostic.recordId}: ${diagnostic.diagnostic}`);
-    });
-  }, [characters, relationships, memories, offlineStories, momentsStorageReady]);
+  // Legacy memory conversion is consent-driven from the memory center.
+  // Never clear user records merely because the application mounted.
 
   // Offline-story handoffs must be persisted before their story is marked as
   // synced. The ordinary effect remains the single path for every other memory
@@ -2200,11 +2172,26 @@ export default function App() {
   };
 
   const [recallSettings, setRecallSettings] = useState<MemoryVaultSettings>(() => loadMemorySettings({
-    extractModel: "gemini-3.5-flash",
+    extractModel: "default-chat-model",
     recallCount: 5,
     autoExtract: true,
     extractInterval: 10,
   }).value);
+  useEffect(()=>installOfflineArchiveExecutor(async(story,options)=>{
+    const latest=offlineStoriesRef.current.find(item=>item.id===story.id);
+    if(!latest)throw Error("offline_story_source_unavailable");
+    const activeStoryRef={current:latest as OfflineStory|null};
+    const actions=createOfflineStoryMemorySyncActions({characters:charactersRef.current,relationships,settings:settingsRef.current,
+      memories,recallSettings,activeIdentityId:settingsRef.current.activeIdentityId||DEFAULT_IDENTITY_ID,activeStoryRef,memorySyncInFlightRef:{current:new Set<string>()},
+      setMemorySyncingStoryId:()=>{},onSaveOfflineStory:handleSaveOfflineStory,onSaveMemories:setMemories,
+      onSaveRelationships:setRelationships,saveActiveStorySnapshot:next=>{activeStoryRef.current=next;},
+      showToast:()=>{},needsLegacyHandoffRepair:()=>false,needsMissingSummaryRepair:()=>false,needsUninformativeSummaryRepair:()=>false});
+    return actions.handleSyncMemoryToBrain(latest,options);
+  },id=>offlineStoriesRef.current.find(item=>item.id===id)),[relationships,memories,recallSettings,settings.activeIdentityId]);
+  useEffect(() => {
+    const runtime = startCharacterContinuityRuntime({ characters, relationships, settings,recallSettings });
+    return runtime.stop;
+  }, [characters, relationships, settings.apiKey, settings.selectedModel, settings.apiEndpoint,recallSettings.extractModel]);
 
   const [immediateSummaryTask, setImmediateSummaryTask] = useState<ImmediateSummaryTask>(() => {
     const raw = readString("phone_immediate_summary_task").value;
@@ -2280,17 +2267,25 @@ export default function App() {
       // Preserve the original one-item summary format and save it only once.
       const isDelicate = char.archiveTemplateType === "delicate";
       const headerLabel = isDelicate ? `【心境日记一键归档 (细腻版 - 最近 ${rounds} 轮)】` : `【精炼事件日志一键归档 (精炼版 - 最近 ${rounds} 轮)】`;
+      const settingReviewer = createMemorySettingReviewer(char, {characterId, relationId, userIdentityId: relation.userIdentityId, conversationId: relation.conversationId}, "chat", settings);
       const result = await MemoryService.extractMemories({
+        singlePass: true,
+        requireFactResolution: true,
+        memorySettings: settingReviewer.inlineSettings(),
         character: char,
         characterId,
         relationId,
         userIdentityId: relation.userIdentityId,
         conversationId: relation.conversationId,
         recentMessages: msgsToSummarize,
+        existingClaims: loadKnowledgeClaims().value,
+        reviewAuthorizedSettings: settingReviewer,
+        prepareSemanticRegistry: (query) => prepareMemoryIdentityRegistry({ characterId, relationId,
+          userIdentityId: relation.userIdentityId, conversationId: relation.conversationId }, settings, query),
         existingMemories: [],
         scenario: "immediate-summary",
         apiKey: settings.apiKey,
-        model: (!recallSettings?.extractModel || recallSettings.extractModel === "default-chat-model") ? (settings.selectedModel || "gemini-3.5-flash") : recallSettings.extractModel,
+        model: (settings.selectedModel || "gemini-3.5-flash"),
         apiEndpoint: settings.apiEndpoint,
         templateType: char.archiveTemplateType,
         createId: () => createId("reading"),
@@ -3137,7 +3132,7 @@ export default function App() {
       ? { ...existingCharacter, ...char, ownerIdentityId }
       : { ...char, ownerIdentityId };
     const nextCharacters = existingCharacter
-      ? currentCharacters.map((candidate) => candidate.id === char.id ? savedCharacter : candidate)
+      ? currentCharacters.map((candidate) => candidate.id === char.id ? savedCharacter : Object.prototype.hasOwnProperty.call(char,"characterApi")&&resolveCanonicalCharacterId(candidate.id,currentCharacters)===resolveCanonicalCharacterId(char.id,currentCharacters)?{...candidate,characterApi:char.characterApi}:candidate)
       : [...currentCharacters, savedCharacter];
     charactersRef.current = nextCharacters;
     setCharacters(nextCharacters);
@@ -3277,8 +3272,9 @@ export default function App() {
       const relationIds = relationships
         .filter((relation) => characterIds.has(relation.characterId))
         .map((relation) => relation.id);
+      const memoryCleanup=removeCharacterTruthForRelations(relationIds,deletedCharacterIds);
+      if(!Object.values(memoryCleanup).every(Boolean)){alert("角色记忆清理未完成，角色和聊天保留，请检查存储后重试。");return;}
       removeCharacterLifeEventsForRelations(relationIds);
-      removeCharacterTruthForRelations(relationIds);
       removeMomentTopicsForCharacters(deletedCharacterIds);
       removeProactiveTopicsForRelations(relationIds);
       removeProactiveTopicsForCharacters(deletedCharacterIds);
@@ -3413,17 +3409,14 @@ export default function App() {
     }
   };
 
-  const handleClearMessages = (characterId: string, keepLastCount?: number, relationId?: string) => {
-    setMessages((prev) => {
-      const matches = (message: Message) => relationId ? message.relationId === relationId : message.characterId === characterId;
-      const charMsgs = prev.filter(matches);
-      if (typeof keepLastCount === "number" && keepLastCount > 0) {
-        const toKeep = charMsgs.slice(-keepLastCount);
-        const others = prev.filter((m) => !matches(m));
-        return [...others, ...toKeep];
-      }
-      return prev.filter((m) => !matches(m));
-    });
+  const handleClearMessages = async (characterId: string, keepLastCount?: number, relationId?: string) => {
+    const scoped=messagesRef.current.filter(message=>message.characterId===characterId&&(!relationId||message.relationId===relationId));
+    const keep=typeof keepLastCount==="number"&&keepLastCount>0?Math.floor(keepLastCount):0;
+    const targets=keep?scoped.slice(0,Math.max(0,scoped.length-keep)):scoped;
+    if(!targets.length)return true;
+    if(!await mutateSourceMessages(targets)){alert("清空尚未完成，请检查存储空间或重新打开应用恢复后重试。");return false;}
+    messagesRef.current=loadMessages([]).value;setMessages(messagesRef.current);setMemories(loadMemories([]).value);
+    return true;
   };
 
   // Chat message send handler
@@ -3478,56 +3471,32 @@ export default function App() {
     );
   };
 
-  const handleDeleteMessage = (id: string, scope?: MessageMutationScope) => {
-    const deletedMessage = messages.find((message) => message.id === id && messageMatchesMutationScope(message, scope));
-    if (!deletedMessage) return;
-    const sourceRelation = deletedMessage.relationId
-      ? relationships.find((relation) => relation.id === deletedMessage.relationId)
-      : undefined;
-    const sourceScope = sourceRelation
-      ? {
-        relationId: sourceRelation.id,
-        characterId: sourceRelation.characterId,
-        userIdentityId: sourceRelation.userIdentityId,
-        conversationId: sourceRelation.conversationId,
-      }
-      : undefined;
-    // Source-linked truth is retained for auditability but cannot remain
-    // active after its evidence message is deleted.
-    const affectedClaimIds = new Set(loadKnowledgeClaims().value
-      .filter((claim) => claim.source.messageIds?.includes(id))
-      .map((claim) => claim.id));
-    retractBySourceMessageIds([id], sourceScope);
-    retractConversationSummariesBySourceMessageIds([id], sourceScope);
-    retractBehaviorCorrectionsBySourceMessageIds([id], sourceScope);
-    if (affectedClaimIds.size > 0) {
-      setMemories((previous) => previous.filter((memory) =>
-        !(memory.sourceKnowledgeClaimIds || []).some((claimId) => affectedClaimIds.has(claimId))));
-    }
-    setMessages((prev) => prev.filter((m) => m.id !== id || !messageMatchesMutationScope(m, scope)));
+  const handleDeleteMessage = async (id: string, scope?: MessageMutationScope) => {
+    const deletedMessage = messagesRef.current.find((message) => message.id === id && messageMatchesMutationScope(message, scope));
+    if (!deletedMessage) return false;
+    if(!await mutateSourceMessages([deletedMessage])){alert("删除尚未完成，请检查存储空间后重试；如仍有恢复任务，请重新打开应用。");return false;}
+    messagesRef.current=loadMessages([]).value;
+    setMessages(messagesRef.current);setMemories(loadMemories([]).value);
+    return true;
+
   };
 
-  const handleUpdateMessage = (id: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => {
+  const handleReplaceMessages = async (targets: Message[], replacements: Message[]) => {
+    if(!await mutateSourceMessages(targets,replacements))return false;
+    messagesRef.current=loadMessages([]).value;setMessages(messagesRef.current);setMemories(loadMemories([]).value);
+    return true;
+  };
+
+  const handleUpdateMessage = async (id: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => {
     const original = messages.find((message) => message.id === id && messageMatchesMutationScope(message, scope));
     if (!original) return;
-    const sourceRelation = original.relationId
-      ? relationships.find((relation) => relation.id === original.relationId)
-      : undefined;
-    const sourceScope = sourceRelation ? {
-      relationId: sourceRelation.id,
-      characterId: sourceRelation.characterId,
-      userIdentityId: sourceRelation.userIdentityId,
-      conversationId: sourceRelation.conversationId,
-    } : undefined;
-    const affectedClaimIds = new Set(loadKnowledgeClaims().value
-      .filter((claim) => claim.source.messageIds?.includes(id))
-      .map((claim) => claim.id));
-    retractBySourceMessageIds([id], sourceScope);
-    retractConversationSummariesBySourceMessageIds([id], sourceScope);
-    retractBehaviorCorrectionsBySourceMessageIds([id], sourceScope);
-    if (affectedClaimIds.size > 0) {
-      setMemories((previous) => previous.filter((memory) =>
-        !(memory.sourceKnowledgeClaimIds || []).some((claimId) => affectedClaimIds.has(claimId))));
+    const changesEvidence = ["content", "sender", "senderId", "imageAssetId", "timestamp", "recalledAt"].some((key) =>
+      key in updatedFields && updatedFields[key as keyof Message] !== original[key as keyof Message]);
+    if(changesEvidence){
+      if(!await mutateSourceMessages([original],[{...original,...updatedFields}])){alert("修改尚未完成，原始资料已保留。请检查存储空间后重试；如仍有恢复任务，请重新打开应用。");return;}
+      messagesRef.current=loadMessages([]).value;setMessages(messagesRef.current);setMemories(loadMemories([]).value);
+      if(original.relationId)setRelationships(previous=>previous.map(relation=>relation.id===original.relationId?{...relation,lastImmediateSummaryMsgId:undefined,updatedAt:Date.now()}:relation));
+      return;
     }
     setMessages((prev) =>
       prev.map((m) => (m.id === id && messageMatchesMutationScope(m, scope) ? { ...m, ...updatedFields } : m))
@@ -4295,8 +4264,8 @@ export default function App() {
       toggleTrack(track.id, "music-library", true, playableTrack);
       setMusicPlaybackHistory(recordMusicPlayback(playableTrack, settings.activeIdentityId || DEFAULT_IDENTITY_ID));
   };
-  // Keep forum activity processing alive while the user navigates between apps.
-  // The engine still respects document visibility and persists all pending work.
+  // Restore/release already generated forum replies across apps. This engine
+  // never initiates generation; paid generation requires an explicit forum action.
   useForumActivityEngine({
     ownerIdentityId: activeIdentity.id,
     relationships,
@@ -5490,6 +5459,7 @@ export default function App() {
                     onDeleteMomentsByRelation={handleDeleteMomentsByRelation}
                     onToggleBookmark={handleToggleBookmark}
                     onDeleteMessage={handleDeleteMessage}
+                    onReplaceMessages={handleReplaceMessages}
                     onUpdateMessage={handleUpdateMessage}
                     onClose={() => setActiveApp(null)}
                     onSaveSettings={setSettings}
@@ -5510,7 +5480,8 @@ export default function App() {
                     onSaveAppointment={handleSaveAppointment}
                     offlineStories={offlineStories}
                     onSaveOfflineStory={handleSaveOfflineStory}
-                    onOpenOfflineStory={(storyId) => {
+                    onOpenOfflineStory={(storyId, messageId) => {
+                      setPendingOfflineHistoryTarget(messageId ? { storyId, id: messageId, requestId: Date.now() } : undefined);
                       setPendingOfflineStoryId(storyId);
                       setActiveApp("offline");
                     }}
@@ -5713,6 +5684,7 @@ export default function App() {
                       hideStatusBar={settings.hideStatusBar}
                       onSendMessage={handleSendMessage}
                       onDeleteMessage={handleDeleteMessage}
+                      onReplaceMessages={handleReplaceMessages}
                       onUpdateMessage={handleUpdateMessage}
                       onSaveImageToCharacterPhone={saveImageToCharacterPhone}
                       onSyncCharacterPhonePost={handleSyncCharacterPhonePost}
@@ -5823,6 +5795,8 @@ export default function App() {
                 {isAppMounted("memory") && (
                   <LazyAppBoundary visible={activeApp === "memory"}>
                     <AppMemory
+                    isActive={activeApp === "memory"}
+                    settings={settings}
                     characters={characters}
                     relationships={relationships}
                     identities={settings.identities}
@@ -5831,6 +5805,8 @@ export default function App() {
                     onSaveMemories={setMemories}
                     recallSettings={recallSettings}
                     onSaveRecallSettings={setRecallSettings}
+                    embeddingConfiguration={settings.memoryEmbedding}
+                    onSaveEmbeddingConfiguration={(memoryEmbedding) => setSettings((previous) => ({ ...previous, memoryEmbedding }))}
                     immediateSummaryTask={immediateSummaryTask}
                     onStartImmediateSummary={handleStartImmediateSummary}
                     onResetImmediateSummary={handleResetImmediateSummary}
@@ -5851,6 +5827,8 @@ export default function App() {
                       ownerIdentityId={activeIdentityId}
                       offlineStories={offlineStories}
                       openStoryId={pendingOfflineStoryId}
+                      historyTarget={pendingOfflineHistoryTarget}
+                      onHistoryTargetHandled={() => setPendingOfflineHistoryTarget(undefined)}
                       onOpenOfflineStoryHandled={(storyId) => {
                         setPendingOfflineStoryId((current) => current === storyId ? null : current);
                       }}

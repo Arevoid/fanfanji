@@ -45,10 +45,12 @@ export function normalizeKnowledgeTemporalSemantics(
 }
 
 export function isKnowledgeTemporallyActive(
-  claim: { status: string; validFrom?: number; validTo?: number },
+  claim: { status: string; validFrom?: number; validTo?: number;admissionStatus?:string;legacyCompatible?:boolean;kind?:string;truthStatus?:string;source?:{app?:string;producer?:string} },
   now = Date.now(),
 ): boolean {
   if (claim.status !== "active") return false;
+  if(claim.admissionStatus!==undefined&&claim.admissionStatus!=="retained"&&!(claim.legacyCompatible&&claim.admissionStatus==="review"))return false;
+  if(claim.source?.app==="diary"&&!(claim.source.producer==="diary-reflection.v1"&&claim.kind==="belief"&&claim.truthStatus==="inferred"))return false;
   if (claim.validFrom !== undefined && claim.validFrom > now) return false;
   if (claim.validTo !== undefined && claim.validTo <= now) return false;
   return true;

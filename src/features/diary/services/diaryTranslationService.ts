@@ -1,3 +1,4 @@
+import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
 import { apiTranslate } from "../../../utils/apiHelper";
 import type { DiaryEntry, DiaryTranslation, UserSettings } from "../../../types";
 import { createDiaryContentHash, createDiaryId } from "../../../domain/diary/diaryData";
@@ -6,8 +7,9 @@ import { getDiaryTranslation, upsertDiaryTranslation } from "../../../core/stora
 export const translateDiaryEntry = async (entry: DiaryEntry, settings: UserSettings, targetLanguage = "zh-CN", translate = apiTranslate): Promise<DiaryTranslation> => {
   const cached = getDiaryTranslation(entry, targetLanguage);
   if (cached) return cached;
+  settings=resolveCharacterTextSettings(settings,undefined,entry.characterId);
   const payload = `[DIARY_TITLE]${entry.title || ""}\n[DIARY_BODY]${entry.body}\n[DIARY_EMOTION]${entry.emotionalState || ""}`;
-  const result = await translate({ text: payload, apiKey: settings.apiKey || "", model: settings.selectedModel, apiEndpoint: settings.apiEndpoint, targetLanguage, proxyOnly: true });
+  const result = await translate({ characterId:entry.characterId,text: payload, apiKey: settings.apiKey || "", model: settings.selectedModel, apiEndpoint: settings.apiEndpoint, targetLanguage, proxyOnly: true });
   if (!result.text?.trim()) throw new Error("翻译服务未返回内容。");
   const text = result.text.trim();
   const body = text.match(/\[DIARY_BODY\]\s*([\s\S]*?)(?:\n\[DIARY_EMOTION\]|$)/)?.[1]?.trim() || text;

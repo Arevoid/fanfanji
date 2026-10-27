@@ -1,3 +1,5 @@
+import { routeCharacterTextRequest } from "../domain/character/characterTextApiRouting";
+import { bindRequestModelIdentity } from "../domain/prompt/modelDirectIdentity";
 // src/utils/apiHelper.ts
 
 import {
@@ -109,6 +111,10 @@ export class ApiChatError extends Error {
   }
 }
 
+const isUnsupportedJsonResponseFormat=(error:unknown)=>error instanceof ApiChatError&&[400,422].includes(error.status||0)
+  &&/response[_\s-]?format|responseMimeType|response_mime_type|json_object/iu.test(`${error.message} ${error.reason||""}`)
+  &&/unsupported|not supported|unrecognized|unknown (?:field|parameter)|不支持/iu.test(`${error.message} ${error.reason||""}`);
+
 const apiRequestError = (error: unknown, label: string): ApiChatError => {
   if (isApiRequestError(error, "timeout")) return new ApiChatError(describeApiRequestError(error, label), { code: "timeout", status: 504, cause: error });
   if (isApiRequestError(error, "aborted")) return new ApiChatError(describeApiRequestError(error, label), { code: "aborted", status: 499, cause: error });
@@ -161,6 +167,7 @@ async function directClientChatImpl(params: {
   timeoutMs?: number;
   /** Provider output budget for long-running workflows. */
   maxOutputTokens?: number;
+  responseFormat?: "json_object";
   imageDataUrl?: string;
   signal?: AbortSignal;
   tools?: readonly ApiToolDefinition[];
@@ -208,7 +215,8 @@ async function directClientChatImpl(params: {
         stream: streamCompatible || false,
         ...(streamCompatible === true ? { stream_options: { include_usage: true } } : {}),
         ...(typeof maxOutputTokens === "number" ? { max_tokens: Math.max(128, Math.floor(maxOutputTokens)) } : {})
-        ,...(tools && tools.length > 0 ? { tools, tool_choice: "auto" } : {})
+        ,...(params.responseFormat === "json_object" ? { response_format: { type: "json_object" } } : {})
+   ,...(tools && tools.length > 0 ? { tools, tool_choice: "auto" } : {})
       }),
       signal,
     }, requestTimeoutMs);
@@ -266,7 +274,7 @@ async function directClientChatImpl(params: {
         collectToolCalls(dataFetch.choices || []);
         const content = dataFetch.choices?.[0]?.message?.content ?? dataFetch.choices?.[0]?.text;
         aiText = Array.isArray(content)
-          ? content.map((part: any) => typeof part === "string" ? part : part?.text || "").join("")
+          ? content.filter((part: any)=>typeof part==="string"||!part?.type||part.type==="text"||part.type==="output_text").map((part: any) => typeof part === "string" ? part : part?.text || "").join("")
           : typeof content === "string" ? content : "";
       } catch (jsonErr) {
         aiText = trimmedText;
@@ -340,6 +348,7 @@ async function directClientChatImpl(params: {
         contents,
         generationConfig: {
           temperature: typeof apiTemperature === "number" ? apiTemperature : 0.7,
+          ...(params.responseFormat === "json_object" ? { responseMimeType: "application/json" } : {}),
           ...(typeof maxOutputTokens === "number" ? { maxOutputTokens: Math.max(128, Math.floor(maxOutputTokens)) } : {})
         },
         ...(geminiPrompt.systemInstruction ? {
@@ -361,7 +370,7 @@ async function directClientChatImpl(params: {
     try { dataFetch = JSON.parse(responseText); } catch {
       throw new ApiChatError("Gemini 返回了无法解析的响应。", { status: 502, code: "provider_invalid_response" });
     }
-    const aiText = dataFetch.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || "").join("") || "";
+    const aiText = dataFetch.candidates?.[0]?.content?.parts?.filter((part: any) => !part?.thought).map((part: any) => part?.text || "").join("") || "";
     const usage = normalizeProviderUsage(dataFetch.usageMetadata || dataFetch.usage);
     if (aiText.trim()) {
       return { text: aiText, ...(usage ? { usage } : {}) };
@@ -372,15 +381,23 @@ async function directClientChatImpl(params: {
   }
 }
 
-async function directClientChat(params: Parameters<typeof directClientChatImpl>[0] & { ledger?: AiRequestLedgerSession }): Promise<{ text: string; usage?: ApiProviderUsage; toolCalls?: ApiToolCall[] }> {
-  const { ledger, ...request } = params;
+async function directClientChat(params: Parameters<typeof directClientChatImpl>[0] & { singleAttempt?:boolean; ledger?: AiRequestLedgerSession; beforeAttempt?: () => boolean | Promise<boolean> }): Promise<{ text: string; usage?: ApiProviderUsage; toolCalls?: ApiToolCall[] }> {
+  const { ledger, beforeAttempt, ...request } = params;
+  if (beforeAttempt && !await beforeAttempt()) throw new Error("memory_migration_budget_limited");
   ledger?.markAttempt({
     provider: request.apiEndpoint?.trim() ? "custom-openai-compatible" : "google-gemini",
     model: request.model,
     endpoint: request.apiEndpoint?.trim() || "https://generativelanguage.googleapis.com/v1beta",
     transport: "browser_direct",
   });
-  const result = await directClientChatImpl(request);
+  let result:Awaited<ReturnType<typeof directClientChatImpl>>;
+  try{result=await directClientChatImpl(request);}catch(error){
+    if(!params.singleAttempt&&request.responseFormat&&isUnsupportedJsonResponseFormat(error)){
+      ledger?.markFallback("provider rejected JSON response format; retry without format");
+      return directClientChat({...params,responseFormat:undefined});
+    }
+    throw error;
+  }
   ledger?.recordUsage(result.usage);
   return result;
 }
@@ -424,6 +441,9 @@ async function directClientFetchModels(apiKey: string, apiEndpoint?: string, led
 // 2. Exported Wrapper Functions that try Backend first, then Fallback
 
 export type ApiChatParams = {
+  singleAttempt?:boolean;
+  /** Local admission gate, never serialized or sent to a provider. Runs per transport attempt. */
+  beforeAttempt?: () => boolean | Promise<boolean>;
   message: string;
   history: any[];
   systemInstruction?: string;
@@ -434,6 +454,7 @@ export type ApiChatParams = {
   streamCompatible?: boolean;
   timeoutMs?: number;
   maxOutputTokens?: number;
+  responseFormat?: "json_object";
   imageDataUrl?: string;
   signal?: AbortSignal;
   /** Prompt-builder scenario used to classify calls that do not provide an explicit purpose. */
@@ -459,7 +480,7 @@ export type ApiToolCall = { id?: string; name: string; arguments: Record<string,
 
 // chat wrapper
 async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSession }): Promise<{ text: string; usage?: ApiProviderUsage }> {
-  const { signal, timeoutMs, ledger, scenario: _scenario, contextItems: _contextItems, purpose, parentActionId, characterId, relationId, conversationId, retryReasons, fallbackReasons, estimatedOutputTokens, ...requestBody } = params;
+  const { singleAttempt, signal, timeoutMs, ledger, beforeAttempt, scenario: _scenario, contextItems: _contextItems, purpose, parentActionId, characterId, relationId, conversationId, retryReasons, fallbackReasons, estimatedOutputTokens, ...requestBody } = params;
   const providerHistory = Array.isArray(requestBody.history)
     ? requestBody.history.map((entry) => {
       if (!entry || typeof entry !== "object") return entry;
@@ -473,6 +494,7 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
     : safeRequestBody;
   let res: Response | null = null;
   try {
+    if (beforeAttempt && !await beforeAttempt()) throw new Error("memory_migration_budget_limited");
     ledger?.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/chat", transport: "backend_proxy" });
     res = await fetchWithTimeout("/api/chat", {
       method: "POST",
@@ -484,7 +506,7 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
     // A network failure means the optional app backend is genuinely absent.
     // Provider HTTP errors must not be retried through the browser because that
     // sends the same rejected prompt twice and hides the original status/body.
-    if (!isApiRequestError(err, "network")) throw apiRequestError(err, "聊天 API");
+    if (singleAttempt||!isApiRequestError(err, "network")) throw apiRequestError(err, "聊天 API");
     console.warn("apiChat backend network request failed, trying client direct fallback:", err);
     ledger?.markFallback("backend network failure -> browser direct");
     try {
@@ -503,6 +525,7 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
   const looksLikeStaticHostFallback = (/text\/html/i.test(contentType) && (routeMissingStatus || res.ok))
     || (routeMissingStatus && !responseText.trim());
   if (looksLikeStaticHostFallback) {
+    if(singleAttempt)throw new ApiChatError("记忆请求接口不可用，未自动追加请求",{status:res.status});
     console.warn("apiChat backend route is unavailable on this host, trying client direct fallback");
     ledger?.markFallback("backend route missing/static host -> browser direct");
     try {
@@ -515,7 +538,12 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
   }
   if (!res.ok) {
     const details = parseTextApiErrorPayload(responseText, res.status);
-    throw new ApiChatError(details.message, { status: res.status, code: details.code, reason: details.reason });
+    const error=new ApiChatError(details.message, { status: res.status, code: details.code, reason: details.reason });
+    if(!singleAttempt&&params.responseFormat&&isUnsupportedJsonResponseFormat(error)){
+      ledger?.markFallback("provider rejected JSON response format; retry without format");
+      return apiChatImpl({...params,responseFormat:undefined});
+    }
+    throw error;
   }
 
   let data: any;
@@ -538,6 +566,8 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
 }
 
 export async function apiChat(params: ApiChatParams): Promise<{ text: string }> {
+  params = routeCharacterTextRequest(params);
+  params={...params,systemInstruction:bindRequestModelIdentity(params.systemInstruction,params.model)};
   const inputCharacters = params.message.length
     + String(params.systemInstruction || "").length
     + params.history.reduce((total, entry) => total + String(entry?.text || entry?.content || "").length, 0);
@@ -735,10 +765,97 @@ export async function apiTestImageConnection(params: {
 }
 
 // extract memories wrapper
+/** Same text transport as chat, followed by the existing extraction parser and repair boundary. */
+async function runMemoryExtractionTextTransport(params: MemoryExtractionParams,ledger:AiRequestLedgerSession|undefined,request:typeof directClientChat):Promise<MemoryExtractionResponse>{
+      const prompt = buildKnowledgeExtractionPrompt({
+        singlePass:params.singlePass,memorySettings:params.memorySettings,
+        semanticReview: params.semanticReview,
+        identityReview: params.identityReview,
+        characterName: params.characterName,
+        characterProfile: params.characterProfile,
+        knownAttributes: params.knownAttributes,
+        semanticRegistry: params.semanticRegistry,
+        knownActivities: params.knownActivities,
+        history: params.history,
+        templateType: params.templateType,
+        scenario: params.scenario,
+        sourceReferenceMode: params.sourceReferenceMode,
+        includeV2Shadow: params.enableV2Shadow,
+      });
+
+      const result = await request({
+        singleAttempt:params.singlePass,
+        message: prompt,
+        history: [],
+        apiKey: params.apiKey,
+        model: params.model,
+        apiEndpoint: params.apiEndpoint,
+        apiTemperature: 0.5,
+        ledger,
+        streamCompatible: params.streamCompatible,
+        maxOutputTokens: 8192,
+        systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
+          ? params.sourceReferenceMode === "local"
+            ? "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供本次请求的 M# source refs 和原文 evidenceQuote。"
+            : "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供精确 sourceMessageIds 和原文 evidenceQuote。"
+          : undefined
+      });
+
+      const aiText = result.text || "";
+      if(params.identityReview!==undefined){const parsed=JSON.parse(aiText.trim().replace(/^```(?:json)?\s*/iu,"").replace(/\s*```$/u,""));return {text:"",items:[],candidates:[],identityReviews:Array.isArray(parsed?.reviews)?parsed.reviews:[]};}
+      if (params.semanticReview !== undefined) {
+        const review = JSON.parse(aiText.trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, ""));
+        return { text: "", items: [], candidates: [], semanticReviews: Array.isArray(review?.reviews) ? review.reviews : [] };
+      }
+      const repaired = await parseOrRepairKnowledgeExtractionOutputWithDiagnostics({
+        allowRepair:!params.singlePass,
+        rawText: aiText,
+        allowedMessageIds: new Set(params.history.map((item) => item.id)),
+        originalPrompt: prompt,
+        preserveUnvalidatedSourceHints: params.sourceReferenceMode === "local" || params.enableV2Shadow,
+        repair: async (repairPrompt) => (await request({
+          message: repairPrompt,
+          history: [],
+          apiKey: params.apiKey,
+          model: params.model,
+          apiEndpoint: params.apiEndpoint,
+          apiTemperature: 0.2,
+          ledger,
+        streamCompatible: params.streamCompatible,
+        maxOutputTokens: 8192,
+          systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
+            ? params.sourceReferenceMode === "local"
+              ? "你是结构化记忆修复器。只输出使用本次 M# source refs 且可验证的 JSONL，不要解释。"
+              : "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。"
+            : undefined,
+        })).text || "",
+      });
+      return {
+        text: repaired.text,
+        items: repaired.candidates,
+        candidates: repaired.candidates,
+        ...(repaired.structuredCandidatesV2.length ? { structuredCandidatesV2: repaired.structuredCandidatesV2 } : {}),
+        ...(repaired.v2MetadataPresent ? { v2MetadataPresent: true } : {}),
+        ...(repaired.runtimeLineageTransport.legacy.length || repaired.runtimeLineageTransport.v2.length
+          ? { runtimeLineageTransport: repaired.runtimeLineageTransport }
+          : {}),
+        structuredOutputTelemetry: repaired.structuredOutputTelemetry,
+      };
+
+}
+
 async function apiExtractMemoriesImpl(params: {
+  singlePass?:boolean;
+  memorySettings?:readonly {id:string;text:string}[];
+  identityReview?: readonly {index:number;statement:string;currentText:string;recoverCandidate?:boolean;sourceMessageIds?:readonly string[]}[];
+  semanticReview?: readonly import("../domain/characterKnowledge/semanticTransitionReview").SemanticTransitionProposal[];
+  semanticRegistry?: readonly { id: string; statement: string; subject: string; condition?: string; value?: string }[];
+  knownAttributes?: readonly string[];
+  knownActivities?: readonly string[];
   history: KnowledgeExtractionHistoryItem[];
   characterName: string;
   characterProfile?: string;
+  streamCompatible?: boolean;
   apiKey: string;
   model: string;
   apiEndpoint?: string;
@@ -757,6 +874,8 @@ async function apiExtractMemoriesImpl(params: {
   ledger?: AiRequestLedgerSession;
 }): Promise<{
   text: string;
+  semanticReviews?: unknown[];
+  identityReviews?: unknown[];
   items: ExtractedKnowledgeCandidatePayload[];
   candidates?: ExtractedKnowledgeCandidatePayload[];
   structuredCandidatesV2?: import("../domain/memory/memoryExtractionSchema").MemoryExtractionCandidateV2[];
@@ -765,8 +884,13 @@ async function apiExtractMemoriesImpl(params: {
   runtimeLineageTransport?: import("../features/characterKnowledge/services/knowledgeExtractionProtocol").KnowledgeExtractionLineageTransport;
   structuredOutputTelemetry?: StructuredOutputTelemetry;
   error?: string;
+  errorDetails?: { status: number; code: string };
 }> {
   const { ledger, purpose, logicalActionId, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
+  if(params.scenario==="offline"){
+    try{return await runMemoryExtractionTextTransport(params,ledger,next=>apiChatImpl({...next,purpose:"memory_extract",characterId:params.characterId,relationId:params.relationId,conversationId:params.conversationId}));}
+    catch(error){return {text:"",items:[],error:error instanceof Error?error.message:"offline_text_transport_unavailable"};}
+  }
   try {
     ledger?.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/extract-memories", transport: "backend_proxy" });
     const res = await fetchWithTimeout("/api/extract-memories", {
@@ -804,6 +928,8 @@ async function apiExtractMemoriesImpl(params: {
       ledger?.recordUsage(normalizeProviderUsage(data?.usage));
       return {
         text: typeof data.text === "string" ? data.text : "",
+        ...(params.semanticReview !== undefined && Array.isArray(data.semanticReviews) ? { semanticReviews: data.semanticReviews } : {}),
+        ...(params.identityReview !== undefined && Array.isArray(data.identityReviews) ? {identityReviews:data.identityReviews}:{}),
         items: Array.isArray(data.candidates) ? data.candidates : [],
         ...(Array.isArray(data.candidates) ? { candidates: data.candidates } : {}),
         ...(structuredCandidatesV2?.length ? { structuredCandidatesV2 } : {}),
@@ -818,7 +944,8 @@ async function apiExtractMemoriesImpl(params: {
         ? data.message.trim()
         : `记忆提取接口返回异常（HTTP ${res.status}）。`;
     if (!res.ok) {
-      return { text: "", items: [], error: backendMessage };
+      const code = typeof data?.code === "string" && /^[a-z_]{1,40}$/.test(data.code) ? data.code : "unknown";
+      return { text: "", items: [], error: `${backendMessage}（HTTP ${res.status} · ${code}）`, errorDetails: { status: res.status, code } };
     }
     return { text: typeof data?.text === "string" ? data.text : "", items: [], error: backendMessage };
   } catch (err) {
@@ -828,63 +955,7 @@ async function apiExtractMemoriesImpl(params: {
     console.warn("apiExtractMemories backend failed, trying client direct fallback:", err);
     ledger?.markFallback("backend memory extraction failure -> browser direct");
     try {
-      const prompt = buildKnowledgeExtractionPrompt({
-        characterName: params.characterName,
-        characterProfile: params.characterProfile,
-        history: params.history,
-        templateType: params.templateType,
-        scenario: params.scenario,
-        sourceReferenceMode: params.sourceReferenceMode,
-        includeV2Shadow: params.enableV2Shadow,
-      });
-
-      const result = await directClientChat({
-        message: prompt,
-        history: [],
-        apiKey: params.apiKey,
-        model: params.model,
-        apiEndpoint: params.apiEndpoint,
-        apiTemperature: 0.5,
-        ledger,
-        systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
-          ? params.sourceReferenceMode === "local"
-            ? "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供本次请求的 M# source refs 和原文 evidenceQuote。"
-            : "你是长期知识候选提取器。严格输出 JSONL，并为每条候选提供精确 sourceMessageIds 和原文 evidenceQuote。"
-          : undefined
-      });
-
-      const aiText = result.text || "";
-      const repaired = await parseOrRepairKnowledgeExtractionOutputWithDiagnostics({
-        rawText: aiText,
-        allowedMessageIds: new Set(params.history.map((item) => item.id)),
-        originalPrompt: prompt,
-        preserveUnvalidatedSourceHints: params.sourceReferenceMode === "local" || params.enableV2Shadow,
-        repair: async (repairPrompt) => (await directClientChat({
-          message: repairPrompt,
-          history: [],
-          apiKey: params.apiKey,
-          model: params.model,
-          apiEndpoint: params.apiEndpoint,
-          apiTemperature: 0.2,
-          ledger,
-          systemInstruction: params.apiEndpoint && params.apiEndpoint.trim()
-            ? params.sourceReferenceMode === "local"
-              ? "你是结构化记忆修复器。只输出使用本次 M# source refs 且可验证的 JSONL，不要解释。"
-              : "你是结构化记忆修复器。只输出可验证的 JSONL，不要解释。"
-            : undefined,
-        })).text || "",
-      });
-      return {
-        text: repaired.text,
-        items: repaired.candidates,
-        candidates: repaired.candidates,
-        ...(repaired.structuredCandidatesV2.length ? { structuredCandidatesV2: repaired.structuredCandidatesV2 } : {}),
-        ...(repaired.v2MetadataPresent ? { v2MetadataPresent: true } : {}),
-        ...(repaired.runtimeLineageTransport.legacy.length || repaired.runtimeLineageTransport.v2.length
-          ? { runtimeLineageTransport: repaired.runtimeLineageTransport }
-          : {}),
-        structuredOutputTelemetry: repaired.structuredOutputTelemetry,
-      };
+      return await runMemoryExtractionTextTransport(params,ledger,directClientChat);
     } catch (fallbackErr) {
       console.error("Direct extract memories fallback failed:", fallbackErr);
       return {
@@ -899,9 +970,11 @@ async function apiExtractMemoriesImpl(params: {
 }
 
 export async function apiExtractMemories(params: Parameters<typeof apiExtractMemoriesImpl>[0]): Promise<Awaited<ReturnType<typeof apiExtractMemoriesImpl>>> {
+  if(params.scenario==="offline")params={...params,singlePass:params.singlePass!==false};
+  params = routeCharacterTextRequest(params);
   const inputCharacters = params.history.reduce((total, entry) => total + String(entry.text || "").length, 0);
   const logicalActionId = params.logicalActionId || createAiActionId();
-  const requestParams = { ...params, logicalActionId };
+  const requestParams = routeCharacterTextRequest({ ...params, logicalActionId });
   return trackApiUsage("memory-extraction", inputCharacters, buildLedgerInput("memory_extract", inputCharacters, requestParams), async (ledger) => {
     // Normalize structural failures inside the ledger boundary so a provider
     // response containing prose is durably accounted as a failed action.
@@ -984,6 +1057,7 @@ ${referencesText}
 }
 
 export async function apiSummarizePersonality(params: Parameters<typeof apiSummarizePersonalityImpl>[0]): Promise<{ text: string }> {
+  params = routeCharacterTextRequest(params);
   const inputCharacters = params.references.reduce((total, reference) => total + String(reference?.title || "").length + String(reference?.content || "").length, 0);
   return trackApiUsage("personality", inputCharacters, buildLedgerInput("personality_summary", inputCharacters, params), (ledger) => apiSummarizePersonalityImpl({ ...params, ledger }));
 }
@@ -1086,6 +1160,7 @@ ${params.text}
 }
 
 export async function apiTranslate(params: Parameters<typeof apiTranslateImpl>[0]): Promise<{ text: string }> {
+  params = routeCharacterTextRequest(params);
   return trackApiUsage("translation", params.text.length, buildLedgerInput(params.purpose || "translation", params.text.length, params), (ledger) => apiTranslateImpl({ ...params, ledger }));
 }
 
@@ -1115,10 +1190,10 @@ export async function apiExtractMemoriesWithModelFallback(
   request: (nextParams: MemoryExtractionParams) => Promise<MemoryExtractionResponse> = apiExtractMemories,
 ): Promise<MemoryExtractionResponse> {
   const logicalActionId = params.logicalActionId || createAiActionId();
-  const requestParams = { ...params, logicalActionId };
+  const requestParams = routeCharacterTextRequest({ ...params, logicalActionId });
   const primary = normalizeMemoryExtractionResponse(await request(requestParams));
   const normalizedFallback = fallbackModel?.trim();
-  if (!primary.error || !normalizedFallback || normalizedFallback === params.model.trim()) return primary;
+  if (params.singlePass||params.scenario==="offline"&&params.singlePass!==false||!primary.error || !normalizedFallback || normalizedFallback === requestParams.model.trim() || requestParams.model !== params.model || routeCharacterTextRequest({...requestParams,model:normalizedFallback}).model !== normalizedFallback) return primary;
   console.warn(`Memory extraction model '${params.model}' failed; retrying with the active chat model '${normalizedFallback}'.`);
   const fallbackResult = normalizeMemoryExtractionResponse(await request({ ...requestParams, model: normalizedFallback }));
   return fallbackResult.structuredOutputTelemetry

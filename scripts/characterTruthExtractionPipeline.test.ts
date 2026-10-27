@@ -1,3 +1,4 @@
+import { meaningfulMemoryValue } from "./fixtures/memoryValueFixture";
 import assert from "node:assert/strict";
 import { MemoryService } from "../src/domain/memory/MemoryService";
 import {
@@ -33,7 +34,7 @@ const payload = (overrides: Record<string, unknown> = {}) => ({
   subject: "relationship",
   temporalStatus: "future",
   sourceMessageIds: [userMessage.id],
-  evidenceQuote: userMessage.content,
+  evidenceQuote: userMessage.content, valueAssessment: meaningfulMemoryValue(userMessage.content),
   ...overrides,
 });
 
@@ -151,7 +152,7 @@ const inventedByCharacter = await MemoryService.extractMemories({ ...baseContext
     kind: "fact",
     temporalStatus: "past",
     sourceMessageIds: [characterMessage.id],
-    evidenceQuote: characterMessage.content,
+    evidenceQuote: characterMessage.content, valueAssessment: meaningfulMemoryValue(characterMessage.content),
   })],
 }));
 assert.equal(inventedByCharacter.acceptedClaims[0]?.truthStatus, "inferred");

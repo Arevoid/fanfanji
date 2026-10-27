@@ -11,8 +11,9 @@ function describeDeterministicArtifact(message: Message): string | undefined {
   if (message.content.startsWith("[转账]")) return `${actor}在聊天中发起了金额为 ${parts[1] || "未知"} 元的转账。`;
   if (message.content.startsWith("[音乐]")) return `${actor}在聊天中分享了音乐《${parts[1] || "未知曲目"}》。`;
   if (message.content.startsWith("[通话记录]")) {
-    const call = parseCallRecord(message.content);
-    return call.status === "completed" ? `双方完成了一次${call.callType || "语音"}通话，记录时长为 ${call.duration || "未知"}。` : undefined;
+    // The original activity record remains in Messages. Durable knowledge is
+    // extracted from the saved transcript, not manufactured from its duration.
+    return undefined;
   }
   if (message.content.startsWith("[位置]")) return `${actor}在聊天中分享了位置“${parts[1] || "未命名位置"}”；这不表示其本人实际位于该处。`;
   if (message.content.startsWith("[文件]")) return `${actor}在聊天中分享了文件《${parts[1] || "未命名文件"}》。`;

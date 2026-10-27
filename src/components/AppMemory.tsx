@@ -9,12 +9,33 @@ import { loadConversationSummaries, saveConversationSummaries } from "../core/st
 import { loadBehaviorCorrections, saveBehaviorCorrections } from "../core/storage/repositories/behaviorCorrectionRepository";
 import type { BehaviorCorrectionRecord, ConversationSummaryRecord, KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
 import { createManualKnowledgeClaim } from "../features/characterKnowledge/services/manualKnowledgeService";
+import { restoreMemoryStoreBackup } from "../features/characterKnowledge/services/memoryBackupRestoreService";
+import { readMemoryContinuityBackup, setCoreMemory, getRemainingLegacyMemories } from "../features/characterKnowledge/services/memoryManagementService";
+import {MEMORY_GALLERY_CATEGORIES,memoryGalleryCategories,isMemoryGalleryOldMaterial,memoryGalleryEvidenceLabel,memoryGalleryTitle,memoryGalleryDisplayText,relatedMemorySummaries,type MemoryGalleryCategory} from "../domain/memory/memoryGallery";
+import { forgetKnowledgeClaim,filterRecallableKnowledge } from "../features/characterKnowledge/services/characterContinuityService";
+import {isConversationSummarySourceValid} from "../domain/characterKnowledge/conversationSummaryProjection";
+import { MemoryAutoLoad } from "../features/characterKnowledge/components/MemoryAutoLoad";
+import { MemoryContinuityPanel, type MemoryView } from "../features/characterKnowledge/components/MemoryContinuityPanel";
+import { LegacyMemoryCompatibilityNotice } from "../features/characterKnowledge/components/LegacyMemoryCompatibilityNotice";
+import { MemorySemanticSettings } from "../features/characterKnowledge/components/MemorySemanticSettings";
+import {readMemorySystem} from "../features/characterKnowledge/services/memorySystemService";
+import {readMemoryReviewHistory} from "../features/characterKnowledge/services/memoryPendingReviewService";
+import { MemoryVectorProgress } from "../features/characterKnowledge/components/MemoryVectorProgress";
+import { projectOrganizedKnowledge } from "../domain/characterKnowledge/knowledgeOrganization";
+import { deduplicateMemoryGalleryClaims } from "../domain/memory/memoryGallery";
+import { buildMemoryEpisodeCards } from "../domain/memory/memoryEpisodeCards";
+import { retractMany as retractKnowledgeClaimGroup, supersedeMany as supersedeKnowledgeClaimGroup } from "../core/storage/repositories/characterKnowledgeRepository";
+import { readMemoryOrganization } from "../features/characterKnowledge/services/memoryOrganizationService";
+import {MemoryCharacterPicker} from "../features/characterKnowledge/components/MemoryCharacterPicker";
+import {readMemoryCharacterSelection,rememberMemoryCharacterSelection} from "../features/characterKnowledge/services/memoryCharacterSelection";
+import type { MemoryEmbeddingConfiguration } from "../features/characterKnowledge/services/memoryEmbeddingProvider";
 import { getMemoryDisplayContent } from "../domain/memory/offlineMemorySync";
 import { commitMemoryWriteBundle } from "../domain/memory/memoryWriteCoordinator";
 import { rankRelevantMemories } from "../domain/memory/MemoryRetriever";
 import { getLastTruthRetrievalDiagnostics } from "../features/characterKnowledge/services/truthRetrievalService";
 import { buildMemoryCenterRecords, filterMemoryCenterRecords, MEMORY_CENTER_LAYER_LABELS, MEMORY_CENTER_SOURCE_LABELS, MEMORY_CENTER_TYPE_LABELS, type MemoryCenterRecord, type MemoryCenterRecordType } from "../domain/memory/memoryCenterModel";
 import { 
+  ChevronDown,
   ChevronLeft,
   Search, 
   Plus, 
@@ -38,6 +59,9 @@ import {
 } from "lucide-react";
 
 interface AppMemoryProps {
+  isActive?: boolean;
+  embeddingConfiguration?: MemoryEmbeddingConfiguration;
+  onSaveEmbeddingConfiguration?: (configuration: MemoryEmbeddingConfiguration) => void;
   characters: Character[];
   relationships: CharacterRelationship[];
   identities?: UserIdentity[];
@@ -53,6 +77,7 @@ interface AppMemoryProps {
   onClose: () => void;
   selectedModel?: string;
   apiEndpoint?: string;
+  settings?: import("../types").UserSettings;
   openDiagnosticsRequestId?: number;
 }
 
@@ -72,6 +97,7 @@ const MEMORY_CENTER_TYPE_OPTIONS: Array<{ value: MemoryCenterRecordType | "all";
 type MemoryCenterDeleteMode = "retract" | "permanent";
 
 export default function AppMemory({
+  isActive = true,
   characters,
   relationships,
   identities = [],
@@ -87,8 +113,19 @@ export default function AppMemory({
   onClose,
   selectedModel = "gemini-3.5-flash",
   apiEndpoint = "",
+  settings,
   openDiagnosticsRequestId = 0,
+  embeddingConfiguration,
+  onSaveEmbeddingConfiguration,
 }: AppMemoryProps) {
+  const [, refreshStoredMemory] = useState(0);
+  useEffect(() => {
+    const refresh = () => refreshStoredMemory((value) => value + 1);
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("fanfanji:memory-data-updated",refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh);document.removeEventListener("fanfanji:memory-data-updated",refresh); };
+  }, []);
   const identityScope = createIdentityScope(activeIdentityId, identities);
   const displayCharacters = characters.filter((character) => !character.isGroupChat && !character.isContactInstance);
   const normalizeCharacterId = (characterId: string) => resolveCanonicalCharacterId(characterId, characters);
@@ -101,7 +138,14 @@ export default function AppMemory({
     conversationId: relation.conversationId,
   });
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCharacterId, setSelectedCharacterId] = useState<string>("all");
+  const [memoryView, setMemoryView] = useState<MemoryView>("memories");
+  const [galleryCategory,setGalleryCategory]=useState<MemoryGalleryCategory|"old"|null>(null);
+  const [visibleRecordCount, setVisibleRecordCount] = useState(30);
+  const [selectedCharacterId, setSelectedCharacterId] = useState<string>(()=>{
+    const previous=readMemoryCharacterSelection(activeIdentityId);return displayCharacters.some(character=>character.id===previous)?previous:"";
+  });
+  const [showCharacterPicker,setShowCharacterPicker]=useState(()=>!displayCharacters.some(character=>character.id===readMemoryCharacterSelection(activeIdentityId)));
+  const selectedMemoryCharacter=displayCharacters.find(character=>character.id===selectedCharacterId);
   const [selectedRelationId, setSelectedRelationId] = useState<string>("all");
   const [activeRecordType, setActiveRecordType] = useState<MemoryCenterRecordType | "all">("all");
   
@@ -122,11 +166,20 @@ export default function AppMemory({
   }, [openDiagnosticsRequestId]);
 
   useEffect(() => {
-    setSelectedCharacterId("all");
+    const previous=readMemoryCharacterSelection(activeIdentityId);
+    setSelectedCharacterId(displayCharacters.some(character=>character.id===previous)?previous:"");
+    setShowCharacterPicker(!displayCharacters.some(character=>character.id===previous));
+    setSearchQuery("");setSelectedMemoryCenterRecord(null);setMemoryCenterActionMenuId(null);setGalleryCategory(null);setMemoryView("memories");
     setSelectedRelationId("all");
     setImmediateCharId("");
     setImmediateRelationId("");
   }, [activeIdentityId]);
+
+  useEffect(()=>{
+    if(selectedCharacterId&&!displayCharacters.some(character=>character.id===selectedCharacterId)){
+      setSelectedCharacterId("");setSelectedMemoryCenterRecord(null);setShowCharacterPicker(true);
+    }
+  },[selectedCharacterId,displayCharacters]);
 
   // States for automatic summary settings
   const [selectedCharForAutoSummary, setSelectedCharForAutoSummary] = useState<string>("");
@@ -144,7 +197,7 @@ export default function AppMemory({
   };
 
   const openAutoSummaryModal = () => {
-    const firstChar = displayCharacters[0];
+    const firstChar = selectedMemoryCharacter || displayCharacters[0];
     if (firstChar) {
       setSelectedCharForAutoSummary(firstChar.id);
       setModalSummaryTriggerRound(normalizeAutoSummaryRounds(firstChar.summaryTriggerRound));
@@ -165,12 +218,14 @@ export default function AppMemory({
   const [immediateRounds, setImmediateRounds] = useState<number>(15);
 
   const openImmediateSummaryModal = () => {
-    const firstChar = displayCharacters[0];
+    const firstChar = selectedMemoryCharacter || displayCharacters[0];
     if (firstChar) {
       setImmediateCharId(firstChar.id);
     } else {
       setImmediateCharId("");
     }
+    const relations = scopedRelationships.filter((relation) => relation.characterId === firstChar?.id);
+    setImmediateRelationId(relations.find((relation) => relation.id === selectedRelationId)?.id || (relations.length === 1 ? relations[0].id : ""));
     setImmediateRounds(15);
     setShowImmediateModal(true);
     setShowMenu(false);
@@ -188,6 +243,7 @@ export default function AppMemory({
 
   // Unified memory center edit state
   const [editingMemoryCenterRecord, setEditingMemoryCenterRecord] = useState<MemoryCenterRecord | null>(null);
+  const [editTruthMode, setEditTruthMode] = useState<"correction" | "change">("correction");
   const [editMemoryCenterContent, setEditMemoryCenterContent] = useState("");
 
   // Inline edit state
@@ -219,21 +275,30 @@ export default function AppMemory({
   const allConversationSummaries = loadConversationSummaries().value;
   const allBehaviorCorrections = loadBehaviorCorrections().value;
   const knowledgeClaims = allKnowledgeClaims.filter((claim) => matchesIdentityScope(claim.userIdentityId, identityScope));
+  const knowledgeProjection = deduplicateMemoryGalleryClaims(projectOrganizedKnowledge(knowledgeClaims));
   const conversationSummaries = allConversationSummaries.filter((summary) => matchesIdentityScope(summary.userIdentityId, identityScope));
   const behaviorCorrections = allBehaviorCorrections.filter((correction) => matchesIdentityScope(correction.userIdentityId, identityScope));
   const memoryCenterRecords = buildMemoryCenterRecords({
     memories: scopedMemories,
-    claims: knowledgeClaims,
+    claims: knowledgeProjection,
     summaries: conversationSummaries,
     corrections: behaviorCorrections,
   });
-  const baseFilteredMemoryCenterRecords = filterMemoryCenterRecords(memoryCenterRecords, {
+  const episodeCards=buildMemoryEpisodeCards({records:memoryCenterRecords,claims:knowledgeProjection,summaries:conversationSummaries});
+  const baseFilteredMemoryCenterRecords = filterMemoryCenterRecords(selectedMemoryCharacter?episodeCards:[], {
     recordType: activeRecordType,
     characterId: selectedCharacterId,
     relationId: selectedRelationId,
     searchQuery,
   });
-  const filteredMemoryCenterRecords = baseFilteredMemoryCenterRecords;
+  const filteredMemoryCenterRecords = baseFilteredMemoryCenterRecords.filter(record=>{
+    const claim=record.recordType==="truth"?knowledgeProjection.find(item=>item.id===record.id):undefined;
+    if(!claim&&activeRecordType!=="all")return true;
+    if(galleryCategory==="old")return !claim||isMemoryGalleryOldMaterial(claim)||claim.status!=="active"||Boolean(claim.supersededById);
+    const categories=episodeCards.find(card=>card.id===record.id)?.categoryIds||[];
+    return Boolean(claim&&!knowledgeProjection.some(other=>other.id!==claim.id&&other.status==="active"&&other.mergedClaimIds?.includes(claim.id))&&(galleryCategory?categories.includes(galleryCategory):categories.length>0));
+  });
+  useEffect(() => setVisibleRecordCount(30), [searchQuery, selectedCharacterId, selectedRelationId, memoryView,galleryCategory]);
   const getClaimForMemory = (item: MemoryItem): KnowledgeClaim | undefined =>
     item.sourceKnowledgeClaimIds?.map((claimId) => knowledgeClaims.find((claim) => claim.id === claimId)).find(Boolean);
   const getRelationLabel = (relationId?: string): string => {
@@ -289,7 +354,10 @@ export default function AppMemory({
   });
   const selectedDiagnosticRelation = selectedRelationId !== "all"
     ? relationships.find((relation) => relation.id === selectedRelationId)
-    : undefined;
+    : relationships.filter(relation => relation.characterId === normalizeCharacterId(selectedCharacterId))
+      .filter(relation => getLastTruthRetrievalDiagnostics(toTruthScope(relation)))
+      .sort((a, b) => (getLastTruthRetrievalDiagnostics(toTruthScope(b))?.recordedAt || 0)
+        - (getLastTruthRetrievalDiagnostics(toTruthScope(a))?.recordedAt || 0))[0];
   const runtimeTruthDiagnostics = selectedDiagnosticRelation
     ? getLastTruthRetrievalDiagnostics(toTruthScope(selectedDiagnosticRelation))
     : undefined;
@@ -311,7 +379,8 @@ export default function AppMemory({
   const getMemoryCenterRecallDisabled = (record: MemoryCenterRecord): boolean => {
     if (record.status !== "active") return true;
     if (record.recordType === "truth") {
-      return Boolean(knowledgeClaims.find((claim) => claim.id === record.id)?.recallDisabled);
+      const claim=knowledgeClaims.find(claim=>claim.id===record.id);
+      return Boolean(claim&&cardClaimIds(record).every(id=>allKnowledgeClaims.find(candidate=>candidate.id===id)?.recallDisabled));
     }
     if (record.recordType === "compatibility") {
       const item = memories.find((candidate) => candidate.id === record.id);
@@ -320,9 +389,26 @@ export default function AppMemory({
     return false;
   };
 
-  const isMemoryCenterRecallEligible = (record: MemoryCenterRecord): boolean =>
-    record.status === "active" && (record.recordType === "truth" || record.recordType === "compatibility");
+  const isMemoryCenterRecallEligible = (record: MemoryCenterRecord): boolean => {
+    if(record.status!=="active")return false;
+    if(record.recordType==="truth"){
+      const claim=knowledgeClaims.find(claim=>claim.id===record.id);
+      return Boolean(claim&&!isMemoryGalleryOldMaterial(claim)&&(claim.source.app!=="diary"||claim.source.producer==="diary-reflection.v1"));
+    }
+    return record.recordType==="compatibility";
+  };
 
+  const groupedClaimIds=(claim:KnowledgeClaim,records=allKnowledgeClaims)=>{
+    if(!records.some(candidate=>candidate.id===claim.id&&candidate.statement===claim.statement&&candidate.status==="active"))return [];
+    const projection=records===allKnowledgeClaims?knowledgeProjection:deduplicateMemoryGalleryClaims(projectOrganizedKnowledge(records));
+    const ids=[claim.id,...(projection.find(item=>item.id===claim.id)?.mergedClaimIds||[])];
+    return [...new Set(ids)].filter(id=>records.some(candidate=>candidate.id===id&&candidate.characterId===claim.characterId
+      &&candidate.relationId===claim.relationId&&candidate.userIdentityId===claim.userIdentityId&&candidate.conversationId===claim.conversationId));
+  };
+  const cardClaimIds=(record:MemoryCenterRecord,records=allKnowledgeClaims)=>{
+    const ids=episodeCards.find(card=>card.id===record.id)?.memberClaimIds||[record.id];
+    return [...new Set(ids.flatMap(id=>{const claim=knowledgeClaims.find(item=>item.id===id);return claim?groupedClaimIds(claim,records):[];}))];
+  };
   const toggleMemoryCenterRecall = (record: MemoryCenterRecord) => {
     if (record.recordType === "truth") {
       const claim = knowledgeClaims.find((candidate) => candidate.id === record.id);
@@ -330,15 +416,19 @@ export default function AppMemory({
         alert("未找到对应的 Truth 原记录，无法修改召回状态。");
         return;
       }
-      const nextDisabled = !claim.recallDisabled;
-      const write = saveKnowledgeClaims(allKnowledgeClaims.map((candidate) => candidate.id === claim.id
+      const nextDisabled = !getMemoryCenterRecallDisabled(record);
+      const latest=loadKnowledgeClaims();
+      if(!latest.valid){alert("记忆暂时无法读取，请稍后重试。");return;}
+      const group=new Set(cardClaimIds(record,latest.value));
+      const write = saveKnowledgeClaims(latest.value.map((candidate) => group.has(candidate.id)&&candidate.characterId===claim.characterId&&candidate.relationId===claim.relationId&&candidate.userIdentityId===claim.userIdentityId&&candidate.conversationId===claim.conversationId
         ? { ...candidate, recallDisabled: nextDisabled }
         : candidate));
       if (!write.success) {
         alert("Truth 召回状态保存失败，记录未改变。");
         return;
       }
-      setSelectedMemoryCenterRecord({ ...record });
+      refreshStoredMemory(value=>value+1);
+      setSelectedMemoryCenterRecord(current=>current?.id===record.id?{...record}:current);
       return;
     }
     if (record.recordType === "compatibility") {
@@ -348,7 +438,7 @@ export default function AppMemory({
         return;
       }
       toggleMemoryRecall(item);
-      setSelectedMemoryCenterRecord({ ...record });
+      setSelectedMemoryCenterRecord(current=>current?.id===record.id?{...record}:current);
       return;
     }
     alert("摘要和规则记录目前由系统统一管理，暂不支持单条暂停；查看详情不会改变任何数据。");
@@ -368,12 +458,17 @@ export default function AppMemory({
       return { label: "不参与召回", dotClass: "bg-slate-300", textClass: "text-slate-400" };
     }
     if (record.recordType === "truth" || record.recordType === "compatibility") {
+      if(!isMemoryCenterRecallEligible(record))return {label:"保留待整理，不参与召回",dotClass:"bg-slate-300",textClass:"text-slate-400"};
       const disabled = getMemoryCenterRecallDisabled(record);
       return disabled
         ? { label: "已暂停", dotClass: "bg-amber-400", textClass: "text-amber-600" }
         : { label: "参与召回", dotClass: "bg-emerald-500", textClass: "text-emerald-600" };
     }
-    return { label: "参与召回（系统）", dotClass: "bg-emerald-500", textClass: "text-emerald-600" };
+    if(record.recordType==="summary"){
+      const summary=conversationSummaries.find(summary=>summary.id===record.id);
+      if(!summary||!isConversationSummarySourceValid(summary,filterRecallableKnowledge(knowledgeClaims)))return {label:"保留资料，不参与召回",dotClass:"bg-slate-300",textClass:"text-slate-400"};
+    }
+    return { label: "相关时按需使用", dotClass: "bg-emerald-500", textClass: "text-emerald-600" };
   };
 
   const requestDeleteMemoryCenterRecord = (record: MemoryCenterRecord, mode: MemoryCenterDeleteMode) => {
@@ -401,12 +496,13 @@ export default function AppMemory({
         conversationId: claim.conversationId,
       };
       const write = mode === "permanent"
-        ? removeKnowledgeClaim(scope, claim.id)
-        : retractKnowledgeClaim(scope, claim.id, "memory_center_retracted");
+        ? forgetKnowledgeClaim(claim,cardClaimIds(record,loadKnowledgeClaims().value))
+        : retractKnowledgeClaimGroup(scope, cardClaimIds(record,loadKnowledgeClaims().value), "memory_center_retracted");
       if (!write.success) {
-        alert(mode === "permanent" ? "Truth 永久删除失败，记录未改变。" : "Truth 撤回失败，记录未改变。");
+        alert(mode === "permanent" ? "Truth 忘记记忆失败，记录未改变。" : "Truth 撤回失败，记录未改变。");
         return false;
       }
+      if(mode==="permanent")onSaveMemories(getRemainingLegacyMemories());
     } else if (record.recordType === "summary") {
       const write = saveConversationSummaries(allConversationSummaries.filter((summary) => summary.id !== record.id));
       if (!write.success) {
@@ -450,13 +546,17 @@ export default function AppMemory({
   const downloadMemoryBackup = () => {
     const payload = {
       format: "fanfanji-memory-backup",
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       memories,
       claims: allKnowledgeClaims,
       summaries: allConversationSummaries,
       corrections: allBehaviorCorrections,
       recallSettings,
+      continuity: readMemoryContinuityBackup().value,
+      organization: readMemoryOrganization().value,
+      reviewActions: readMemoryReviewHistory().value,
+      memorySystem: readMemorySystem().value,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
@@ -480,19 +580,29 @@ export default function AppMemory({
         summaries: ConversationSummaryRecord[];
         corrections: BehaviorCorrectionRecord[];
         recallSettings: MemoryVaultSettings;
+        continuity: unknown;
+        organization: unknown;
+        reviewActions: unknown;
+        memorySystem: import("../features/characterKnowledge/services/memorySystemService").MemorySystemState;
       }>;
-      if (parsed.format !== "fanfanji-memory-backup" || parsed.version !== 1
+      if (parsed.format !== "fanfanji-memory-backup" || ![1, 2].includes(parsed.version || 0)
         || !Array.isArray(parsed.memories) || !Array.isArray(parsed.claims)
         || !Array.isArray(parsed.summaries) || !Array.isArray(parsed.corrections)) {
         alert("不是可识别的米饭机记忆备份文件。");
         return;
       }
       if (!window.confirm("恢复记忆备份会替换当前记忆、Truth、摘要和修正记录。继续前请确认已有备份。")) return;
-      const claimWrite = saveKnowledgeClaims(parsed.claims);
-      const summaryWrite = saveConversationSummaries(parsed.summaries);
-      const correctionWrite = saveBehaviorCorrections(parsed.corrections);
-      if (!claimWrite.success || !summaryWrite.success || !correctionWrite.success) {
-        alert("记忆备份恢复失败，原有页面数据未主动清空；请检查存储空间后重试。");
+      const restored = restoreMemoryStoreBackup({
+        claims: parsed.claims, summaries: parsed.summaries, corrections: parsed.corrections,
+        memories: parsed.memories, recallSettings: parsed.recallSettings, continuity: parsed.continuity,
+        organization: parsed.organization,
+        reviewActions: parsed.reviewActions,
+        memorySystem: parsed.memorySystem,
+      });
+      if (!restored.success) {
+        alert(restored.error === "rollback"
+          ? "恢复未完成，已保留恢复快照。请释放存储空间后重新打开应用以恢复原数据。"
+          : "记忆备份恢复失败，原有数据已保留；请检查备份格式和存储空间。");
         return;
       }
       onSaveMemories(parsed.memories);
@@ -525,6 +635,7 @@ export default function AppMemory({
       sourceRecordId: memoryId,
       recordedAt: now,
       sourceApp: "memory",
+      importance: newImportance,
     });
     if (!claim) {
       alert("长期认知写入失败，未保存兼容记忆。");
@@ -602,7 +713,9 @@ export default function AppMemory({
     }
   };
 
-  const requestEditMemoryCenterRecord = (record: MemoryCenterRecord) => {
+  const requestEditMemoryCenterRecord = (record: MemoryCenterRecord,singleClaim=false) => {
+    if(!singleClaim&&(episodeCards.find(card=>card.id===record.id)?.memberClaimIds.length||0)>1){setMemoryCenterActionMenuId(null);setSelectedMemoryCenterRecord(record);return;}
+    setEditTruthMode("correction");
     setMemoryCenterActionMenuId(null);
     setSelectedMemoryCenterRecord(null);
     setEditingMemoryCenterRecord(record);
@@ -641,6 +754,7 @@ export default function AppMemory({
       const replacement = createManualKnowledgeClaim({
         id: `claim:manual:memory-center:${claim.id}:${Date.now()}`,
         scope,
+        classification: { kind: claim.kind, subject: claim.subject, temporalStatus: claim.temporalStatus },
         statement: content,
         sourceRecordId: claim.source.sourceRecordId || claim.id,
         recordedAt: Date.now(),
@@ -651,10 +765,10 @@ export default function AppMemory({
         return;
       }
       const write = claim.status === "active"
-        ? supersedeKnowledgeClaim(scope, claim.id, replacement)
+        ? supersedeKnowledgeClaimGroup(scope, groupedClaimIds(claim,loadKnowledgeClaims().value), replacement, editTruthMode)
         : appendKnowledgeClaim(replacement);
       if (!write.success) {
-        alert("长期事实修改失败，原记录保持不变。");
+        alert("记忆修改失败，原记录保持不变。");
         return;
       }
       closeMemoryCenterEdit();
@@ -696,34 +810,39 @@ export default function AppMemory({
   };
 
   const renderMemoryCenterRecord = (record: MemoryCenterRecord) => {
+    const claim=record.recordType==="truth"?knowledgeProjection.find(item=>item.id===record.id):undefined;
+    const episode=episodeCards.find(card=>card.id===record.id);
+    const displayContent=memoryGalleryDisplayText(getMemoryDisplayContent(record.content));
+    const categoryLabel=galleryCategory==="life"?(record.provenance.app==="diary"?"日记感受":claim?.source.experience?.kind==="insight"?"感悟":claim?.source.experience?.kind==="strong_emotion"?"情绪触动":"经历"):claim?(episode?.categoryIds||memoryGalleryCategories(claim)).map(id=>MEMORY_GALLERY_CATEGORIES.find(category=>category.id===id)?.title).filter(Boolean).join(" · ")||"记忆":record.recordType==="summary"?"交流回顾":"相处规则";
     const character = record.scope.characterId
       ? displayCharacters.find((candidate) => candidate.id === normalizeCharacterId(record.scope.characterId!))
       : undefined;
     const recallDisplay = getMemoryCenterRecallDisplay(record);
     const actionMenuKey = `${record.recordType}-${record.id}`;
     const isActionMenuOpen = memoryCenterActionMenuId === actionMenuKey;
-    const memoryCenterHeaderControlClass = "inline-flex h-5 w-10 shrink-0 items-center justify-center rounded-lg px-0.5 text-[9px] leading-none";
+    const memoryCenterHeaderControlClass = "memory-card-control";
     return (
       <motion.div
         key={`${record.recordType}-${record.id}`}
+        role="article"
         layout
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -10 }}
-        className="relative rounded-[22px] border border-slate-100 bg-white p-4 shadow-sm"
+        className="memory-content-card relative"
       >
-        <div className="flex items-start justify-between gap-3">
+        <div className="memory-card-header">
           <div className="min-w-0">
-            <p className="truncate text-xs font-black text-slate-800">{character?.name || "未绑定角色"}</p>
-            <p className="mt-0.5 text-[9px] text-slate-400">{MEMORY_CENTER_SOURCE_LABELS[record.provenance.app]} · {formatTime(record.recordedAt)}</p>
+            <p className="memory-card-author">{character?.name || "未绑定角色"}</p>
+            <p className="memory-card-time">整理于 {formatTime(record.recordedAt)}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <span className={`${memoryCenterHeaderControlClass} bg-slate-100 font-bold text-slate-600`}>{MEMORY_CENTER_TYPE_LABELS[record.recordType]}</span>
+          <div className="memory-card-actions">
+
             {/* Detail stays visible on the card; state-changing actions live in the overflow menu. */}
             <button
               type="button"
               onClick={() => setSelectedMemoryCenterRecord(record)}
-              className={`${memoryCenterHeaderControlClass} bg-slate-50 font-bold text-slate-500 hover:bg-slate-100`}
+              className={memoryCenterHeaderControlClass}
               aria-label={`查看${MEMORY_CENTER_TYPE_LABELS[record.recordType]}详情`}
             >
               详情
@@ -731,86 +850,73 @@ export default function AppMemory({
             <button
               type="button"
               onClick={() => setMemoryCenterActionMenuId(isActionMenuOpen ? null : actionMenuKey)}
-              className={`${memoryCenterHeaderControlClass} bg-slate-50 p-0 text-slate-500 transition-colors hover:bg-slate-100`}
+              className={`${memoryCenterHeaderControlClass} memory-card-more`}
               aria-label="更多记忆操作"
               aria-expanded={isActionMenuOpen}
             >
               <MoreVertical className="h-3.5 w-3.5" />
             </button>
             {isActionMenuOpen && (
-              <div className="absolute right-4 top-11 z-20 min-w-32 rounded-xl border border-slate-100 bg-white p-1.5 shadow-lg">
+              <div className="memory-card-menu">
                 <button
                   type="button"
                   onClick={() => requestEditMemoryCenterRecord(record)}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-slate-600 hover:bg-slate-50"
+                  className="memory-card-menu-item"
                 >
-                  <Edit3 className="h-3 w-3" />
-                  编辑
+                  <Edit3 aria-hidden="true" className="h-4 w-4" />
+                  编辑记忆
                 </button>
-                {isMemoryCenterRecallEligible(record) && (
-                  <button
-                    type="button"
-                    onClick={() => { setMemoryCenterActionMenuId(null); toggleMemoryCenterRecall(record); }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-slate-600 hover:bg-slate-50"
-                  >
-                    {getMemoryCenterRecallDisabled(record) ? <RotateCcw className="h-3 w-3" /> : <PauseCircle className="h-3 w-3" />}
-                    {getMemoryCenterRecallDisabled(record) ? "恢复召回" : "暂停召回"}
-                  </button>
-                )}
                 {record.recordType === "truth" && record.status === "active" && (
-                  <button
-                    type="button"
-                    onClick={() => requestDeleteMemoryCenterRecord(record, "retract")}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-amber-700 hover:bg-amber-50"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                    撤回长期事实
+                  <button type="button" onClick={() => {
+                    const claim = knowledgeClaims.find((item) => item.id === record.id); if (!claim) return;
+                    const result = setCoreMemory(claim.id, claim, !claim.coreMemory,cardClaimIds(record,loadKnowledgeClaims().value));
+                    if (!result.success) alert("核心记忆保存失败，原记录保留。");
+                    setMemoryCenterActionMenuId(null);
+                  }} className="memory-card-menu-item">
+                    <Brain aria-hidden="true" className="h-4 w-4" />
+                    {knowledgeClaims.find((item) => item.id === record.id)?.coreMemory ? "取消重点记住" : "重点记住"}
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => requestDeleteMemoryCenterRecord(record, "permanent")}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-rose-600 hover:bg-rose-50"
+                  className="memory-card-menu-item memory-card-danger"
                 >
-                  <Trash2 className="h-3 w-3" />
-                  {record.recordType === "truth" ? "永久删除" : "删除"}
+                  <Trash2 aria-hidden="true" className="h-4 w-4" />
+                  删除记忆
                 </button>
               </div>
             )}
           </div>
         </div>
-        <p className="mt-3 whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">{getMemoryDisplayContent(record.content)}</p>
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          <span className={`inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-[9px] font-bold ${recallDisplay.textClass}`} title={`召回状态：${recallDisplay.label}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${recallDisplay.dotClass}`} aria-hidden="true" />
-            {recallDisplay.label}
-          </span>
-        </div>
-        <p className="mt-2 text-[9px] leading-relaxed text-slate-400">
-          {record.scope.relationId ? getRelationLabel(record.scope.relationId) : "未绑定关系"}
-          {record.provenance.sourceMessageIds?.length ? ` · 来源消息 ${record.provenance.sourceMessageIds.length} 条` : " · 暂无直接消息链接"}
-        </p>
+        <h3 className="mt-3 break-words text-sm font-semibold leading-6 text-slate-900">{episode?.episodeTitle||displayContent}</h3>
+        {episode?.episodeTitle&&<p className={`mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600 ${character?.archiveTemplateType==="delicate"?"":"line-clamp-3"}`}>{displayContent}</p>}
+        {claim&&<p className="mt-2 text-xs text-slate-500">{episode?.evidenceLabel||memoryGalleryEvidenceLabel(claim)}{claim.coreMemory?" · 特别重要":""}</p>}
+
+        <div className="memory-card-categories">{categoryLabel.split(" \u00b7 ").map(label=><span key={label} className="memory-card-category">{label}</span>)}</div>
       </motion.div>
     );
   };
 
   return (
-    <div data-theme-page="memory" className="w-full h-full bg-[var(--app-bg)] text-[var(--text-primary)] flex flex-col font-sans select-none relative overflow-hidden">
+    isActive ? <div data-theme-page="memory" className="w-full h-full bg-[var(--app-bg)] text-[var(--text-primary)] flex flex-col font-sans select-none relative overflow-hidden">
       {/* Upper Navigation Bar */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-transparent border-0 z-10 shrink-0 relative">
         <button
           onClick={onClose}
+          aria-label="返回"
           className="app-nav-icon-button w-8 h-8 flex items-center justify-center rounded-none border-0 bg-transparent shadow-none transition-colors z-10 shrink-0"
         >
           <ChevronLeft className="w-4 h-4 text-slate-700" />
         </button>
         
-        <h1 className="text-base font-bold text-slate-800 tracking-tight absolute left-1/2 -translate-x-1/2 w-max">
-          <span>记忆库</span>
-        </h1>
+        <button type="button" aria-label="选择记忆人物" aria-haspopup="dialog" onClick={()=>setShowCharacterPicker(true)} className="memory-character-trigger absolute left-1/2 flex min-h-11 max-w-[65%] -translate-x-1/2 items-center gap-2 rounded-xl px-3 text-sm font-semibold focus-visible:ring-2">
+          {selectedMemoryCharacter&&<img src={selectedMemoryCharacter.avatar} alt="" className="h-7 w-7 rounded-full object-cover"/>}<span className="truncate">{selectedMemoryCharacter?.remark||selectedMemoryCharacter?.name||"选择人物"}</span><span className="memory-character-chevron"><ChevronDown aria-hidden="true" className="h-4 w-4" /></span>
+        </button>
         <div className="relative z-20">
           <button
             onClick={() => setShowMenu(!showMenu)}
+            aria-label="记忆菜单" aria-expanded={showMenu}
             className="app-nav-icon-button w-8 h-8 flex items-center justify-center rounded-none border-0 bg-transparent shadow-none transition-colors shrink-0"
           >
             <MoreVertical className="w-4 h-4 text-slate-700" />
@@ -829,53 +935,15 @@ export default function AppMemory({
                   initial={{ opacity: 0, scale: 0.95, y: -10 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                  className="absolute right-0 mt-2 w-40 bg-white border border-slate-100 rounded-[12px] shadow-xl z-40 py-1.5 overflow-hidden"
+                  role="menu" aria-label="记忆操作" className="memory-menu absolute right-0 mt-2 z-40"
                 >
-                  <button
-                    onClick={() => {
-                      setIsAddingItem(true);
-                      setShowMenu(false);
-                    }}
-                    className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors border-b border-slate-100"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-neutral-800" />
-                    手动添加
-                  </button>
-                  <button
-                    onClick={openAutoSummaryModal}
-                    className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors border-b border-slate-100"
-                  >
-                    <Sliders className="w-3.5 h-3.5 text-neutral-800" />
-                    自动总结
-                  </button>
-                  <button
-                    onClick={openImmediateSummaryModal}
-                    className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-neutral-800" />
-                    立即总结
-                  </button>
-                  <button
-                    onClick={() => { setShowDiagnosticsModal(true); setShowMenu(false); }}
-                    className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors border-t border-slate-100"
-                  >
-                    <Info className="w-3.5 h-3.5 text-neutral-800" />
-                    管理诊断
-                  </button>
-                  <button
-                    onClick={downloadMemoryBackup}
-                    className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
-                  >
-                    <Download className="w-3.5 h-3.5 text-neutral-800" />
-                    导出记忆备份
-                  </button>
-                  <button
-                    onClick={() => { setShowMenu(false); restoreBackupRef.current?.click(); }}
-                    className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
-                  >
-                    <Upload className="w-3.5 h-3.5 text-neutral-800" />
-                    恢复记忆备份
-                  </button>
+                  {[
+                    {label:"手动总结",Icon:Plus,action:()=>setIsAddingItem(true)},
+                    {label:"自动总结",Icon:Sliders,action:openAutoSummaryModal},
+                    {label:"立即总结",Icon:Sparkles,action:openImmediateSummaryModal},
+                    {label:"向量记忆",Icon:Database,action:()=>setShowApiPoolModal(true)},
+                  ].map(({label,Icon,action})=><button key={label} type="button" role="menuitem" onClick={()=>{setShowMenu(false);action();}}
+                    className="memory-menu-item"><Icon aria-hidden="true" className="h-4 w-4 shrink-0"/>{label}</button>)}
                   <input ref={restoreBackupRef} type="file" accept="application/json,.json" onChange={restoreMemoryBackup} className="hidden" />
                 </motion.div>
               </>
@@ -885,7 +953,11 @@ export default function AppMemory({
       </div>
 
       {/* Main Container */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <LegacyMemoryCompatibilityNotice />
+      <MemoryCharacterPicker open={showCharacterPicker} selectedId={selectedCharacterId} characters={displayCharacters} onClose={()=>setShowCharacterPicker(false)} onSelect={id=>{
+        setSelectedCharacterId(id);rememberMemoryCharacterSelection(activeIdentityId,id);setSelectedRelationId("all");setSearchQuery("");setSelectedMemoryCenterRecord(null);setMemoryCenterActionMenuId(null);setGalleryCategory(null);setMemoryView("memories");setShowTypeFilter(false);setShowCharacterPicker(false);
+      }}/>
+      <div data-memory-scroll tabIndex={0} role="region" aria-label="记忆列表" className="memory-home-content flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {/* Immediate Summary Task Background Status Banner */}
         {immediateSummaryTask && immediateSummaryTask.status === "summarizing" && (
           <div 
@@ -916,7 +988,7 @@ export default function AppMemory({
               <div className="min-w-0">
                 <p className="text-xs font-bold truncate">记忆提炼完成！</p>
                 <p className="text-[10px] text-emerald-600">
-                  成功为 {displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name || "角色"} 提炼了 {immediateSummaryTask.extractedCount} 条长期内容
+                  已为 {displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name || "角色"} 处理并保存 {immediateSummaryTask.extractedCount} 条候选资料
                   {immediateSummaryTask.archiveStats && ` · 事实 ${immediateSummaryTask.archiveStats.acceptedTruthCount} · 摘要 ${immediateSummaryTask.archiveStats.summaryCount}`}
                 </p>
                 {immediateSummaryTask.archiveStats && immediateSummaryTask.archiveStats.rejectedCandidateCount > 0 && (
@@ -957,44 +1029,6 @@ export default function AppMemory({
           </div>
         )}
 
-        {/* Character filter stays above search, matching the offline app selector. */}
-        <div className="flex items-start gap-3 overflow-x-auto pb-1 no-scrollbar select-none">
-          <button
-            onClick={() => setSelectedCharacterId("all")}
-            className={`group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 transition-all ${
-              selectedCharacterId === "all" ? "text-slate-900" : "text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            <span className={`relative rounded-full p-0.5 transition-all ${selectedCharacterId === "all" ? "bg-slate-300" : "bg-transparent"}`}>
-              <span className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-slate-100">
-                <User className="h-4 w-4" />
-              </span>
-              {selectedCharacterId === "all" && <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-slate-700 text-[7px] font-bold text-white">✓</span>}
-            </span>
-            <span className="max-w-full truncate text-[9px] font-bold leading-3">全部角色</span>
-          </button>
-          {displayCharacters.map((char) => (
-            <button
-              key={char.id}
-              onClick={() => setSelectedCharacterId(char.id)}
-              className={`group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 transition-all ${
-                selectedCharacterId === char.id ? "text-slate-900" : "text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              <span className={`relative rounded-full p-0.5 transition-all ${selectedCharacterId === char.id ? "bg-slate-300" : "bg-transparent"}`}>
-                <img
-                  src={char.avatar}
-                  alt={char.name}
-                  className="h-8 w-8 rounded-full border border-slate-200 object-cover"
-                  referrerPolicy="no-referrer"
-                />
-                {selectedCharacterId === char.id && <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-slate-700 text-[7px] font-bold text-white">✓</span>}
-              </span>
-              <span className="max-w-full truncate text-[9px] font-bold leading-3">{char.name}</span>
-            </button>
-          ))}
-        </div>
-
         {/* Search and optional type filter */}
         <div className="relative">
           <div className="flex items-center gap-2">
@@ -1004,7 +1038,7 @@ export default function AppMemory({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜索记忆条目..."
+                placeholder="搜索当前角色的记忆"
                 className="h-10 w-full bg-white pl-10 pr-10 py-0 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-2 focus:ring-neutral-950/10 focus:border-neutral-950 transition-all font-medium placeholder-slate-400 shadow-sm"
               />
               {searchQuery && (
@@ -1028,24 +1062,11 @@ export default function AppMemory({
             </button>
           </div>
           {showTypeFilter && (
-            <div className="absolute right-0 top-full z-30 mt-2 w-48 rounded-2xl border border-slate-100 bg-white p-2 shadow-xl">
-              <p className="px-2 py-1.5 text-[10px] font-black text-slate-400">筛选记忆类型</p>
-              {MEMORY_CENTER_TYPE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => {
-                    setActiveRecordType(option.value);
-                    setShowTypeFilter(false);
-                  }}
-                  className={`flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-left text-[11px] font-bold transition-colors ${
-                    activeRecordType === option.value ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"
-                  }`}
-                >
-                  <span>{option.label}</span>
-                  {activeRecordType === option.value && <Check className="h-3.5 w-3.5" />}
-                </button>
-              ))}
+            <div className="memory-category-popover">
+        <div className="memory-category-filter" aria-label="筛选记忆分类">
+          <button type="button" onClick={()=>{setGalleryCategory(null);setMemoryView("memories");setActiveRecordType("all");setShowTypeFilter(false);}} className={`min-h-10 shrink-0 rounded-full border px-3 text-xs ${!galleryCategory?"bg-slate-900 text-white":"bg-white text-slate-600"}`}>全部记忆</button>
+          {MEMORY_GALLERY_CATEGORIES.map(category=><button key={category.id} type="button" onClick={()=>{setActiveRecordType("all");setShowTypeFilter(false);setGalleryCategory(category.id);setMemoryView(category.id==="impressions"?"impressions":category.id==="changes"||category.id==="life"?"changes":"memories");}} className={`min-h-10 shrink-0 rounded-full border px-3 text-xs ${galleryCategory===category.id?"bg-slate-900 text-white":"bg-white text-slate-600"}`}>{category.title}</button>)}
+        </div>
             </div>
           )}
         </div>
@@ -1064,11 +1085,18 @@ export default function AppMemory({
         </div>
 
         {/* Unified memory center list */}
-        <div className="space-y-3">
+
+        {selectedMemoryCharacter&&<MemoryContinuityPanel characters={characters} relationships={relationships} memories={memories}
+          settings={settings}
+          claims={knowledgeProjection} identityId={activeIdentityId} characterId={selectedCharacterId}
+          showNavigation={false} contentMode={galleryCategory==="life"?"life":galleryCategory==="changes"?"changes":undefined}
+          formatRecordedAt={formatTime} lifeMemoryCards={galleryCategory==="life"?filteredMemoryCenterRecords.map(record=>({id:`memory:${record.id}`,time:record.recordedAt,card:renderMemoryCenterRecord(record)})):undefined}
+          relationId={selectedRelationId} query={searchQuery} view={memoryView} onView={setMemoryView} onSaveMemories={onSaveMemories} />}
+        {(memoryView === "memories") && <div className="space-y-3">
           <h2 className="text-xs font-black text-slate-400 uppercase tracking-wider pl-1 flex items-center gap-1.5">
-            长期记忆内容 ({filteredMemoryCenterRecords.length})
+            {galleryCategory==="old"?"保留的交流资料":"记忆内容"} ({filteredMemoryCenterRecords.length})
           </h2>
-          <AnimatePresence mode="popLayout">
+          <AnimatePresence key={`${activeIdentityId}:${selectedCharacterId}`} mode="popLayout">
             {filteredMemoryCenterRecords.length === 0 ? (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -1078,13 +1106,14 @@ export default function AppMemory({
               >
                 <Brain className="mx-auto h-10 w-10 text-slate-300" />
                 <p className="mt-3 text-xs font-bold text-slate-700">暂无符合条件的记忆</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">可以继续聊天并使用总结归档，新的长期内容会按类型出现在这里。</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">新的记忆会显示在这里，可以通过上方标签筛选。</p>
               </motion.div>
             ) : (
-              filteredMemoryCenterRecords.map(renderMemoryCenterRecord)
+              filteredMemoryCenterRecords.slice(0, visibleRecordCount).map(renderMemoryCenterRecord)
             )}
           </AnimatePresence>
-        </div>
+          <MemoryAutoLoad count={visibleRecordCount} total={filteredMemoryCenterRecords.length} onLoad={() => setVisibleRecordCount(count => Math.min(count + 30, filteredMemoryCenterRecords.length))} />
+        </div>}
       </div>
 
       {/* MODAL: Hand Add Memory */}
@@ -1100,7 +1129,7 @@ export default function AppMemory({
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
                   <Plus className="w-4 h-4 text-neutral-800" />
-                  手动录入角色记忆
+                  手动总结
                 </h3>
                 <button
                   onClick={() => setIsAddingItem(false)}
@@ -1246,6 +1275,12 @@ export default function AppMemory({
                     className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-medium leading-relaxed text-slate-700 outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300"
                   />
                 </div>
+                {record.recordType === "truth" && <label className="mt-3 block text-xs text-slate-600">本次修改的含义
+                  <select aria-label="事实修改方式" value={editTruthMode} onChange={(event) => setEditTruthMode(event.target.value as "correction" | "change")} className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3">
+                    <option value="correction">纠正旧记录：旧内容有误，不再作为事实使用</option>
+                    <option value="change">事实发生变化：旧状态曾成立，保留为历史</option>
+                  </select>
+                </label>}
                 <div className="mt-4 flex gap-2.5">
                   <button
                     type="button"
@@ -1319,6 +1354,13 @@ export default function AppMemory({
                         <p className="mt-1">查询：<strong className="text-slate-700">{runtimeTruthDiagnostics.queryText || "（无显式查询）"}</strong></p>
                         <p className="mt-1">候选 Truth {runtimeTruthDiagnostics.candidateClaimCount} 条，已注入 {runtimeTruthDiagnostics.injectedClaimIds.length} 条；摘要 {runtimeTruthDiagnostics.injectedSummaryIds.length} 条；修正 {runtimeTruthDiagnostics.injectedCorrectionIds.length} 条。</p>
                         <p className="mt-1">向量兜底：{runtimeTruthDiagnostics.vectorFallbackUsed ? "已启用" : "未使用"}。这份记录只保存在当前页面运行期间，不写入聊天内容。</p>
+                        <details className="mt-2">
+                          <summary className="cursor-pointer">候选与最终注入记录</summary>
+                          <p className="mt-1 break-all">最终注入：{runtimeTruthDiagnostics.injectedClaimIds.join("、") || "无"}</p>
+                          {runtimeTruthDiagnostics.candidateDecisions?.map(row => <p key={row.claimId} className="mt-1 break-all">
+                            {row.claimId} · {row.reason === "already_prompted" ? "已在近期上下文" : row.reason === "selected" ? "已选中" : "相关性不足或预算未选中"} · 相关性 {row.relevance}
+                          </p>)}
+                        </details>
                       </>
                     ) : (
                       <p className="mt-1">当前关系还没有产生可读取的直接聊天注入诊断；发送一轮消息后再打开这里即可查看。</p>
@@ -1326,6 +1368,16 @@ export default function AppMemory({
                   </div>
                 )}
 
+                {diagnosticItems.length === 0 ? (
+                  <details className="rounded-xl border border-slate-100 p-3 text-[10px] text-slate-500">
+                    <summary className="cursor-pointer">来源与状态诊断</summary>
+                    {selectedDiagnosticClaims.map(claim => <p key={claim.id} className="mt-2 break-all">
+                      {JSON.stringify({ id: claim.id, kind: claim.kind, temporalStatus: claim.temporalStatus, truthStatus: claim.truthStatus,
+                        authorship: claim.source.authorship, quotedMessageId: claim.source.quotedMessageId, messageAuthors: claim.source.messageAuthors,
+                        supersededById: claim.supersededById, statementAt: claim.source.statementAt, recordedAt: claim.recordedAt })}
+                    </p>)}
+                  </details>
+                ) : null}
                 {diagnosticItems.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-xs text-slate-400">
                     当前筛选下没有兼容记忆记录。
@@ -1364,6 +1416,9 @@ export default function AppMemory({
       <AnimatePresence>
         {selectedMemoryCenterRecord && (() => {
           const record = selectedMemoryCenterRecord;
+          const claim=knowledgeProjection.find(item=>item.id===record.id);
+          const episode=episodeCards.find(card=>card.id===record.id);
+          const detailSummaries=conversationSummaries.filter(summary=>summary.status==="active"&&(episode?.relatedSummaryIds.includes(summary.id)||claim&&relatedMemorySummaries(claim,[summary]).length>0)&&isConversationSummarySourceValid(summary,knowledgeProjection));
           const character = record.scope.characterId
             ? displayCharacters.find((candidate) => candidate.id === normalizeCharacterId(record.scope.characterId!))
             : undefined;
@@ -1383,7 +1438,7 @@ export default function AppMemory({
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
-                className="flex max-h-[90%] w-full max-w-md flex-col overflow-hidden rounded-[24px] border border-slate-100 bg-white shadow-2xl"
+                className="memory-detail-dialog flex max-h-[90%] w-full max-w-md flex-col overflow-hidden rounded-[24px] border border-slate-100 bg-white shadow-2xl"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="memory-center-detail-title"
@@ -1407,56 +1462,47 @@ export default function AppMemory({
                 </div>
 
                 <div className="space-y-3 overflow-y-auto p-5 pt-3">
-                  <div className="rounded-2xl bg-slate-50 p-3">
+                  <div className="memory-detail-intro text-left">
                     <div className="flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-white px-2 py-1 text-[9px] font-bold text-slate-600">{MEMORY_CENTER_TYPE_LABELS[record.recordType]}</span>
-                      <span className="rounded-full bg-white px-2 py-1 text-[9px] font-bold text-slate-600">{MEMORY_CENTER_LAYER_LABELS[record.layer]}</span>
-                      <span className="rounded-full bg-white px-2 py-1 text-[9px] font-bold text-slate-600">{statusLabel[record.status]}</span>
+                      <span className="py-1 text-xs font-medium text-slate-600">{MEMORY_CENTER_TYPE_LABELS[record.recordType]}</span>
+                      <span className="py-1 text-xs font-medium text-slate-600">{MEMORY_CENTER_LAYER_LABELS[record.layer]}</span>
+                      <span className="py-1 text-xs font-medium text-slate-600">{statusLabel[record.status]}</span>
                     </div>
-                    <p className="mt-3 whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">{getMemoryDisplayContent(record.content)}</p>
+                    <p className="mt-3 whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-slate-700">{memoryGalleryDisplayText(getMemoryDisplayContent(record.content))}</p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-[10px] text-slate-400">
-                    <span>所属角色：<strong className="text-slate-600">{character?.name || "未绑定角色"}</strong></span>
+                  <div className="memory-detail-metadata grid grid-cols-2 gap-x-3 gap-y-2 text-xs text-slate-400">
                     <span>来源应用：<strong className="text-slate-600">{MEMORY_CENTER_SOURCE_LABELS[record.provenance.app]}</strong></span>
-                    <span>所属关系：<strong className="text-slate-600">{record.scope.relationId ? getRelationLabel(record.scope.relationId) : "未绑定关系"}</strong></span>
-                    <span>记录时间：<strong className="text-slate-600">{new Date(record.recordedAt).toLocaleString("zh-CN")}</strong></span>
-                    <span>重要性：<strong className="text-slate-600">{record.importance}/10</strong></span>
-                    <span>可信度：<strong className="text-slate-600">{Math.round(record.confidence * 100)}%</strong></span>
-                    <span>用户确认：<strong className="text-slate-600">{record.userConfirmed ? "是" : "否"}</strong></span>
-                    <span>召回状态：<strong className={recallDisplay.textClass}>{recallDisplay.label}</strong></span>
+                    <span>重要性：<strong className="text-slate-600">{record.importance>=8?"特别重要":record.importance>=6?"重要":"一般"}</strong></span>
+                    <span className="col-span-2">整理时间：<strong className="text-slate-600">{new Date(record.recordedAt).toLocaleString("zh-CN")}</strong></span>
+                    <span className="col-span-2">依据：<strong className="text-slate-600">{knowledgeProjection.find(claim=>claim.id===record.id)?memoryGalleryEvidenceLabel(knowledgeProjection.find(claim=>claim.id===record.id)!):"保留的交流资料"}</strong></span>
                   </div>
 
                   <div className="rounded-xl border border-slate-100 p-3 text-[10px] leading-relaxed text-slate-500">
                     <p className="font-bold text-slate-700">来源追溯</p>
-                    <p className="mt-1 break-all">来源记录：{record.provenance.sourceRecordId || "暂无直接记录 ID"}</p>
-                    <p className="mt-1 break-all">来源消息：{record.provenance.sourceMessageIds?.length ? record.provenance.sourceMessageIds.join("、") : "暂无直接消息链接"}</p>
-                    <p className="mt-1 break-all">来源 Truth：{record.provenance.sourceClaimIds?.length ? record.provenance.sourceClaimIds.join("、") : "无"}</p>
+                    <p className="mt-1 whitespace-pre-wrap break-words">{record.provenance.app==="diary"?"来自角色日记反思，不展示日记正文":knowledgeProjection.find(claim=>claim.id===record.id)?.source.evidenceQuote || "这条资料没有保留可直接展示的原话，不能补写来源。"}</p>
+                    {knowledgeClaims.filter(claim=>knowledgeProjection.find(item=>item.id===record.id)?.mergedClaimIds?.includes(claim.id)
+                      &&claim.characterId===record.scope.characterId&&claim.relationId===record.scope.relationId&&claim.userIdentityId===record.scope.userIdentityId
+                      &&claim.conversationId===record.scope.conversationId).map(claim=><details key={claim.id} className="mt-2"><summary className="min-h-10 cursor-pointer">合并的相关记录</summary><p className="whitespace-pre-wrap break-words">{memoryGalleryDisplayText(claim.statement)}</p><p className="mt-1 whitespace-pre-wrap break-words">{claim.source.app==="diary"?"来自角色日记反思，不展示日记正文":claim.source.evidenceQuote||"未保留可展示的原话"}</p></details>)}
+                    {record.provenance.sourceClaimIds?.map(id=>knowledgeProjection.find(claim=>claim.id===id)).filter(Boolean).map(claim=><p key={claim!.id} className="mt-2 whitespace-pre-wrap break-words">{claim!.statement}</p>)}
                     {(record.supersedesId || record.supersededById) && (
-                      <p className="mt-1 break-all">替代关系：{record.supersedesId ? `替代 ${record.supersedesId}` : `被 ${record.supersededById} 替代`}</p>
+                      <p className="mt-1 break-words">{record.supersedesId?"之前的记录：":"后续的记录："}{knowledgeProjection.find(claim=>claim.id===(record.supersedesId||record.supersededById))?.statement||"原记录已不可用"}</p>
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-amber-50/50 p-3 text-[10px] leading-relaxed text-slate-500">
-                    <span>
-                      {recallEligible
-                        ? "暂停只影响未来检索，原文、来源和历史记录都会保留。"
-                        : record.status !== "active"
-                          ? `当前记录为${statusLabel[record.status]}，不会参与未来检索。`
-                          : "摘要和规则由系统统一管理，当前支持查看来源，不提供单条暂停。"}
-                    </span>
-                      {recallEligible ? (
-                        <button
-                        type="button"
-                        onClick={() => toggleMemoryCenterRecall(record)}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 shadow-sm hover:bg-slate-100"
-                      >
-                        {recallDisabled ? <RotateCcw className="h-3 w-3" /> : <PauseCircle className="h-3 w-3" />}
-                        {recallDisabled ? "恢复召回" : "暂停召回"}
-                        </button>
-                      ) : (
-                        <span className="shrink-0 rounded-lg bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-400">状态不可召回</span>
-                      )}
+                  {episode&&episode.memberClaimIds.length>1&&<section className="space-y-3 rounded-xl border border-slate-100 p-3" aria-label="记忆中的重点"><h4 className="text-sm font-medium">记忆中的重点</h4>
+                    {episode.memberClaimIds.map(id=>{const member=memoryCenterRecords.find(item=>item.id===id&&item.recordType==="truth"),evidence=knowledgeProjection.find(item=>item.id===id);return member&&<div key={id} className="border-t border-slate-100 pt-2"><p className="whitespace-pre-wrap text-sm leading-6">{memoryGalleryDisplayText(member.content).replace(/^用户/u,"你")}</p>{evidence&&<><p className="mt-1 text-xs text-slate-500">{memoryGalleryEvidenceLabel(evidence)}</p><details className="mt-2 text-xs text-slate-500"><summary>原话与来源</summary><p className="mt-2 whitespace-pre-wrap break-words">{evidence.source.app==="diary"?"来自角色日记反思，不展示日记正文":evidence.source.evidenceQuote||"没有可直接展示的原话"}</p><p className="mt-1">{MEMORY_CENTER_SOURCE_LABELS[member.provenance.app]} · {new Date(evidence.recordedAt).toLocaleString("zh-CN")}</p></details></>}<button type="button" onClick={()=>requestEditMemoryCenterRecord(member,true)} className="memory-detail-edit" aria-label="编辑这条信息" title="编辑这条信息"><Edit3 aria-hidden="true" className="h-4 w-4" /></button></div>;})}
+                  </section>}
+        {claim&&detailSummaries.length>0&&<details className="mt-3 border-t border-slate-100 pt-2"><summary className="min-h-11 cursor-pointer text-xs text-slate-600">回顾相关交流</summary>
+          {detailSummaries.map(summary=><p key={summary.id} className="mb-3 whitespace-pre-wrap text-sm leading-6">{summary.summary}</p>)}
+        </details>}
+                  <div className="memory-detail-recall">
+                    {recallEligible ? <button type="button" role="switch" aria-label="参与召回" aria-checked={!recallDisabled}
+                      onClick={()=>toggleMemoryCenterRecall(record)} className="memory-recall-switch">
+                      <span>{recallDisplay.label}</span>
+                      <span aria-hidden="true" className="memory-recall-track"><span /></span>
+                    </button> : <span className="memory-recall-unavailable">{recallDisplay.label}</span>}
+                    <p>{recallEligible?"点击切换召回状态；原文、来源和历史记录始终保留。":"当前资料由系统管理或已失效，不支持单条切换。"}</p>
                   </div>
                 </div>
               </motion.div>
@@ -1465,69 +1511,11 @@ export default function AppMemory({
         })()}
       </AnimatePresence>
 
-      {/* MODAL: Extract API Pool (抽取 API 池) */}
-      <AnimatePresence>
-        {showApiPoolModal && (
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="settings-panel-card p-5 w-full max-w-sm space-y-4"
-            >
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                  <Database className="w-4 h-4 text-neutral-800" />
-                  抽取 API 池设置
-                </h3>
-                <button
-                  onClick={() => setShowApiPoolModal(false)}
-                  className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="space-y-3.5">
-                <div className="text-xs text-slate-500 leading-relaxed space-y-1">
-                  <p className="font-bold text-slate-700">什么是「抽取 API 池」？</p>
-                  <p>抽取 API 是专用于提取/提炼记忆的核心模型配置。在这里设置单独的模型可以最大程度提升提炼的精确度，同时与聊天模型独立开，避免干扰。</p>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                    记忆抽取专用模型
-                  </label>
-                  <select
-                    value={recallSettings.extractModel || "gemini-3.5-flash"}
-                    onChange={(e) => onSaveRecallSettings({ ...recallSettings, extractModel: e.target.value })}
-                    className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950"
-                  >
-                    <option value="gemini-3.5-flash">Gemini 3.5 Flash (推荐：快速低开销)</option>
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                    <option value="deepseek-v4-flash">DeepSeek V4 (如果配置中转端)</option>
-                    <option value="default-chat-model">跟随“设置”中配置的默认模型</option>
-                  </select>
-                </div>
-
-                <div className="bg-amber-50 p-3 rounded-[16px] border border-amber-100 text-[11px] text-amber-700 font-medium leading-relaxed flex gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-500 shrink-0 mt-0.5 animate-pulse" />
-                  <span>
-                    💡 提示：记忆库在执行提炼时，会默认调用这里配置的模型。如果想要更稳定的提炼格式，推荐使用默认配置好的 <strong>Gemini 3.5 Flash</strong> 模型。
-                  </span>
-                </div>
-
-                <button
-                  onClick={() => setShowApiPoolModal(false)}
-                  className="w-full py-2.5 bg-neutral-950 hover:bg-neutral-900 text-white font-bold rounded-[16px] text-xs transition-colors shadow-sm"
-                >
-                  确定并应用
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* MODAL: Vector memory */}
+      {showApiPoolModal && onSaveEmbeddingConfiguration && <MemorySemanticSettings
+        configuration={embeddingConfiguration} onSave={onSaveEmbeddingConfiguration}
+        progress={<MemoryVectorProgress configuration={embeddingConfiguration} claims={knowledgeClaims} relationships={relationships} identityId={activeIdentityId} characterId={selectedCharacterId} relationId={selectedRelationId}/>}
+        onClose={() => setShowApiPoolModal(false)} />}
 
       {/* MODAL: Auto Summary Settings (自动总结) */}
       <AnimatePresence>
@@ -1596,13 +1584,13 @@ export default function AppMemory({
                         className="w-full h-1 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-neutral-950"
                       />
                       <p className="text-[10px] text-slate-400 leading-snug">
-                        自动总结始终开启。范围为 10 至 100 轮，默认 50 轮；触发后，系统会自动提炼该段对话并存储到记忆库。
+                        自动整理始终开启。范围为 10 至 100 轮，默认 50 轮；达到轮数后检查这段交流，只保留有意义的内容。
                       </p>
                   </div>
 
                   {/* Template Type Choice */}
                   <div className="space-y-2 border-t border-slate-100 pt-3.5">
-                    <span className="text-xs font-bold text-slate-800 block">长期归档精炼记忆模板</span>
+                    <span className="text-xs font-bold text-slate-800 block">记忆展示方式</span>
                     <div className="flex flex-col gap-2">
                       <button
                         type="button"
@@ -1613,9 +1601,9 @@ export default function AppMemory({
                             : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                         }`}
                       >
-                        <span className="text-xs font-bold">精炼版 (低Token)</span>
+                        <span className="text-xs font-bold">精炼版</span>
                         <span className={`text-[10px] mt-0.5 block ${modalArchiveTemplateType === "refined" ? "text-slate-300" : "text-slate-400"}`}>
-                          生成条理清晰的客观事件日志
+                          卡片先显示简短内容，详情保留完整原文
                         </span>
                       </button>
                       <button
@@ -1627,12 +1615,13 @@ export default function AppMemory({
                             : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                         }`}
                       >
-                        <span className="text-xs font-bold">细腻版 (重情感)</span>
+                        <span className="text-xs font-bold">细腻版</span>
                         <span className={`text-[10px] mt-0.5 block ${modalArchiveTemplateType === "delicate" ? "text-slate-300" : "text-slate-400"}`}>
-                          提炼第一人称的心境角色日记
+                          卡片展开完整内容，不改变事实、分类与可信状态
                         </span>
                       </button>
                     </div>
+                    <p className="text-[10px] leading-snug text-slate-400">只改变显示方式；切换不会重新调用模型，也不会编写新的经历或感受。</p>
                   </div>
 
                   <div className="settings-wide-action-group">
@@ -1717,11 +1706,11 @@ export default function AppMemory({
                   <div>
                     <h4 className="text-sm font-bold text-slate-800">总结提炼完成！</h4>
                     <p className="text-xs text-emerald-600 mt-1">
-                      成功为 <span className="font-semibold text-slate-700">{displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name}</span> 提炼了 <span className="font-bold">{immediateSummaryTask.extractedCount}</span> 条长期内容。
+                      已为 <span className="font-semibold text-slate-700">{displayCharacters.find(c => c.id === normalizeCharacterId(immediateSummaryTask.characterId))?.name}</span> 处理并保存 <span className="font-bold">{immediateSummaryTask.extractedCount}</span> 条候选资料。符合记忆展示规则的内容才会出现在列表中。
                     </p>
                     {immediateSummaryTask.archiveStats && (
                       <p className="mt-1 text-[10px] text-slate-500">
-                        来源消息 {immediateSummaryTask.archiveStats.sourceMessageCount} 条 · 长期事实 {immediateSummaryTask.archiveStats.acceptedTruthCount} 条 · 摘要 {immediateSummaryTask.archiveStats.summaryCount} 条
+                        来源消息 {immediateSummaryTask.archiveStats.sourceMessageCount} 条 · 记忆候选 {immediateSummaryTask.archiveStats.acceptedTruthCount} 条 · 交流回顾 {immediateSummaryTask.archiveStats.summaryCount} 条
                       </p>
                     )}
                     {immediateSummaryTask.archiveStats && immediateSummaryTask.archiveStats.rejectedCandidateCount > 0 && (
@@ -1753,7 +1742,7 @@ export default function AppMemory({
                         </label>
                         <select
                           value={immediateCharId}
-                          onChange={(e) => setImmediateCharId(e.target.value)}
+                          onChange={(e) => { setImmediateCharId(e.target.value); setImmediateRelationId(""); }}
                           className="w-full bg-slate-50 p-2.5 text-xs text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-bold"
                         >
                           {displayCharacters.map((char) => (
@@ -1819,7 +1808,8 @@ export default function AppMemory({
                         <button
                           onClick={async () => {
                             if (onStartImmediateSummary && immediateCharId) {
-                              const relation = scopedRelationships.find((item) => item.id === immediateRelationId);
+                              const relation = scopedRelationships.find((item) => item.id === immediateRelationId && item.characterId === normalizeCharacterId(immediateCharId));
+                              if (immediateRelationId && !relation) return;
                               await onStartImmediateSummary(immediateCharId, immediateRounds, relation?.id, relation?.conversationId);
                             }
                           }}
@@ -1841,10 +1831,10 @@ export default function AppMemory({
       <AnimatePresence>
         {deleteTarget && (() => {
           const isTruth = deleteTarget.recordType === "truth";
-          const actionLabel = deleteMode === "retract" ? "撤回" : isTruth ? "永久删除" : "删除";
+          const actionLabel = deleteMode === "retract" ? "撤回" : "删除记忆";
           const typeLabel = MEMORY_CENTER_TYPE_LABELS[deleteTarget.recordType];
           const description = deleteMode === "permanent" && isTruth
-            ? "这会从记忆库永久删除这条长期事实；原聊天记录和来源信息会保留，删除后不能从记忆库恢复。"
+            ? "这会永久停止召回这条事实及同一事实的旧版本，并阻止从现有来源重新提取；原聊天记录、历史及遗忘规则保留。"
             : deleteMode === "retract"
               ? "这会撤回 Truth，使它不再参与召回；原聊天记录和来源信息会保留。"
               : deleteTarget.recordType === "compatibility"
@@ -1889,6 +1879,6 @@ export default function AppMemory({
           );
         })()}
       </AnimatePresence>
-    </div>
+    </div> : null
   );
 }

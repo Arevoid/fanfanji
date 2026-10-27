@@ -2,8 +2,8 @@ import type { Character, ForumActivityTask, ForumReply, ForumThread, MemoryItem,
 import { createId as createApplicationId } from "../../../core/id/createId";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { commitForumMutation, getForumSnapshotForIdentity } from "../../../core/storage/repositories/forumRepository";
-import { buildForumActivityActorSlots, planForumActivity, releaseForumPendingEvents, shouldAttemptAutomaticForumActivity } from "./forumActivityService";
-import { applyForumStoryUpdate, canScheduleStoryContinuation } from "../../../domain/forum/forumStoryArc";
+import { buildForumActivityActorSlots, planForumActivity, releaseForumPendingEvents } from "./forumActivityService";
+import { applyForumStoryUpdate } from "../../../domain/forum/forumStoryArc";
 import { getForumThreadActivityAt } from "../../../domain/forum/forumData";
 
 const id = (prefix: string): string => createApplicationId(prefix);
@@ -199,53 +199,7 @@ export const scheduleForumUserInteraction = async (
   return releaseDueForumActivity(context, 1);
 };
 
-export const runAutomaticForumActivityCheck = async (context: ForumActivityRuntimeContext): Promise<{ attempted: boolean; released: ForumReply[] }> => {
-  const released = releaseDueForumActivity(context, 1);
-  if (released.length) return { attempted: false, released };
-  const now = context.now?.() ?? Date.now();
-  const snapshot = getForumSnapshotForIdentity(context.ownerIdentityId);
-  if (!context.settings.apiKey?.trim() || !context.settings.selectedModel?.trim()
-    || !shouldAttemptAutomaticForumActivity({ activityTasks: snapshot.activityTasks, ownerIdentityId: context.ownerIdentityId, now })) {
-    return { attempted: false, released: [] };
-  }
-  const eligibleThreads = [...snapshot.threads]
-    .filter((candidate) => {
-      if (candidate.source !== "user" && candidate.source !== "user-anonymous") return true;
-      // A failed/empty initial-reply plan should be recoverable on the next
-      // background tick, while a successfully queued user post is handled by
-      // its existing pending events and should not be duplicated.
-      return now - candidate.createdAt >= 2 * 60 * 1000
-        && !snapshot.activityTasks.some((task) => task.threadId === candidate.id
-        && task.trigger === "initial-replies"
-        && task.status === "succeeded");
-    })
-    .sort((a, b) => {
-      const storyA = canScheduleStoryContinuation(a, snapshot.replies, now) ? 1 : 0;
-      const storyB = canScheduleStoryContinuation(b, snapshot.replies, now) ? 1 : 0;
-      return storyB - storyA || b.updatedAt - a.updatedAt;
-    });
-  const thread = eligibleThreads
-    .find((candidate) => !snapshot.activityTasks.some((task) => task.threadId === candidate.id && task.trigger === "automatic" && now - task.startedAt < 12 * 60 * 1000));
-  if (!thread) return { attempted: false, released: [] };
-  try {
-    const events = await planForumActivity({
-      trigger: "automatic", ownerIdentityId: context.ownerIdentityId, thread,
-      replies: snapshot.replies, actorStates: snapshot.actorStates, relationships: context.relationships,
-      characters: context.characters, messages: context.messages, memories: context.memories,
-      worldBookEntries: context.worldBookEntries, settings: context.settings, now, random: context.random,
-    });
-    const task: ForumActivityTask = {
-      id: id("forum-activity-task"), ownerIdentityId: context.ownerIdentityId, threadId: thread.id,
-      trigger: "automatic", status: events.length ? "succeeded" : "failed", startedAt: now,
-      completedAt: now, ...(events.length ? {} : { retryAfter: now + 5 * 60 * 1000 }), pendingEvents: events,
-      createdAt: now, updatedAt: now,
-    };
-    commitForumMutation({ activityTasks: [...snapshot.activityTasks, task] });
-    return { attempted: true, released: releaseDueForumActivity(context, 1) };
-  } catch {
-    // Automatic failures are deliberately silent; the persisted backoff prevents rapid retries.
-    const failed: ForumActivityTask = { id: id("forum-activity-task"), ownerIdentityId: context.ownerIdentityId, threadId: thread.id, trigger: "automatic", status: "failed", startedAt: now, completedAt: now, retryAfter: now + 5 * 60 * 1000, pendingEvents: [], createdAt: now, updatedAt: now };
-    commitForumMutation({ activityTasks: [...snapshot.activityTasks, failed] });
-    return { attempted: true, released: [] };
-  }
-};
+/** Compatibility entry point: startup/timer ticks only publish already generated events. */
+export const runAutomaticForumActivityCheck = async (context: ForumActivityRuntimeContext): Promise<{ attempted: boolean; released: ForumReply[] }> => ({
+  attempted: false, released: releaseDueForumActivity(context, 1),
+});

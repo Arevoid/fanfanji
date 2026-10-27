@@ -7,6 +7,7 @@ import { projectAppointmentCalendarItem } from "../domain/schedule/calendarTypes
 import { formatScheduleTime } from "../features/schedule/schedulePresentation";
 import type { Character } from "../types";
 import ScheduleDashboard from "./schedule/ScheduleDashboard";
+import { CharacterLifePlans } from "../features/characterKnowledge/components/CharacterLifePlans";
 
 interface AppScheduleProps {
   entries: ScheduleEntry[];
@@ -172,6 +173,7 @@ export default function AppSchedule({
                 {selectedEntries.length === 0 ? <div className="py-2 text-sm text-neutral-400">这一天还没有安排</div> : selectedEntries.map((entry) => <button key={entry.id} type="button" className={`mb-3 flex w-full items-center gap-2 rounded-[18px] px-3 py-3 text-left last:mb-0 ${phoneEventColor(entry.id)}`}><span className="shrink-0 text-xs font-medium text-neutral-500">{formatScheduleTime(entry)}</span><span className="min-w-0 flex-1 truncate text-xs font-semibold text-neutral-800">{entry.title}</span></button>)}
               </div>
             </div>
+            <CharacterLifePlans userIdentityId={userIdentityId || ""} characterId={characters[0]?.id || ""} />
           </main>
           {addFormOpen && <form onSubmit={submitPhoneEntry} className="absolute bottom-20 left-5 right-5 z-30 rounded-2xl border border-black/5 bg-white p-4 shadow-lg"><div className="flex items-center justify-between"><h2 className="text-sm font-semibold text-neutral-800">添加日程</h2><button type="button" onClick={() => setAddFormOpen(false)} aria-label="关闭添加面板" className="flex h-7 w-7 items-center justify-center rounded-full text-neutral-500"><X className="h-4 w-4" /></button></div><input autoFocus value={addTitle} onChange={(event) => setAddTitle(event.target.value)} placeholder="日程内容" aria-label="日程内容" className="mt-3 w-full border-b border-neutral-200 px-1 py-2 text-sm outline-none" /><div className="mt-3 flex items-center justify-between px-1 text-xs text-neutral-500"><label className="flex items-center gap-2"><input type="checkbox" checked={addAllDay} onChange={(event) => setAddAllDay(event.target.checked)} />全天</label>{!addAllDay && <input type="time" value={addTime} onChange={(event) => setAddTime(event.target.value)} className="rounded-lg border border-neutral-200 px-2 py-1 text-sm" />}</div><div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setAddFormOpen(false)} className="rounded-lg px-3 py-2 text-xs text-neutral-500">取消</button><button type="submit" disabled={!addTitle.trim()} className="rounded-lg bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-35">添加</button></div></form>}
           <button type="button" aria-label={addFormOpen ? "关闭添加日程" : "添加日程"} onClick={() => setAddFormOpen((open) => !open)} className={`absolute bottom-5 right-5 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-neutral-900 text-white shadow-lg transition-opacity ${fabVisible || addFormOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}>{addFormOpen ? <X className="h-5 w-5" /> : <Plus className="h-5 w-5" />}</button>

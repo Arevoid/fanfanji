@@ -41,5 +41,10 @@ export const compressStoredMemories = (now = Date.now()): { result: MemoryCompre
     : { success: true as const };
   return { result, write };
 };
-export const loadMemorySettings = (fallback: MemoryVaultSettings): StorageResult<MemoryVaultSettings> => readObject(storageKeys.memoryVaultSettings, fallback);
+export const loadMemorySettings = (fallback: MemoryVaultSettings): StorageResult<MemoryVaultSettings> => {
+  const read=readObject(storageKeys.memoryVaultSettings, fallback);
+  if(read.valid&&read.value.extractModel!=="default-chat-model")
+    return {...read,value:{...read.value,legacyExtractModel:read.value.extractModel,extractModel:"default-chat-model"}};
+  return read;
+};
 export const saveMemorySettings = (settings: MemoryVaultSettings): StorageWriteResult => writeJson(storageKeys.memoryVaultSettings, settings);

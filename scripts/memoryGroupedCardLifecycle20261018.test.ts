@@ -1,0 +1,24 @@
+import assert from "node:assert/strict";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+import {saveKnowledgeClaims,loadKnowledgeClaims,retractMany,supersedeMany} from "../src/core/storage/repositories/characterKnowledgeRepository";
+import {acceptOrganizedKnowledge,organizationSourceRevision} from "../src/domain/characterKnowledge/knowledgeOrganization";
+import {forgetKnowledgeClaim} from "../src/features/characterKnowledge/services/characterContinuityService";
+import {loadCharacterContinuity} from "../src/core/storage/repositories/characterContinuityRepository";
+import {createManualKnowledgeClaim} from "../src/features/characterKnowledge/services/manualKnowledgeService";
+const values=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>values.set(key,value),removeItem:(key:string)=>values.delete(key)}}});
+const scope={characterId:"a",relationId:"r",userIdentityId:"u",conversationId:"c"};
+const parent:KnowledgeClaim={...scope,id:"p1",statement:"用户喜欢散步。用户养了一只猫。",kind:"fact",subject:"user",temporalStatus:"present",truthStatus:"legacy_unverified",confidence:.25,userConfirmed:false,recordedAt:1,status:"active",visibility:"relation_private",schemaVersion:1,organizationOriginal:true,source:{kind:"legacy_memory",authorship:"unknown",producer:"synthetic",evidenceKey:"p1",sourceRecordId:"p1"}};
+const other={...parent,id:"p2",statement:"用户有散步的习惯。用户有一辆自行车。",source:{...parent.source,evidenceKey:"p2",sourceRecordId:"p2"}};
+const atom=(p:KnowledgeClaim,quote:string)=>acceptOrganizedKnowledge(p,[{sourceId:p.id,quote,kind:"preference",temporalStatus:"present",valueAssessment:{quote,impact:1,durability:2,novelty:1,confidence:.99,reason:"持续信息"}}])[0];
+const a=atom(parent,"用户喜欢散步。"),b=atom(other,"用户有散步的习惯。"),cat=atom(parent,"用户养了一只猫。"),bike=atom(other,"用户有一辆自行车。");
+const foreign={...a,id:"foreign",relationId:"private-other",conversationId:"private-other-c",organizationSourceId:undefined,organizationSourceRevision:undefined};
+const records=[parent,other,a,b,cat,bike,foreign];saveKnowledgeClaims(records);
+assert.ok(forgetKnowledgeClaim(a,[b.id,foreign.id]).success);let stored=loadKnowledgeClaims().value;
+assert.ok(stored.filter(c=>[a.id,b.id].includes(c.id)).every(c=>c.status==="retracted"));assert.equal(stored.find(c=>c.id===foreign.id)?.status,"active");
+assert.equal(loadCharacterContinuity().value.forgotten.length,2,"each semantic phrasing is protected against re-extraction");
+for(const [p,remaining] of [[parent,cat],[other,bike]]){const retained=stored.find(c=>c.id===p.id)!;assert.ok(retained.statement.includes(remaining.statement));assert.equal(stored.find(c=>c.id===remaining.id)?.organizationSourceRevision,organizationSourceRevision(retained));}
+values.clear();saveKnowledgeClaims(records);assert.ok(retractMany(scope,[a.id,b.id,foreign.id],"user_retracted").success);stored=loadKnowledgeClaims().value;assert.ok(stored.filter(c=>[a.id,b.id].includes(c.id)).every(c=>c.status==="retracted"));assert.equal(stored.find(c=>c.id===foreign.id)?.status,"active");
+values.clear();saveKnowledgeClaims(records);const replacement=createManualKnowledgeClaim({id:"manual-correction",scope,classification:{kind:"preference",subject:"user",temporalStatus:"present"},statement:"用户现在不喜欢散步。",sourceRecordId:a.id,recordedAt:10})!;
+assert.ok(supersedeMany(scope,[a.id,b.id,foreign.id],replacement,"change").success);stored=loadKnowledgeClaims().value;
+assert.ok(stored.filter(c=>[a.id,b.id].includes(c.id)).every(c=>c.supersededById===replacement.id&&c.validTo===10));assert.equal(stored.find(c=>c.id===replacement.id)?.status,"active");assert.equal(stored.find(c=>c.id===foreign.id)?.supersededById,undefined);
+console.log("PASS grouped memory lifecycle: all semantic copies forgotten/retracted/revised together, both source parents corrected, unrelated clauses and private relationship preserved");

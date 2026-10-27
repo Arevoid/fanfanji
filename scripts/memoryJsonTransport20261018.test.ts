@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import {apiChat,ApiChatError} from "../src/utils/apiHelper";
+import {callTextProviderWithDiagnostics} from "../src/server/textProtocolAdapters";
+const values=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>values.set(k,v),removeItem:(k:string)=>values.delete(k)}}});
+const json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:{"content-type":"application/json"}});
+const input={message:"Return JSON",history:[],apiKey:"synthetic",model:"synthetic",apiEndpoint:"https://synthetic.invalid/v1"};
+let calls=0;
+globalThis.fetch=async(_url,init)=>{calls++;const body=JSON.parse(String(init?.body));assert.deepEqual(body.response_format,{type:"json_object"});return json({choices:[{message:{content:'{"items":[]}'}}]});};
+assert.equal((await callTextProviderWithDiagnostics({...input,responseFormat:"json_object"})).text,'{"items":[]}');assert.equal(calls,1);
+globalThis.fetch=async(_url,init)=>{assert.equal(JSON.parse(String(init?.body)).response_format,undefined);return json({choices:[{message:{content:"plain reply"}}]});};
+assert.equal((await callTextProviderWithDiagnostics(input)).text,"plain reply","ordinary chat keeps its text transport");
+globalThis.fetch=async(_url,init)=>{assert.equal(JSON.parse(String(init?.body)).generationConfig.responseMimeType,"application/json");return json({candidates:[{content:{parts:[{text:'{"items":[]}' } ]}}]});};
+assert.equal((await callTextProviderWithDiagnostics({...input,apiEndpoint:undefined,responseFormat:"json_object"})).text,'{"items":[]}');
+const bodies:Record<string,unknown>[]=[];
+globalThis.fetch=async(url,init)=>{assert.equal(url,"/api/chat");const body=JSON.parse(String(init?.body));bodies.push(body);return bodies.length===1?json({error:"Unsupported parameter: response_format",code:"provider_request"},400):json({text:'{"reviews":[]}'});};
+assert.equal((await apiChat({...input,responseFormat:"json_object"})).text,'{"reviews":[]}');assert.equal(bodies.length,2);assert.equal(bodies[0].responseFormat,"json_object");assert.equal(bodies[1].responseFormat,undefined,"only a proven format compatibility error permits a single format-free retry");
+for(const status of [401,429,500]){let attempts=0;globalThis.fetch=async()=>{attempts++;return json({error:"response_format unsupported",code:"provider_request"},status);};await assert.rejects(apiChat({...input,responseFormat:"json_object"}),e=>e instanceof ApiChatError&&e.status===status);assert.equal(attempts,1,"auth, quota and provider failures must not trigger duplicate requests");}
+const directBodies:Record<string,unknown>[]=[];let backend=0;
+globalThis.fetch=async(url,init)=>{if(url==="/api/chat"){backend++;return new Response("<html>static host</html>",{status:404,headers:{"content-type":"text/html"}});}assert.equal(String(url),"https://synthetic.invalid/v1/chat/completions");directBodies.push(JSON.parse(String(init?.body)));return directBodies.length===1?json({error:{message:"Unknown parameter: response_format"}},400):json({choices:[{message:{content:'{"reviews":[]}'}}]});};
+assert.equal((await apiChat({...input,responseFormat:"json_object"})).text,'{"reviews":[]}');assert.equal(backend,1);assert.equal(directBodies.length,2);assert.deepEqual(directBodies[0].response_format,{type:"json_object"});assert.equal(directBodies[1].response_format,undefined);
+console.log("PASS memory JSON transport: opt-in OpenAI/Gemini format, plain chat unchanged, tracked single compatibility retry through proxy/direct paths, no duplicate auth/quota/provider retry; no real API calls");

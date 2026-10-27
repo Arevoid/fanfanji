@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import { impressionChangeEntries, impressionDisplayText } from "../src/features/characterKnowledge/components/memoryImpressionPresentation";
+import type { CharacterImpression } from "../src/domain/memory/characterContinuity";
+
+const scope = { characterId: "c", userIdentityId: "u", relationId: "r", conversationId: "direct:r" };
+const first: CharacterImpression = { id: "first", scope, category: "trust", proposition: "用户有些冷淡", sourceClaimIds: ["source"], confidence: .8, status: "superseded", recordedAt: 1 };
+const current: CharacterImpression = { ...first, id: "current", status: "active", proposition: "用户其实很温柔", supersedesId: first.id, recordedAt: 2 };
+assert.deepEqual(impressionChangeEntries([{ ...first, status: "active" }], [first]), [], "first impressions are not changes");
+assert.deepEqual(impressionChangeEntries([{ ...current, intervention: true }], [first]), [], "user corrections are not character growth");
+assert.deepEqual(impressionChangeEntries([{ ...current, status: "invalid" }], [first]), []);
+assert.deepEqual(impressionChangeEntries([{ ...current, proposition: first.proposition }], [first]), [], "reinforcement alone is not a changed view");
+assert.deepEqual(impressionChangeEntries([current], [{ ...first, scope: { ...scope, relationId: "foreign" } }]), [], "previous view must belong to the exact relation");
+const entries = impressionChangeEntries([current], [first, current]);
+assert.equal(entries.length, 1);
+assert.equal(entries[0].text, "起初，你有些冷淡\n后来，你其实很温柔");
+const original = "用户在亲密关系中表现得直接而大胆，会通过消息挑逗并主动引导我发生更深层的亲密接触。";
+assert.equal(impressionDisplayText(original), "你在亲密的时候挺直接，也很大胆，会在消息里挑逗并主动带着我更亲密地相处。");
+assert.equal(impressionDisplayText("也许用户不信任我，尚不确定"), "也许你不信任我，尚不确定", "display wording must preserve uncertainty and negation");
+assert.equal(current.proposition, "用户其实很温柔", "presentation never rewrites persisted memory");
+console.log("PASS impression presentation: evidence-backed change, scope, uncertainty and no data rewriting");

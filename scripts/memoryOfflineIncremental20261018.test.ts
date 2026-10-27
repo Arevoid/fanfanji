@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import {getOfflineMemorySourceMessages,hasUnsyncedOfflineMemoryProgress,offlineMemorySourceRevision} from "../src/domain/memory/offlineMemorySync";
+import type {OfflineStory,Message} from "../src/types";
+const first:Message={id:"one",characterId:"a",sender:"user",content:"我们约好下周去天文馆",timestamp:1};
+const second:Message={...first,id:"two",sender:"character",content:"一起查好了开放时间",timestamp:2};
+const story:OfflineStory={id:"story",characterId:"a",title:"续写",mode:"continue",createdAt:1,updatedAt:2,messages:[first,second],lastSyncedMessageCount:2,memorySyncStatus:"synced",syncedSourceMessageRevisions:Object.fromEntries([first,second].map(m=>[m.id,offlineMemorySourceRevision(m)]))};
+assert.equal(hasUnsyncedOfflineMemoryProgress(story),false);assert.deepEqual(getOfflineMemorySourceMessages(story),[]);
+const added={...first,id:"three",content:"后来确认改到周六",timestamp:3};
+assert.deepEqual(getOfflineMemorySourceMessages({...story,messages:[first,second,added]}).map(m=>m.id),["three"]);
+const edited={...first,content:"我们改约去图书馆"};
+assert.equal(hasUnsyncedOfflineMemoryProgress({...story,messages:[edited,second]}),true);assert.deepEqual(getOfflineMemorySourceMessages({...story,messages:[edited,second]}).map(m=>m.id),["one"]);
+assert.equal(hasUnsyncedOfflineMemoryProgress({...story,messages:[second]}),true,"removed source invalidates processing revision even when count does not increase");
+assert.deepEqual(getOfflineMemorySourceMessages({...story,messages:[first,second,{...added,isImportedContext:true}]}),[]);
+assert.equal(hasUnsyncedOfflineMemoryProgress({...story,messages:[{...first,recalledAt:4},second]}),true);
+console.log("PASS offline incremental source plan: no-new zero work, only new/edited sources, deletion/retraction detected, imported context excluded");

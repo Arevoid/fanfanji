@@ -1,3 +1,4 @@
+import {resolveCharacterApiSettings} from "../../../domain/character/characterApiSettings";
 import type { Message, OfflineStory } from "../../../types";
 import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../services/chatMemoryRetrievalSettings";
 import { buildAliasIdentityBoundaryPrompt, buildAliasIdentityFinalGuardPrompt } from "../../../domain/prompt/aliasIdentityBoundary";
@@ -7,14 +8,15 @@ import { buildWorldBookScanText } from "../../../domain/worldbook/worldBookTrigg
 import { extractStickerMarkupReferences, mayCharacterUseEmoji } from "../services/characterEmojiPolicy";
 import { createRegeneratedReplyCandidates } from "../services/regenerateService";
 import { formatCharacterActionPrompt, parseCharacterActionDirective } from "../services/characterActionProtocol";
+import { contributeSemanticDirectReplyTruthContext } from "../../characterKnowledge/services/semanticMemoryRecallService";
 
 /** Mechanical extraction of the existing regeneration path; dependencies stay explicit in the page context. */
 export function useChatRegenerationAction(context: Record<string, any>) {
   const {
-    activeChatCharId, activeCharacter, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
+    activeChatCharId, activeCharacter, onDeleteMessage, onReplaceMessages, showToast, deleteMessageAndLinkedImage, currentChatMessages,
     activeRelationship, listCharacterEventsByRelation, buildRelationshipCognitiveProjection, buildCharacterCognitiveContext,
     createDirectChatKnowledgeBoundary, resolveChatRoutine, buildCharacterRoutine, resolveChatTurnSettings, setIsTyping,
-    latestActiveCharacterRef, settings, serializeMessageContentForPrompt,
+    latestActiveCharacterRef, settings: globalSettings, serializeMessageContentForPrompt,
     activeAttachModal, callingStatus, callTranscript, detectCallTopicShift,
     buildDirectChatMainPrompt,
     buildDirectChatContextSnapshot,
@@ -41,12 +43,12 @@ export function useChatRegenerationAction(context: Record<string, any>) {
 
   const handleRegenerateResponse = async (targetMsg: Message, oocComment = "") => {
     if (!activeChatCharId || !activeCharacter) return;
+    let settings;try{settings=resolveCharacterApiSettings(globalSettings,activeCharacter,context.characters||[]);}catch(error){showToast(error instanceof Error?error.message:"API configuration invalid");return;}
 
     // Scope regeneration to the selected reply's complete model turn. Later
     // user messages belong to a different turn and must not become the prompt
     // for an older regenerated reply.
     const regenerationTurn = resolveRegenerationTurnScope(currentChatMessages, targetMsg);
-    if (onDeleteMessage) regenerationTurn.targetMessages.forEach((message) => deleteMessageAndLinkedImage(message.id));
 
     const previousMessages = regenerationTurn.messagesBeforeTarget;
     const lastUserMsg = regenerationTurn.userMessage;
@@ -54,11 +56,11 @@ export function useChatRegenerationAction(context: Record<string, any>) {
       const regenerationCognitiveContext = activeRelationship && !activeCharacter.isGroupChat
         ? (() => {
           try {
-            const relationEvents = listCharacterEventsByRelation(activeRelationship.id);
+            const relationEvents = listCharacterEventsByRelation(activeRelationship.id).filter((event) => event.recordedAt <= lastUserMsg.timestamp);
             const relationshipProjection = buildRelationshipCognitiveProjection({
               relation: activeRelationship,
               events: relationEvents,
-              now: Date.now(),
+              now: lastUserMsg.timestamp,
             });
             return buildCharacterCognitiveContext({
               character: activeCharacter,
@@ -71,7 +73,7 @@ export function useChatRegenerationAction(context: Record<string, any>) {
                   ? "safe" as const
                   : "private" as const,
               })),
-              timeContext: { now: Date.now() },
+              timeContext: { now: lastUserMsg.timestamp },
               knowledgeBoundary: createDirectChatKnowledgeBoundary(),
               conversationId: activeRelationship.conversationId,
               relationshipTimeline: relationshipProjection.timeline,
@@ -190,7 +192,8 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       // Recall memories
       const topK = resolveChatLongTermMemoryLimit(activeCharacter?.retrievalHistoryLimit);
       const truthRetrieval = activeRelationship
-        ? contributeDirectReplyTruthContext({
+        ? await contributeSemanticDirectReplyTruthContext({ configuration: settings.memoryEmbedding, retrieval: {
+          knownAt: lastUserMsg.timestamp,
           scope: {
             relationId: activeRelationship.id,
             characterId: activeRelationship.characterId,
@@ -199,7 +202,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           },
           queryText: truthQueryText,
           limit: topK,
-          maxCharacters: 4800,
+          unboundedMemory: true,
           alreadyPromptedMessageIds: [...slicedMsgs, lastUserMsg].map((message) => message.id),
           alreadyPromptedTexts: [...slicedMsgs, lastUserMsg].map((message) => serializeMessageContentForPrompt(message, {
             mode: "history",
@@ -209,7 +212,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
           claims: loadKnowledgeClaims().value,
           summaries: loadConversationSummaries().value,
           corrections: loadBehaviorCorrections().value,
-        })
+        } })
         : undefined;
       if (truthRetrieval) {
         characterContextText += formatTruthRetrievalForPrompt(truthRetrieval);
@@ -249,7 +252,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       const relationshipContext = characterProjection.relationship?.content || "";
       if (activeIdentity?.kind === "alias") {
         if (primaryRelation) {
-          characterContextText += `\n[角色自身关于另一位联系人的既有记忆]\n这些是角色过去对主号联系人或相关事件的记忆，不是当前马甲的身份信息。当前说话者仍是陌生联系人；不得因为职业、措辞或事件相似就认定当前马甲是饭饭，也不得把主号聊天历史当作当前对话历史。只有当前联系人明确说“我就是饭饭”等内容时，才允许建立身份关联。\n${primaryRelation.compressedMemory?.trim() ? `关系记忆：${primaryRelation.compressedMemory.trim()}` : "暂无相关既有记忆"}`;
+          characterContextText += `\n[联系人信息边界]\n角色另有联系人，不代表当前马甲就是该联系人。当前请求不读取其他关系的私聊摘要；不得因为职业、措辞或事件相似就猜测身份。身份关联只能依据当前联系人明确披露的内容，关联本身也不自动授权传播另一关系的秘密。`;
         }
       }
       const aliasIdentityBoundaryPrompt = activeIdentity?.kind === "alias"
@@ -351,6 +354,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
         : undefined;
 
       const systemInstruction = buildDirectChatSystemInstruction({
+        modelDirectAutoTranslate: Boolean(activeCharacter.enableAutoTranslate),
         mainPromptText,
         musicContext,
         forumContext,
@@ -495,7 +499,9 @@ Please read the feedback carefully and rewrite your response to perfectly match 
       }
 
       if (data && data.text && replyCandidates) {
-        replyCandidates.messages.forEach(onSendMessage);
+        if(!onReplaceMessages||!await onReplaceMessages(regenerationTurn.targetMessages,replyCandidates.messages)){
+          showToast("原回复已保留，本次替换未完成，请重试。");return;
+        }
         if ((parsedAction?.directive?.type === "call" || parsedAction?.directive?.type === "video_call")
           && executeCharacterCallAction) {
           executeCharacterCallAction(parsedAction.directive, {

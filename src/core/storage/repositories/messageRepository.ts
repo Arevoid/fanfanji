@@ -6,7 +6,7 @@ import { readingAssetDb } from "../readingAssetDb";
 import { remove } from "../storageAdapter";
 import { createLatestSnapshotWriter } from "../latestSnapshotWriter";
 import { isMessageEntryStoreEnabled } from "../contentStorageFlags";
-import { messageEntryDb, type MessageEntryQuery } from "../messageEntryDb";
+import { messageEntryDb, type MessageEntryQuery, type MessageEntryPageQuery, type MessageEntryPage } from "../messageEntryDb";
 
 const MESSAGE_METADATA_KEY = "messages-v4";
 let cachedMessages: Message[] | null = null;
@@ -19,11 +19,11 @@ const cloneMessages = (messages: Message[]): Message[] => typeof structuredClone
   : JSON.parse(JSON.stringify(messages)) as Message[];
 
 const messageWriter = createLatestSnapshotWriter(
-  cloneMessages,
+  (snapshot: Message[]) => snapshot,
   (snapshot) => readingAssetDb.saveMetadataValue(MESSAGE_METADATA_KEY, snapshot),
 );
 const messageEntryWriter = createLatestSnapshotWriter(
-  cloneMessages,
+  (snapshot: Message[]) => snapshot,
   (snapshot) => messageEntryDb.saveSnapshot(snapshot),
 );
 
@@ -73,7 +73,7 @@ export async function initializeMessages(fallback: Message[]): Promise<StorageRe
         }
         cachedMessages = cloneMessages(stored);
         metadataReady = true;
-        return { value: cloneMessages(stored), found: true, valid: true };
+        return { value: stored, found: true, valid: true };
       }
       const stored = await readingAssetDb.loadMetadataValue<Message[]>(MESSAGE_METADATA_KEY);
       if (mutationVersion !== initializationMutationVersion && cachedMessages) {
@@ -84,7 +84,7 @@ export async function initializeMessages(fallback: Message[]): Promise<StorageRe
         metadataReady = true;
         remove(storageKeys.messages);
         remove(storageKeys.legacyMessages);
-        return { value: cloneMessages(stored), found: true, valid: true };
+        return { value: stored, found: true, valid: true };
       }
       const legacy = readArray<Message>(storageKeys.messages, fallback);
       const source = legacy.found && legacy.valid
@@ -119,7 +119,21 @@ export async function loadMessageWindow(query: MessageEntryQuery): Promise<Messa
   const filtered = source.filter((message) => (!query.characterId || message.characterId === query.characterId)
     && (!query.relationId || message.relationId === query.relationId)
     && (!query.conversationId || message.conversationId === query.conversationId));
-  return filtered.slice(Math.max(0, query.offset || 0), Math.max(0, query.offset || 0) + Math.max(0, query.limit));
+  return cloneMessages(filtered.slice(Math.max(0, query.offset || 0), Math.max(0, query.offset || 0) + Math.max(0, query.limit)));
+}
+
+/** Scoped stable-cursor API. Existing snapshot installations keep their storage
+ * mode; opening history must never start a content migration. */
+export async function loadMessagePage(query: MessageEntryPageQuery): Promise<MessageEntryPage> {
+  if (isMessageEntryStoreEnabled() && typeof indexedDB !== "undefined") return messageEntryDb.loadPage(query);
+  await initializeMessages([]);
+  const limit = Math.max(1, Math.min(100, Math.floor(query.limit) || 50));
+  const compare = (a: Pick<Message, "timestamp" | "id">, b: Pick<Message, "timestamp" | "id">) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const rows = (cachedMessages || loadMessages([]).value).filter(message => message.characterId === query.characterId
+    && (!query.relationId || message.relationId === query.relationId) && (!query.conversationId || message.conversationId === query.conversationId)
+    && (!query.before || compare(message, query.before) < 0)).sort(compare);
+  const items = cloneMessages(rows.slice(-limit)), first = items[0];
+  return { items, hasEarlier: rows.length > limit, cursor: first ? { timestamp: first.timestamp, id: first.id } : undefined };
 }
 
 export async function flushMessages(): Promise<StorageWriteResult> {
@@ -134,4 +148,11 @@ export async function flushMessages(): Promise<StorageWriteResult> {
     const name = error && typeof error === "object" ? String((error as { name?: unknown }).name || "") : "";
     return { success: false, error: name === "QuotaExceededError" ? "quota" : "write" };
   }
+}
+
+/** Observe durable replies without starting a migration or accepting queued failures. */
+export async function loadCommittedMessages():Promise<StorageResult<Message[]>>{
+ if(metadataReady&&cachedMessages){const flushed=await flushMessages();if(!flushed.success)return {value:[],valid:false,found:true,error:flushed.error};}
+ if(typeof indexedDB!=="undefined")try{const stored=isMessageEntryStoreEnabled()?await messageEntryDb.loadAll():await readingAssetDb.loadMetadataValue<Message[]>(MESSAGE_METADATA_KEY);if(Array.isArray(stored))return {value:stored,valid:true,found:true};}catch{return {value:[],valid:false,found:false,error:"read"};}
+ const current=readArray<Message>(storageKeys.messages,[]);return current.found||!current.valid?current:readArray<Message>(storageKeys.legacyMessages,[]);
 }

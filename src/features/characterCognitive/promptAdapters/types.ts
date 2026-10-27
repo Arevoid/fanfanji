@@ -118,6 +118,7 @@ export interface ChatPromptContext {
 }
 
 export interface MomentPromptContext {
+  authorizedPublicLife?: readonly { summary:string; occurredAt:number }[];
   persona: CognitivePromptPersona;
   relationship?: CognitivePromptRelationship;
   /** Confirmed, same-relation memory facts only. */

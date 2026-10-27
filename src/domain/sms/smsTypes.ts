@@ -1,4 +1,5 @@
 import type { Character } from "../../types";
+import type { KnowledgeClaim } from "../characterKnowledge/characterKnowledgeTypes";
 
 export type SmsTimelineMode = "unanchored" | "anchored";
 export type SmsTimelineKind = "independent_future" | "continuation_future" | "past" | "present" | "custom";
@@ -44,6 +45,10 @@ export interface SmsMessage {
 }
 
 export interface SmsTimelineMemory {
+  /** Isolated timeline knowledge; never copied into the online relationship store. */
+  claims?: KnowledgeClaim[];
+  processedRevisions?: Record<string, string>;
+  extractionFailureAt?: number;
   timelineId: string;
   characterId: string;
   ownerIdentityId: string;

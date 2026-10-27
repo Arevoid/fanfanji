@@ -9,7 +9,7 @@ import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "./src/server/imageProtocolAdapters";
 import { callTextProvider, callTextProviderWithDiagnostics, normalizeTextApiError } from "./src/server/textProtocolAdapters";
-import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutputWithDiagnostics, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
+import { buildKnowledgeExtractionPrompt, normalizeSemanticRegistry, parseOrRepairKnowledgeExtractionOutputWithDiagnostics, type KnowledgeExtractionHistoryItem } from "./src/features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { combineStructuredOutputTelemetry, withStructuredOutputTelemetry, type StructuredOutputTelemetry } from "./src/features/characterKnowledge/services/structuredOutputTelemetry";
 import {
   MEMORY_ADMISSION_CAMPAIGN_FINGERPRINT,
@@ -313,6 +313,7 @@ async function startServer() {
         streamCompatible: body.streamCompatible === true,
         timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : undefined,
         maxOutputTokens: typeof body.maxOutputTokens === "number" ? body.maxOutputTokens : undefined,
+        responseFormat: body.responseFormat === "json_object" ? "json_object" : undefined,
         imageDataUrl: typeof body.imageDataUrl === "string" && body.imageDataUrl.startsWith("data:image/") ? body.imageDataUrl : undefined,
         tools: Array.isArray(body.tools) ? body.tools : undefined,
       });
@@ -512,7 +513,7 @@ ${historyText}
   // API Route: Extract individual memories
   app.post("/api/extract-memories", async (req, res) => {
     try {
-      const { history, characterName, characterProfile, apiKey, model, apiEndpoint, templateType, scenario, sourceReferenceMode, enableV2Shadow } = req.body;
+      const { history, characterName, characterProfile, knownAttributes, knownActivities, apiKey, model, apiEndpoint, templateType, scenario, sourceReferenceMode, enableV2Shadow } = req.body;
       const apiKeyValue = apiKey || process.env.GEMINI_API_KEY;
       if (!apiKeyValue) {
         return res.status(400).json({
@@ -531,8 +532,15 @@ ${historyText}
         })
         : [];
       const prompt = buildKnowledgeExtractionPrompt({
+        singlePass: req.body.singlePass === true,
+        memorySettings: Array.isArray(req.body.memorySettings) ? req.body.memorySettings.filter((item: any) => item && typeof item.id === "string" && typeof item.text === "string") : [],
         characterName,
+        semanticReview: req.body.semanticReview,
+        identityReview: req.body.identityReview,
         characterProfile: typeof characterProfile === "string" ? characterProfile : undefined,
+        knownAttributes: Array.isArray(knownAttributes) ? knownAttributes.filter((item: unknown): item is string => typeof item === "string") : [],
+        semanticRegistry: normalizeSemanticRegistry(req.body.semanticRegistry),
+        knownActivities: Array.isArray(knownActivities) ? knownActivities.filter((item: unknown): item is string => typeof item === "string") : [],
         history: safeHistory,
         sourceReferenceMode: sourceReferenceMode === "local" ? "local" : "canonical",
         templateType: templateType === "delicate" ? "delicate" : "refined",
@@ -557,6 +565,7 @@ ${historyText}
           model: String(model || (apiEndpoint && apiEndpoint.trim() ? "deepseek-v4-flash" : "gemini-3.5-flash")),
           apiEndpoint: typeof apiEndpoint === "string" ? apiEndpoint : undefined,
           temperature,
+          streamCompatible: req.body.streamCompatible === true,
           timeoutMs: API_REQUEST_TIMEOUTS.memoryTask,
           systemInstruction: "你是结构化长期知识提取器。只输出可验证的 JSONL，不要解释。",
           allowEmptyText: true,
@@ -567,7 +576,13 @@ ${historyText}
       };
 
       const aiText = await generateExtractionText(prompt, 0.5);
+      if(req.body.identityReview!==undefined){const parsed=JSON.parse(aiText.trim().replace(/^```(?:json)?\s*/iu,"").replace(/\s*```$/u,""));return res.json({candidates:[],identityReviews:Array.isArray(parsed?.reviews)?parsed.reviews:[],...(providerUsage?{usage:providerUsage}:{})});}
+      if (req.body.semanticReview !== undefined) {
+        const review = JSON.parse(aiText.trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, ""));
+        return res.json({ candidates: [], semanticReviews: Array.isArray(review?.reviews) ? review.reviews : [], ...(providerUsage ? { usage: providerUsage } : {}) });
+      }
       const repaired = await parseOrRepairKnowledgeExtractionOutputWithDiagnostics({
+        allowRepair: req.body.singlePass !== true,
         rawText: aiText,
         allowedMessageIds: new Set(safeHistory.map((item) => item.id)),
         originalPrompt: prompt,

@@ -1,3 +1,4 @@
+import { meaningfulMemoryValue } from "./fixtures/memoryValueFixture";
 import assert from "node:assert/strict";
 import {
   filterOfflineExtractedFacts,
@@ -111,7 +112,7 @@ const tests: Array<[string, () => void | Promise<void>]> = [
       subject: "relationship",
       temporalStatus: "future",
       sourceMessageIds: ["message-a"],
-      evidenceQuote: "明天一起通话。",
+      evidenceQuote: "明天一起通话。", valueAssessment: meaningfulMemoryValue("明天一起通话。"),
     }] }));
     assert.equal(result.extractedMemories.length, 0);
   }],
@@ -138,7 +139,7 @@ const tests: Array<[string, () => void | Promise<void>]> = [
       subject: "relationship",
       temporalStatus: "future",
       sourceMessageIds: ["message-a"],
-      evidenceQuote: "明天一起通话。",
+      evidenceQuote: "明天一起通话。", valueAssessment: meaningfulMemoryValue("明天一起通话。"),
     }] }));
     assert.equal(result.extractedMemories.length, 1);
     assert.ok(result.extractedMemories[0]?.content.includes(canonicalMarker));
@@ -164,7 +165,7 @@ const tests: Array<[string, () => void | Promise<void>]> = [
         subject: "relationship" as const,
         temporalStatus: "past" as const,
         sourceMessageIds: ["character-chicken"],
-        evidenceQuote: confirmedStoryMessages[0].content,
+        evidenceQuote: confirmedStoryMessages[0].content, valueAssessment: meaningfulMemoryValue(confirmedStoryMessages[0].content),
       },
       {
         statement: "用户明确表示喜欢范千带来的炸鸡口味。",
@@ -172,7 +173,7 @@ const tests: Array<[string, () => void | Promise<void>]> = [
         subject: "user" as const,
         temporalStatus: "timeless" as const,
         sourceMessageIds: ["user-preference"],
-        evidenceQuote: confirmedStoryMessages[1].content,
+        evidenceQuote: confirmedStoryMessages[1].content, valueAssessment: meaningfulMemoryValue(confirmedStoryMessages[1].content),
       },
       {
         statement: "范千向用户告白，用户接受告白，两人确认恋爱关系。",
@@ -180,7 +181,7 @@ const tests: Array<[string, () => void | Promise<void>]> = [
         subject: "relationship" as const,
         temporalStatus: "present" as const,
         sourceMessageIds: ["character-confession", "user-acceptance"],
-        evidenceQuote: confirmedStoryMessages[3].content,
+        evidenceQuote: confirmedStoryMessages[3].content, valueAssessment: meaningfulMemoryValue(confirmedStoryMessages[3].content),
       },
       {
         statement: "用户与范千在双方自愿的情况下发生了性关系。",
@@ -188,7 +189,7 @@ const tests: Array<[string, () => void | Promise<void>]> = [
         subject: "relationship" as const,
         temporalStatus: "past" as const,
         sourceMessageIds: ["relationship-intimacy"],
-        evidenceQuote: confirmedStoryMessages[4].content,
+        evidenceQuote: confirmedStoryMessages[4].content, valueAssessment: meaningfulMemoryValue(confirmedStoryMessages[4].content),
       },
     ];
     const result = await MemoryService.extractMemories({
@@ -243,12 +244,12 @@ const tests: Array<[string, () => void | Promise<void>]> = [
       subject: "relationship",
       temporalStatus: "past",
       sourceMessageIds: ["character-chicken"],
-      evidenceQuote: confirmedStoryMessages[0].content,
+      evidenceQuote: confirmedStoryMessages[0].content, valueAssessment: meaningfulMemoryValue(confirmedStoryMessages[0].content),
     }] }));
     assert.equal(result.acceptedClaims.length, 0);
     assert.equal(result.extractedMemories.length, 0);
   }],
-  ["H delicate template displays character diary voice without changing factual ownership", async () => {
+  ["H display style cannot change extraction or add invented diary feelings", async () => {
     const objectiveStatement = "范千向用户告白，用户接受告白，两人确认恋爱关系。";
     const diaryText = "我今天去{{user}}家时，终于把那句告白说出口了。{{user}}答应做我女朋友——啧，算她有眼光。";
     const result = await MemoryService.extractMemories({
@@ -269,7 +270,7 @@ const tests: Array<[string, () => void | Promise<void>]> = [
       currentTime: () => 17,
       formatContent: (items, options) => `【心境归档】\n${(options?.displayItems || items).join("\n\n")}`,
     }, async (params) => {
-      assert.equal(params.templateType, "delicate");
+      assert.equal(params.templateType, "refined", "both display styles use the same factual extraction contract");
       assert.match(params.characterProfile || "", /嘴硬心软/);
       return { candidates: [{
         statement: objectiveStatement,
@@ -278,16 +279,15 @@ const tests: Array<[string, () => void | Promise<void>]> = [
         subject: "relationship",
         temporalStatus: "present",
         sourceMessageIds: ["character-confession", "user-acceptance"],
-        evidenceQuote: confirmedStoryMessages[3].content,
+        evidenceQuote: confirmedStoryMessages[3].content, valueAssessment: meaningfulMemoryValue(confirmedStoryMessages[3].content),
       }] };
     });
 
     assert.equal(result.acceptedClaims[0]?.statement, objectiveStatement, "truth storage remains objective and actor-safe");
-    assert.match(result.extractedMemories[0]?.content || "", /我今天去\{\{user\}\}家/);
-    assert.match(result.extractedMemories[0]?.content || "", /算她有眼光/);
-    assert.doesNotMatch(result.extractedMemories[0]?.content || "", /- 范千向用户告白/);
+    assert.ok(result.extractedMemories[0]?.content.includes(objectiveStatement));
+    assert.ok(!result.extractedMemories[0]?.content.includes(diaryText), "unsolicited narrative rewrite cannot become archived evidence");
   }],
-  ["I delicate offline storage shows diary while online recall uses objective fact index", () => {
+  ["I legacy delicate storage remains readable while recall uses its objective index", () => {
     const stored = `【心境归档】\n我今天终于向{{user}}告白了，{{user}}答应了。\n[offline-story:${story.id}:summary]\n【事实索引（系统）】\n- 范千向用户告白，用户接受告白，两人确认恋爱关系。`;
     const displayed = getMemoryDisplayContent(stored);
     const recalled = sanitizeOfflineMemoryForOnlineUse(stored);

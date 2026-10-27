@@ -33,6 +33,27 @@ function records() {
 
 try {
   resetLedger();
+  await withAiRequestLedger({ purpose: "memory_extract" }, async session => {
+    session.markAttempt({ transport: "backend_proxy" });
+    return { text: "", error: "private provider detail must not be persisted" };
+  });
+  assert.equal(records()[0].status, "failure");
+  assert.equal(records()[0].errorCategory, "unknown", "a returned error is not a successful none category");
+  assert.doesNotMatch(JSON.stringify(records()), /private provider detail/);
+  resetLedger();
+  await withAiRequestLedger({ purpose: "memory_extract" }, async session => {
+    session.markAttempt({ transport: "backend_proxy" });
+    return { success: false, error: { code: "provider_invalid_response" } };
+  });
+  assert.equal(records()[0].errorCategory, "provider_invalid_response");
+  resetLedger();
+  await withAiRequestLedger({ purpose: "memory_extract" }, async session => {
+    session.markAttempt({ transport: "backend_proxy" });
+    return { text: "", items: [] };
+  });
+  assert.equal(records()[0].status, "success", "an honestly empty extraction is still successful");
+  assert.equal(records()[0].errorCategory, "none");
+  resetLedger();
   await withAiRequestLedger({ purpose: "chat_reply" }, async () => ({ text: "预检结果，不代表真实 API 调用" }));
   assert.equal(records().length, 0, "a flow without a provider attempt must not create a fake call detail");
 
@@ -136,6 +157,20 @@ try {
   ledger = records();
   assert.equal(ledger[0].purpose, "memory_extract");
   assert.equal(ledger[0].parentActionId, "action-memory");
+
+  resetLedger();
+  let failedExtractionCalls = 0;
+  globalThis.fetch = (async () => {
+    failedExtractionCalls += 1;
+    return Response.json({ error: "upstream unavailable", code: "provider_unavailable" }, { status: 500 });
+  }) as typeof fetch;
+  const failedExtraction = await apiExtractMemories({ history: [{ id: "m1", role: "user", text: "test" }], characterName: "test", apiKey: "key", model: "model" });
+  assert.match(failedExtraction.error || "", /HTTP 500.*provider_unavailable/);
+  assert.equal(failedExtractionCalls, 1, "explicit provider failure must not trigger another request");
+  ledger = records();
+  assert.equal(ledger[0].errorCategory, "provider_5xx");
+  assert.equal(ledger[0].providerRequestCount, 1);
+  assert.ok(!JSON.stringify(ledger).includes("upstream unavailable"), "raw errors stay out of durable ledger");
 
   resetLedger();
   globalThis.fetch = (async () => Response.json({ text: "{\"title\":\"日记\",\"body\":\"今天\"}" })) as typeof fetch;

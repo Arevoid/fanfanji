@@ -50,6 +50,7 @@ export interface TextProviderInput {
   timeoutMs?: number;
   /** Maximum provider output tokens for workflows that intentionally generate in segments. */
   maxOutputTokens?: number;
+  responseFormat?: "json_object";
   imageDataUrl?: string;
   /** Extraction may legitimately return an empty candidate set. */
   allowEmptyText?: boolean;
@@ -211,7 +212,7 @@ export function parseOpenAiTextWithTelemetry(raw: string): TextProviderDiagnosti
     observedContent = summary.kind;
     contentPartCount = summary.count;
     if (Array.isArray(content)) {
-      result = content.map((part) => typeof part === "string" ? part : part?.text || "").join("");
+      result = content.filter((part:any)=>typeof part==="string"||!part?.type||part.type==="text"||part.type==="output_text").map((part) => typeof part === "string" ? part : part?.text || "").join("");
     } else {
       result = typeof content === "string" ? content : "";
     }
@@ -246,7 +247,7 @@ export function parseGeminiTextWithTelemetry(raw: string): TextProviderDiagnosti
   const candidates = hasCandidates ? parsed.candidates : [];
   const parts = candidates[0]?.content?.parts;
   const summary = contentKind(parts);
-  const text = Array.isArray(parts) ? parts.map((part: any) => part?.text || "").join("") : "";
+  const text = Array.isArray(parts) ? parts.filter((part:any)=>!part?.thought).map((part: any) => part?.text || "").join("") : "";
   const usage = normalizeProviderUsage(parsed.usageMetadata || parsed.usage);
   const finishReason = finishReasonKind(candidates[0]?.finishReason || parsed?.promptFeedback?.blockReason);
   return {
@@ -287,6 +288,7 @@ export async function callTextProviderWithDiagnostics(input: TextProviderInput):
         messages,
         temperature: input.temperature ?? 0.7,
         stream: input.streamCompatible === true,
+        ...(input.responseFormat === "json_object" ? { response_format: { type: "json_object" } } : {}),
         ...(input.streamCompatible === true ? { stream_options: { include_usage: true } } : {}),
         ...(typeof input.maxOutputTokens === "number"
           ? { max_tokens: Math.max(128, Math.floor(input.maxOutputTokens)) }
@@ -332,6 +334,7 @@ export async function callTextProviderWithDiagnostics(input: TextProviderInput):
       contents,
       generationConfig: {
         temperature: input.temperature ?? 0.7,
+        ...(input.responseFormat === "json_object" ? { responseMimeType: "application/json" } : {}),
         ...(typeof input.maxOutputTokens === "number"
           ? { maxOutputTokens: Math.max(128, Math.floor(input.maxOutputTokens)) }
           : {}),

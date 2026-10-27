@@ -14,6 +14,10 @@ export const AI_PURPOSES = [
   "regenerate",
   "proactive_message",
   "memory_extract",
+  "memory_migration",
+  "memory_organization",
+  "memory_continuity",
+  "memory_embedding",
   "translation",
   "personality_summary",
   "inner_voice",
@@ -46,6 +50,10 @@ export const AI_PURPOSE_PROMPT_LABELS: Partial<Record<AiPurpose, string>> = {
   regenerate: "重新生成提示词",
   proactive_message: "主动消息提示词",
   memory_extract: "记忆提取提示词",
+  memory_migration: "旧记忆迁移提示词",
+  memory_organization: "记忆整理与核对提示词",
+  memory_continuity: "角色认知与生活提示词",
+  memory_embedding: "记忆语义向量",
   translation: "翻译提示词",
   personality_summary: "人设总结提示词",
   inner_voice: "心声提示词",
@@ -559,9 +567,10 @@ export async function withAiRequestLedger<T>(
     const outputCharacters = typeof result === "object" && result !== null && "text" in result
       ? String((result as { text?: unknown }).text || "").length
       : undefined;
-    const recordLike = typeof result === "object" && result !== null ? result as { success?: unknown; error?: unknown } : undefined;
+    const recordLike = typeof result === "object" && result !== null ? result as { success?: unknown; error?: unknown; errorDetails?: unknown } : undefined;
     const succeeded = recordLike?.success === false || (typeof recordLike?.error === "string" && recordLike.error.trim().length > 0) ? false : true;
-    session.complete({ succeeded, outputCharacters });
+    session.complete({ succeeded, outputCharacters,
+      ...(!succeeded ? { error: recordLike?.errorDetails || recordLike?.error || { code: "unknown" } } : {}) });
     return result;
   } catch (error) {
     session.complete({ succeeded: false, error });

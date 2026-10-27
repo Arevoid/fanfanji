@@ -43,12 +43,9 @@ const confirmedEvent: CharacterEvent = {
 };
 
 const weakChat = buildChatPromptContext(buildContext());
-assert.deepEqual(weakChat.relationship.legacySummary, {
-  content: "旧摘要：用户曾经答应周末见面",
-  source: "legacy-unverified",
-});
-assert.match(formatChatPromptContext(weakChat), /source=legacy-unverified/);
-assert.match(formatDiaryPromptContext(buildDiaryPromptContext(buildContext())), /source=legacy-unverified/);
+assert.equal(weakChat.relationship.legacySummary,undefined,"unversioned legacy text cannot bypass the unified source/forget gate even as a weak hint");
+assert.doesNotMatch(formatChatPromptContext(weakChat), /旧摘要：用户曾经答应周末见面/);
+assert.doesNotMatch(formatDiaryPromptContext(buildDiaryPromptContext(buildContext())), /旧摘要：用户曾经答应周末见面/);
 
 const confirmedChat = buildChatPromptContext(buildContext([{ event: confirmedEvent, promptVisibility: "safe" }]));
 assert.equal(confirmedChat.relationship.legacySummary, undefined, "confirmed CharacterEvent outranks legacy summary");

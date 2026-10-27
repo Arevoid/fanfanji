@@ -1,3 +1,4 @@
+import { resolveCharacterTextSettings } from "../../domain/character/characterTextApiRouting";
 import { apiChat } from "../../utils/apiHelper";
 import { createId } from "../../core/id/createId";
 import type { Character, Message, Moment, MusicTrack, UserIdentity, UserSettings, WorldBookEntry } from "../../types";
@@ -862,6 +863,7 @@ type CharacterPhoneProgressionInput = {
 export async function advanceCharacterPhoneWithResult(
   input: CharacterPhoneProgressionInput,
 ): Promise<CharacterPhoneGenerationResult> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const now = input.now ?? Date.now();
   const isInitialGeneration = Boolean(input.initial);
   const isContactThreadRepair = Boolean(input.contactThreadRepair);
@@ -1713,6 +1715,7 @@ export async function advanceCharacterPhoneWithResult(
 export async function advanceCharacterPhone(
   input: CharacterPhoneProgressionInput,
 ): Promise<CharacterPhoneRecord> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const result = await advanceCharacterPhoneWithResult(input);
   return result.phone;
 }

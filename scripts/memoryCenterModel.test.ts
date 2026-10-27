@@ -65,7 +65,7 @@ assert.deepEqual(countMemoryCenterRecords(records), { truth: 1, summary: 1, rule
 assert.equal(records[0]?.recordType, "rule");
 assert.equal(records.find((record) => record.recordType === "truth")?.layer, "core");
 assert.equal(records.find((record) => record.recordType === "truth")?.truthStatus, "confirmed");
-assert.equal(MEMORY_CENTER_TYPE_LABELS.truth, "长期事实");
+assert.equal(MEMORY_CENTER_TYPE_LABELS.truth, "记忆条目");
 assert.equal(MEMORY_CENTER_LAYER_LABELS.core, "核心记忆");
 assert.equal(filterMemoryCenterRecords(records, { recordType: "truth" }).length, 1);
 assert.equal(filterMemoryCenterRecords(records, { characterId: "character-a", searchQuery: "摄影" }).length, 2);

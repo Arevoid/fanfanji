@@ -1,3 +1,4 @@
+import { resolveCharacterTextSettings } from "../domain/character/characterTextApiRouting";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowUp, Film, Save, Send, Settings as SettingsIcon, Trash2, Upload, Users, X } from "lucide-react";
 import { createId } from "../core/id/createId";
@@ -8,10 +9,9 @@ import { getConversationId, type CharacterRelationship } from "../domain/relatio
 import type { CinemaCue, CinemaDiscussion, CinemaMedia, CinemaStore, CinemaWatchRoom } from "../domain/cinema/types";
 import type { Character, MemoryItem, UserSettings } from "../types";
 import { getSubtitleContext, parseSubtitleText, formatSubtitleTime } from "../features/cinema/subtitleParser";
-import { createManualKnowledgeClaim } from "../features/characterKnowledge/services/manualKnowledgeService";
-import { appendMany as appendKnowledgeClaims } from "../core/storage/repositories/characterKnowledgeRepository";
-import type { KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
-import { commitMemoryWriteBundle } from "../domain/memory/memoryWriteCoordinator";
+import { archiveCinemaDiscussion } from "../features/cinema/cinemaMemoryArchiveService";
+import { requestCinemaMemoryReply } from "../features/cinema/cinemaMemoryReply";
+import { saveCharacterExperience } from "../features/characterKnowledge/services/characterExperienceService";
 
 interface AppCinemaProps {
   userIdentityId: string;
@@ -192,7 +192,6 @@ export default function AppCinema({
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       setVideoUrl(null);
-      setSubtitleCues([]);
     };
   }, [selectedMedia?.id, selectedMedia?.video.assetId, selectedRoom?.id]);
 
@@ -205,7 +204,7 @@ export default function AppCinema({
     cinemaAssetDb.load(selectedMedia.subtitle.assetId).then(async (asset) => {
       if (!active || !asset) return;
       const text = await asset.blob.text();
-      setSubtitleCues(parseSubtitleText(text, selectedMedia.subtitleFormat || "srt"));
+      if (active) setSubtitleCues(parseSubtitleText(text, selectedMedia.subtitleFormat || "srt"));
     }).catch(() => setSubtitleCues([]));
     return () => { active = false; };
   }, [selectedMedia?.id, selectedMedia?.subtitle?.assetId, selectedMedia?.subtitleFormat]);
@@ -385,17 +384,18 @@ export default function AppCinema({
   };
 
   const generatePlotSummary = async () => {
-    if (!selectedRoom || !selectedMedia || !selectedCharacter || !settings?.apiKey || plotSummaryLoading) return;
+    if (!selectedRoom || !selectedMedia || !selectedCharacter || plotSummaryLoading) return;
     setPlotSummaryLoading(true);
     try {
+      const roleSettings=resolveCharacterTextSettings(settings,selectedCharacter);
       const frame = currentSubtitle ? undefined : captureFrame();
       const response = await apiChat({
         message: `请只根据用户已经播放到的内容，更新一份不超过120字的剧情摘要。不要猜测未播放内容，不要写角色动作括号。\n影视：${selectedMedia.title}\n片名辅助信息：${selectedMedia.synopsis || "无"}\n其他辅助信息：${selectedMedia.auxiliaryInfo || "无"}\n播放到：${formatSubtitleTime(positionMs)}\n已有摘要：${selectedRoom.plotSummary || "无"}\n最近字幕：${watchedSubtitleContext || "无字幕"}\n最近讨论：${selectedDiscussions.slice(-4).map((item) => `${item.userText} / ${item.characterText || ""}`).join("\n") || "无"}`,
         history: [],
         systemInstruction: "你是观影进度摘要器，只整理已播放内容，输出简短纯文本摘要。",
-        apiKey: settings.apiKey,
-        model: settings.selectedModel,
-        apiEndpoint: settings.apiEndpoint,
+        apiKey: roleSettings.apiKey,
+        model: roleSettings.selectedModel,
+        apiEndpoint: roleSettings.apiEndpoint,
         apiTemperature: 0.2,
         imageDataUrl: frame || undefined,
         purpose: "cinema_generate",
@@ -413,7 +413,7 @@ export default function AppCinema({
   };
 
   const generateReply = async (userText: string, automatic = false, requestReply = true) => {
-    if (!selectedRoom || !selectedMedia || !selectedCharacter || (requestReply && !settings?.apiKey)) {
+    if (!selectedRoom || !selectedMedia || !selectedCharacter) {
       if (!settings?.apiKey) setNotice("请先在设置中配置 API Key");
       return;
     }
@@ -430,7 +430,7 @@ export default function AppCinema({
       conversationId: selectedRoom.conversationId,
       positionMs,
       userText: automatic ? "（角色主动反应）" : trimmedUserText,
-      subtitleContext: currentSubtitle || undefined,
+      subtitleContext: (currentSubtitle || watchedSubtitleContext) || undefined,
       createdAt: Date.now(),
     };
     if (!persistStore(mergeStore(storeRef.current, { discussions: [...storeRef.current.discussions, initialDiscussion] }))) return;
@@ -441,7 +441,9 @@ export default function AppCinema({
     try {
       const effectiveFrameDataUrl = frameDataUrl || (!currentSubtitle ? captureFrame() : undefined);
       const prompt = `你正在和用户一起观看影视《${selectedMedia.title}》。你扮演${selectedCharacter.name}，只能知道用户已经看到的内容。\n片名辅助信息：${selectedMedia.synopsis || "无"}\n其他辅助信息：${selectedMedia.auxiliaryInfo || "无"}\n当前播放时间：${formatSubtitleTime(positionMs)}。\n当前字幕：${currentSubtitle || "暂无字幕"}\n已播放剧情摘要：${selectedRoom.plotSummary || "未开启剧情摘要"}\n${effectiveFrameDataUrl ? "当前视频画面已附加，请优先识别画面中的主体、动作、场景和可见文字，只讨论当前画面，不要凭空猜测后续剧情。" : "当前使用字幕和观影摘要，不发送视频画面。"}\n${automatic ? "这是一次低频观影反应，请只用一句自然、符合角色性格的短回应，不要抢夺用户注意力。" : `用户说：${userText.trim()}`}\n只输出角色实际说的话，不要括号动作、舞台说明或旁白。`;
-      const response = await apiChat({
+      const memoryRelation = relationships.find((relation) => relation.id === selectedRoom.relationId);
+      const response = await requestCinemaMemoryReply({ relation: memoryRelation, characterId: selectedCharacter.id, userIdentityId,
+        settings, query: userText.trim() || currentSubtitle || selectedMedia.title, params: {
         message: prompt,
         history: selectedDiscussions.slice(-8).flatMap((discussion) => [
           { role: "user", text: discussion.userText },
@@ -458,9 +460,13 @@ export default function AppCinema({
         characterId: selectedCharacter.id,
         relationId: selectedRoom.relationId,
         conversationId: selectedRoom.conversationId,
-      });
+      } });
       const characterText = cleanCharacterReply(response.text);
       persistStore(mergeStore(storeRef.current, { discussions: storeRef.current.discussions.map((discussion) => discussion.id === discussionId ? { ...discussion, characterText } : discussion) }));
+      if (memoryRelation && memoryRelation.characterId === selectedCharacter.id && memoryRelation.userIdentityId === userIdentityId) {
+        saveCharacterExperience({ scope: { characterId: selectedCharacter.id, userIdentityId, relationId: memoryRelation.id, conversationId: memoryRelation.conversationId },
+          app: "cinema", sourceId: discussionId, body: characterText, experience: response.experience });
+      }
       setFrameDataUrl(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "观影讨论生成失败";
@@ -511,63 +517,26 @@ export default function AppCinema({
   const saveDiscussionToMemory = async (discussion: CinemaDiscussion) => {
     const relation = scopedRelations.find((item) => item.id === discussion.relationId);
     if (!relation) return;
-    const statement = `与用户一起观看《${selectedMedia?.title || "影视"}》时，在 ${formatSubtitleTime(discussion.positionMs)} 讨论：${discussion.userText}；角色回应：${discussion.characterText || ""}`.slice(0, 1000);
-    const claim = createManualKnowledgeClaim({
-      id: createId("claim-cinema"),
-      scope: { relationId: relation.id, characterId: relation.characterId, userIdentityId: relation.userIdentityId, conversationId: relation.conversationId },
-      sourceApp: "cinema",
-      statement,
-      sourceRecordId: discussion.id,
-      recordedAt: Date.now(),
-    });
-    if (!claim) {
-      setNotice("观影记忆保存失败");
-      return;
-    }
-    const write = await commitMemoryWriteBundle({
-      claims: [claim],
-      appendClaims: appendKnowledgeClaims,
-    });
-    if (!write.complete) {
+    const write = archiveCinemaDiscussion({ relation, discussionId: discussion.id });
+    if (!write.success) {
       setNotice("观影记忆保存失败，已保护当前关系认知");
       return;
     }
     persistStore(mergeStore(storeRef.current, { discussions: storeRef.current.discussions.map((item) => item.id === discussion.id ? { ...item, savedToMemory: true } : item) }));
-    setNotice("已保存为当前关系的观影记忆");
+    setNotice("已保存为当前关系的观影资料快照，影视内容不作为现实经历。");
   };
 
   const archiveDiscussionsBeforeDelete = async (media: CinemaMedia, rooms: CinemaWatchRoom[], discussions: CinemaDiscussion[]) => {
     if (!discussions.length) return true;
-    const claims: KnowledgeClaim[] = [];
     for (const room of rooms) {
       const relation = scopedRelations.find((item) => item.id === room.relationId);
       const roomDiscussions = discussions.filter((discussion) => discussion.roomId === room.id);
       if (!relation || !roomDiscussions.length) continue;
-      const discussionSummary = roomDiscussions
-        .slice(-12)
-        .map((discussion) => `用户：${discussion.userText}${discussion.characterText ? `；角色：${discussion.characterText}` : ""}`)
-        .join("\n")
-        .slice(0, 1600);
-      const statement = `与用户一起观看《${media.title}》的观影归档：${room.plotSummary ? `剧情摘要：${room.plotSummary}；` : ""}讨论记录：${discussionSummary}`.slice(0, 2000);
-      const claim = createManualKnowledgeClaim({
-        id: createId("claim-cinema-archive"),
-        scope: { relationId: relation.id, characterId: relation.characterId, userIdentityId: relation.userIdentityId, conversationId: relation.conversationId },
-        sourceApp: "cinema",
-        statement,
-        sourceRecordId: room.id,
-        recordedAt: Date.now(),
-      });
-      if (!claim) continue;
-      claims.push(claim);
-    }
-    if (!claims.length) return true;
-    const write = await commitMemoryWriteBundle({
-      claims,
-      appendClaims: appendKnowledgeClaims,
-    });
-    if (!write.complete) {
-      setNotice("观影讨论归档失败，已取消删除以保护数据");
-      return false;
+      for (const discussion of roomDiscussions) {
+        if (!archiveCinemaDiscussion({ relation, discussionId: discussion.id }).success) {
+          setNotice("观影讨论归档失败，已取消删除以保护数据"); return false;
+        }
+      }
     }
     return true;
   };

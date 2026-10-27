@@ -1,0 +1,40 @@
+import {sourceRevision} from "../src/domain/characterKnowledge/knowledgeEvolution";
+import {readOfflineCumulativeMemoryContext} from "../src/features/offline/services/offlineCumulativeMemoryContext";
+import assert from "node:assert/strict";
+import {MemoryService} from "../src/domain/memory/MemoryService";
+import {createOfflineStoryMemorySyncActions} from "../src/features/offline/hooks/useOfflineStoryMemorySyncActions";
+import {installOfflineArchiveExecutor} from "../src/features/offline/services/offlineArchiveQueue";
+import {getOfflineMemorySourceMessages,offlineMemorySourceRevision,getOfflineStorySummaryId} from "../src/domain/memory/offlineMemorySync";
+import {loadConversationSummaries} from "../src/core/storage/repositories/conversationSummaryRepository";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+import type {Character,OfflineStory,UserSettings,MemoryVaultSettings} from "../src/types";
+import type {CharacterRelationship} from "../src/domain/relationship/characterRelationship";
+const storage=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(key:string)=>storage.get(key)??null,setItem:(key:string,value:string)=>storage.set(key,value),removeItem:(key:string)=>storage.delete(key)}}});
+const role={id:"c",name:"C",avatar:"",personality:"",backstory:""} as Character;
+const relation={id:"r",characterId:"c",userIdentityId:"u",conversationId:"conv",relationship:"friend",createdAt:1,updatedAt:1} as CharacterRelationship;
+let story={id:"story",characterId:"c",relationId:"r",conversationId:"conv",ownerIdentityId:"u",mode:"continue",title:"test",createdAt:1,updatedAt:1,syncedSourceMessageRevisions:{},messages:[{id:"one",characterId:"c",sender:"user",timestamp:1,content:"first "+"a".repeat(9000)},{id:"two",characterId:"c",sender:"character",timestamp:2,content:"second "+"b".repeat(9000)}]} as OfflineStory;
+const ref={current:story as OfflineStory|null};const calls:string[][]=[];let failSecond=true;
+const original=MemoryService.extractMemoryBatches;
+MemoryService.extractMemoryBatches=async context=>{
+ calls.push(context.recentMessages.map(message=>message.id));
+ if(context.recentMessages[0].id==="two"&&failSecond)return {extractedMemories:[],acceptedClaims:[],rejectedCandidateCount:0,apiError:"synthetic 503"};
+ const claims=context.recentMessages.map(message=>({...relation,relationId:relation.id,id:`claim-${message.id}`,statement:`durable fact ${message.id}`,kind:"fact",subject:"relationship",temporalStatus:"past",truthStatus:"asserted",confidence:.9,userConfirmed:false,status:"active",visibility:"relation_private",recordedAt:message.timestamp,schemaVersion:1,admissionStatus:"retained",source:{kind:"offline_story",storyId:story.id,authorship:message.sender,producer:"synthetic",evidenceKey:message.id,messageIds:[message.id],messageRevisions:{[message.id]:sourceRevision(message.content)},evidenceQuote:message.content}})) as unknown as KnowledgeClaim[];
+ return {extractedMemories:[],acceptedClaims:claims,rejectedCandidateCount:0};
+};
+const dispose=installOfflineArchiveExecutor(async value=>value,id=>id===story.id?story:undefined);
+const actions=createOfflineStoryMemorySyncActions({requestMemoryReview:async request=>{const payload=JSON.parse(request.message!);return {text:JSON.stringify({reviews:payload.candidates.map((candidate:any)=>({id:candidate.id,sourceQuote:candidate.sourceQuote,decision:"new_experience",confidence:.99,reason:"synthetic durable fact"}))})};},characters:[role],relationships:[relation],settings:{apiKey:"synthetic",selectedModel:"synthetic",name:"U"} as UserSettings,memories:[],recallSettings:{} as MemoryVaultSettings,activeIdentityId:"u",activeStoryRef:ref,memorySyncInFlightRef:{current:new Set()},setMemorySyncingStoryId:()=>{},onSaveOfflineStory:async value=>{story=value;ref.current=value;return true;},onSaveMemories:()=>{},onSaveRelationships:()=>{},saveActiveStorySnapshot:value=>{ref.current=value;},showToast:()=>{},needsLegacyHandoffRepair:()=>false,needsMissingSummaryRepair:()=>false,needsUninformativeSummaryRepair:()=>false});
+try{
+ const failed=await actions.handleSyncMemoryToBrain(story,{userConfirmed:true,syncIntent:"automatic_end",backgroundProgress:true});
+ assert.equal(failed.memorySyncStatus,"failed");assert.deepEqual(calls,[["one"],["two"]]);
+ assert.equal(failed.syncedSourceMessageRevisions?.one,offlineMemorySourceRevision(story.messages[0]));assert.equal(failed.syncedSourceMessageRevisions?.two,undefined);
+ assert.deepEqual(getOfflineMemorySourceMessages(failed).map(message=>message.id),["two"]);
+ failSecond=false;
+ const resumed=await actions.handleSyncMemoryToBrain(story,{userConfirmed:true,syncIntent:"automatic_end",backgroundProgress:true});
+ assert.equal(resumed.memorySyncStatus,"synced");assert.deepEqual(calls,[["one"],["two"],["two"]],"retry does not summarize the committed first batch again");
+ const summaries=loadConversationSummaries().value.filter(summary=>summary.id===getOfflineStorySummaryId(story));assert.equal(summaries.length,1);assert.equal(summaries[0].sourceMessageIds.length,2);assert.ok(summaries[0].summary.includes("one")&&summaries[0].summary.includes("two"));assert.equal(summaries[0].sourceMessageRevisions?.two,offlineMemorySourceRevision(story.messages[1]));
+ assert.ok(readOfflineCumulativeMemoryContext(story).includes("durable fact one"));
+ assert.equal(readOfflineCumulativeMemoryContext({...story,ownerIdentityId:"another"}),"");
+ assert.equal(readOfflineCumulativeMemoryContext({...story,messages:[{...story.messages[0],content:"edited"},...story.messages.slice(1)]}),"");
+ await actions.handleSyncMemoryToBrain(story,{userConfirmed:true,syncIntent:"automatic_end"});assert.equal(calls.length,3);
+ console.log("PASS actual archive writer: per-batch durable progress, failure, retry only unfinished sources, stable cumulative story summary and persisted revision coverage (in-memory synthetic storage/model only)");
+}finally{MemoryService.extractMemoryBatches=original;dispose();}

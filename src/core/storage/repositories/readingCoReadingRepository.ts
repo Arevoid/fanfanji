@@ -88,6 +88,13 @@ export async function flushCoReadingStore(): Promise<StorageWriteResult> {
   }
 }
 
+/** Read-only cold-start lookup; flush a live queue before observing its output. */
+export async function loadCommittedCoReadingStore():Promise<StorageResult<CoReadingStore>>{
+ if(metadataReady&&cachedStore){const flushed=await flushCoReadingStore();if(!flushed.success)return {value:createEmptyCoReadingStore(),valid:false,found:true,error:flushed.error};}
+ if(typeof indexedDB!=="undefined")try{const stored=await readingAssetDb.loadMetadataValue<unknown>(CO_READING_METADATA_KEY);if(stored)return {value:normalizeCoReadingStore(stored),valid:true,found:true};}catch{return {value:createEmptyCoReadingStore(),valid:false,found:false,error:"read"};}
+ return loadLegacyCoReadingStore();
+}
+
 export function listReadingRooms(userIdentityId: string, bookId?: string): ReadingRoom[] {
   return loadCoReadingStore().value.rooms.filter((room) => room.userIdentityId === userIdentityId && (!bookId || room.bookId === bookId));
 }

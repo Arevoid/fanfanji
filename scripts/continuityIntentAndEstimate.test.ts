@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { runForegroundCharacterContinuity,getCharacterContinuityView } from "../src/features/characterKnowledge/services/characterContinuityService";
+import { estimateLegacyMigration } from "../src/features/characterKnowledge/services/memoryMigrationEstimate";
+import { saveKnowledgeClaims } from "../src/core/storage/repositories/characterKnowledgeRepository";
+import type { Character,UserSettings } from "../src/types";
+import type { KnowledgeClaim } from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+const values=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>values.set(k,v),removeItem:(k:string)=>values.delete(k)}}});
+const scope={characterId:"c",relationId:"r",userIdentityId:"u",conversationId:"conv"};
+const claim={...scope,id:"source",statement:"用户在我难过时耐心安慰我。",kind:"fact",subject:"relationship",temporalStatus:"present",truthStatus:"asserted",confidence:.9,userConfirmed:false,recordedAt:Date.now(),status:"active",visibility:"relation_private",schemaVersion:1,admissionStatus:"retained",source:{kind:"user_message",authorship:"user",messageIds:["message"],producer:"test",evidenceKey:"source"}} as KnowledgeClaim;
+saveKnowledgeClaims([claim]);let calls=0;
+const input={character:{id:"c",name:"C"} as Character,scope,settings:{apiKey:"fixture",name:"U"} as UserSettings,visible:true,singlePass:true,readClaims:()=>[claim],request:async(params:any)=>{
+ calls++;assert.equal(params.singleAttempt,true);
+ return {text:JSON.stringify({impressions:[{category:"care",proposition:"用户很温柔",confidence:.9,sourceClaimIds:["source"]}],lifeEvents:[{summary:"整理了自己的书桌",status:"completed"}],lifeContinuations:[]})};
+}};
+await runForegroundCharacterContinuity({...input,intent:"reflection"});
+assert.equal(calls,1);assert.equal(getCharacterContinuityView().value.life.length,0,"reflection cannot silently generate life");
+const impressions=getCharacterContinuityView().value.impressions.length;
+await runForegroundCharacterContinuity({...input,intent:"life"});
+assert.equal(calls,2,"explicit life uses a separate single request");assert.equal(getCharacterContinuityView().value.impressions.length,impressions,"life cannot silently update impressions");
+assert.equal(getCharacterContinuityView().value.life.length,1);
+const chat=readFileSync(new URL("../src/components/AppChat.tsx",import.meta.url),"utf8");
+assert.doesNotMatch(chat,/runForegroundCharacterContinuity|prepareMemoryIdentityRegistry/u,"chat page cannot bypass the central scheduler");
+values.clear();saveKnowledgeClaims(Array.from({length:25},(_,i)=>({...claim,id:`old-${i}`,statement:`用户保存第${i}次旅行的明信片。`,legacyCompatible:true,source:{...claim.source,kind:"legacy_memory" as const,sourceRecordId:`old-${i}`,messageIds:undefined,evidenceKey:`old-${i}`}})));
+assert.equal(estimateLegacyMigration()?.batches,1);assert.equal(estimateLegacyMigration()?.sources,25);
+saveKnowledgeClaims([{...claim,id:"new"}, {...claim,id:"long",source:{...claim.source,evidenceKey:"long"},legacyCompatible:true,statement:"长".repeat(13000)}, {...claim,id:"other",legacyCompatible:true,relationId:"other",conversationId:"other"}]);
+assert.equal(estimateLegacyMigration()?.sources,2,"new-system sources do not inflate migration estimates");assert.equal(estimateLegacyMigration()?.batches,2,"long fragments and separate relationships cannot be packed together");
+console.log("PASS intent isolation, one request per explicit operation, no chat-page bypass, scope/length aware migration estimate");

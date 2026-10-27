@@ -63,6 +63,7 @@ export function projectLegacyMemoryToKnowledgeClaim(
         evidenceKey: `legacy-memory:${memory.id}:${relation.id}`,
       },
       confidence: 0.25,
+      ...(memory.recallDisabled?{recallDisabled:true}:{}),
       userConfirmed: false,
       recordedAt: memory.timestamp,
       status: "active",

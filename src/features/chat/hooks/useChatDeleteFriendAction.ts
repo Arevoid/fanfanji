@@ -28,7 +28,7 @@ interface UseChatDeleteFriendActionOptions {
   offlineStories: readonly OfflineStory[];
   relationForCharacter: (characterId: string) => CharacterRelationship | undefined;
   belongsToActiveIdentity: (ownerIdentityId?: string) => boolean;
-  clearMessagesAndLinkedArtifacts: (characterId: string, relationId?: string) => void;
+  clearMessagesAndLinkedArtifacts: (characterId: string, relationId?: string) => void | boolean | Promise<void | boolean>;
   onSaveRelationships: (relationships: CharacterRelationship[]) => void;
   onDeleteMomentsByRelation?: (relationId: string) => void;
   onSaveMemories: (memories: MemoryItem[]) => void;
@@ -73,7 +73,7 @@ export function useChatDeleteFriendAction({
   setActiveChatRelationId,
   showToast,
 }: UseChatDeleteFriendActionOptions) {
-  const handleDeleteFriend = useCallback(() => {
+  const handleDeleteFriend = useCallback(async () => {
     if (!activeCharacter || activeCharacter.isGroupChat) return;
 
     const currentIdentityRelation = relationForCharacter(activeCharacter.id);
@@ -87,11 +87,12 @@ export function useChatDeleteFriendAction({
     }
     const friendId = activeCharacter.id;
     const relationId = relationToDelete?.id || orphanRelationId!;
+    const memoryCleanup=removeCharacterTruthForRelations([relationId]);
+    if(!Object.values(memoryCleanup).every(Boolean)){showToast("记忆清理未完成，好友和聊天保留，请检查存储后重试。");return;}
     removeBlockedDeliveriesByRelation(relationId);
     removeFriendRequestsByRelation(relationId);
-    clearMessagesAndLinkedArtifacts(friendId, relationId);
+    if(await clearMessagesAndLinkedArtifacts(friendId, relationId)===false){showToast("聊天清理未完成，好友保留，请重试。");return;}
     removeCharacterLifeEventsForRelations([relationId]);
-    removeCharacterTruthForRelations([relationId]);
     removeProactiveTopicsForRelations([relationId]);
     onDeleteMomentsByRelation?.(relationId);
     onSaveRelationships(relationships.filter((relation) => relation.id !== relationId));

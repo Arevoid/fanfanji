@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import {performance} from "node:perf_hooks";
+import {retrieveTruthForPrivatePrompt,formatTruthRetrievalForPrompt,countTruthRetrievalRecords} from "../src/features/characterKnowledge/services/truthRetrievalService";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+const scope={characterId:'scale-char',relationId:'scale-relation',userIdentityId:'scale-user',conversationId:'scale-conversation'},now=Date.now();
+const record=(id:string,statement:string,extra:Partial<KnowledgeClaim>={}):KnowledgeClaim=>({...scope,id,statement,kind:'fact',subject:'user',temporalStatus:'past',truthStatus:'asserted',status:'active',admissionStatus:'retained',schemaVersion:1,visibility:'relation_private',confidence:.9,userConfirmed:false,importance:4,recordedAt:now-1000,source:{kind:'user_message',authorship:'user',producer:'synthetic-scale',evidenceKey:id,messageIds:[id]},...extra});
+const important=record('old-important','我们约定生日一起去天文馆，目前尚未出发。',{kind:'plan',temporalStatus:'future',importance:9,recordedAt:now-150*86400000});
+const noise=Array.from({length:10000},(_,i)=>record('noise-'+i,`本地合成测试中的不同工作票据编号${i}，此资料与旧生日约定无关。`));
+const start=performance.now();const selected=retrieveTruthForPrivatePrompt({scope,queryText:'天文馆的生日约定',claims:[important,...noise,record('foreign-secret',important.statement,{relationId:'foreign'})],summaries:[],corrections:[],limit:300,unboundedMemory:true});
+assert.ok(selected.orderedClaims?.some(c=>c.id===important.id));assert.ok(!selected.orderedClaims?.some(c=>c.id==='foreign-secret'));assert.match(formatTruthRetrievalForPrompt(selected),/天文馆/);
+const irrelevant=retrieveTruthForPrivatePrompt({scope,queryText:'量子纠缠是什么',claims:[important,...noise],summaries:[],corrections:[],limit:300,unboundedMemory:true});assert.equal(countTruthRetrievalRecords(irrelevant),0);
+const matching=Array.from({length:350},(_,i)=>record('match-'+i,`用户在天文馆完成了独立志愿活动${i}，与当天不同的参与者讨论了天文学知识，并保留了本次独立的活动经历和心得。`));
+const bounded=retrieveTruthForPrivatePrompt({scope,queryText:'天文馆志愿活动',claims:matching,summaries:[],corrections:[],limit:300,unboundedMemory:true});assert.equal(countTruthRetrievalRecords(bounded),300);
+const text=formatTruthRetrievalForPrompt(bounded);assert.ok(text.length>4800);assert.ok(new TextEncoder().encode(text).length>3000,'no hidden private memory byte/token clipping');
+console.log(JSON.stringify({status:'passed',syntheticOnly:true,corpus:10001,oldAgeDays:150,recallLimit:300,formattedCharacters:text.length,elapsedMs:Math.round(performance.now()-start),checks:['old relevant memory survives 10000 newer records','foreign scope excluded','unrelated query empty','300 count budget with full text above old caps']}));

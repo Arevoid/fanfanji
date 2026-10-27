@@ -47,9 +47,12 @@ assert.equal(explainTruthProjection({
 }).at(0)?.reason, "paused");
 
 const ui = readFileSync(new URL("../src/components/AppMemory.tsx", import.meta.url), "utf8");
-for (const label of ["管理诊断", "来源应用", "召回诊断", "当前权重", "替代状态", "原始消息/记录", "暂停召回", "恢复召回", "导出记忆备份", "恢复记忆备份"]) {
+for (const label of ["管理诊断", "来源应用", "召回诊断", "当前权重", "替代状态", "原始消息/记录", "暂停召回", "恢复召回"]) {
   assert.match(ui, new RegExp(label), `memory management UI must expose ${label}`);
 }
+const menu = ui.slice(ui.indexOf('{showMenu &&'), ui.indexOf('{/* Main Container */}'));
+for (const label of ["手动总结", "自动总结", "立即总结", "向量记忆"]) assert.ok(menu.includes(label));
+for (const label of ["导出记忆备份", "恢复记忆备份", "管理诊断", "待核对记忆", "后台迁移用量", "记忆整理模型"]) assert.ok(!menu.includes(label));
 const chat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 assert.match(chat, /打开记忆诊断/);
 assert.match(chat, /onNavigateToApp\("memory"\)/);

@@ -1,0 +1,17 @@
+import assert from "node:assert/strict";
+import {MemoryService} from "../src/domain/memory/MemoryService";
+import {saveKnowledgeClaims,loadKnowledgeClaims} from "../src/core/storage/repositories/characterKnowledgeRepository";
+import {loadCharacterContinuity} from "../src/core/storage/repositories/characterContinuityRepository";
+import {runForegroundCharacterContinuity} from "../src/features/characterKnowledge/services/characterContinuityService";
+import {projectImpressionGrowth} from "../src/domain/memory/impressionGrowth";
+import type {Character,UserSettings} from "../src/types";
+const values=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>values.set(k,v),removeItem:(k:string)=>values.delete(k)}}});
+const scope={characterId:"a",relationId:"r",userIdentityId:"u",conversationId:"c"};const character={id:"a",name:"角色"} as Character;
+const recentMessages=Array.from({length:1000},(_,i)=>({...scope,id:`brief-${i}`,sender:"user" as const,content:i%2?"嗯":"知道了",timestamp:i+1}));
+let ids=0;const result=await MemoryService.extractMemoryBatches({...scope,character,recentMessages,existingClaims:[],existingMemories:[],scenario:"chat",apiKey:"synthetic",model:"synthetic",createId:()=>`id-${ids++}`,currentTime:()=>2000,formatContent:items=>items.join("\n")},async params=>({candidates:params.history.slice(0,2).map(item=>({statement:"用户态度很冷淡",kind:"fact",subject:"user",temporalStatus:"present",sourceMessageIds:[item.id],evidenceQuote:item.text}))}));
+assert.equal(result.apiError,undefined);assert.equal(result.acceptedClaims.length,0);saveKnowledgeClaims(result.acceptedClaims);
+const absent=await MemoryService.extractMemories({...scope,character,recentMessages:[{...scope,id:"question",sender:"character",content:"你在吗？",timestamp:1}],existingClaims:[],existingMemories:[],scenario:"chat",apiKey:"synthetic",model:"synthetic",createId:()=>"absent",currentTime:()=>2000,formatContent:items=>items.join("\n")},async()=>({candidates:[{statement:"用户不信任角色",kind:"fact",subject:"user",temporalStatus:"present",sourceMessageIds:["nonexistent-user-reply"],evidenceQuote:"没有回复"}]}));
+assert.equal(absent.acceptedClaims.length,0);
+assert.equal(await runForegroundCharacterContinuity({scope,character,visible:true,now:2000,settings:{apiKey:"synthetic",selectedModel:"synthetic"} as UserSettings,request:async()=>({text:JSON.stringify({impressions:[{category:"冷淡",proposition:"用户不信任我",confidence:.99,sourceClaimIds:[recentMessages[0].id],growth:{trust:-1}}],lifeEvents:[]})})}),"completed");
+assert.equal(loadKnowledgeClaims().value.length,0);assert.equal(loadCharacterContinuity().value.impressions.length,0);assert.deepEqual(projectImpressionGrowth(undefined,loadCharacterContinuity().value.impressions),projectImpressionGrowth(undefined,[]));
+console.log("PASS C02/C07 formal extraction-to-reflection: sparse acknowledgements and missing replies cannot fabricate personality evidence; 1000 ordinary messages do not increase/decrease trust");

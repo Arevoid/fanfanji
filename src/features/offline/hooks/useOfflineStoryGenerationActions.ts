@@ -1,7 +1,11 @@
+import { readOfflineCumulativeMemoryContext } from "../services/offlineCumulativeMemoryContext";
+import { mergeOfflineArchiveProgress } from "../../../domain/memory/offlineArchivePolicy";
+import {resolveCharacterApiSettings} from "../../../domain/character/characterApiSettings";
 import type { Character, MemoryItem, Message, OfflineStory, UserSettings, WorldBookEntry } from "../../../types";
 import type { Dispatch, SetStateAction } from "react";
 import { apiChat } from "../../../utils/apiHelper";
-import { loadKnowledgeClaims } from "../../../core/storage/repositories/characterKnowledgeRepository";
+import { buildOfflineFrameMemoryContext, hasExplicitOfflineMemoryImport, offlineFrameRelationship } from "../services/offlineMemoryReadFrame";
+import { requestGroupMemberAwareness, publicGroupAwarenessGuidance } from "../../chat/services/groupMemberAwareness";
 import { MemoryService } from "../../../domain/memory/MemoryService";
 import { getLatestWorldBookEntries } from "../../../utils/worldBook";
 import { serializeMessageContentForPrompt, serializeMessageToPromptTurns } from "../../chat/prompts/messagePromptSerializer";
@@ -29,6 +33,8 @@ interface UseOfflineStoryGenerationActionsOptions {
   activeIdentityId: string;
   memories: readonly MemoryItem[];
   settings: UserSettings;
+  request?: typeof apiChat;
+  onUserGenerationComplete?: (story:OfflineStory)=>void;
   worldBookEntries: WorldBookEntry[];
   selectedChar: Character;
   inputText: string;
@@ -51,7 +57,9 @@ export function useOfflineStoryGenerationActions({
   relationships,
   activeIdentityId,
   memories,
-  settings,
+  settings: globalSettings,
+  request = apiChat,
+  onUserGenerationComplete,
   worldBookEntries,
   selectedChar,
   inputText,
@@ -81,21 +89,6 @@ export function useOfflineStoryGenerationActions({
     if (!text && !forceAIOnly) return;
 
     let updatedStory = { ...storyAtSend, messages: generationMessages };
-    if (!updatedStory.knowledgeSnapshot && updatedStory.relationId) {
-      const relation = relationships.find((item) => item.id === updatedStory.relationId);
-      updatedStory.knowledgeSnapshot = relation ? Array.from(new Set([
-        ...loadKnowledgeClaims().value
-          .filter((claim) => claim.relationId === relation.id
-            && claim.characterId === relation.characterId
-            && claim.userIdentityId === relation.userIdentityId
-            && claim.status === "active"
-            && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
-          .map((claim) => claim.statement),
-        ...memories
-          .filter((memory) => memory.relationId === relation.id && memory.isManual === true)
-          .map((memory) => memory.content),
-      ])) : [];
-    }
     
     // 1. If we have user text to add
     if (text && !forceAIOnly) {
@@ -124,6 +117,7 @@ export function useOfflineStoryGenerationActions({
     setIsGenerating(true);
 
     try {
+      const settings=resolveCharacterApiSettings(globalSettings,characters.find(c=>c.id===storyAtSend.characterId)||selectedChar,characters);
       // Assemble history context
       // If we added a user message in this turn, exclude it from historyContext because it will be passed as the separate 'message' parameter.
       const msgsForHistory = (text && !forceAIOnly && updatedStory.messages.length > 0 && updatedStory.messages[updatedStory.messages.length - 1].sender === "user")
@@ -144,7 +138,7 @@ export function useOfflineStoryGenerationActions({
         ? selectableCharacters.filter(c => resolveOfflineStoryCharacterIds(updatedStory, characters).includes(c.id))
         : [selectedChar];
       const sourceChat = characters.find(c => c.id === (updatedStory.sourceChatId ? resolveCharacterId(updatedStory.sourceChatId) : undefined));
-      const isGroupStory = Boolean((updatedStory.characterIds?.length || 0) > 1 && !updatedStory.relationId);
+      const isGroupStory = storyCharsList.length > 1;
       const isImportedGroupStory = isGroupStory || Boolean(sourceChat?.isGroupChat);
 
       const worldBookScanText = buildWorldBookScanText(
@@ -182,15 +176,13 @@ export function useOfflineStoryGenerationActions({
         const memberRelationship = relationships.find((relation) =>
           relation.characterId === char.id && relation.userIdentityId === activeIdentityId,
         );
-        const relationSummary = updatedStory.relationId
-          ? relationships.find((relation) => relation.id === updatedStory.relationId)?.compressedMemory
-          : memberRelationship?.compressedMemory;
+        const relationSummary = "仅使用本故事明确导入并冻结的记忆资料，不读取当前线上关系摘要";
         sysPrompt += `[角色 ${idx + 1}: ${char.name}]
 - 姓名：${char.name}
 - 年龄：${char.age || "未知"}
 - 语气/性格特点：${char.personality}
-- 背景设定：${char.backstory}
-- 当前关系：${memberRelationship?.relationship || "未知"}
+- 背景设定：${storyCharsList.length === 1 ? char.backstory : "每位角色的私人背景不在多人公共请求中展开"}
+- 当前关系：${offlineFrameRelationship(updatedStory, char.id) || "以本故事明确设定为准"}
 - 当前关系摘要：${relationSummary || "暂无"}
 \n`;
         });
@@ -290,12 +282,25 @@ ${wbPrompts}\n`;
       // Self-directed and IF stories stay fully isolated from the online vault.
       const allMemoriesParts: string[] = [];
       const memberKnowledgeSnapshots = updatedStory.memberKnowledgeSnapshots || updatedStory.importedContext?.memberMemories;
-      storyCharsList.forEach(char => {
+      for (const char of storyCharsList) {
+        if (!hasExplicitOfflineMemoryImport(updatedStory)) continue;
+        if (updatedStory.memoryReadFrame) {
+          const relation = relationships.find((record) => record.characterId === char.id && record.userIdentityId === activeIdentityId
+            && (isImportedGroupStory || !updatedStory.relationId || record.id === updatedStory.relationId));
+          const context = relation ? await buildOfflineFrameMemoryContext({ story: updatedStory, characterId: char.id, relation, settings, query: text || "续写故事" }) : "";
+          if (!context) continue;
+          if (isImportedGroupStory) {
+            const action = await requestGroupMemberAwareness({ member: char, privateContext: context,
+              publicHistory: text || "续写故事", groupId: updatedStory.id, settings, request: (params) => request({ ...params, purpose: "offline_story_generate", conversationId: `offline:${updatedStory.id}`, relationId: relation?.id }) });
+            allMemoriesParts.push(`* ${char.name} 的表达边界：${publicGroupAwarenessGuidance(action)}`);
+          } else allMemoriesParts.push(context);
+          continue;
+        }
         // New group stories use per-member snapshots. Legacy group stories
         // with one flattened list omit it instead of leaking it to all.
         const knowledgeSnapshot = memberKnowledgeSnapshots?.[char.id]
           || (!isImportedGroupStory ? (updatedStory.knowledgeSnapshot || updatedStory.importedContext?.memories || []) : []);
-        if (knowledgeSnapshot.length === 0) return;
+        if (knowledgeSnapshot.length === 0) continue;
         const snapshotMemories = knowledgeSnapshot.map((content, index) => ({
           id: `snapshot-memory-${char.id}-${index}`,
           characterId: char.id,
@@ -312,14 +317,18 @@ ${wbPrompts}\n`;
         });
         if (relevantMems.length > 0) {
           const lines = relevantMems.map(m => `  - ${m.content}`).join("\n");
-          allMemoriesParts.push(`* 【${char.remark || char.name}】的线上记忆库事实：\n${lines}`);
+          if (isImportedGroupStory) {
+            const action = await requestGroupMemberAwareness({ member: char, privateContext: lines,
+              publicHistory: text || "续写故事", groupId: updatedStory.id, settings, request: (params) => request({ ...params, purpose: "offline_story_generate", conversationId: `offline:${updatedStory.id}` }) });
+            allMemoriesParts.push(`* ${char.name} 的表达边界：${publicGroupAwarenessGuidance(action)}`);
+          } else allMemoriesParts.push(`* 导入时保留的旧资料快照，来源待核验，不能将计划或观点当成现实事实：\n${lines}`);
         }
-      });
+      }
       if (allMemoriesParts.length > 0) {
         if (isImportedGroupStory) {
           sysPrompt += `\n\n【多人记忆访问边界】下方每个以角色姓名标记的线上记忆区只属于该角色自身。其他角色不能知道、引用或回应其中的私聊事实；只有导入的公开群消息或本线下故事中明确公开发生的内容才可成为所有在场角色的共同认知。`;
         }
-        sysPrompt += `\n\n【互通的线上记忆库】：以下是各个参与角色的线上对话中发生并提取的核心事实，请将其有机融入作为故事的背景事实支撑：\n${allMemoriesParts.join("\n")}`;
+        sysPrompt += `\n\n【导入时的记忆与表达边界】：只在相关时自然使用。多人部分只有表达方式，不含私密事实；单人资料仍需区分计划、认识、经历与来源，不当作当前现实保证：\n${allMemoriesParts.join("\n")}`;
       }
 
       // Never fetch live online chat while writing offline. Use the import
@@ -413,22 +422,25 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
           content: truncatePromptTextToEstimatedTokens(injection.content, 250),
         }));
 
+      const cumulative=readOfflineCumulativeMemoryContext(activeStoryRef.current?.id===updatedStory.id?activeStoryRef.current:updatedStory);
+      if(cumulative.length>60_000)throw Error("本剧情的累积摘要超出单次上下文容量，请先整理记忆或使用更大上下文模型；原文仍保留。");
       const composedPrompt = PromptComposer.compose({
         scenario: "offline-story",
         message: boundedPrompt.message,
         history: boundedPrompt.history,
-        systemInstruction: boundedPrompt.systemInstruction,
+        systemInstruction: boundedPrompt.systemInstruction+(cumulative?`\n[THIS SAME OFFLINE STORY ? COMPLETED ARCHIVE]\n${cumulative}\nThese are earlier events from this same scene. Distinguish past facts from plans and beliefs; never restart or contradict them. Newer explicit scene facts take precedence.`:""),
         historyInjections: boundedHistoryInjections,
       });
-      const response = await apiChat({
+      const response = await request({
         ...composedPrompt,
         apiKey: settings.apiKey,
         model: settings.selectedModel || "gemini-3.5-flash",
         apiEndpoint: settings.apiEndpoint,
-        apiTemperature: settings.apiTemperature || 0.8,
+        apiTemperature: settings.apiTemperature ?? 0.8,
         streamCompatible: settings.streamCompatible,
         maxOutputTokens: segmentOutputTokens,
         purpose: "offline_story_generate",
+        characterId: updatedStory.characterId,
         contextItems: [
           `角色人设 ${storyCharsList.length} 位`,
           ...(msgsForHistory.length > 0 ? [`剧情历史 ${msgsForHistory.length} 条`] : []),
@@ -471,7 +483,10 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
           oneTimeGuidance: undefined,
         };
 
-        saveActiveStorySnapshot(finalStory);
+        const current=activeStoryRef.current;
+        const completed=current?.id===finalStory.id?mergeOfflineArchiveProgress(finalStory,current):finalStory;
+        saveActiveStorySnapshot(completed);
+        onUserGenerationComplete?.(completed);
         if (oneTimeGuidance) {
           setGuidanceDraft((current) => ({ ...current, oneTime: "" }));
         }

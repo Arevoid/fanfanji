@@ -29,6 +29,7 @@ import {
 import { createAnchoredSmsTimeline, createUnanchoredSmsTimeline } from "../features/sms/smsTimeline";
 import { resolveSmsConversationActivity } from "../features/sms/smsInbox";
 import { buildSmsHistory, buildSmsMemoryNote, buildSmsSystemPrompt, selectSmsWorldBookEntries } from "../features/sms/smsPrompt";
+import { archiveSmsLongTermMemory, recallSmsLongTermMemory, rebindSmsTimelineMemory, canWriteSmsMemory } from "../features/sms/smsLongTermMemory";
 import { apiChat } from "../utils/apiHelper";
 import { ChatAvatar } from "../features/chat/components/ChatAvatar";
 import { getVoiceMessageSummary, isVoiceMessageContent } from "../features/chat/services/voiceMessageContent";
@@ -157,6 +158,15 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
     setStore(next);
   };
 
+  useEffect(() => {
+    if(page!=="detail"||!selectedTimeline||!selectedCharacter||isSending)return;
+    const run=()=>void archiveSmsLongTermMemory({timeline:selectedTimeline,character:selectedCharacter,settings,read:()=>storeRef.current,
+      write:next=>{const saved=saveSmsStore(next);if(!saved.success)return false;persistStore(next);return true;}});
+    const timer=setTimeout(run,300);
+    const retry=setInterval(run,5*60_000);
+    return ()=>{clearTimeout(timer);clearInterval(retry);};
+  },[page,selectedTimeline?.id,selectedMessages.length,isSending,store.memories.find(memory=>memory.timelineId===selectedTimeline?.id)?.updatedAt]);
+
   const markTimelineRead = (timelineId: string) => {
     const current = storeRef.current;
     const readAt = Date.now();
@@ -246,6 +256,7 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
   const sendMessage = async () => {
     const content = draft.trim();
     if (!content || !selectedCharacter || !selectedTimeline || isSending) return;
+    if(!canWriteSmsMemory()){setError("当前窗口只读，请在拥有写入权限的窗口发送短信。");return;}
     const now = Date.now();
     const userMessage: SmsMessage = {
       id: `sms-${now}-user`,
@@ -265,10 +276,11 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
     try {
       const scopedWorldBook = selectSmsWorldBookEntries(worldBookEntries, selectedCharacter.id, selectedIdentityId);
       const memory = storeRef.current.memories.find((item) => item.timelineId === selectedTimeline.id);
+      const longTermMemory = await recallSmsLongTermMemory({timeline:selectedTimeline,settings,query:content,read:()=>storeRef.current});
       const response = await apiChat({
         message: content,
         history: buildSmsHistory(storeRef.current.messages.filter((message) => message.timelineId === selectedTimeline.id && message.id !== userMessage.id)),
-        systemInstruction: buildSmsSystemPrompt({ character: selectedCharacter, timeline: selectedTimeline, activeIdentity: selectedIdentity, worldBookEntries: scopedWorldBook, memory }),
+        systemInstruction: buildSmsSystemPrompt({ character: selectedCharacter, timeline: selectedTimeline, activeIdentity: selectedIdentity, worldBookEntries: scopedWorldBook, memory, longTermMemory }),
         apiKey: settings.apiKey,
         model: settings.selectedModel,
         apiEndpoint: settings.apiEndpoint,
@@ -293,6 +305,9 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
         receivedAt: Date.now() + index,
         timelineTime: selectedTimeline.timelineTime,
       }));
+      void archiveSmsLongTermMemory({timeline:selectedTimeline,character:selectedCharacter,settings,read:()=>storeRef.current,write:next=>{
+        const saved=saveSmsStore(next);if(!saved.success)return false;persistStore(next);return true;
+      }});
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "短信暂时没有送达，请检查 API 设置后重试。");
     } finally {
@@ -319,7 +334,7 @@ export default function AppSms({ activeIdentity, identities = [], characters, re
       ? current.messages.map((message) => message.timelineId === selectedTimeline.id ? { ...message, timelineId: nextTimeline.id } : message)
       : current.messages;
     const migratedMemories = choice === "convert_current"
-      ? current.memories.map((memory) => memory.timelineId === selectedTimeline.id ? { ...memory, timelineId: nextTimeline.id } : memory)
+      ? current.memories.map((memory) => rebindSmsTimelineMemory(memory,selectedTimeline,nextTimeline))
       : current.memories;
     const timelines = choice === "convert_current"
       ? current.timelines.filter((timeline) => timeline.id !== selectedTimeline.id).concat(nextTimeline)

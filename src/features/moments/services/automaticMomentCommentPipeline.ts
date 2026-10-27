@@ -1,9 +1,12 @@
+import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
 import type { apiChat } from "../../../utils/apiHelper";
 import type { Character, MemoryItem, Moment, UserSettings } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import type { KnowledgeClaim } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import type { CharacterEvent } from "../../../domain/characterLife/characterEventTypes";
 import { PromptComposer } from "../../../domain/prompt/PromptComposer";
+import { buildModelDirectIdentity, modelDirectProfile, resolveChatIdentityMode } from "../../../domain/prompt/modelDirectIdentity";
+import { cleanAiReplyText } from "../../chat/services/messageParser";
 import { CHARACTER_LANGUAGE_POLICY } from "../../../domain/prompt/characterPromptProjector";
 import { buildCharacterRoutine } from "../../../domain/characterLife/characterRoutine/characterRoutineBuilder";
 import { resolveChatRoutine } from "../../chat/services/chatTurnSettings";
@@ -32,6 +35,7 @@ export async function generateAutomaticMomentComment(input: {
   /** Allows a public interaction to end naturally without a generated comment. */
   allowSkip?: boolean;
 }): Promise<Awaited<ReturnType<typeof requestAutomaticMomentComment>>> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const temporalContext = createMomentTemporalContext(new Date());
   const relationContext = buildRelationMomentContext({
     character: input.character,
@@ -40,6 +44,7 @@ export async function generateAutomaticMomentComment(input: {
     knowledgeClaims: input.knowledgeClaims,
     memories: input.memories,
     events: input.events,
+    publicSurface: true,
   });
   const relationWorldKnowledge = [
     ...buildMomentWorldKnowledge(
@@ -58,7 +63,9 @@ export async function generateAutomaticMomentComment(input: {
     ),
     now: Date.now(),
   });
-  const systemInstruction = `Your task: Write a short, natural comment on the Moment.
+  const systemInstruction = resolveChatIdentityMode(input.character) === "model-direct"
+    ? `${buildModelDirectIdentity(modelDirectProfile(input.character))}\n任务：只评论指定的动态，简短自然，不超过35字，不编造亲身经历，不把其他关系或旧人设当成自己的生活。无话可说可输出 [SKIP]。不需要每次声明 AI 身份。`
+    : `Your task: Write a short, natural comment on the Moment.
 🚨 [CRITICAL WECHAT COMMENT RULES]:
 1. The comment must be brief, extremely natural, and fit the character and current relationship context supplied by the Moment Prompt Adapter.
 2. Keep it under 35 characters and follow the character language policy below.
@@ -88,7 +95,7 @@ ${formatFinalReplyLanguageInstruction(resolveCharacterReplyLanguage(input.charac
       characterId: input.character.id,
     },
     character: input.character,
-    cleanText: input.cleanText,
+    cleanText: resolveChatIdentityMode(input.character) === "model-direct" ? (text) => cleanAiReplyText(text, true, true) : input.cleanText,
     temporalContext,
     publicContext,
     relationContext,

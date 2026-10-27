@@ -2,7 +2,7 @@ import type { Character, WorldBookEntry } from "../../types";
 import { getWorldBookCharacterIds } from "../../domain/worldbook/worldBookVisibility";
 
 export type PortableCharacterProfile = Pick<Character,
-  "name" | "age" | "avatar" | "gender" | "mbti" | "personality" | "backstory" | "replyLanguage" | "greeting"
+  "name" | "age" | "avatar" | "gender" | "mbti" | "personality" | "backstory" | "replyLanguage" | "greeting" | "chatIdentityMode"
 >;
 
 const readString = (value: unknown): string => typeof value === "string" ? value : "";
@@ -14,6 +14,7 @@ const readString = (value: unknown): string => typeof value === "string" ? value
  * never hitch a ride through a character-card round trip.
  */
 export const toPortableCharacterProfile = (character: Character): PortableCharacterProfile => ({
+  ...(character.chatIdentityMode ? { chatIdentityMode: character.chatIdentityMode } : {}),
   name: character.name,
   age: character.age ?? "",
   avatar: character.avatar || "",
@@ -39,6 +40,7 @@ export const createCharacterFromImportedProfile = (value: unknown, id: string): 
   const sourceFileName = readString(profile.sourceFileName);
   return {
     id,
+    ...(profile.chatIdentityMode === "model-direct" || profile.chatIdentityMode === "roleplay" ? { chatIdentityMode: profile.chatIdentityMode } : {}),
     name: readString(profile.name) || "未命名角色",
     ...(sourceFileName ? { sourceFileName } : {}),
     age: importedAge,

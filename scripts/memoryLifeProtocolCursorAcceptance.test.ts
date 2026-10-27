@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import {prepareLifeContinuation,reviewLifeContinuation} from "../src/features/characterKnowledge/services/lifeContinuationReview";
+import {acceptLifeEpisode,applyLifeContinuation} from "../src/domain/memory/characterContinuity";
+const scope={characterId:"c",relationId:"r",userIdentityId:"u",conversationId:"conv"};
+const plan=acceptLifeEpisode({summary:"准备整理书架",status:"planned",activity:{goal:"整理书架",kind:"hobby",steps:["分类旧书"]}},scope,100,"plan",[])!;
+const raw={previousEpisodeId:"plan",summary:"我完成了分类旧书。",status:"progressed",stepIndex:1};
+const prepared=prepareLifeContinuation(plan,raw);assert.equal(prepared.requiresReview,true);assert.deepEqual(prepared.candidate,{...raw,status:"completed",stepIndex:0});
+const configuration={apiKey:"synthetic",model:"synthetic"};
+assert.equal(await reviewLifeContinuation({previous:plan,candidate:prepared.candidate,configuration,request:async()=>({text:JSON.stringify({previousId:"plan",supported:true,quote:"完成了分类旧书",confidence:"high",reason:"synthetic"})})}),false,"qualitative confidence never coerced into authority");
+const reviewed=await reviewLifeContinuation({previous:plan,candidate:prepared.candidate,configuration,request:async()=>({text:JSON.stringify({previousId:"plan",supported:true,quote:"完成了分类旧书",confidence:.98,reason:"明确完成当前步骤"})})});assert.equal(reviewed,true);
+const result=applyLifeContinuation([plan],prepared.candidate,scope,200,"next",[],[],reviewed);assert.equal(result.at(-1)?.status,"completed");assert.equal(result.at(-1)?.activity?.progress,1);
+assert.equal(applyLifeContinuation([plan],{...(prepared.candidate as any),summary:"分类旧书失败了"},scope,200,"no",[],[],true).length,1);
+assert.equal(applyLifeContinuation([plan],prepared.candidate,{...scope,userIdentityId:"foreign"},200,"no",[],[],true).length,1);
+console.log("PASS life protocol cursor: runtime step/status, independent numeric review, explicit failure and foreign owner remain blocked");

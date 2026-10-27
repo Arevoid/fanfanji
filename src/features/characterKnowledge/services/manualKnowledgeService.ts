@@ -1,6 +1,7 @@
 import type { CharacterTruthScope, KnowledgeClaim } from "../../../domain/characterKnowledge/characterKnowledgeTypes";
 import type { MemorySourceApp } from "../../../domain/memory/memoryModel";
 import { evaluateKnowledgeWrite } from "../../../domain/characterKnowledge/knowledgeWritePolicy";
+import { deriveKnowledgeSemantics } from "../../../domain/characterKnowledge/knowledgeEvolution";
 
 export function createManualKnowledgeClaim(input: {
   id: string;
@@ -9,14 +10,16 @@ export function createManualKnowledgeClaim(input: {
   sourceRecordId: string;
   recordedAt: number;
   sourceApp?: MemorySourceApp;
+  importance?: number;
+  classification?: Pick<KnowledgeClaim, "kind" | "subject" | "temporalStatus">;
 }): KnowledgeClaim | undefined {
   const decision = evaluateKnowledgeWrite({
     id: input.id,
     ...input.scope,
-    kind: "fact",
-    subject: "other",
+    kind: input.classification?.kind ?? "fact",
+    subject: input.classification?.subject ?? (/^(?:用户|我)(?:现在|已经|以前)?(?:喜欢|不喜欢|不再喜欢|讨厌|住在|搬到|叫|名字是|的)/u.test(input.statement.trim()) ? "user" : "other"),
     statement: input.statement,
-    temporalStatus: "unknown",
+    temporalStatus: input.classification?.temporalStatus ?? "unknown",
     source: {
       kind: "manual",
       authorship: "user",
@@ -28,7 +31,10 @@ export function createManualKnowledgeClaim(input: {
     requestedTruthStatus: "confirmed",
     confidence: 1,
     userConfirmed: true,
+    importance: input.importance,
     recordedAt: input.recordedAt,
   });
-  return decision.accepted ? decision.claim : undefined;
+  if (!decision.accepted) return undefined;
+  const semantics = deriveKnowledgeSemantics(decision.claim);
+  return { ...decision.claim, ...(semantics ? { semantics, ...(!input.classification ? { temporalStatus: "present" as const } : {}) } : {}), continuityVersion: 1 };
 }

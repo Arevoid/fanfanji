@@ -176,6 +176,7 @@ export function buildMomentPromptContext(
     persona: projectPublicMomentPersona(context, options),
     ...projectRelationMomentContext(options),
     publicFacts: publicContext?.authorizedPublicFacts.map(({ content }) => ({ content })) ?? selectMomentPublicFacts(context),
+    authorizedPublicLife: publicContext?.authorizedPublicLife?.map(({summary,occurredAt})=>({summary,occurredAt})),
     publicEvents: publicContext?.publicEvents.map(({ kind, summary, occurredAt, confidence }) => ({
       kind,
       summary,
@@ -295,6 +296,8 @@ export function formatMomentPromptContext(context: MomentPromptContextWithRoutin
     ...(relationFacts.length > 0 ? ["Remembered facts in this relationship:", ...relationFacts] : []),
     ...(facts.length > 0 ? ["Verified public facts:", ...facts] : []),
     ...(events.length > 0 ? ["Verified public events:", ...events] : []),
+    ...((context.authorizedPublicLife?.length||0)>0 ? ["已明确允许公开的自身虚拟生活（可用的新话题；不是现实或用户共同经历）：",
+      ...context.authorizedPublicLife!.map(episode=>`- [虚拟生活记录时间 ${new Date(episode.occurredAt).toLocaleString("zh-CN",{hour12:false})}] ${episode.summary}`)] : []),
     ...(worldKnowledge.length > 0 ? ["Public world knowledge:", ...worldKnowledge] : []),
     ...(momentHistory.length > 0 ? ["Recent public Moment history (avoid repeating these topics):", ...momentHistory] : []),
     ...(commentHistory.length > 0 ? ["Recent public comment history:", ...commentHistory] : []),

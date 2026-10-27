@@ -1,3 +1,4 @@
+import { meaningfulMemoryValue } from "./fixtures/memoryValueFixture";
 import { strict as assert } from "node:assert";
 import { MemoryService, formatExtractedMemorySummary, formatMemoriesForPrompt } from "../src/domain/memory/MemoryService";
 import type { Character, MemoryItem, Message } from "../src/types";
@@ -49,7 +50,7 @@ async function run() {
     subject: "relationship" as const,
     temporalStatus: "future" as const,
     sourceMessageIds: ["m1"],
-    evidenceQuote: "我们约好周末见面",
+    evidenceQuote: "我们约好周末见面", valueAssessment: meaningfulMemoryValue("我们约好周末见面"),
   }] });
 
   // J-L: extraction, manual trigger, and immediate summary all preserve parse/format/save candidates.
@@ -107,7 +108,7 @@ async function run() {
     subject: "relationship" as const,
     temporalStatus: "past" as const,
     sourceMessageIds: ["m2"],
-    evidenceQuote: "A 和用户已经约定周末见面",
+    evidenceQuote: "A 和用户已经约定周末见面", valueAssessment: meaningfulMemoryValue("A 和用户已经约定周末见面"),
   }] }));
   assert.equal(aiOnly.acceptedClaims[0]?.truthStatus, "inferred", "角色自己的发言只能产生待验证认知");
   assert.deepEqual(aiOnly.extractedMemories, [], "推断认知不得回写旧版长期记忆");

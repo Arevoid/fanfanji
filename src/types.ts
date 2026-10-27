@@ -22,6 +22,8 @@ export function sanitizeChatIcons(value: unknown): ChatIconOverrides {
 }
 
 export interface Character {
+  /** Absent on legacy records: keep their original roleplay behavior. */
+  chatIdentityMode?: "roleplay" | "model-direct";
   id: string;
   /** Optional dev-only synthetic fixture namespace; production records omit it. */
   syntheticFixtureId?: string;
@@ -31,6 +33,8 @@ export interface Character {
   age?: number | "" | "∞";
   avatar: string; // URL, emoji, or base64
   gender?: string;
+  /** Optional role-wide text API selection; absent/disabled inherits global settings. */
+  characterApi?: CharacterApiConfig;
   mbti?: string;
   personality: string;
   backstory: string;
@@ -54,6 +58,8 @@ export interface Character {
   enableProactiveCall?: boolean;
   /** Show local sticker recommendations while typing in this chat. */
   enableStickerAssociation?: boolean;
+  /** Allows user-requested Moments generation; startup/timers never generate posts. */
+  enableMomentGeneration?: boolean;
   proactiveChatInterval?: number;
   proactiveStartTime?: string;
   proactiveEndTime?: string;
@@ -74,9 +80,11 @@ export interface Character {
   disableBracketActions?: boolean;
   /** Number of chat messages processed per automatic/manual archive batch. */
   historyMemoryLimit?: number;
+  /** Display batch size only; never controls model context or memory extraction. */
+  chatHistoryPageSize?: number;
   contextMemoryLimit?: number; // 10~300 messages, default 150
   /** Long-term memory items retrieved and injected per chat turn. */
-  retrievalHistoryLimit?: number; // 10~100, default 50
+  retrievalHistoryLimit?: number; // 10~300, default 50
   archiveTemplateType?: "refined" | "delicate"; // "refined" (event log) | "delicate" (first person diary)
   enableTimeAwareness?: boolean;
   isGroupChat?: boolean;
@@ -166,6 +174,7 @@ export type DiarySource = "manual" | "ai-auto" | "ai-manual";
 
 /** A private local diary entry. Character entries are scoped to one relation. */
 export interface DiaryEntry {
+  memoryReflection?: {text:string;quote:string;revision:string};
   id: string;
   ownerIdentityId: string;
   authorType: DiaryAuthorType;
@@ -754,6 +763,7 @@ export interface UserIdentity {
 }
 
 export interface UserSettings {
+  memoryEmbedding?: { enabled: boolean; apiEndpoint: string; model: string; apiKey: string; minimumSimilarity?: number };
   name: string;
   avatar: string;
   signature: string;
@@ -897,6 +907,12 @@ export interface UserSettings {
 }
 
 export type UserSettingsUpdate = UserSettings | ((previous: UserSettings) => UserSettings);
+
+export interface CharacterApiConfig {
+  enabled: boolean;
+  presetId?: string;
+  custom?: Omit<ApiPreset, "id">;
+}
 
 export interface ApiPreset {
   id: string;
@@ -1042,6 +1058,8 @@ export interface RedPacketPayload {
 
 export interface MemoryVaultSettings {
   extractModel: string;
+  extractModelConfigured?: boolean;
+  legacyExtractModel?: string;
   recallCount: number;
   autoExtract: boolean;
   extractInterval: number;
@@ -1112,6 +1130,8 @@ export interface OfflineStory {
   enableTimeAwareness?: boolean;
   /** Confirmed Truth/manual-memory snapshot captured for this isolated story. */
   knowledgeSnapshot?: string[];
+  /** Adapter-validated source references captured by an explicit online import. */
+  memoryReadFrame?: unknown;
   /** Per-participant memory snapshot for multi-character stories. */
   memberKnowledgeSnapshots?: Record<string, string[]>;
   /** Frozen at the moment an online chat is explicitly imported into this story. */
@@ -1130,11 +1150,23 @@ export interface OfflineStory {
   archivedMemoryIds?: string[];
   /** Number of story messages already condensed into online memory. */
   lastSyncedMessageCount?: number;
-  memorySyncStatus?: "pending" | "synced" | "failed";
+  memorySyncStatus?: "pending" | "synced" | "partial" | "failed";
+  /** Resumable business candidates; never provider prompts or API configuration. */
+  memoryArchiveWork?: Record<string,OfflineArchiveCheckpoint>;
+  /** Version 3 proves full-source repair or a new revision-aware archive. */
+  memoryArchiveVersion?:3;
+  memoryRepair?: {
+    version:1;scopeKey:string;sourceRevisions:Record<string,string>;nextBatch:number;totalBatches:number;
+    stagedClaims:unknown[];checkpoint?:OfflineArchiveCheckpoint;status:"running"|"failed";
+  };
+  memorySyncReport?: {retained:number;review:number;skipped:number;failed:number};
   lastMemorySyncAt?: number;
   /** User-facing diagnostic retained when a memory extraction attempt fails. */
   lastMemorySyncError?: string;
   syncedSourceMessageIds?: string[];
+  /** Semantic source revisions committed by the last successful offline consolidation. */
+  syncedSourceMessageRevisions?: Record<string,string>;
+  memorySyncOutcome?: "retained" | "skipped" | "review";
   /** Durable one-shot bridge from a completed offline story back to this relationship's online chat. */
   onlineHandoff?: {
     status: "pending" | "acknowledged";
@@ -1142,6 +1174,7 @@ export interface OfflineStory {
     startedAt: number;
     endedAt: number;
     sourceMessageIds: string[];
+    sourceMessageRevisions?: Record<string,string>;
     /** Successful online replies that received this hidden bridge. */
     deliveredReplyCount?: number;
     acknowledgedAt?: number;
@@ -1175,3 +1208,12 @@ export interface StickerGroup {
 
 
 
+
+/** Business checkpoint is generic to keep public types independent of memory internals. */
+export interface OfflineArchiveCheckpoint<TCandidate=unknown> {
+ impressionCandidates?: readonly unknown[];
+ version:1; scope:{characterId:string;relationId:string;userIdentityId:string;conversationId?:string};
+ sourceRevisions:Record<string,string>; extracted:boolean; candidates:TCandidate[];
+ reviewedIds:string[]; skippedIds:string[]; failures:{candidateIds:string[];code:string}[];
+ rejectedCandidateCount:number; valueSkippedCount:number;
+}

@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import {applyInlineMemorySettingReviews} from "../src/features/characterKnowledge/services/memorySettingReviewService";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+const c={id:"a",statement:"我一直怕打雷",admissionStatus:"retained",source:{evidenceQuote:"我一直怕打雷"}} as KnowledgeClaim;
+const settings=[{id:"world:allowed",text:"角色喜欢阅读。"}];
+const item=(decision:string,extra={})=>({sourceId:c.id,quote:c.statement,settingReview:{decision,confidence:.99,reason:"已核对",...extra}});
+assert.equal(applyInlineMemorySettingReviews([c],settings,[item("new_experience")]).remaining.length,0);
+for(const raw of [item("uncertain"),item("ephemeral"),item("new_experience",{confidence:.5}),{...item("new_experience"),quote:"不存在的引文"},item("duplicate_setting",{settingId:"W9",settingQuote:"阅读"})])assert.equal(applyInlineMemorySettingReviews([c],settings,[raw]).remaining.length,1,"uncertain/unbound/disputed values require the independent review");
+const skipped=applyInlineMemorySettingReviews([c],settings,[item("duplicate_setting",{settingId:"W1",settingQuote:"喜欢阅读"})]);assert.equal(skipped.skipped,1);
+assert.equal(applyInlineMemorySettingReviews([{...c,admissionStatus:"review"}],settings,[item("new_experience")]).remaining.length,1,"cannot promote uncertain value with a setting-only decision");
+assert.equal(applyInlineMemorySettingReviews([c],settings,[item("new_experience"),item("new_experience")]).remaining.length,1,"ambiguous duplicate responses are not cached as approved");
+console.log("PASS combined setting review: clear grounded decisions avoid a second request; ambiguous, foreign, low-confidence and disputed decisions still require review");

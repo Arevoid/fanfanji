@@ -32,6 +32,7 @@ export function buildSmsSystemPrompt(input: {
   activeIdentity?: UserIdentity;
   worldBookEntries: readonly WorldBookEntry[];
   memory?: SmsTimelineMemory;
+  longTermMemory?: string;
 }): string {
   const { character, timeline, worldBookEntries, memory } = input;
   const worldBook = worldBookEntries.length > 0
@@ -67,7 +68,7 @@ ${worldBook}
 
 【短信专属状态】
 ${memory?.relationshipSummary ? `关系摘要：${compact(memory.relationshipSummary, 800)}` : "尚未形成关系摘要。"}
-${memory?.notes?.length ? `近期短信记忆：\n${memory.notes.slice(-12).map((note) => `- ${compact(note, 300)}`).join("\n")}` : "尚无短信专属记忆。"}
+${input.longTermMemory ? `本短信时间线中有来源的相关长期记忆：\n${input.longTermMemory}` : "当前没有需补充的短信长期记忆。"}
 
 【用户可见身份】
 用户身份：未知。不要从应用设置、手机号或任何隐藏上下文推断用户姓名；只有用户在短信中主动说明，才可以把自报身份当作一个需要核验的线索。

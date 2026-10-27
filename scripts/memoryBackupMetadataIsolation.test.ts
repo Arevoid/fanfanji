@@ -1,0 +1,26 @@
+import assert from "node:assert/strict";
+import {indexedDB,IDBKeyRange} from "fake-indexeddb";
+import {MEMORY_BACKUP_KEYS,missingMemoryBackupKeys} from "../src/core/storage/memoryBackupKeys";
+import {useSystemBackupActions} from "../src/features/settings/hooks/useSystemBackupActions";
+const values=new Map<string,string>();
+const storage={getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>{values.set(k,v);},removeItem:(k:string)=>{values.delete(k);},key:(n:number)=>[...values.keys()][n]??null,get length(){return values.size;}};
+Object.assign(globalThis,{indexedDB,IDBKeyRange,localStorage:storage,confirm:()=>true});
+let finished:Promise<unknown>|undefined,reloaded=false,payload="",alerts:string[]=[];
+Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:storage,dispatchEvent:()=>true,location:{reload:()=>{reloaded=true;}}}});
+Object.defineProperty(globalThis,"FileReader",{configurable:true,value:class {result="";onload?:()=>Promise<unknown>;readAsText(){this.result=payload;finished=this.onload?.();}}});
+Object.assign(globalThis,{alert:(text:string)=>alerts.push(text)});
+const keys=[...MEMORY_BACKUP_KEYS,"phone_character_knowledge_claims","phone_appearance_settings"];
+const actions=useSystemBackupActions({backupKeys:new Set(keys),fullBackupKeys:keys,lightBackupKeys:keys,sanitizeValue:(_key,value)=>value});
+async function restore(source:Record<string,string>){payload=JSON.stringify(source);alerts=[];reloaded=false;actions.handleSystemBackupImport({target:{files:[{name:"synthetic.json"}],value:""}} as any);await finished;assert.ok(alerts.some(s=>s.includes("成功")||s.includes("已恢复")),alerts.join(";"));}
+values.set("phone_memory_organization_v1","prior");values.set("phone_memory_system_v1","prior-choice");values.set("phone_memory_restore_transaction_v1","prior-journal");
+await restore({phone_appearance_settings:"{}"});assert.equal(values.get("phone_memory_system_v1"),"prior-choice","appearance import preserves memory");
+await restore({phone_character_knowledge_claims:"[]"});assert.equal(values.has("phone_memory_system_v1"),false);assert.equal(values.has("phone_memory_organization_v1"),false);assert.equal(values.has("phone_memory_restore_transaction_v1"),false);assert.ok(reloaded);
+const choice=JSON.stringify({version:1,choice:"declined",hasLegacy:true});
+await restore({phone_character_knowledge_claims:"[]",phone_memory_system_v1:choice});assert.equal(values.get("phone_memory_system_v1"),choice,"new backup restores its own choice");
+assert.ok(MEMORY_BACKUP_KEYS.includes("phone_memory_source_mutation_v1"));assert.ok(missingMemoryBackupKeys({phone_characters:"[]"}).includes("phone_memory_organization_v1"));
+values.set("phone_memory_organization_v1","preserve-on-failure");
+const failing=useSystemBackupActions({backupKeys:new Set(keys),fullBackupKeys:keys,lightBackupKeys:keys,sanitizeValue:()=>{throw Error("synthetic failure after metadata removal");}});
+payload=JSON.stringify({phone_character_knowledge_claims:"[]"});alerts=[];
+failing.handleSystemBackupImport({target:{files:[{name:"synthetic.json"}],value:""}} as any);await finished;
+assert.ok(alerts.some(s=>s.includes("失败")));assert.equal(values.get("phone_memory_system_v1"),choice);assert.equal(values.get("phone_memory_organization_v1"),"preserve-on-failure","failed import rolls removed metadata back");
+console.log("PASS backup metadata isolation: appearance preservation, old backup resets progress/journal, new backup restores its own migration choice");

@@ -18,9 +18,9 @@ for (const key of [
   assert.match(settings, new RegExp(`"${key}"`), `${key} must round-trip through system backup`);
   assert.match(storageKeys, new RegExp(`"${key}"`), `${key} must have a canonical storage key`);
 }
-assert.match(app, /removeCharacterTruthForRelations\(relationIds\)/, "character deletion must clear truth records");
+assert.match(app, /removeCharacterTruthForRelations\(relationIds,\s*deletedCharacterIds\)/, "character deletion must clear truth and own continuity records");
 assert.match(`${chat}\n${chatDeleteFriend}`, /removeCharacterTruthForRelations\(\[relationId\]\)/, "relationship deletion must clear truth records");
-assert.match(app, /retractBySourceMessageIds\(\[id\], sourceScope\)/, "message deletion must retract source-linked claims");
+assert.match(app, /await mutateSourceMessages\(\[deletedMessage\]\)/, "message deletion must await recoverable source and evidence invalidation (execution covered by memorySourceMutationRecovery)");
 assert.match(app, /removeMomentTopicsForMoments\(\[momentId\]\)/, "Moment deletion must clear topic history");
 
 console.log("PASS Character Truth backup and relationship cleanup wiring coverage");

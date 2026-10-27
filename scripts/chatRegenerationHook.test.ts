@@ -7,9 +7,9 @@ const hook = readFileSync(new URL("../src/features/chat/hooks/useChatRegeneratio
 assert.match(appChat, /useChatRegenerationAction\(/);
 assert.doesNotMatch(appChat, /const handleRegenerateResponse = async/);
 assert.match(hook, /diagnosticLabel: "regenerate prompt"/);
-assert.match(hook, /regenerationTurn\.targetMessages\.forEach/);
-assert.match(hook, /deleteMessageAndLinkedImage\(message\.id\)/);
+assert.match(hook, /await onReplaceMessages\(regenerationTurn\.targetMessages,replyCandidates\.messages\)/);
+assert.doesNotMatch(hook, /deleteMessageAndLinkedImage\(message\.id\)/);
 assert.match(hook, /recordPendingOfflineHandoffDelivery/);
 assert.match(hook, /generateRegeneratedChatTurn/);
 
-console.log("PASS chat regeneration remains behavior-preserving behind an explicit dependency hook");
+console.log("PASS chat regeneration commits replacements after generation without pre-deleting source replies");

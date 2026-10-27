@@ -1,5 +1,6 @@
 import type { StorageResult, StorageWriteResult } from "./storageTypes";
 import * as LZStringModule from "lz-string";
+import { canWriteMemoryStorage } from "./memoryWriterCoordination";
 
 const LZString = ((LZStringModule as typeof LZStringModule & { default?: typeof LZStringModule }).default ?? LZStringModule) as typeof import("lz-string");
 const COMPRESSED_SETTINGS_PREFIX = "lz-settings-v1:";
@@ -83,6 +84,7 @@ export function readJson<T>(key: string, fallback: T): StorageResult<T> {
 }
 
 export function writeString(key: string, value: string): StorageWriteResult {
+  if (!canWriteMemoryStorage(key)) return { success: false, error: "verification" };
   const storage = getStorage();
   if (!storage) return { success: false, error: "unavailable" };
   if (typeof value !== "string") {
@@ -159,6 +161,7 @@ export function writeJson<T>(key: string, value: T, options?: StorageWriteOption
 }
 
 export function remove(key: string): StorageWriteResult {
+  if (!canWriteMemoryStorage(key)) return { success: false, error: "verification" };
   const storage = getStorage();
   if (!storage) return { success: false, error: "unavailable" };
 

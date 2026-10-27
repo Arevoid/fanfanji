@@ -80,8 +80,8 @@ const summaryWithSemantics = createConversationSummaryRecord({
 assert.ok(summaryWithSemantics);
 assert.deepEqual(summaryWithSemantics?.sourceMessageIds, ["message-c", "message-z"]);
 assert.deepEqual(summaryWithSemantics?.sourceClaimIds, ["claim-plan", "claim-z"]);
-assert.equal(summaryWithSemantics?.rangeStartAt, 10);
-assert.equal(summaryWithSemantics?.rangeEndAt, 11);
+assert.equal(summaryWithSemantics?.rangeStartAt, undefined, "recording time is not evidence of source/event time");
+assert.equal(summaryWithSemantics?.rangeEndAt, undefined);
 assert.match(summaryWithSemantics?.summary || "", /未来计划，尚未发生/);
 assert.doesNotMatch(summaryWithSemantics?.summary || "", /wrong-conversation|retracted/);
 

@@ -11,7 +11,7 @@ assert.doesNotMatch(source, /const clearMessagesAndLinkedArtifacts =/);
 assert.match(hook, /isMessageInDirectScope\(targetMessage, activeDirectScope\)/);
 assert.match(hook, /removeImageGenerationRecordByMessage/);
 assert.match(hook, /removePaymentStatusesForMessages/);
-assert.match(hook, /onClearMessages\?\.\(characterId, undefined, relationId\)/);
+assert.match(hook, /await onClearMessages\(characterId,undefined,relationId\)===false/);
 assert.match(hook, /setSelectedMessageIds\(new Set\(\[initialMessageId\]\)\)/);
 
 console.log("chat message cleanup actions hook contract passed");

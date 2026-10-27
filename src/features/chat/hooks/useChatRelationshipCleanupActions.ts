@@ -26,7 +26,7 @@ interface UseChatRelationshipCleanupActionsOptions {
   memories: readonly MemoryItem[];
   relationships: readonly CharacterRelationship[];
   offlineStories: readonly OfflineStory[];
-  clearMessagesAndLinkedArtifacts: (characterId: string, relationId?: string) => void;
+  clearMessagesAndLinkedArtifacts: (characterId: string, relationId?: string) => void | boolean | Promise<void | boolean>;
   onSaveRelationships: (relationships: CharacterRelationship[]) => void;
   onDeleteMomentsByRelation?: (relationId: string) => void;
   onSaveMemories: (memories: MemoryItem[]) => void;
@@ -59,7 +59,7 @@ export function useChatRelationshipCleanupActions({
   setLastReadTimestamps,
   setRedPacketStatuses,
 }: UseChatRelationshipCleanupActionsOptions) {
-  const clearFriendScopedMemory = useCallback((friendId: string, relationId: string) => {
+  const clearFriendScopedMemory = useCallback(async (friendId: string, relationId: string) => {
     const relationMoments = moments.filter((moment) => moment.relationId === relationId);
     const relationMomentIds = new Set(relationMoments.map((moment) => moment.id));
     const relationCommentIds = new Set(
@@ -68,9 +68,10 @@ export function useChatRelationshipCleanupActions({
         .map((comment) => `${moment.id}:${comment.id}`)),
     );
 
-    clearMessagesAndLinkedArtifacts(friendId, relationId);
+    const memoryCleanup=removeCharacterTruthForRelations([relationId]);
+    if(!Object.values(memoryCleanup).every(Boolean)){window.alert("记忆清理未完成，聊天原文保留，请检查存储后重试。");return;}
+    if(await clearMessagesAndLinkedArtifacts(friendId, relationId)===false){window.alert("聊天清理未完成，请重试。");return;}
     removeCharacterLifeEventsForRelations([relationId]);
-    removeCharacterTruthForRelations([relationId]);
     removeProactiveTopicsForRelations([relationId]);
     removeContinuityRuntimeForRelations([relationId]);
     removeCharacterLifeRuntimeForRelations([relationId]);

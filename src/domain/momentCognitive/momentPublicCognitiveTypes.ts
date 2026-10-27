@@ -133,6 +133,8 @@ export interface MomentPublicTimeContext {
  * relationship, conversation, Memory, InnerVoice, or OfflineStory fields.
  */
 export interface MomentPublicCognitiveContext {
+  /** Caller has checked explicit owner authorization and current source revision. */
+  authorizedPublicLife?: readonly { summary:string; occurredAt:number }[];
   schemaVersion: typeof MOMENT_PUBLIC_COGNITIVE_CONTEXT_SCHEMA_VERSION;
   createdAt: number;
   publicCharacterProfile: MomentPublicCharacterProfile;

@@ -8,6 +8,7 @@ import { getConversationId, getOfflineGroupModeStorageKey, getOfflineGroupStoryS
 import { writeString } from "../../../core/storage/storageAdapter";
 import { buildOfflineHandoffFacts, OFFLINE_HANDOFF_MESSAGE_LIMIT } from "../../../domain/offlineStory/offlineHandoffContext";
 import { buildOfflineMemberKnowledgeSnapshots } from "../services/offlineMemberMemorySnapshot";
+import { captureOfflineMemoryReadFrame } from "../services/offlineMemoryReadFrame";
 
 type StoryCreationMode = "director" | "continue" | "if";
 
@@ -76,7 +77,7 @@ export function useOfflineStoryCreationActions({
     const charsLabel = storyCharsList.map((character) => character.remark || character.name).join("、");
     const modeLabel = newMode === "director" ? "导演剧本" : newMode === "if" ? "IF假想线" : "续写故事";
     const titleToUse = newTitle.trim() || `「${charsLabel}」的${modeLabel} - ${new Date().toLocaleDateString()}`;
-    const memberMemories = isGroupStory
+    const memberMemories = isGroupStory && newStartFromChat
       ? buildOfflineMemberKnowledgeSnapshots({
           memberIds: participantIds,
           characters,
@@ -125,14 +126,16 @@ export function useOfflineStoryCreationActions({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       mode: newMode,
-      knowledgeSnapshot: Array.from(new Set([
+      ...(newStartFromChat ? { memoryReadFrame: captureOfflineMemoryReadFrame({ memberIds: participantIds, characters, relationships,
+        userIdentityId: activeIdentityId, relationId: relationship?.id }) } : {}),
+      knowledgeSnapshot: newStartFromChat ? Array.from(new Set([
         ...loadKnowledgeClaims().value
           .filter((claim) => !isGroupStory && claim.relationId === relationship!.id && claim.characterId === relationship.characterId && claim.userIdentityId === relationship.userIdentityId && claim.status === "active" && (claim.truthStatus === "confirmed" || claim.truthStatus === "asserted"))
           .map((claim) => claim.statement),
         ...memories.filter((memory) => memory.isManual === true && (isGroupStory
           ? participantIds.some((participantId) => relationships.some((relation) => relation.id === memory.relationId && relation.characterId === participantId && relation.userIdentityId === activeIdentityId))
           : memory.relationId === relationship!.id)).map((memory) => memory.content),
-      ])),
+      ])) : [],
       ...(memberMemories && Object.keys(memberMemories).length > 0 ? { memberKnowledgeSnapshots: memberMemories } : {}),
       ifPrompt: newMode === "if" ? newIfPrompt : undefined,
       sourceChatId: newStartFromChat ? selectedCharId : undefined,

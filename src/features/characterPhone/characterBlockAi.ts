@@ -1,3 +1,4 @@
+import { resolveCharacterTextSettings } from "../../domain/character/characterTextApiRouting";
 import { apiChat } from "../../utils/apiHelper";
 import type { Character, Message, UserSettings } from "../../types";
 import type { CharacterRelationship } from "../../domain/relationship/characterRelationship";
@@ -99,6 +100,7 @@ phoneMessages 生成 1—3 条，每条 1—3 句，必须像角色写给自己�
 }
 
 export async function generateCharacterBlockAiResponse(input: CharacterBlockAiInput): Promise<CharacterBlockAiOutput | null> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const settings = input.settings;
   if (!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) return null;
   const prompt = buildCharacterBlockAiPrompt(input);

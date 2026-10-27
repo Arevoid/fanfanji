@@ -198,6 +198,18 @@ class ReadingAssetDB {
     });
   }
 
+  async deleteMetadataMatching(matches: (key: string) => boolean): Promise<number> {
+    const database=await this.initMetadata();
+    return new Promise((resolve,reject)=>{
+      const transaction=database.transaction(METADATA_STORE,"readwrite");let deleted=0;
+      const request=transaction.objectStore(METADATA_STORE).openCursor();
+      request.onsuccess=()=>{const cursor=request.result;if(!cursor)return;
+        try{if(typeof cursor.key==="string"&&matches(cursor.key)){cursor.delete();deleted++;}cursor.continue();}
+        catch(error){transaction.abort();reject(error);}};
+      transaction.oncomplete=()=>resolve(deleted);transaction.onerror=()=>reject(transaction.error);transaction.onabort=()=>reject(transaction.error);
+    });
+  }
+
   async saveCover(bookId: string, blob: Blob): Promise<void> {
     if (!bookId || !(blob instanceof Blob) || !blob.type.startsWith("image/")) throw new Error("Invalid reading cover");
     const database = await this.initCover();

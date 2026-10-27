@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import {isConversationSummarySourceValid,createConversationSummaryRecord} from "../src/domain/characterKnowledge/conversationSummaryProjection";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+const scope={characterId:"a",relationId:"r",userIdentityId:"u",conversationId:"c"};
+const claim={...scope,id:"old",statement:"用户一直怕打雷",kind:"fact",subject:"user",truthStatus:"asserted",temporalStatus:"present",confidence:.8,status:"active",visibility:"relation_private",schemaVersion:1,userConfirmed:false,recordedAt:1,admissionStatus:"review",legacyCompatible:true,source:{kind:"user_message",authorship:"user",producer:"fixture",messageIds:["m"],evidenceKey:"m"}} as KnowledgeClaim;
+const summary=createConversationSummaryRecord({id:"s",scope,claims:[claim],sourceMessageIds:["m"],generatedAt:2,generator:"fixture",layer:"episode"})!;
+assert.ok(summary);assert.ok(isConversationSummarySourceValid(summary,[claim]));
+for(const mutation of [{status:"retracted"},{recallDisabled:true},{supersededById:"next"},{relationId:"other"},{legacyCompatible:false},{admissionStatus:"skipped"}])assert.equal(isConversationSummarySourceValid(summary,[{...claim,...mutation} as KnowledgeClaim]),false,JSON.stringify(mutation));
+assert.equal(isConversationSummarySourceValid(summary,[]),false,"missing sources never resurrect from summary text");
+console.log("PASS legacy summary compatibility: pending/failed/declined compatible sources work; deletion, scope, supersession and explicit skipping stay excluded");

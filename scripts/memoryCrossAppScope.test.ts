@@ -24,10 +24,12 @@ assert.equal(manualCinemaClaim.source.app, "cinema");
 assert.equal(memoryRecordFromKnowledgeClaim(manualCinemaClaim).provenance.app, "cinema");
 
 const cinemaSource = read("src/components/AppCinema.tsx");
-assert.match(cinemaSource, /sourceApp: "cinema"/);
-assert.match(cinemaSource, /userIdentityId: relation\.userIdentityId/);
-assert.match(cinemaSource, /conversationId: relation\.conversationId/);
-assert.match(cinemaSource, /sourceRecordId/);
+assert.match(cinemaSource, /archiveCinemaDiscussion\(/);
+const cinemaArchive = read("src/features/cinema/cinemaMemoryArchiveService.ts");
+assert.match(cinemaArchive, /app: "cinema"/);
+assert.match(cinemaArchive, /userIdentityId: input\.relation\.userIdentityId/);
+assert.match(cinemaArchive, /conversationId: input\.relation\.conversationId/);
+assert.match(cinemaArchive, /recordId: record.id/);
 
 const memorySource = read("src/components/AppMemory.tsx");
 assert.match(memorySource, /sourceApp: "memory"/);

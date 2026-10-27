@@ -1747,7 +1747,7 @@ export default function AppCharacterPhone({
       const latestPhone = getCharacterPhone(input.phone.ownerIdentityId, input.phone.characterId) || input.phone;
       const latestContact = latestPhone.contacts.find((contact) => contact.id === input.contact.id && !contact.removedAt);
       if (!latestContact) return;
-      if (!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) {
+      if ((!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) && !input.character.characterApi?.enabled) {
         setPhoneNotice("消息已发出；联系人会在看到后回复（请先配置 API）");
         return;
       }
@@ -3714,6 +3714,7 @@ export default function AppCharacterPhone({
       <div className="-mx-5 min-h-0 flex-1 bg-[var(--app-bg)]">
         <AppSchedule
         entries={phoneScheduleEntries}
+        userIdentityId={userIdentityId}
         appointments={phoneAppointments}
         characters={[selectedCharacter]}
         onOpenChat={() => setActiveApp("chat")}

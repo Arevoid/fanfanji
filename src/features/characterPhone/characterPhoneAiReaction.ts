@@ -1,3 +1,4 @@
+import { resolveCharacterTextSettings } from "../../domain/character/characterTextApiRouting";
 import { apiChat } from "../../utils/apiHelper";
 import type { Character, UserSettings } from "../../types";
 import type { CharacterPhoneActionRecord } from "../../domain/characterPhone/types";
@@ -115,6 +116,7 @@ export function buildCharacterPhoneDiscoveryAiPrompt(input: CharacterPhoneDiscov
 export async function generateCharacterPhoneDiscoveryMessage(
   input: CharacterPhoneDiscoveryAiInput,
 ): Promise<string | null> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const settings = input.settings;
   if (!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) return null;
   const prompt = buildCharacterPhoneDiscoveryAiPrompt(input);
@@ -162,6 +164,7 @@ export function buildCharacterPhoneAwarenessAiPrompt(input: CharacterPhoneAwaren
 export async function generateCharacterPhoneAwarenessMessage(
   input: CharacterPhoneAwarenessAiInput,
 ): Promise<string | null> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const settings = input.settings;
   if (!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) return null;
   const prompt = buildCharacterPhoneAwarenessAiPrompt(input);
@@ -209,6 +212,7 @@ export function buildCharacterPhoneBrowserReflectionAiPrompt(input: CharacterPho
 export async function generateCharacterPhoneBrowserReflection(
   input: CharacterPhoneBrowserReflectionAiInput,
 ): Promise<string | null> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const settings = input.settings;
   if (!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) return null;
   const prompt = buildCharacterPhoneBrowserReflectionAiPrompt(input);

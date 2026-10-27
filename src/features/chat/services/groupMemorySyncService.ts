@@ -8,6 +8,7 @@ import { appendMany as appendKnowledgeClaims, retractBySourceMessageIds } from "
 import { conversationSummaryRepository, loadConversationSummaries } from "../../../core/storage/repositories/conversationSummaryRepository";
 import { readJson, writeJson } from "../../../core/storage/storageAdapter";
 import { storageKeys } from "../../../core/storage/storageKeys";
+import { shouldArchiveGroupMessage } from "../../../domain/memory/groupMemoryValue";
 
 export interface GroupMemorySyncMemberCursor {
   relationId: string;
@@ -142,6 +143,7 @@ export function syncGroupMemoryToMembers(input: {
   let processed = 0;
   let skipped = 0;
   let changed = 0;
+  let invalidationFailed = false;
   const claims: KnowledgeClaim[] = [];
   const summaries: ConversationSummaryRecord[] = [];
 
@@ -157,19 +159,21 @@ export function syncGroupMemoryToMembers(input: {
       }
       if (previousHash !== undefined) changed += 1;
       if (previousHash !== undefined) {
-        retractBySourceMessageIds([message.id], {
+        const claimRetraction = retractBySourceMessageIds([message.id], {
           characterId: member.id,
           relationId: relation.id,
           userIdentityId: input.activeIdentityId,
           conversationId,
         });
-        conversationSummaryRepository.retractBySourceMessageIds([message.id], {
+        const summaryRetraction = conversationSummaryRepository.retractBySourceMessageIds([message.id], {
           characterId: member.id,
           relationId: relation.id,
           userIdentityId: input.activeIdentityId,
           conversationId,
         });
+        if (!claimRetraction.success || !summaryRetraction.success) { invalidationFailed = true; return; }
       }
+      if (!shouldArchiveGroupMessage(message, messages)) { messageHashes[message.id] = hash; skipped += 1; return; }
       const eventId = sourceEventId(groupId, message.id, hash);
       const statement = `群聊「${input.group.name}」中有一条公开交流记录（${message.id}）`;
       const decision = evaluateKnowledgeWrite({
@@ -223,10 +227,14 @@ export function syncGroupMemoryToMembers(input: {
     nextMembers[key] = { relationId: relation.id, messageHashes };
   });
 
-  if (claims.length > 0) appendKnowledgeClaims(claims);
-  if (summaries.length > 0) conversationSummaryRepository.appendMany(summaries);
+  if (invalidationFailed || claims.length > 0 && !appendKnowledgeClaims(claims).success) {
+    return { processed: 0, skipped, total: messages.length, memberCount: memberScopes.length, changed: 0 };
+  }
+  if (summaries.length > 0 && !conversationSummaryRepository.appendMany(summaries).success) {
+    return { processed: 0, skipped, total: messages.length, memberCount: memberScopes.length, changed: 0 };
+  }
   const next: GroupMemorySyncState = { groupId, enabled: previous.enabled, members: nextMembers, updatedAt: Date.now() };
   store[groupId] = next;
-  saveGroupMemorySyncStore(store);
+  if (!saveGroupMemorySyncStore(store)) return { processed: 0, skipped, total: messages.length, memberCount: memberScopes.length, changed: 0 };
   return { processed, skipped, total: messages.length, memberCount: memberScopes.length, changed };
 }

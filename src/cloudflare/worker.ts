@@ -2,7 +2,7 @@ import { assertImageGenerationTrigger } from "../features/chat/services/imageGen
 import { ImageApiError, fetchImageModels, generateImageWithProtocol, testImageConnectionWithProtocol } from "../server/imageProtocolAdapters";
 import { MosslandTtsError, synthesizeMosslandSpeech } from "../server/mosslandTts";
 import { ElevenLabsTtsError, synthesizeElevenLabsSpeech } from "../server/elevenLabsTts";
-import { buildKnowledgeExtractionPrompt, parseOrRepairKnowledgeExtractionOutput } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
+import { buildKnowledgeExtractionPrompt, normalizeSemanticRegistry, parseOrRepairKnowledgeExtractionOutput } from "../features/characterKnowledge/services/knowledgeExtractionProtocol";
 import { buildTranslationPrompt, callTextProvider, callTextProviderWithDiagnostics, fetchTextModels, normalizeTextApiError } from "../server/textProtocolAdapters";
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 import { CONTENT_SECURITY_POLICY } from "../core/security/contentSecurityPolicy";
@@ -73,6 +73,7 @@ const textInput = (body: Record<string, unknown>, message: string, systemInstruc
   streamCompatible: body.streamCompatible === true,
   timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : undefined,
   maxOutputTokens: typeof body.maxOutputTokens === "number" ? body.maxOutputTokens : undefined,
+  responseFormat: body.responseFormat === "json_object" ? "json_object" as const : undefined,
   imageDataUrl: typeof body.imageDataUrl === "string" && body.imageDataUrl.startsWith("data:image/") ? body.imageDataUrl : undefined,
 });
 
@@ -262,7 +263,14 @@ export default {
         // Offline extraction is intentionally never promoted into this path.
         const enableV2Shadow = body.enableV2Shadow === true && body.scenario !== "offline";
         const prompt = buildKnowledgeExtractionPrompt({
+          singlePass: body.singlePass === true,
+          memorySettings: Array.isArray(body.memorySettings) ? body.memorySettings.filter((item: any) => item && typeof item.id === "string" && typeof item.text === "string") : [],
+          semanticReview: body.semanticReview,
+          identityReview: body.identityReview,
           characterName: String(body.characterName || "角色"), characterProfile: typeof body.characterProfile === "string" ? body.characterProfile : undefined,
+          knownAttributes: Array.isArray(body.knownAttributes) ? body.knownAttributes.filter((item): item is string => typeof item === "string") : [],
+          semanticRegistry: normalizeSemanticRegistry(body.semanticRegistry),
+          knownActivities: Array.isArray(body.knownActivities) ? body.knownActivities.filter((item): item is string => typeof item === "string") : [],
           history, sourceReferenceMode: body.sourceReferenceMode === "local" ? "local" : "canonical",
           templateType: body.templateType === "delicate" ? "delicate" : "refined", scenario: body.scenario === "offline" ? "offline" : undefined,
           includeV2Shadow: enableV2Shadow,
@@ -281,7 +289,13 @@ export default {
           allowEmptyText: true,
         });
         mergeProviderUsage(firstResult.usage);
+        if(body.identityReview!==undefined){const parsed=JSON.parse(firstResult.text.trim().replace(/^```(?:json)?\s*/iu,"").replace(/\s*```$/u,""));return json({candidates:[],identityReviews:Array.isArray(parsed?.reviews)?parsed.reviews:[],...(providerUsage?{usage:providerUsage}:{})});}
+        if (body.semanticReview !== undefined) {
+          const review = JSON.parse(firstResult.text.trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, ""));
+          return json({ candidates: [], semanticReviews: Array.isArray(review?.reviews) ? review.reviews : [], ...(providerUsage ? { usage: providerUsage } : {}) });
+        }
         const repaired = await parseOrRepairKnowledgeExtractionOutput({
+          allowRepair: body.singlePass !== true,
           rawText: firstResult.text,
           allowedMessageIds: new Set(history.map((item) => String(item.id))),
           originalPrompt: prompt,

@@ -25,10 +25,10 @@ export interface MemoryCenterRecord extends MemoryRecord {
 }
 
 export const MEMORY_CENTER_TYPE_LABELS: Readonly<Record<MemoryCenterRecordType, string>> = {
-  truth: "长期事实",
-  summary: "对话摘要",
+  truth: "记忆条目",
+  summary: "交流回顾",
   rule: "规则记忆",
-  compatibility: "兼容记忆",
+  compatibility: "旧资料",
 };
 
 export const MEMORY_CENTER_LAYER_LABELS: Readonly<Record<MemoryRecord["layer"], string>> = {

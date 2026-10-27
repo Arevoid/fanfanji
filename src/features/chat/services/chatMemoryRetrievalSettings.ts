@@ -4,7 +4,7 @@ export const MAX_CHAT_CONTEXT_MEMORY_LIMIT = 300;
 
 export const DEFAULT_CHAT_LONG_TERM_MEMORY_LIMIT = 50;
 export const MIN_CHAT_LONG_TERM_MEMORY_LIMIT = 10;
-export const MAX_CHAT_LONG_TERM_MEMORY_LIMIT = 100;
+export const MAX_CHAT_LONG_TERM_MEMORY_LIMIT = 300;
 
 /** Resolves the number of recent messages retained as short-term chat context. */
 export function resolveChatContextMemoryLimit(value?: number): number {

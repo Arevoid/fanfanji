@@ -1,3 +1,4 @@
+import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
 import type {
   Character,
   ForumActivityActorSlot,
@@ -59,7 +60,7 @@ export interface ForumActivityPlanInput {
   requiredReplyFloor?: number;
   /** User interactions should still receive an answer when an actor just posted. */
   ignoreActorCooldown?: boolean;
-  aiCall?: (input: { message: string; systemInstruction: string; apiKey: string; model: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean }) => Promise<{ text: string }>;
+  aiCall?: (input: { characterId?:string;message: string; systemInstruction: string; apiKey: string; model: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean }) => Promise<{ text: string }>;
   /** Explicitly classified public candidates only; omitted records remain denied. */
   publicEventCandidates?: readonly PublicCharacterEventCandidate[];
   /** Explicitly classified public world knowledge only; omitted records remain denied. */
@@ -274,14 +275,12 @@ const buildPublicActivityPromptSupplements = (
 
 /** One public-only AI call yields a scheduled batch; it never writes forum storage itself. */
 export const planForumActivity = async (input: ForumActivityPlanInput): Promise<ForumPendingActivityEvent[]> => {
-  if (!input.settings.apiKey?.trim() || !input.settings.selectedModel?.trim()) {
-    throw new Error("论坛 AI 配置缺失：请先配置文本 API。");
-  }
+
   if (input.thread.ownerIdentityId !== input.ownerIdentityId) return [];
   const slots = buildForumActivityActorSlots(input);
   if (!slots.length) return [];
   const recent = input.actorStates.filter((state) => state.threadId === input.thread.id && state.ownerIdentityId === input.ownerIdentityId);
-  const eligible = slots.filter((slot) => {
+  let eligible = slots.filter((slot) => {
     const state = recent.find((candidate) => candidate.actorKey === forumActorKey(slot.actor));
     return input.ignoreActorCooldown || !state?.cooldownUntil || state.cooldownUntil <= input.now;
   });
@@ -294,6 +293,22 @@ export const planForumActivity = async (input: ForumActivityPlanInput): Promise<
     : input.trigger === "user-interaction"
       ? 5 + Math.floor(random() * 6)
       : 1 + Math.floor(random() * 4);
+  // A public activity batch remains one paid call. Never let a global-model
+  // batch author dialogue for a role that selected its own API.
+  const routes=eligible.map(slot=>{
+    const characterId=slot.actor.kind==="relationship"?slot.actor.characterId:undefined;
+    const character=characterId?input.characters.find(item=>item.id===characterId):undefined;
+    const settings=resolveCharacterTextSettings(input.settings,character);
+    return {slot,settings,characterId:settings===input.settings?undefined:character?.id};
+  });
+  let roleCharacterId:string|undefined;
+  let requestSettings=input.settings;
+  if(routes.some(route=>route.characterId)){
+    const route=storyContinuation?routes.find(item=>actorIsThreadAuthor(item.slot,input.thread))||routes[0]:routes[Math.min(routes.length-1,Math.floor(random()*routes.length))];
+    roleCharacterId=route.characterId;requestSettings=route.settings;
+    eligible=routes.filter(item=>item.characterId===roleCharacterId).map(item=>item.slot);
+  }
+  if(!requestSettings.apiKey?.trim()||!requestSettings.selectedModel?.trim())throw Error("论坛 AI 配置缺失：请先配置文本 API。");
   const publicCognitiveSupplements = buildPublicActivityPromptSupplements(input, eligible);
   const prompt = {
     systemInstruction: `你只生成一批公开论坛活动候选，不执行任何写操作。严格输出 JSON：{"events":[{"localId":"e1","actorSlot":"slot","kind":"reply","body":"回复","replyTo":{"type":"thread"},"delaySeconds":30}]}。本批必须生成 ${requestedEventCount} 条事件；actorSlot 只能来自白名单；可使用 thread、floor 或先前 batch 楼层形成自然的引用回复，但不得重复同一种观点或让同一作者连续刷楼。不得输出任意 ID、私人聊天、Memory、关系、点赞、转发、删除、图片或动作描写。${FORUM_REPLY_REALISM_RULES}author-update 只可由真实 AI 楼主发出。${storyContinuation ? "当前是开放连载帖的合理后续窗口：第一条必须是楼主的 author-update，内容只补充一个新事实、纠正、结果或改变后的打算；不得改名、补写完整剧情或编造私密背景。" : ""}`,
@@ -301,11 +316,12 @@ export const planForumActivity = async (input: ForumActivityPlanInput): Promise<
   };
   const result = await (input.aiCall || defaultAiCall)({
     ...prompt,
-    apiKey: input.settings.apiKey,
-    model: input.settings.selectedModel,
-    apiEndpoint: input.settings.apiEndpoint,
-    apiTemperature: input.settings.apiTemperature,
-    streamCompatible: input.settings.streamCompatible,
+    characterId:roleCharacterId,
+    apiKey: requestSettings.apiKey,
+    model: requestSettings.selectedModel,
+    apiEndpoint: requestSettings.apiEndpoint,
+    apiTemperature: requestSettings.apiTemperature,
+    streamCompatible: requestSettings.streamCompatible,
   });
   const protectedNames = buildForumProtectedNames({
     ownerIdentity: input.settings.identities?.find((identity) => identity.id === input.ownerIdentityId),

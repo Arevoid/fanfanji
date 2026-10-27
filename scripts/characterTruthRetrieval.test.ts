@@ -24,7 +24,7 @@ const claim = (id: string, statement: string, truthStatus: KnowledgeClaim["truth
 const summary: ConversationSummaryRecord = {
   id: "summary-a",
   ...scope,
-  summary: "只属于 A 的派生摘要",
+  summary: "只属于 A 的电影派生摘要",
   sourceMessageIds: [],
   sourceClaimIds: [],
   generatedAt: 10,
@@ -58,9 +58,9 @@ const result = retrieveTruthForPrivatePrompt({
   claims: [
     claim("claim-confirmed", "用户确认喜欢电影", "confirmed"),
     claim("claim-plan", "以后计划一起看电影", "asserted", "plan"),
-    claim("claim-hypothesis", "也许用户喜欢科幻", "inferred", "hypothesis"),
-    claim("claim-disputed", "用户是否喜欢恐怖片存在争议", "disputed"),
-    claim("claim-legacy", "旧 Memory 待核验", "legacy_unverified"),
+    claim("claim-hypothesis", "也许用户喜欢科幻电影", "inferred", "hypothesis"),
+    claim("claim-disputed", "用户是否喜欢恐怖电影存在争议", "disputed"),
+    claim("claim-legacy", "旧电影 Memory 待核验", "legacy_unverified"),
     claim("claim-other", "identity B 的电影事实", "confirmed", "fact", { ...scope, relationId: "relation-b", userIdentityId: "identity-b", conversationId: "direct:relation-b" }),
   ],
   summaries: [summary, sourceBackedSummary, { ...summary, id: "summary-b", relationId: "relation-b", userIdentityId: "identity-b", conversationId: "direct:relation-b", summary: "B 的摘要" }],
@@ -74,7 +74,7 @@ assert.equal(result.projection.openBeliefsAndHypotheses.length, 1);
 assert.equal(result.projection.disputed.length, 1);
 assert.equal(result.projection.legacyUnverified.length, 1);
 assert.equal(result.summaries.length, 1, "a summary backed by an already selected Truth claim is suppressed");
-assert.equal(result.summaries[0].summary, "只属于 A 的派生摘要");
+assert.equal(result.summaries[0].summary, "只属于 A 的电影派生摘要");
 assert.equal(result.corrections.length, 1);
 assert.ok(result.shadowedLegacyMemoryIds.includes("claim-legacy"));
 
@@ -84,7 +84,7 @@ assert.match(prompt, /尚未发生的计划/);
 assert.match(prompt, /不得改写成已经发生的事实/);
 assert.match(prompt, /旧数据待核验/);
 assert.match(prompt, /对话摘要（非权威补充）/);
-assert.match(prompt, /只属于 A 的派生摘要/);
+assert.match(prompt, /只属于 A 的电影派生摘要/);
 assert.doesNotMatch(prompt, /有来源的摘要/);
 assert.match(prompt, /如果与上面的具体事实/);
 assert.match(prompt, /保持克制/);
@@ -102,6 +102,7 @@ assert.ok(boundedPrompt.length <= 120, "Truth prompt projection must respect its
 
 const diagnostics = explainTruthProjection({
   scope,
+  queryText: "included",
   limit: 8,
   now: 100,
   claims: [

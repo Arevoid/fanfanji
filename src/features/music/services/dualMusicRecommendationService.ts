@@ -1,3 +1,4 @@
+import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
 import type {
   Character,
   MemoryItem,
@@ -8,6 +9,7 @@ import type {
 } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { serializeMessageContentForPrompt } from "../../chat/prompts/messagePromptSerializer";
+import { buildMemoryContext } from "../../characterKnowledge/services/memoryContextGateway";
 
 export interface MusicRecommendationResult {
   trackId: string;
@@ -16,6 +18,7 @@ export interface MusicRecommendationResult {
 }
 
 interface AiRequest {
+  characterId?:string;
   message: string;
   history: Array<{ role: string; text: string }>;
   systemInstruction?: string;
@@ -63,20 +66,26 @@ export async function recommendDualMusicTrack(input: {
   requestAi?: (request: AiRequest) => Promise<{ text: string }>;
   random?: () => number;
 }): Promise<MusicRecommendationResult | undefined> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   if (!input.tracks.length) return undefined;
   const relationMessages = input.messages
-    .filter((message) => message.relationId === input.relationship.id && !message.isOffline)
+    .filter((message) => message.relationId === input.relationship.id
+      && message.characterId === input.character.id && !message.isOffline && !message.recalledAt)
     .slice(-16);
-  const relationMemories = input.memories
-    .filter((memory) => memory.relationId === input.relationship.id)
-    .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, 8);
   const validIds = new Set(input.tracks.map((track) => track.id));
   const canUseAi = Boolean(input.requestAi && input.settings.apiKey?.trim() && input.settings.selectedModel?.trim());
 
   if (canUseAi) {
     try {
+      const memoryContext = await buildMemoryContext({
+        surface: "music", relation: input.relationship, characterId: input.character.id,
+        userIdentityId: input.relationship.userIdentityId, settings: input.settings,
+        audience: "relation_private",
+        query: `音乐 喜欢的歌曲 听歌习惯 ${relationMessages.slice(-4).map(message => message.content).join("\n")}\n${input.tracks.map(track => `${track.title} ${track.artist}`).join("\n")}`,
+        alreadyPromptedTexts: relationMessages.map(message => message.content),
+      });
       const response = await input.requestAi!({
+        characterId: input.character.id,
         message: "Select exactly one track from the supplied local library for the character to be listening to now.",
         history: [],
         systemInstruction: `You select music only from a user's existing local library.
@@ -94,7 +103,8 @@ Recent direct-chat context:
 ${relationMessages.map((message) => `${message.sender}: ${serializeMessageContentForPrompt(message, { mode: "history", characterName: input.character.name })}`).join("\n")}
 
 Relevant relation memories:
-${relationMemories.map((memory) => `- ${memory.content}`).join("\n")}
+${memoryContext}
+Music recommendations and lyrics are not evidence that the user listened, participated, or has a lasting preference.
 
 Current/recent track ids:
 ${[input.currentState?.currentTrackId, ...(input.currentState?.recentTrackIds || [])].filter(Boolean).join(", ")}

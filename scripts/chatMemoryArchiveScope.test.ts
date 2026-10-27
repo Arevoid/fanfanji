@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { selectUnarchivedChatMessages, splitChatArchiveBatches } from "../src/features/chat/hooks/useChatMemoryExtraction";
+import { selectUnarchivedChatMessages, splitChatArchiveBatches,getChatArchiveBatchSize } from "../src/features/chat/hooks/useChatMemoryExtraction";
 import type { Message } from "../src/types";
+import { splitChatArchiveTurnBatches } from "../src/domain/memory/chatArchiveTurns";
 
 const messages = Array.from({ length: 5 }, (_, index) => ({
   id: `message-${index + 1}`,
@@ -35,5 +36,10 @@ assert.deepEqual(
 const appChat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 assert.match(appChat, /一键总结归档记忆/);
 assert.doesNotMatch(appChat, /一键手动提炼归档当前对话/);
+assert.equal(getChatArchiveBatchSize({summaryTriggerRound:20,historyMemoryLimit:10},true),20,"automatic batch size is in logical rounds, independent of the history window");
+assert.equal(getChatArchiveBatchSize({summaryTriggerRound:20,historyMemoryLimit:150},true),20);
+assert.equal(getChatArchiveBatchSize({summaryTriggerRound:20,historyMemoryLimit:150},false),150,"manual backlog processing retains its existing batch sizing");
+const backlog=Array.from({length:80},(_,i)=>({...messages[0],id:`backlog-${i}`,sender:i%2===0?"user":"character"} as Message));
+assert.deepEqual(splitChatArchiveTurnBatches(backlog,getChatArchiveBatchSize({summaryTriggerRound:20},true)).map(batch=>batch.length),[40,40]);
 
 console.log("Chat memory archive scope: 5 acceptance checks passed");

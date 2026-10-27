@@ -1,4 +1,5 @@
 import { readingAssetDb } from "../../core/storage/readingAssetDb";
+export {MEMORY_BACKUP_KEYS} from "../../core/storage/memoryBackupKeys";
 import { flushCharacters } from "../../core/storage/repositories/characterRepository";
 import { flushMoments, mergeMomentSnapshots } from "../../core/storage/repositories/momentRepository";
 import { flushReadingStore } from "../../core/storage/repositories/readingRepository";

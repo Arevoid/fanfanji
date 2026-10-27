@@ -1,3 +1,4 @@
+import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
 import { apiChat } from "../../../utils/apiHelper";
 import type { ReadingCoStoryActionMode, ReadingCoStoryState, ReadingStoryAiActionResult } from "../../../domain/reading/coStoryTypes";
 import { getReadingCoStory, listReadingCoStoryTurns } from "../../../core/storage/repositories/readingCoStoryRepository";
@@ -6,7 +7,7 @@ import { commitReadingCoStoryAiAction, commitReadingCoStoryTurn, ReadingCoStoryE
 import { ReadingCoStoryPolicyError, validateReadingStoryAiAction } from "./readingCoStoryPolicy";
 
 export interface ReadingCoStoryGenerationSettings { apiKey: string; selectedModel: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean; }
-export interface ReadingCoStoryAiRequest { message: string; systemInstruction: string; apiKey: string; model: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean; }
+export interface ReadingCoStoryAiRequest { characterId?:string; message: string; systemInstruction: string; apiKey: string; model: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean; }
 export type ReadingCoStoryAiCall = (request: ReadingCoStoryAiRequest) => Promise<{ text: string }>;
 const defaultAiCall: ReadingCoStoryAiCall = (request) => apiChat({ ...request, history: [], purpose: "reading_generate" });
 
@@ -27,6 +28,7 @@ export async function generateReadingCoStoryAiAction(input: {
   aiCall?: ReadingCoStoryAiCall;
   now?: number;
 }): Promise<{ story: ReadingCoStoryState; result: ReadingStoryAiActionResult; attempts: number }> {
+  input = {...input,settings:resolveCharacterTextSettings(input.settings,undefined,input.story.characterId)};
   if (!input.settings.apiKey?.trim() || !input.settings.selectedModel?.trim()) throw new Error("共同穿书 AI 配置不完整，请先设置 API Key 和模型");
   const scope = { userIdentityId: input.story.userIdentityId, coStoryId: input.story.coStoryId, relationId: input.story.relationId, characterId: input.story.characterId };
   const current = getReadingCoStory(scope);
@@ -37,7 +39,7 @@ export async function generateReadingCoStoryAiAction(input: {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const response = await call({ message: prompt.message, systemInstruction: attempt === 0 ? prompt.systemInstruction : `${prompt.systemInstruction}\n上一次输出未通过校验，请只输出符合 schema 的 JSON。`, apiKey: input.settings.apiKey, model: input.settings.selectedModel, apiEndpoint: input.settings.apiEndpoint, apiTemperature: input.settings.apiTemperature, streamCompatible: input.settings.streamCompatible });
+      const response = await call({ characterId:input.story.characterId, message: prompt.message, systemInstruction: attempt === 0 ? prompt.systemInstruction : `${prompt.systemInstruction}\n上一次输出未通过校验，请只输出符合 schema 的 JSON。`, apiKey: input.settings.apiKey, model: input.settings.selectedModel, apiEndpoint: input.settings.apiEndpoint, apiTemperature: input.settings.apiTemperature, streamCompatible: input.settings.streamCompatible });
       const result = validateReadingStoryAiAction(parseJson(response.text));
       const committed = commitReadingCoStoryAiAction({ scope, result, mode: input.mode, expectedStoryUpdatedAt: current.updatedAt, now: input.now });
       return { story: committed.story, result, attempts: attempt + 1 };
@@ -60,6 +62,7 @@ export async function generateReadingCoStoryTurn(input: {
   now?: number;
 }): Promise<{ story: ReadingCoStoryState; result: ReadingCoStoryTurnResult; requestId?: string; attempts: number }> {
   if (!input.userAction.trim()) throw new ReadingCoStoryError("请先输入或选择行动", "invalid");
+  input = {...input,settings:resolveCharacterTextSettings(input.settings,undefined,input.story.characterId)};
   if (!input.settings.apiKey?.trim() || !input.settings.selectedModel?.trim()) throw new ReadingCoStoryError("共同故事 AI 配置不完整，请先设置 API Key 和模型", "invalid");
   const scope = { userIdentityId: input.story.userIdentityId, coStoryId: input.story.coStoryId, relationId: input.story.relationId, characterId: input.story.characterId };
   const current = getReadingCoStory(scope);
@@ -74,7 +77,7 @@ export async function generateReadingCoStoryTurn(input: {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const response = await call({ message: prompt.message, systemInstruction: attempt === 0 ? prompt.systemInstruction : `${prompt.systemInstruction}\n上一次输出未通过校验，只输出完全符合 schema 的 JSON。`, apiKey: input.settings.apiKey, model: input.settings.selectedModel, apiEndpoint: input.settings.apiEndpoint, apiTemperature: input.settings.apiTemperature, streamCompatible: input.settings.streamCompatible });
+      const response = await call({ characterId:input.story.characterId, message: prompt.message, systemInstruction: attempt === 0 ? prompt.systemInstruction : `${prompt.systemInstruction}\n上一次输出未通过校验，只输出完全符合 schema 的 JSON。`, apiKey: input.settings.apiKey, model: input.settings.selectedModel, apiEndpoint: input.settings.apiEndpoint, apiTemperature: input.settings.apiTemperature, streamCompatible: input.settings.streamCompatible });
       const result = validateReadingCoStoryTurnResult(parseJson(response.text));
       const committed = commitReadingCoStoryTurn({ scope, result, userAction: input.userAction, requestId, expectedStoryUpdatedAt: current.updatedAt, now: input.now });
       return { story: committed.story, result, requestId, attempts: attempt + 1 };

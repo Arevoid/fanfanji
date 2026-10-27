@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import { evaluationScope,evaluationNow,frozenMemoryCases } from "./fixtures/memoryFrozenEvaluation";
+import { retrieveTruthForPrivatePrompt,formatTruthRetrievalForPrompt } from "../src/features/characterKnowledge/services/truthRetrievalService";
+const claim=frozenMemoryCases[0].claims[0];
+const input={scope:evaluationScope,now:evaluationNow,queryText:"打雷",claims:[claim],summaries:[],corrections:[]};
+assert.match(formatTruthRetrievalForPrompt(retrieveTruthForPrivatePrompt(input)),/用户害怕打雷/);
+const recent="用户害怕打雷，刚才已经关心过，现在先陪着就好。";
+assert.equal(formatTruthRetrievalForPrompt(retrieveTruthForPrivatePrompt({...input,alreadyPromptedTexts:[recent]})),"","short Chinese facts already in recent context must not be injected again");
+assert.match(formatTruthRetrievalForPrompt(retrieveTruthForPrivatePrompt({...input,alreadyPromptedTexts:["外面打雷了"]})),/用户害怕打雷/,"topic overlap alone cannot remove useful knowledge");
+const followup="再讲讲我为什么害怕打雷";
+const combined=recent+followup+formatTruthRetrievalForPrompt(retrieveTruthForPrivatePrompt({...input,queryText:followup,alreadyPromptedTexts:[recent]}));
+assert.match(combined,/用户害怕打雷/,"explicit follow-up retains the known fact in final recent context even without a duplicate memory block");
+console.log("PASS M15 bounded recent-context duplicate suppression, short facts, explicit follow-up and no topic-only suppression; not a semantic mention classifier");

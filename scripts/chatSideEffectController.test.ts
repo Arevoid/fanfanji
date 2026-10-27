@@ -36,6 +36,7 @@ const relationships = [relationship];
 const previousMessages = Array.from({ length: 18 }, (_, index) => ({
   ...userMessage,
   id: `history-${index}`,
+  sender: index % 2 === 0 ? "user" : "character",
   timestamp: index + 10,
 })) as Message[];
 
@@ -124,8 +125,8 @@ retryController.afterReplySuccess({
   isOffline: false,
 });
 await retryScheduled[0]();
-assert.equal(retryCalls, 2, "high-value zero-candidate batches receive one retry");
-assert.equal(retryOptions[1]?.retryHighValue, true, "the second pass is marked as a high-value retry");
+assert.equal(retryCalls, 1, "an empty extraction must not silently purchase a second request");
+assert.equal(retryOptions.length, 1);
 
 const duplicateScheduled: Array<() => void | Promise<void>> = [];
 let duplicateCalls = 0;

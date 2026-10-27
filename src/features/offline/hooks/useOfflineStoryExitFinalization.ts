@@ -36,6 +36,9 @@ export function useOfflineStoryExitFinalization({
     if (!completedStory.archivedAt) {
       completedStory = {
         ...completedStory,
+        // Archiving a newly-ended story is not proof of extraction. Preserve
+        // the pre-archive cursor before legacy readers see archivedAt.
+        lastSyncedMessageCount: completedStory.lastSyncedMessageCount ?? 0,
         archivedAt: handoffCreatedAt,
         updatedAt: handoffCreatedAt,
       };
@@ -58,8 +61,12 @@ export function useOfflineStoryExitFinalization({
         showToast("线下剧情已保存，但约定状态暂时未能更新");
       }
     }
-    if (activeStoryRef.current?.id === completedStory.id) saveActiveStorySnapshot(completedStory);
-    else onSaveOfflineStory(completedStory);
+    const saved = await onSaveOfflineStory(completedStory);
+    if (!saved) {
+      showToast("剧情保存失败，尚未开始记忆整理，请保留当前页面并重试");
+      throw new Error("offline_exit_persistence_failed");
+    }
+    if (activeStoryRef.current?.id === completedStory.id) activeStoryRef.current = completedStory;
 
     // Persist the scene and bounded handoff before starting heavy extraction.
     // The caller can now return to Online immediately; the existing sync

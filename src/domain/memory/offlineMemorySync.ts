@@ -1,6 +1,17 @@
 import type { MemoryItem, Message, OfflineStory } from "../../types";
-import type { ConversationSummaryRecord } from "../characterKnowledge/characterKnowledgeTypes";
+import type { ConversationSummaryRecord, CharacterTruthScope, KnowledgeClaim } from "../characterKnowledge/characterKnowledgeTypes";
+import {isExactTruthScope} from "../characterKnowledge/knowledgeConflictPolicy";
 import { serializeMessageContentForPrompt } from "../../features/chat/prompts/messagePromptSerializer";
+import {sourceRevision,evolveKnowledgeClaims} from "../characterKnowledge/knowledgeEvolution";
+
+export const offlineMemorySourceRevision=(message:Message)=>sourceRevision(JSON.stringify([message.id,message.sender,message.senderId,message.content,message.recalledAt||null]));
+
+/** Rebuild the background summary from already accepted atoms, without sending
+ * previously processed scenes back to a model or discarding earlier windows. */
+export function offlineStorySummaryClaims(storyId:string,scope:CharacterTruthScope,existing:readonly KnowledgeClaim[],incoming:readonly KnowledgeClaim[]){
+  return [...new Map(evolveKnowledgeClaims(existing,incoming).filter(claim=>isExactTruthScope(claim,scope)&&claim.source.storyId===storyId&&claim.status==="active"
+    &&!claim.supersededById&&(claim.admissionStatus===undefined||claim.admissionStatus==="retained")).map(claim=>[claim.id,claim])).values()];
+}
 
 export function getOfflineStorySyncMarker(story: OfflineStory): string {
   const syncStart = story.lastSyncedMessageCount ?? (story.archivedAt ? story.messages.length : 0);
@@ -23,6 +34,7 @@ export function getOfflineStoryMarkerPrefix(story: OfflineStory): string {
 /** Only authored offline content can advance the memory-sync cursor. */
 export function isOfflineStoryMessageSyncable(message: Message): boolean {
   return !message.isImportedContext
+    && !message.recalledAt
     && !message.id.startsWith("offline-import-")
     && !message.isNarration
     && message.content.trim().length > 0;
@@ -75,6 +87,7 @@ export function selectFreshOfflineHandoffMemory(input: {
     ),
   ]));
   return [...input.memories]
+    .filter(memory=>!memory.recallDisabled)
     .filter((memory) => input.relationId
       ? memory.relationId === input.relationId && memory.content.includes("offline-story:")
       : memory.content.includes(`offline-story:${input.storyId}:`))
@@ -156,7 +169,7 @@ export function selectInterveningOfflineHandoff(input: {
       .filter((summary) => summary.id === getOfflineStorySummaryId(story.story, summary.characterId))
       .sort((left, right) => right.generatedAt - left.generatedAt)[0];
     const memory = input.memories
-      .filter((candidate) => isOfflineStoryHandoffMemory(candidate, story.story))
+      .filter((candidate) => !candidate.recallDisabled&&isOfflineStoryHandoffMemory(candidate, story.story))
       .filter((candidate) => candidate.content.includes(getOfflineStorySummaryMarker(story.story)))
       .sort((left, right) => right.timestamp - left.timestamp)[0]
       || (canonicalSummary ? createOfflineStorySummaryMemory(story.story, canonicalSummary) : undefined);
@@ -203,7 +216,7 @@ export function createPendingOfflineHandoff(input: {
   const sameSourceMessageIds = existing
     && sourceMessageIds.length === existing.sourceMessageIds.length
     && sourceMessageIds.every((id, index) => id === existing.sourceMessageIds[index]);
-  if (sameSourceMessageIds) return input.story;
+  if (sameSourceMessageIds && input.sourceMessages.every(message=>existing?.sourceMessageRevisions?.[message.id]===offlineMemorySourceRevision(message))) return input.story;
   const now = input.now ?? Date.now();
   return {
     ...input.story,
@@ -213,6 +226,7 @@ export function createPendingOfflineHandoff(input: {
       startedAt: input.sourceMessages[0]?.timestamp ?? input.story.createdAt,
       endedAt: now,
       sourceMessageIds,
+      sourceMessageRevisions:Object.fromEntries(input.sourceMessages.map(message=>[message.id,offlineMemorySourceRevision(message)])),
       deliveredReplyCount: 0,
     },
     updatedAt: now,
@@ -257,6 +271,8 @@ export function recordOfflineHandoffDelivery(
 }
 
 export function getOfflineMemorySourceMessages(story: OfflineStory, options: { includeSynced?: boolean } = {}): Message[] {
+  if(!options.includeSynced&&story.syncedSourceMessageRevisions){return story.messages.filter(message=>isOfflineStoryMessageSyncable(message)
+    &&story.syncedSourceMessageRevisions![message.id]!==offlineMemorySourceRevision(message)).sort((a,b)=>a.timestamp-b.timestamp);}
   const syncStart = options.includeSynced
     ? 0
     : (story.lastSyncedMessageCount ?? (story.archivedAt ? story.messages.length : 0));
@@ -399,6 +415,8 @@ export function sanitizeOfflineMemoryForOnlineUse(content: string): string {
 }
 
 export function hasUnsyncedOfflineMemoryProgress(story: OfflineStory): boolean {
+  if(story.syncedSourceMessageRevisions)return getOfflineMemorySourceMessages(story).length>0
+    ||Object.keys(story.syncedSourceMessageRevisions).some(id=>!story.messages.some(message=>message.id===id&&isOfflineStoryMessageSyncable(message)));
   // A synced legacy story may not have received the cursor field introduced
   // later. Treat its current transcript as the already-synced baseline rather
   // than re-running extraction every time the user only views and exits it.
@@ -507,6 +525,7 @@ ${sanitizeOfflineMemoryForOnlineUse(input.memory.content)}
 连续性规则：
 - 第 2 段真实发生在第 1 段之后、第 3 段之前；角色亲历并记得上述已确认事实，不得否认、遗忘或与之矛盾。
 - Never deny, forget, or contradict them; they are confirmed relationship-scoped facts.
+- 同一剧情可以包含先后阶段：较早的接收、移动或保管动作，与随后明确的存放、交接或状态变化不自动构成矛盾。询问“最后/现在”时，依据较晚的明确状态回答；不得仅因存在早期动作就宣称记录冲突。先前聊天中的不确定回答不是推翻来源记录的证据。
 - ${isImmediateReturn ? "这次线上聊天是线下互动刚结束后的衔接，用户所说的“刚才/刚刚”优先指第 2 段。" : "按上述绝对时间理解先后关系，不得擅自改写相对时间。"}
 - 只把列出的事实视为权威；不得补写缺失的场景、动作、地点或承诺。不确定的细节应明确表示不确定。
 - Do not invent missing scenes, actions, locations, promises, or relationship changes.
@@ -525,26 +544,33 @@ export function buildPendingOfflineHandoffPromptBlock(input: {
   previousOnlineAt?: number;
   currentOnlineAt?: number;
   summaryMemory?: MemoryItem;
+  canonicalSummary?: ConversationSummaryRecord;
 }): string {
   const handoff = input.story.onlineHandoff;
   if (!handoff || handoff.status !== "pending") return "";
   const allowedIds = new Set(handoff.sourceMessageIds);
   const sourceMessages = getOfflineMemorySourceMessages(input.story, { includeSynced: true })
     .filter((message) => allowedIds.has(message.id));
-  const selectedMessages = sourceMessages.length <= 40
-    ? sourceMessages
-    : [...sourceMessages.slice(0, 15), ...sourceMessages.slice(-25)];
+  const canonical=input.canonicalSummary;
+  const covered=new Set(canonical?.status==="active"&&canonical.id===getOfflineStorySummaryId(input.story)
+    &&canonical.characterId===input.story.characterId&&canonical.relationId===input.story.relationId
+    &&canonical.userIdentityId===input.story.ownerIdentityId&&canonical.conversationId===input.story.conversationId
+    ?canonical.sourceMessageIds:[]);
+  const selectedMessages=sourceMessages.filter(message=>!covered.has(message.id)
+    ||canonical?.sourceMessageRevisions?.[message.id]!==offlineMemorySourceRevision(message));
   const transcript = selectedMessages.map((message) => {
     const speaker = message.sender === "user" ? (input.userName || "用户") : input.characterName;
     const content = serializeMessageContentForPrompt(message, {
       mode: "history",
       userName: input.userName,
       characterName: input.characterName,
-    }).replace(/\s+/gu, " ").trim().slice(0, 800);
+    }).trim();
     return `- ${formatTimelineTime(message.timestamp)}｜${speaker}：${content}`;
   }).join("\n");
-  const omitted = sourceMessages.length - selectedMessages.length;
-  const summary = input.summaryMemory
+
+  const summary = canonical && covered.size
+    ? `\n已完成的剧情事实摘要:\n${sanitizeOfflineMemoryForOnlineUse(canonical.summary)}`
+    : input.summaryMemory
     ? `\n已完成的长期事实摘要：\n${sanitizeOfflineMemoryForOnlineUse(input.summaryMemory.content)}`
     : "";
 
@@ -555,12 +581,13 @@ export function buildPendingOfflineHandoffPromptBlock(input: {
 3. 当前重新开始线上聊天的时间：${formatTimelineTime(input.currentOnlineAt)}。
 
 线下亲历记录（用户已确认需要同步；说话者已明确标注）：
-${transcript || "- 没有可展示的线下正文。"}${omitted > 0 ? `\n- 另有 ${omitted} 条中段记录因上下文长度限制未展开。` : ""}${summary}
+${transcript || "- 没有可展示的线下正文。"}${summary}
 
 强制连续性规则：
 - 你就是参与上述线下经历的“${input.characterName}”，这些事情发生在上一段线上聊天之后、当前线上聊天之前；不是梦、假设、陌生人的经历或旧线上对话。
 - 当前聊天紧接线下剧情结束。“刚才/刚刚/方才”默认指上述线下经历；自然延续当时已经发生的事件、关系变化、承诺和情绪。
 - 仔细区分说话者和行为主体，不得把用户做的事记成角色做的事，也不得反过来。
+- 同一剧情的较早动作和随后状态变化是先后阶段，不自动构成冲突；询问最后或现在的状态时以较晚的明确来源为准。先前聊天里的不确定回答不能推翻这些来源。
 - 不得否认或遗忘记录中明确发生的事实；不得补写记录中没有的人物、地点、行为、关系或承诺。
 - 如果用户当前使用了在线下记录中已经确立的关系称呼（例如男朋友、女朋友、老公、老婆），不得用“谁是你的……”之类回答否认该关系。可以保持角色的傲娇或嘴硬，但必须同时自然承认双方刚刚确立或经历的关系事实。
 - 当前返回线上的前几轮回复必须表现出连续性；当用户的话与线下经历相关时，至少自然带出一个记录中真实存在的细节，让用户能明确感受到你记得刚才，而不是只给泛化回复。

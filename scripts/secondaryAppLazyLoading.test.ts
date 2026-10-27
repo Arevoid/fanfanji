@@ -30,7 +30,7 @@ assert.match(appSource, /cannot access \.\*uninitialized variable/);
 assert.match(appSource, /_result\\\.default/);
 assert.match(appSource, /Lazy module default export unavailable/);
 assert.match(appSource, /fanfan-stale-module-recovery-v2-at/);
-assert.match(appSource, /requestIdleCallback\(preloadIdleApps, \{ timeout: 1500 \}\)/);
+assert.match(appSource, /requestIdleCallback\(preloadIdleApps, \{ timeout: 4000 \}\)/);
 assert.match(appSource, /preloadApp\(item\.id\)/);
 assert.match(appSource, /const IDLE_PRELOAD_APP_IDS = \[[^\]]+\]/);
 assert.match(appSource, /IDLE_PRELOAD_APP_IDS = \[[^\]]*"chat"/);

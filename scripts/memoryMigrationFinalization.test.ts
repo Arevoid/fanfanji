@@ -1,0 +1,53 @@
+import assert from "node:assert/strict";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+import {saveKnowledgeClaims,loadKnowledgeClaims} from "../src/core/storage/repositories/characterKnowledgeRepository";
+import {readMemorySystem,MEMORY_SYSTEM_KEY} from "../src/core/storage/repositories/memorySystemRepository";
+import {finalizeMemoryMigration,consumeMemoryMigrationNotice,finishPreviousMemoryMigration,memoryMigrationNoticeText} from "../src/features/characterKnowledge/services/memoryMigrationFinalization";
+import {hasUnprocessedLegacyMemory} from "../src/features/characterKnowledge/services/memoryMigrationCoverage";
+import {needsMemoryContinuityMigration} from "../src/features/characterKnowledge/services/memoryContinuityMigrationService";
+import {completeMemoryMigration,isCompletingMemoryMigration} from "../src/features/characterKnowledge/services/completeMemoryMigrationService";
+import {filterRecallableKnowledge} from "../src/features/characterKnowledge/services/characterContinuityService";
+const values=new Map<string,string>();let failWrites=false,calls=0;
+Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>{if(failWrites)throw Error("quota");values.set(k,v);},removeItem:(k:string)=>values.delete(k)}}});
+const put=(k:string,v:unknown)=>values.set(k,JSON.stringify(v));
+const old={id:"old",characterId:"c",relationId:"r",userIdentityId:"u",conversationId:"conv",statement:"An uncertain old experience.",kind:"hypothesis",subject:"user",truthStatus:"legacy_unverified",temporalStatus:"past",confidence:.25,userConfirmed:false,status:"active",visibility:"relation_private",recordedAt:1,schemaVersion:1,admissionStatus:"review",legacyCompatible:false,source:{kind:"legacy_memory",authorship:"unknown",producer:"fixture",evidenceKey:"old",sourceRecordId:"old"}} as KnowledgeClaim;
+const prepare=()=>{values.clear();put(MEMORY_SYSTEM_KEY,{version:1,choice:"accepted",hasLegacy:true});put("phone_memory_continuity_legacy_snapshot_v1",{claims:[old]});saveKnowledgeClaims([old]);};
+const originalFetch=globalThis.fetch;globalThis.fetch=(async()=>{calls++;throw Error("No model needed");}) as typeof fetch;
+try{
+ assert.equal(finalizeMemoryMigration().success,false,"a fresh user must not receive a completion notice");
+ for(const status of ["failed","needs_review","running","completed"]){
+  prepare();put("phone_memory_continuity_migration_v1",{consentAt:1,status});
+  assert.equal(finishPreviousMemoryMigration(true),false,"do not finish a live task");
+  assert.equal(finishPreviousMemoryMigration(false),true);
+  assert.equal(readMemorySystem().value.migrationFinished,true);
+  assert.equal(readMemorySystem().value.migrationResult?.status,"interrupted");
+  assert.match(memoryMigrationNoticeText(),/上次整理已中断/u);
+  assert.doesNotMatch(memoryMigrationNoticeText(),/迁移已完成/u);
+  assert.equal(hasUnprocessedLegacyMemory(),false);
+  assert.equal(needsMemoryContinuityMigration([],[]),false);
+  assert.equal(consumeMemoryMigrationNotice(),true);assert.equal(consumeMemoryMigrationNotice(),false);
+  assert.equal(finalizeMemoryMigration().success,true);assert.equal(consumeMemoryMigrationNotice(),false,"idempotent finalization cannot rearm notice");
+  const record=loadKnowledgeClaims().value[0];assert.equal(record.legacyCompatible,true);assert.equal(record.kind,old.kind);assert.equal(record.truthStatus,old.truthStatus);
+  assert.equal(filterRecallableKnowledge([record]).length,1);
+  await completeMemoryMigration({characters:[],relationships:[],consent:true,organize:async()=>{calls++;return "failed";}});
+  assert.equal(calls,0,"reopening must not trigger another migration/model request");
+ }
+ prepare();failWrites=true;assert.equal(finalizeMemoryMigration().success,false);failWrites=false;
+ assert.notEqual(readMemorySystem().value.migrationFinished,true,"storage failure must not claim completion");
+ assert.equal(consumeMemoryMigrationNotice(),false);
+ prepare();
+ const pending=completeMemoryMigration({characters:[],relationships:[],consent:true});
+ assert.equal(isCompletingMemoryMigration(),true,"reserve running state before preparation starts");
+ assert.equal(completeMemoryMigration({characters:[],relationships:[],consent:true}),pending,"duplicate clicks share the same task");
+ assert.equal(finishPreviousMemoryMigration(isCompletingMemoryMigration()),false,"reserved task cannot be ended by recovery");
+ await pending;
+ assert.equal(readMemorySystem().value.migrationResult?.status,"failed");
+ assert.match(memoryMigrationNoticeText(),/尚未配置/u);
+ assert.equal(calls,0,"missing settings must never send a provider request");
+ prepare();saveKnowledgeClaims([{...old,coreMemory:true}]);
+ assert.equal(finalizeMemoryMigration({organizedBefore:[old.id]}).success,true);
+ assert.equal(readMemorySystem().value.migrationResult?.organizedBefore,1);
+ assert.equal(readMemorySystem().value.migrationResult?.newlyOrganized,0,"historical results cannot be counted as new work");
+ assert.match(memoryMigrationNoticeText(),/已有整理结果/u);
+ console.log("PASS migration completion: fallback after failed/uncertain/interrupted runs, one durable notice, hidden legacy entry, no repeated calls, storage failure remains honest");
+}finally{failWrites=false;globalThis.fetch=originalFetch;}

@@ -1,3 +1,4 @@
+import {resolveCharacterApiSettings} from "../../../domain/character/characterApiSettings";
 import type { Dispatch, SetStateAction } from "react";
 import type { Character, Message, UserSettings } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
@@ -20,6 +21,7 @@ interface UseChatSaveSettingsOptions {
   setIsEditingRemark: Dispatch<SetStateAction<boolean>>;
   setAdvancedSettingsSection: Dispatch<SetStateAction<any>>;
   setIsShowingCardModal: Dispatch<SetStateAction<boolean>>;
+  draftCharacterApi?: Character["characterApi"];
   draftEnableAutoTranslate: any;
   draftEnableProactiveChat: any;
   draftProactiveStartTime: any;
@@ -35,9 +37,11 @@ interface UseChatSaveSettingsOptions {
   draftChatStylePreset: any;
   draftEnableProactiveCall: any;
   draftEnableStickerAssociation: any;
+  draftEnableMomentGeneration?: boolean;
   draftProactiveChatInterval: any;
   draftDisableBracketActions: any;
   draftHistoryMemoryLimit: any;
+  draftChatHistoryPageSize?: number;
   draftContextMemoryLimit: any;
   draftRetrievalHistoryLimit: any;
   draftArchiveTemplateType: any;
@@ -71,10 +75,10 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
     ...drafts
   } = options;
   const {
-    draftEnableAutoTranslate, draftEnableProactiveChat, draftProactiveStartTime, draftProactiveEndTime,
+    draftCharacterApi,draftEnableAutoTranslate, draftEnableProactiveChat, draftProactiveStartTime, draftProactiveEndTime,
     draftEnableProactiveOffline, draftRemark, draftAvatar, draftIsPinned, draftGroupMemorySyncEnabled, draftChatBg, draftCustomCss,
-    draftChatIcons, draftChatStylePreset, draftEnableProactiveCall, draftEnableStickerAssociation, draftProactiveChatInterval,
-    draftDisableBracketActions, draftHistoryMemoryLimit, draftContextMemoryLimit, draftRetrievalHistoryLimit,
+    draftChatIcons, draftChatStylePreset, draftEnableProactiveCall, draftEnableStickerAssociation, draftEnableMomentGeneration, draftProactiveChatInterval,
+    draftDisableBracketActions, draftHistoryMemoryLimit, draftChatHistoryPageSize, draftContextMemoryLimit, draftRetrievalHistoryLimit,
     draftArchiveTemplateType, draftEnableTimeAwareness,
     draftMinimaxVoiceId, draftMosslandVoiceId, draftElevenlabsVoiceId, draftMinimaxSpeed, draftVoiceFrequency,
     draftEnableImageGeneration, draftEnableProactiveImageGeneration, draftImageAppearancePrompt, draftImageNegativePrompt,
@@ -83,6 +87,8 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
   // Save settings draft
   const handleSaveSettings = async (): Promise<boolean> => {
     if (!activeCharacter) return false;
+    let resolvedApi:UserSettings;
+    try{resolvedApi=resolveCharacterApiSettings(settings,{...activeCharacter,characterApi:draftCharacterApi});}catch(error){if(typeof alert!=="undefined")alert(error instanceof Error?error.message:"API configuration invalid");return false;}
 
     const isEnablingAutoTranslate = draftEnableAutoTranslate && !activeCharacter.enableAutoTranslate;
 
@@ -108,6 +114,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
 
     const persisted = await onSaveCharacter({
       ...activeCharacter,
+      ...(draftCharacterApi!==undefined?{characterApi:draftCharacterApi}:{}),
       name: activeCharacter.isGroupChat ? (draftRemark.trim() || activeCharacter.name) : activeCharacter.name,
       remark: activeCharacter.isGroupChat ? undefined : (draftRemark.trim() || undefined),
       // The avatar draft belongs to every character profile, not only group
@@ -124,12 +131,14 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
         enableProactiveChat: draftEnableProactiveChat,
         enableProactiveCall: draftEnableProactiveCall,
         enableStickerAssociation: draftEnableStickerAssociation,
+        enableMomentGeneration: draftEnableMomentGeneration !== false,
         proactiveChatInterval: draftProactiveChatInterval,
         proactiveStartTime: draftProactiveStartTime,
         proactiveEndTime: draftProactiveEndTime,
       }),
       disableBracketActions: draftDisableBracketActions,
       historyMemoryLimit: draftHistoryMemoryLimit,
+      chatHistoryPageSize: [20, 50, 100].includes(draftChatHistoryPageSize || 0) ? draftChatHistoryPageSize : 50,
       contextMemoryLimit: draftContextMemoryLimit,
       retrievalHistoryLimit: draftRetrievalHistoryLimit,
       archiveTemplateType: draftArchiveTemplateType,
@@ -168,9 +177,9 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
         if (containsNonChineseText(sourceText)) {
           apiTranslate({
             text: sanitizeCharacterActionText(sourceText),
-            apiKey: settings.apiKey || "",
-            model: settings.selectedModel,
-            apiEndpoint: settings.apiEndpoint,
+            apiKey: resolvedApi.apiKey || "",
+            model: resolvedApi.selectedModel,
+            apiEndpoint: resolvedApi.apiEndpoint,
           })
             .then((res) => {
               const translatedText = sanitizeCharacterActionText(res?.text || "");

@@ -1,3 +1,6 @@
+import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
+import { CHARACTER_EXPERIENCE_INSTRUCTION } from "../../../domain/memory/characterExperience";
+import { saveCharacterExperience } from "../../characterKnowledge/services/characterExperienceService";
 import type {
   Character,
   ForumPublicAuthor,
@@ -103,6 +106,7 @@ type ForumAiCall = (params: {
 }) => Promise<{ text: string }>;
 
 interface ForumAiRequest {
+  characterId?:string;
   message: string;
   systemInstruction: string;
   apiKey: string;
@@ -208,14 +212,17 @@ const requireTextAiConfig = (settings: UserSettings): void => {
 const toAiRequest = (
   settings: UserSettings,
   prompt: { systemInstruction: string; message: string },
-): ForumAiRequest => ({
+  character?: Character,
+): ForumAiRequest => { settings=resolveCharacterTextSettings(settings,character);requireTextAiConfig(settings);return ({
+  characterId:character?.id,
   ...prompt,
+  systemInstruction: prompt.systemInstruction + CHARACTER_EXPERIENCE_INSTRUCTION,
   apiKey: settings.apiKey,
   model: settings.selectedModel,
   apiEndpoint: settings.apiEndpoint,
   apiTemperature: settings.apiTemperature,
   streamCompatible: settings.streamCompatible,
-});
+});};
 
 const generateValidatedCandidate = async <T>(input: {
   aiCall: ForumAiCall;
@@ -577,7 +584,6 @@ export async function generateForumThreads(input: {
   /** Optional category rotation used by the recommendation feed. */
   categoryTargets?: readonly { name: string; worldview?: string }[];
 }): Promise<ForumGenerationBundle> {
-  requireTextAiConfig(input.settings);
   const random = input.random || Math.random;
   const diversityBatchOffset = Math.floor(random() * FORUM_DIVERSITY_LENSES.length);
   const relationContexts = input.relationships
@@ -658,7 +664,7 @@ export async function generateForumThreads(input: {
     });
     const rawCandidate = await generateValidatedCandidate({
       aiCall,
-      request: toAiRequest(input.settings, prompt),
+      request: toAiRequest(input.settings, prompt, relationContext?.character),
       parse: parseForumThreadCandidate,
       validate: (value) => isThreadCandidatePublicSafe({
         candidate: value,
@@ -783,6 +789,13 @@ const validateReplyCandidate = (input: {
   return input.candidate;
 };
 
+const pendingForumExperiences = new WeakMap<ForumReply, Parameters<typeof saveCharacterExperience>[0]>();
+export function saveGeneratedForumExperiences(replies: readonly ForumReply[]) {
+  for (const reply of replies) {
+    const pending = pendingForumExperiences.get(reply);
+    if (pending) { saveCharacterExperience(pending); pendingForumExperiences.delete(reply); }
+  }
+}
 const createGeneratedReply = (input: {
   prefix: string;
   thread: ForumThread;
@@ -800,8 +813,9 @@ const createGeneratedReply = (input: {
   );
   if (!targetResult.valid) return undefined;
   const anonymous = input.author.kind === "relation" && Boolean(input.candidate.anonymous);
-  return {
-    id: id(input.prefix),
+  const replyId = id(input.prefix);
+  const reply: ForumReply = {
+    id: replyId,
     threadId: input.thread.id,
     ownerIdentityId: input.thread.ownerIdentityId,
     floor: input.floor,
@@ -813,15 +827,18 @@ const createGeneratedReply = (input: {
         : createForumVirtualAuthor(input.author.profile),
     body: input.candidate.body,
     ...quoteTargetFields(targetResult.target),
-    source: input.author.kind === "relation"
-      ? anonymous ? "ai-character-anonymous" : "ai-character"
-      : "ai-virtual",
+    source: input.author.kind === "relation" ? anonymous ? "ai-character-anonymous" : "ai-character" : "ai-virtual",
     occurredAt: Math.min(input.now, Math.max(input.thread.occurredAt, input.occurredAt)),
-    baseLikeCount: 0,
-    likedByIdentityIds: [],
-    createdAt: input.now,
-    updatedAt: input.now,
+    baseLikeCount: 0, likedByIdentityIds: [], createdAt: input.now, updatedAt: input.now,
   };
+  if (input.author.kind === "relation") {
+    const relation = input.author.context.relationship;
+    if (relation.userIdentityId === input.thread.ownerIdentityId && relation.characterId === input.author.context.character.id) {
+      pendingForumExperiences.set(reply, { scope: { characterId: relation.characterId, userIdentityId: relation.userIdentityId, relationId: relation.id, conversationId: relation.conversationId },
+        app: "forum", sourceId: replyId, body: input.candidate.body, experience: input.candidate.experience, now: input.now });
+    }
+  }
+  return reply;
 };
 
 const buildReplyPrompt = (input: {
@@ -875,7 +892,6 @@ export async function generateInitialRepliesForUserThread(input: {
   /** Explicit public world knowledge only; absence is denied by the public context policy. */
   publicWorldSettings?: readonly PublicWorldSettingCandidate[];
 }): Promise<ForumReply[]> {
-  requireTextAiConfig(input.settings);
   const random = input.random || Math.random;
   const relationContexts = input.relationships
     .filter((relation) => relation.userIdentityId === input.thread.ownerIdentityId)
@@ -923,7 +939,7 @@ export async function generateInitialRepliesForUserThread(input: {
     const prompt = buildReplyPrompt({ thread: input.thread, availableReplies, author });
     const candidate = await generateValidatedCandidate({
       aiCall,
-      request: toAiRequest(input.settings, prompt),
+      request: toAiRequest(input.settings, prompt, author.kind === "relation" ? author.context.character : undefined),
       parse: parseForumReplyCandidate,
       validate: (value) => validateReplyCandidate({
         candidate: value,
@@ -992,7 +1008,6 @@ export async function generateThreadActivity(input: {
   if (!shouldGenerateForumActivity(random, probability)) {
     return { outcome: "no-update", replies: [] };
   }
-  requireTextAiConfig(input.settings);
   const validContexts = input.relationships
     .filter((relationship) => relationship.userIdentityId === input.ownerIdentityId)
     .map((relationship) => buildForumRelationGenerationContext({
@@ -1059,7 +1074,7 @@ ${originalAuthorContext
     };
     const candidate = await generateValidatedCandidate({
       aiCall,
-      request: toAiRequest(input.settings, prompt),
+      request: toAiRequest(input.settings, prompt, originalAuthorContext?.character),
       parse: parseForumReplyCandidate,
       validate: (value) => validateReplyCandidate({
         candidate: value,
@@ -1115,7 +1130,7 @@ ${originalAuthorContext
     });
     const candidate = await generateValidatedCandidate({
       aiCall,
-      request: toAiRequest(input.settings, prompt),
+      request: toAiRequest(input.settings, prompt, author.kind === "relation" ? author.context.character : undefined),
       parse: parseForumReplyCandidate,
       validate: (value) => validateReplyCandidate({
         candidate: value,

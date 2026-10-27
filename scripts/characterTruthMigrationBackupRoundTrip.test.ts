@@ -5,6 +5,7 @@ import { loadConversationSummaries, saveConversationSummaries } from "../src/cor
 import { loadBehaviorCorrections, saveBehaviorCorrections } from "../src/core/storage/repositories/behaviorCorrectionRepository";
 import { CHARACTER_KNOWLEDGE_MIGRATION_VERSION } from "../src/domain/characterKnowledge/characterKnowledgeMigrationTypes";
 import type { KnowledgeClaim, ConversationSummaryRecord, BehaviorCorrectionRecord } from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+import { normalizeKnowledgeClaim } from "../src/domain/characterKnowledge/knowledgeWritePolicy";
 
 const values = new Map<string, string>();
 const localStorage = {
@@ -81,7 +82,8 @@ assert.equal(saveCharacterKnowledgeMigrationState({
   orphanRecordIds: ["memory:orphan"],
 }).success, true);
 
-assert.deepEqual(loadKnowledgeClaims().value, [claim]);
+assert.deepEqual(loadKnowledgeClaims().value, [normalizeKnowledgeClaim(claim)]);
+assert.equal(loadKnowledgeClaims().value[0].perspective?.acquisition.mode, "unknown");
 assert.deepEqual(loadConversationSummaries().value, [summary]);
 assert.deepEqual(loadBehaviorCorrections().value, [correction]);
 assert.deepEqual(loadCharacterKnowledgeMigrationState().value.migratedMemoryIds, ["backup-memory"]);

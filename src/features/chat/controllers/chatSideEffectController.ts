@@ -1,6 +1,7 @@
 import type { Character, Message, OfflineStory } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { evaluateMemoryExtractionCheapFilter } from "../../../domain/memory/memoryExtractionCheapFilter";
+import { getChatArchiveRoundLimit, requestsPriorityMemory, splitCompletedChatTurns } from "../../../domain/memory/chatArchiveTurns";
 
 export interface ChatReplySideEffectInput {
   userMsg: Message | null;
@@ -45,7 +46,6 @@ export type LastReadTimestamps = Record<string, number>;
 const AUTO_SUMMARY_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const autoSummaryInFlight = new Set<string>();
 const autoSummaryCooldownUntil = new Map<string, number>();
-const autoSummaryZeroCandidateRetries = new Set<string>();
 
 /**
  * Reply-completion side effects. The controller deliberately receives the
@@ -87,10 +87,7 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
       }
 
         const configuredRounds = input.activeCharacter.summaryTriggerRound;
-        const extractIntervalRounds = Number.isFinite(configuredRounds)
-          ? Math.min(100, Math.max(10, Math.round(configuredRounds as number)))
-          : 10;
-        const triggerCount = extractIntervalRounds * 2;
+        const extractIntervalRounds = getChatArchiveRoundLimit(configuredRounds);
         const currentMessages = input.userMsg
           ? [...input.currentChatMessages, input.userMsg, ...input.createdMessages]
           : [...input.currentChatMessages, ...input.createdMessages];
@@ -105,9 +102,11 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
           }
         }
 
-        if (eligibleMessages.length >= triggerCount) {
+        const completedTurns = splitCompletedChatTurns(eligibleMessages);
+        const priorityRequested = !input.activeCharacter.isGroupChat && Boolean(input.activeRelationship)
+          && requestsPriorityMemory(input.userMsg) && input.createdMessages.some(message => message.sender === "character");
+        if (completedTurns.length >= extractIntervalRounds || priorityRequested) {
           const summaryScopeKey = input.activeRelationship?.id || input.activeCharacter.id;
-          let highValueBatch = false;
           // Normal Direct Chat is the only production consumer in this stage.
           // Group, Offline, and relationship-less paths keep their existing
           // extraction lifecycle unchanged.
@@ -120,7 +119,6 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
               // A filter defect must never become a memory false negative.
               cheapFilter = { decision: "extract", reason: "uncertain" };
             }
-            highValueBatch = cheapFilter.reason === "possible_memory_value";
             if (cheapFilter.decision === "skip") {
               const lastMessage = eligibleMessages[eligibleMessages.length - 1];
               autoSummaryCooldownUntil.delete(summaryScopeKey);
@@ -152,22 +150,8 @@ export function createChatSideEffectController(dependencies: ChatSideEffectContr
             autoSummaryInFlight.add(summaryScopeKey);
             schedule(async () => {
               try {
-                let count = await dependencies.extractMemories(eligibleMessages, { automatic: true });
-                const lastMessage = eligibleMessages[eligibleMessages.length - 1];
-                const retryKey = `${summaryScopeKey}:${lastMessage?.id || eligibleMessages.length}`;
-                if (count === 0
-                  && highValueBatch
-                  && !autoSummaryZeroCandidateRetries.has(retryKey)) {
-                  // A valuable-looking batch that produced no candidates may
-                  // be a model false negative. Retry once before advancing the
-                  // archive marker; a second empty result is accepted as an
-                  // honest no-fact decision and will not loop forever.
-                  autoSummaryZeroCandidateRetries.add(retryKey);
-                  count = await dependencies.extractMemories(eligibleMessages, {
-                    automatic: true,
-                    retryHighValue: true,
-                  });
-                }
+                const count = await dependencies.extractMemories(eligibleMessages, { automatic: true });
+                // Empty results never purchase a second attempt. Sources remain available.
                 // The extraction entry point owns the cursor because it can
                 // verify canonical/summary persistence. Do not advance it a
                 // second time here: doing so could hide a failed cursor write

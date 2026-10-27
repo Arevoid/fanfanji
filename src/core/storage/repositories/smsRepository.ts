@@ -1,4 +1,5 @@
 import { readJson, writeJson } from "../storageAdapter";
+import { normalizeKnowledgeClaim } from "../../../domain/characterKnowledge/knowledgeWritePolicy";
 import { storageKeys } from "../storageKeys";
 import type { StorageResult, StorageWriteResult } from "../storageTypes";
 import {
@@ -82,7 +83,13 @@ const normalizeMemory = (value: unknown): SmsTimelineMemory | null => {
   const phoneNumber = text(item.phoneNumber);
   if (!timelineId || !characterId || !ownerIdentityId || !isSmsPhoneNumber(phoneNumber)) return null;
   const notes = Array.isArray(item.notes) ? item.notes.filter((note): note is string => typeof note === "string" && Boolean(note.trim())).slice(-20) : [];
-  return { timelineId, characterId, ownerIdentityId, phoneNumber, notes, relationshipSummary: text(item.relationshipSummary) || undefined, updatedAt: time(item.updatedAt) };
+  const claims = Array.isArray(item.claims) ? item.claims.map(normalizeKnowledgeClaim).filter((claim): claim is NonNullable<typeof claim> => Boolean(claim)
+    && claim!.characterId === characterId && claim!.userIdentityId === ownerIdentityId && claim!.relationId === `sms:${timelineId}` && claim!.conversationId === `sms:${timelineId}`) : undefined;
+  const processedRevisions = item.processedRevisions && typeof item.processedRevisions === "object" && !Array.isArray(item.processedRevisions)
+    ? Object.fromEntries(Object.entries(item.processedRevisions).filter(([,v])=>typeof v === "string")) : undefined;
+  return { timelineId, characterId, ownerIdentityId, phoneNumber, notes, relationshipSummary: text(item.relationshipSummary) || undefined, updatedAt: time(item.updatedAt),
+    ...(claims ? {claims} : {}), ...(processedRevisions ? {processedRevisions} : {}),
+    ...(Number.isFinite(item.extractionFailureAt) ? {extractionFailureAt:item.extractionFailureAt} : {}) };
 };
 
 export const normalizeSmsStore = (value: unknown): SmsStore => {

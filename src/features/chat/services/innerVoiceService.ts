@@ -1,3 +1,4 @@
+import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
 import type { Character, InnerVoiceRecord, Message, UserSettings, WorldBookEntry } from "../../../types";
 import { createId } from "../../../core/id/createId";
 import { apiChat } from "../../../utils/apiHelper";
@@ -63,6 +64,7 @@ const INNER_VOICE_FORMAT_RETRY_INSTRUCTION = `
 
 /** Generates one standalone record. Persistence is intentionally owned by the repository caller. */
 export async function generateInnerVoice(input: GenerateInnerVoiceInput): Promise<InnerVoiceRecord | null> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const relationId = input.relationId ?? input.context?.relationId ?? undefined;
   const groupId = input.groupId ?? input.context?.groupId ?? undefined;
   const conversationId = input.conversationId ?? input.context?.conversationId ?? undefined;

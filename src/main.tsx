@@ -1,22 +1,48 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
 import './index.css';
 import { ThemeProvider } from './features/theme/ThemeProvider.tsx';
 import { isDevLoopbackOrigin } from './core/runtime/devOrigin.ts';
 import { installDevRuntimeProbe } from './core/runtime/devDiagnostics.ts';
 import { initializeMemoryAdmissionV2Promotion } from './features/chat/services/directChatMemoryAdmissionPromotion.ts';
+import { recoverMemoryStoreTransaction } from './core/storage/memoryStoreTransaction.ts';
+import { initializeMemoryWriterCoordination } from './core/storage/memoryWriterCoordination.ts';
+import { recoverSourceMessageMutation } from './features/characterKnowledge/services/sourceMessageMutationService.ts';
 
 installDevRuntimeProbe();
-initializeMemoryAdmissionV2Promotion();
+const applicationRoot = createRoot(document.getElementById('root')!);
+async function mountApplication() {
+applicationRoot.render(<div role="status" style={{ padding: 24, fontFamily: 'system-ui' }}>正在打开米饭机…</div>);
+const memoryWriter = await initializeMemoryWriterCoordination();
+if (memoryWriter === 'writer') initializeMemoryAdmissionV2Promotion();
+const memoryRecovery = memoryWriter === 'writer' ? recoverMemoryStoreTransaction() : { success: true };
+if(memoryWriter === 'writer' && memoryRecovery.success && !await recoverSourceMessageMutation()) memoryRecovery.success=false;
+const appModule = await import('./App.tsx');
+if(import.meta.env.DEV&&window.location.hostname==='127.0.0.4'&&window.location.port==='3104'
+ &&new URLSearchParams(window.location.search).get('memoryAcceptanceFixture')==='1'&&memoryWriter==='writer'){
+ const fixture=await import('./features/characterKnowledge/dev/memoryAcceptanceFixture');
+ await fixture.prepareMemoryAcceptanceFixture(appModule.DEFAULT_SETTINGS);
+}
+if (import.meta.env.DEV && (window.location.hostname === '127.0.0.3' || window.location.hostname === '127.0.0.9' && new URLSearchParams(window.location.search).get('memoryCostGateFixture')==='1') && window.location.port === '3103'
+  && new URLSearchParams(window.location.search).get('chatPerformanceFixture') === '1' && memoryWriter === 'writer') {
+  const fixture = await import('./features/chat/dev/chatPerformanceFixture');
+  await fixture.prepareChatPerformanceFixture(appModule.DEFAULT_SETTINGS);
+}
+const App = appModule.default;
 
-createRoot(document.getElementById('root')!).render(
+applicationRoot.render(
   <StrictMode>
     <ThemeProvider>
-      <App />
+      {memoryWriter !== 'writer' && <div role="status" className="fixed left-0 right-0 top-0 z-[10000] bg-amber-100 p-3 text-center text-sm text-amber-950">
+        {memoryWriter === 'unsupported' ? '当前浏览器无法提供跨窗口写入保护，聊天来源和记忆暂为只读。请使用支持 Web Locks 的浏览器。' : '另一个窗口正在维护聊天和记忆，此窗口只读，不能保存相关修改。关闭另一个窗口后，刷新本页即可编辑。'}
+        <button type="button" className="ml-3 underline" onClick={() => window.location.reload()}>刷新本页</button>
+      </div>}
+      {memoryRecovery.success ? <App /> : <div role="alert">记忆恢复尚未完成。原始快照已保留，请释放浏览器存储空间后重新打开。</div>}
     </ThemeProvider>
   </StrictMode>,
 );
+}
+void mountApplication().catch(() => applicationRoot.render(<div role="alert" style={{ padding: 24 }}>页面暂时无法打开。<button onClick={() => window.location.reload()}>重新加载</button></div>));
 
 // Register service worker for PWA capability and listen to beforeinstallprompt
 if (typeof window !== "undefined") {

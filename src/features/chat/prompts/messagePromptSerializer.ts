@@ -26,6 +26,15 @@ export interface SerializedPromptTurn {
   timestamp: number;
 }
 
+/** The caller of a phone call does not author every transcript line. */
+export function getMessageEvidenceAuthor(message:Message,quote:string):"user"|"character"|"unknown"{
+  if(!isCallRecordMarkup(message.content))return message.sender==="user"?"user":message.sender==="character"?"character":"unknown";
+  const normalize=(text:string)=>text.replace(/\s+/gu," ").trim();
+  const matches=(expandCallRecordHistory(message.content,message.timestamp)||[]).filter(turn=>normalize(turn.text).includes(normalize(quote)));
+  if(!quote.trim()||!matches.length)return "unknown";
+  return matches.every(turn=>turn.role==="user")?"user":matches.every(turn=>turn.role==="model")?"character":"unknown";
+}
+
 const safeDecode = (value: string): string => {
   try {
     return decodeURIComponent(value);

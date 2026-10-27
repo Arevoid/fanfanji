@@ -282,7 +282,7 @@ export const parseTextToWorldBookEntries = (text: string, filename: string): Wor
   }];
 };
 
-export function cleanOnlineMessage(text: string, disableBracketActions: boolean): string {
+export function cleanOnlineMessage(text: string, disableBracketActions: boolean, preserveProse = false): string {
   if (!text) return "";
 
   // Parentheses are also part of Markdown links/images.  The bracket-action
@@ -301,7 +301,11 @@ export function cleanOnlineMessage(text: string, disableBracketActions: boolean)
   // Check if there are any quotes in the response (Chinese or standard quotes)
   const hasQuotes = /[“「『”」』]/.test(processedText);
   
-  if (hasQuotes) {
+  // A quoted name/word inside a sentence is not a dialogue wrapper. Extracting
+  // it would silently erase the answer around it (e.g. 刻着“逐光”的铜书签).
+  const inlineQuotation = /[\p{L}\p{N}][“「『]/u.test(processedText)
+    && !/(?:说|问|答|道)[：:\s]*[“「『]/u.test(processedText);
+  if (hasQuotes && !preserveProse && !inlineQuotation) {
     if (!disableBracketActions) {
       // When filtering is off, preserve concise parenthesized actions that sit
       // outside quoted dialogue (for example: （轻笑）“你来了”). The old

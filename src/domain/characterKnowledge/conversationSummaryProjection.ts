@@ -7,6 +7,7 @@ import {
   type KnowledgeClaim,
 } from "./characterKnowledgeTypes";
 import { isExactTruthScope } from "./knowledgeConflictPolicy";
+import { isKnowledgeAdmitted } from "./knowledgeValueAssessment";
 
 const summaryClaimRank = (claim: KnowledgeClaim): number => {
   if (claim.truthStatus === "confirmed") return 0;
@@ -41,6 +42,7 @@ export function projectConversationSummaryClaims(input: {
   if (sourceMessageIds.size === 0) return [];
   return input.claims
     .filter((claim) => claim.status === "active")
+    .filter(isKnowledgeAdmitted)
     .filter((claim) => isExactTruthScope(claim, input.scope))
     .filter((claim) => claim.source.messageIds?.some((messageId) => sourceMessageIds.has(messageId)) === true)
     .sort((left, right) =>
@@ -54,9 +56,11 @@ export function projectConversationSummaryClaims(input: {
 export function isConversationSummarySourceValid(summary: ConversationSummaryRecord, claims: readonly KnowledgeClaim[]): boolean {
   if (summary.sourceClaimIds.length === 0) return true;
   const claimsById = new Map(claims.map((claim) => [claim.id, claim]));
+  claims.forEach((claim) => claim.mergedClaimIds?.forEach((id) => claimsById.set(id, claim)));
   return summary.sourceClaimIds.every((claimId) => {
     const claim = claimsById.get(claimId);
-    return Boolean(claim && claim.status === "active" && !claim.supersededById && isExactTruthScope(claim, summary));
+    return Boolean(claim && claim.status === "active" &&isKnowledgeAdmitted(claim)&& !claim.recallDisabled && !claim.supersededById
+      && (claim.validTo === undefined || claim.validTo > Date.now()) && isExactTruthScope(claim, summary));
   });
 }
 
@@ -77,6 +81,7 @@ export function createConversationSummaryRecord(input: {
   scope: CharacterTruthScope;
   claims: readonly KnowledgeClaim[];
   sourceMessageIds: readonly string[];
+  sourceMessageRevisions?: Record<string,string>;
   generatedAt: number;
   canonicalRevision?: string;
   id?: string;
@@ -89,7 +94,10 @@ export function createConversationSummaryRecord(input: {
   const claims = projectConversationSummaryClaims({ scope: input.scope, claims: input.claims, sourceMessageIds });
   const sourceClaimIds = claims.map((claim) => claim.id).sort();
   if (claims.length === 0 || sourceMessageIds.length === 0) return undefined;
-  const claimTimes = claims.map((claim) => claim.occurredAt ?? claim.recordedAt)
+  // This is a source-message coverage window, not the fictional event calendar.
+  // Reorganizing old evidence must never move the window to the extraction date.
+  const claimTimes = claims.map((claim) => claim.source.kind === "offline_story"
+    ? claim.source.statementAt : claim.occurredAt ?? claim.source.statementAt)
     .filter((timestamp): timestamp is number => Number.isFinite(timestamp));
   const rangeStartAt = input.rangeStartAt ?? (claimTimes.length > 0 ? Math.min(...claimTimes) : undefined);
   const rangeEndAt = input.rangeEndAt ?? (claimTimes.length > 0 ? Math.max(...claimTimes) : undefined);
@@ -102,6 +110,7 @@ export function createConversationSummaryRecord(input: {
     layer: input.layer || getConversationSummaryLayer({ generator }),
     ...(input.canonicalRevision ? { canonicalRevision: input.canonicalRevision.trim() } : {}),
     sourceMessageIds,
+    ...(input.sourceMessageRevisions ? {sourceMessageRevisions:input.sourceMessageRevisions} : {}),
     sourceClaimIds,
     ...(rangeStartAt !== undefined ? { rangeStartAt } : {}),
     ...(rangeEndAt !== undefined ? { rangeEndAt } : {}),
@@ -122,6 +131,7 @@ export function rebuildConversationSummaryRecord(input: {
     scope: input.summary,
     claims: input.claims,
     sourceMessageIds: input.summary.sourceMessageIds,
+    sourceMessageRevisions:input.summary.sourceMessageRevisions,
     generatedAt: input.generatedAt ?? input.summary.generatedAt,
     generator: input.summary.generator,
     layer: getConversationSummaryLayer(input.summary),

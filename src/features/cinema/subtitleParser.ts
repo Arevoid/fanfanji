@@ -28,6 +28,9 @@ export function parseSubtitleText(source: string, format: "srt" | "vtt"): Cinema
 
 export function getSubtitleContext(cues: readonly CinemaCue[], positionMs: number, radius = 2): string {
   if (!cues.length) return "";
+  // Never select a nearest future cue, including before the first subtitle.
+  cues = cues.filter((cue) => cue.startMs <= positionMs);
+  if (!cues.length) return "";
   const currentIndex = cues.findIndex((cue) => positionMs >= cue.startMs && positionMs <= cue.endMs);
   const nearestIndex = currentIndex >= 0
     ? currentIndex

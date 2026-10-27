@@ -1,3 +1,12 @@
+import { requestOfflineArchive, readOfflineArchiveStory } from "../features/offline/services/offlineArchiveQueue";
+import {CharacterApiSettings} from "../features/chat/components/CharacterApiSettings";
+import {resolveCharacterApiSettings} from "../domain/character/characterApiSettings";
+import { resolveChatIdentityMode } from "../domain/prompt/modelDirectIdentity";
+import { ChatHistorySearch, emptyChatHistorySearchState } from "../features/chat/components/ChatHistorySearch";
+import { projectChatDisplayMessage } from "../features/chat/services/chatDisplayProjection";
+import { createOfflineTimelineLookup } from "../features/chat/services/offlineTimelineLookup";
+import { indexChatTurnEnds, resolveChatPageSize } from "../domain/chat/chatTimelineIndex";
+import { deferForegroundTask } from "../core/runtime/deferredForegroundTask";
 import React, { useState, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
@@ -13,8 +22,8 @@ import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proact
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
 import type { Appointment, AppointmentMode } from "../domain/schedule/scheduleTypes";
-import { canConfirmAppointment, getCurrentAppointmentProposal } from "../domain/schedule/appointmentPolicy";
-import { decideAppointmentInvitation } from "../domain/schedule/appointmentInvitation";
+import { getCurrentAppointmentProposal } from "../domain/schedule/appointmentPolicy";
+import { OfflineInvitationCard } from "../features/chat/components/OfflineInvitationCard";
 import { startAppointmentOfflineSession } from "../domain/schedule/appointmentOfflineHandoff";
 import { compressImage } from "../utils/pngParser";
 import { containsNonChineseText } from "../utils/textLanguage";
@@ -39,6 +48,7 @@ import {
 import { resolveCharacterPhoneHiddenGalleryPasscode } from "../features/characterPhone/characterPhoneGallerySecurity";
 import type { CharacterPhoneImageSaveInput } from "../domain/characterPhone/types";
 import { runGroupChatReplyPipeline } from "../features/chat/services/groupChatReplyPipeline";
+import { requestGroupMemberAwareness } from "../features/chat/services/groupMemberAwareness";
 import { scheduleGroupReplyDelivery } from "../features/chat/services/groupReplyDelivery";
 import { extractStickerMarkupReferences, mayCharacterUseEmoji } from "../features/chat/services/characterEmojiPolicy";
 import { createVoiceCallRecordMessage, isCurrentVoiceCallScope, resolveDirectVoiceCallScope, type DirectVoiceCallScope } from "../features/chat/services/voiceCallScope";
@@ -217,6 +227,7 @@ import { loadConversationSummaries, saveConversationSummaries } from "../core/st
 import { loadBehaviorCorrections } from "../core/storage/repositories/behaviorCorrectionRepository";
 import { behaviorCorrectionRepository } from "../core/storage/repositories/behaviorCorrectionRepository";
 import { contributeDirectReplyTruthContext } from "../features/characterKnowledge/services/directReplyTruthContextContributor";
+import { contributeSemanticDirectReplyTruthContext } from "../features/characterKnowledge/services/semanticMemoryRecallService";
 import { formatTruthRetrievalForPrompt, retrieveTruthForPrivatePrompt } from "../features/characterKnowledge/services/truthRetrievalService";
 import { persistTruthVectorIndex } from "../features/characterKnowledge/services/truthVectorIndexService";
 import { persistDirectChatArchiveProgress } from "../features/chat/services/directChatArchiveProgress";
@@ -248,7 +259,7 @@ import { ChatTopBar } from "../features/chat/components/ChatTopBar";
 import { InnerVoiceModal } from "../features/chat/components/InnerVoiceModal";
 import { ContactList } from "../features/chat/components/ContactList";
 import { ConversationList } from "../features/chat/components/ConversationList";
-import { MessageList } from "../features/chat/components/MessageList";
+import { MessageList, hasChatViewportSnapshot } from "../features/chat/components/MessageList";
 import { ChatTextWithLinks, isLegacyMcpMediaFragment } from "../features/chat/components/ChatTextWithLinks";
 import { parseQuoteReply, QuotedMessagePreview } from "../features/chat/components/QuotedMessagePreview";
 import { AttachmentMenu } from "../features/chat/components/AttachmentMenu";
@@ -270,6 +281,7 @@ import { requestAutomaticMomentComment } from "../features/moments/services/mome
 import { requestMomentCommentReply } from "../features/moments/services/momentReplyService";
 import { buildRelationMomentContext, formatMomentSourceText } from "../features/moments/services/momentRelationContext";
 import { generateCharacterMomentPipeline } from "../features/moments/services/characterMomentGenerationPipeline";
+import { canGenerateCharacterMoment, hasExplicitMomentGenerationRequest } from "../domain/moments/momentGenerationPolicy";
 import { generateAutomaticMomentComment } from "../features/moments/services/automaticMomentCommentPipeline";
 import {
   findRelationshipNetworkCharacterMomentCommentCandidate,
@@ -440,7 +452,8 @@ interface AppChatProps {
   onDeleteMoment?: (momentId: string) => void;
   onDeleteMomentsByRelation?: (relationId: string) => void;
   onToggleBookmark: (messageId: string, scope?: MessageMutationScope) => void;
-  onDeleteMessage?: (messageId: string, scope?: MessageMutationScope) => void;
+  onDeleteMessage?: (messageId: string, scope?: MessageMutationScope) => void | boolean | Promise<void | boolean>;
+  onReplaceMessages?: (targets: Message[], replacements: Message[]) => Promise<boolean>;
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => void;
   onClose: () => void;
   /** Returns false when the settings payload could not be persisted. */
@@ -462,7 +475,7 @@ interface AppChatProps {
   onSaveAppointment?: (appointment: Appointment) => boolean;
   offlineStories?: OfflineStory[];
   onSaveOfflineStory?: (story: OfflineStory) => boolean | void | Promise<boolean>;
-  onOpenOfflineStory?: (storyId: string) => void;
+  onOpenOfflineStory?: (storyId: string, messageId?: string) => void;
   onDeleteOfflineStory?: (storyId: string) => void;
   onDeleteCharacter?: (id: string, skipConfirm?: boolean, preserveGroupMemories?: boolean) => void;
   onDeleteRelationshipMusic?: (relationId: string) => void;
@@ -554,6 +567,7 @@ export default function AppChat({
   onDeleteMomentsByRelation,
   onToggleBookmark,
   onDeleteMessage,
+  onReplaceMessages,
   onUpdateMessage,
   onClose,
   onSaveSettings,
@@ -1147,16 +1161,12 @@ export default function AppChat({
       timestamp: record.createdAt,
     })), [activeBlockedDeliveries, activeRelationship?.conversationId]);
   const visibleChatMessages = useMemo<Message[]>(() => [...projectedVisibleChatMessages, ...blockedChatMessages]
-    .sort((left, right) => left.timestamp - right.timestamp)
-    .map((message) => ({
-      ...message,
-      // Older persisted turns may still contain the private action envelope.
-      // Sanitize the render projection as a final boundary so historical
-      // messages cannot leak protocol text while the underlying action data
-      // remains available to the runtime and migration paths.
-      ...(message.sender === "character" ? { content: sanitizeCharacterActionText(message.content) } : {}),
-      ...(message.translation ? { translation: sanitizeCharacterActionText(message.translation) } : {}),
-    })), [blockedChatMessages, projectedVisibleChatMessages]);
+    .sort((left, right) => left.timestamp - right.timestamp), [blockedChatMessages, projectedVisibleChatMessages]);
+  const chatTurnEnds = useMemo(() => indexChatTurnEnds(visibleChatMessages), [visibleChatMessages]);
+  const chatViewportKey = [activeChatCharId || "none", activeRelationship?.id || "group", activeIdentityId].join(":");
+  const [chatHistorySearchState, setChatHistorySearchState] = useState(emptyChatHistorySearchState);
+  const [chatHistoryJump, setChatHistoryJump] = useState<{ id: string; requestId: number }>();
+  useEffect(() => { setChatHistorySearchState(emptyChatHistorySearchState()); setChatHistoryJump(undefined); }, [chatViewportKey]);
   const activeDirectScope = resolveDirectInteractionScope({
     characterId: activeCharacter?.id,
     activeIdentityId,
@@ -1166,6 +1176,7 @@ export default function AppChat({
   });
   useEffect(() => {
     if (!activeDirectScope) return;
+    return deferForegroundTask(() => {
     const scopeClaims = loadKnowledgeClaims().value.filter((claim) =>
       claim.relationId === activeDirectScope.relationId
       && claim.characterId === activeDirectScope.characterId
@@ -1177,6 +1188,7 @@ export default function AppChat({
       && summary.userIdentityId === activeDirectScope.userIdentityId
       && summary.conversationId === activeDirectScope.conversationId);
     void persistTruthVectorIndex(scopeClaims, scopeSummaries, activeDirectScope);
+    });
   }, [activeDirectScope?.relationId, activeDirectScope?.characterId, activeDirectScope?.userIdentityId, activeDirectScope?.conversationId, messages.length]);
   const isActiveChatScopeValid = Boolean(activeCharacter && (activeCharacter.isGroupChat
     ? !activeChatRelationId
@@ -1212,7 +1224,7 @@ export default function AppChat({
   // Old records may contain model-facing scheduling metadata. The projection
   // hook removes it only from the rendered timeline, retaining source history.
   const getPendingOfflineHandoff = (): OfflineStory | undefined => recoverPendingOfflineHandoff({
-    stories: offlineStories,
+    stories: offlineStories.map(story=>readOfflineArchiveStory(story.id)||story),
     currentChatMessages,
     scope: {
       isGroup: Boolean(activeCharacter?.isGroupChat),
@@ -1227,7 +1239,9 @@ export default function AppChat({
     if (!story || story.onlineHandoff?.status !== "pending") return;
     const durableSummaryReady = hasOfflineStoryCanonicalSummary(story, loadConversationSummaries().value)
       || hasOfflineStorySummary(story, memories || []);
-    onSaveOfflineStory(recordOfflineHandoffDelivery(story, Date.now(), 3, durableSummaryReady));
+    const latest=readOfflineArchiveStory(story.id)||offlineStories.find(item=>item.id===story.id) || story;
+    if(latest.onlineHandoff?.createdAt!==story.onlineHandoff.createdAt)return;
+    onSaveOfflineStory(recordOfflineHandoffDelivery(latest, Date.now(), 3, durableSummaryReady));
   };
   const buildPendingOfflineTimelineHandoff = (
     story: OfflineStory,
@@ -1241,6 +1255,7 @@ export default function AppChat({
       currentChatMessages,
       currentOnlineAt,
       summaryMemory,
+      canonicalSummary:loadConversationSummaries().value.find(summary=>summary.id===`offline-story-summary:${story.id}:${story.characterId}`),
     });
   };
   const buildOfflineTimelineHandoff = (memory: MemoryItem, currentOnlineAt?: number): string => {
@@ -1263,17 +1278,14 @@ export default function AppChat({
       summaries: loadConversationSummaries().value,
     });
   };
-  const getOfflineTimelineStoriesBetween = (previousAt: number | undefined, currentAt: number): OfflineStory[] => {
-    return getOfflineTimelineStoriesBetweenFromContext({
-      previousAt,
-      currentAt,
-      relationId: activeRelationship?.id,
-      isGroup: Boolean(activeCharacter?.isGroupChat),
-      offlineStories,
-      memories: memories || [],
-      summaries: loadConversationSummaries().value,
-    });
-  };
+  const [timelineEvidenceRevision, setTimelineEvidenceRevision] = useState(0);
+  useEffect(() => { const refresh = () => setTimelineEvidenceRevision(value => value + 1);
+    window.addEventListener("fanfanji:memory-evidence-updated", refresh);
+    return () => window.removeEventListener("fanfanji:memory-evidence-updated", refresh); }, []);
+  const getOfflineTimelineStoriesBetween = useMemo(() => createOfflineTimelineLookup({
+    relationId: activeRelationship?.id, isGroup: Boolean(activeCharacter?.isGroupChat), offlineStories,
+    memories: memories || [], summaries: loadConversationSummaries().value,
+  }), [activeRelationship?.id, activeCharacter?.isGroupChat, offlineStories, memories, timelineEvidenceRevision, currentChatMessages]);
   const activeStylePreset = resolveActiveChatStylePreset(
     activeCharacter?.chatStylePreset,
     settings.globalChatStylePreset,
@@ -1683,21 +1695,12 @@ export default function AppChat({
     setTimeout(() => setToastMessage(null), 1500);
   };
 
-  const decidePendingOfflineInvitation = (decision: "accept" | "decline") => {
-    if (!pendingOfflineAppointment || !onSaveAppointment) return;
-    const updated = decideAppointmentInvitation(pendingOfflineAppointment, decision, Date.now());
-    if (!updated || !onSaveAppointment(updated)) {
-      showToast("这条线下邀约暂时无法更新，请重试");
-      return;
-    }
-    showToast(decision === "accept" ? "已接受线下邀约，双方日程已同步" : "已拒绝这条线下邀约");
-  };
 
   // Keep the original hook call signature discoverable for the translation
   // regression guard while extending it with the voice reveal callback.
   // useChatMessageTranslation({ settings, onUpdateMessage, showToast })
   const { handleTranslateMessage } = useChatMessageTranslation({
-    settings,
+    settings,character:activeCharacter,characters,
     onUpdateMessage,
     onTranslationReady: (message) => {
       if (!isVoiceMessageContent(message.content, message.isVoiceMessage === true, Boolean(message.audioUrl))) return;
@@ -1915,14 +1918,16 @@ export default function AppChat({
     isDeleteMemberMode, setIsDeleteMemberMode, showAddMemberModal, setShowAddMemberModal,
     selectedAddMemberIds, setSelectedAddMemberIds, draftIsPinned, setDraftIsPinned,
     draftGroupMemorySyncEnabled, setDraftGroupMemorySyncEnabled,
+    draftCharacterApi,setDraftCharacterApi,
     draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
     draftEnableProactiveCall, setDraftEnableProactiveCall,
     draftEnableStickerAssociation, setDraftEnableStickerAssociation,
+    draftEnableMomentGeneration, setDraftEnableMomentGeneration,
     draftProactiveChatInterval, draftProactiveStartTime, setDraftProactiveStartTime,
     draftProactiveEndTime, setDraftProactiveEndTime, draftDisableBracketActions, setDraftDisableBracketActions,
-    draftHistoryMemoryLimit, draftContextMemoryLimit, setDraftContextMemoryLimit,
+    draftHistoryMemoryLimit, draftChatHistoryPageSize, setDraftChatHistoryPageSize, draftContextMemoryLimit, setDraftContextMemoryLimit,
     draftRetrievalHistoryLimit, setDraftRetrievalHistoryLimit, draftArchiveTemplateType,
     draftEnableTimeAwareness, setDraftEnableTimeAwareness, draftEnableAutoTranslate, setDraftEnableAutoTranslate,
     draftMinimaxVoiceId, setDraftMinimaxVoiceId, draftMosslandVoiceId, setDraftMosslandVoiceId,
@@ -2034,7 +2039,7 @@ export default function AppChat({
         },
         queryText,
         limit: recallLimit,
-        maxCharacters: 4800,
+        unboundedMemory: true,
         alreadyPromptedMessageIds: previewPromptedMessages.map((message) => message.id),
         alreadyPromptedTexts: previewPromptedMessages.map((message) => serializeMessageContentForPrompt(message, {
           mode: "history",
@@ -2583,6 +2588,7 @@ export default function AppChat({
       const groupConversationSummaries = loadConversationSummaries().value;
       const groupBehaviorCorrections = loadBehaviorCorrections().value;
       const groupPipeline = await runGroupChatReplyPipeline({
+        decideMemberAwareness: (input) => requestGroupMemberAwareness({ ...input, request: apiChat }),
         activeCharacter,
         characters,
         relationships,
@@ -2760,6 +2766,7 @@ export default function AppChat({
     }));
   };
 
+  const globalApiSettings=settings;
   const executeDirectReplyPipeline = async (
     userMsg: Message | null,
     customHistoryOverride?: Message[],
@@ -2851,6 +2858,8 @@ export default function AppChat({
     // may have been created by an earlier render, so its captured character
     // must never decide the next prompt or output filtering.
     const turnCharacter = latestActiveCharacterRef.current || activeCharacter;
+    let settings:UserSettings;
+    try{settings=resolveCharacterApiSettings(globalApiSettings,turnCharacter,characters);}catch(error){publishReplyError(error instanceof Error?error.message:"API configuration invalid");return buildOutcome("failed");}
     const turnRelationship = latestActiveRelationshipRef.current;
     const turnSettings = resolveChatTurnSettings(turnCharacter);
     // Resolve the active identity before building any prompt history. The
@@ -3231,7 +3240,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       // Recall memories from Memory Vault
       const topK = resolveChatLongTermMemoryLimit(activeCharacter.retrievalHistoryLimit);
       const truthRetrieval = activeRelationship
-        ? contributeDirectReplyTruthContext({
+        ? await contributeSemanticDirectReplyTruthContext({ configuration: settings.memoryEmbedding, retrieval: {
           scope: {
             relationId: activeRelationship.id,
             characterId: activeRelationship.characterId,
@@ -3240,8 +3249,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           },
           queryText: truthQueryText,
           limit: topK,
-          maxCharacters: 4800,
+          unboundedMemory: true,
           alreadyPromptedMessageIds: [...slicedMsgs, ...(userMsg ? [userMsg] : [])].map((message) => message.id),
+          recentAssistantTurns:slicedMsgs.filter(message=>message.sender==="character").slice(-2).map(message=>({id:message.id,text:serializeMessageContentForPrompt(message,{mode:"history",userName:promptUserName,characterName:activeCharacter.name}),at:message.timestamp})),
           alreadyPromptedTexts: [...slicedMsgs, ...(userMsg ? [userMsg] : [])].map((message) => serializeMessageContentForPrompt(message, {
             mode: "history",
             userName: promptUserName,
@@ -3251,7 +3261,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           summaries: loadConversationSummaries().value,
           corrections: loadBehaviorCorrections().value,
           memoryShadowDiagnostics: getDirectChatMemoryShadowDiagnosticsInput({ memories: memories || [] }),
-        })
+        } })
         : undefined;
       const truthRetrievalPrompt = truthRetrieval ? formatTruthRetrievalForPrompt(truthRetrieval) : "";
       characterContextText += truthRetrievalPrompt;
@@ -3271,17 +3281,21 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           && isOfflineStoryHandoffMemory(latestOfflineContinuationMemory, pendingOfflineHandoffForReply)
           ? latestOfflineContinuationMemory
           : undefined;
-        const pendingOfflineHistoryAnchor = buildPendingOfflineTimelineHandoff(
+        let pendingOfflineHistoryAnchor = buildPendingOfflineTimelineHandoff(
           pendingOfflineHandoffForReply,
           userMsg?.timestamp,
           matchingSummary,
         );
+        if(pendingOfflineHistoryAnchor.length>60_000){
+          showToast("正在同步较长的线下经历，完成后继续回复… ");
+          const synchronized=await requestOfflineArchive(pendingOfflineHandoffForReply,{userConfirmed:true,syncIntent:"automatic_end"});
+          if(synchronized.memorySyncStatus==="failed"||synchronized.memorySyncStatus==="partial")throw Error(synchronized.lastMemorySyncError||"offline_handoff_sync_failed");
+          pendingOfflineHandoffForReply=getPendingOfflineHandoff()||synchronized;
+          pendingOfflineHistoryAnchor=buildPendingOfflineTimelineHandoff(pendingOfflineHandoffForReply,userMsg?.timestamp);
+          if(pendingOfflineHistoryAnchor.length>60_000)throw Error("线下交接内容仍超出单次请求容量，原文已保留，未截断发送。");
+        }
         characterContextText += pendingOfflineHistoryAnchor;
-        // Put the handoff immediately before the current user message as a
-        // hidden history anchor as well as a system rule. Some compatible API
-        // models underweight distant system blocks but reliably follow recent
-        // chronological history.
-        history.push({ role: "user", text: pendingOfflineHistoryAnchor });
+        // Full handoff appears once in system context to avoid duplicating token costs.
       } else if (latestOfflineContinuationMemory) {
         characterContextText += buildOfflineTimelineHandoff(latestOfflineContinuationMemory, userMsg?.timestamp);
       }
@@ -3298,9 +3312,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         : `User Profile (interacting with you):
 - Nickname: ${promptUserName}
 - Personality/Bio: ${activeIdentity?.bio ?? activeIdentityBio}`;
-      if (primaryRelation) {
-        characterContextText += `\n[角色自身关于另一位联系人的既有记忆]\n这些是角色过去对主号联系人或相关事件的记忆，不是当前马甲的身份信息。主号联系人姓名是“${primaryIdentityName}”；当前说话者仍是独立联系人，不得因为职业、措辞或事件相似就把两段关系合并。只有当前联系人明确说明两者关系时，才允许建立身份关联。\n${primaryRelation.compressedMemory?.trim() ? `关系记忆：${primaryRelation.compressedMemory.trim()}` : "暂无相关既有记忆"}`;
-      }
       const userKnowledgeBoundary = formatUserKnowledgeBoundary();
       const relationshipContext = characterProjection.relationship?.content || "";
       const chatPromptContext = cognitiveContext
@@ -3419,6 +3430,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         : undefined;
 
       const directChatPromptInput: DirectReplyPromptPreparationInput = {
+        modelDirectAutoTranslate: Boolean(turnCharacter.enableAutoTranslate),
         mainPromptText,
         musicContext,
         forumContext,
@@ -3485,25 +3497,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             })]
             : []),
-          ...(activeCharacter && !activeCharacter.isGroupChat && activeIdentityId === "identity-1"
-            ? (() => {
-              const aliasRelations = relationships.filter((relation) =>
-                relation.userIdentityId !== activeIdentityId
-                && resolveCanonicalCharacterId(relation.characterId, characters) === activeCharacter.id,
-              );
-              const aliasEvents = aliasRelations.map((relation) => {
-                const alias = settings.identities?.find((identity) => identity.id === relation.userIdentityId);
-                const latestAliasMessage = messages
-                  .filter((message) => message.relationId === relation.id)
-                  .sort((left, right) => right.timestamp - left.timestamp)[0];
-                if (!alias || !latestAliasMessage) return null;
-                return "联系人“" + alias.name + "”最近与你有过互动，最近内容：" + latestAliasMessage.content.slice(0, 180);
-              }).filter((event): event is string => Boolean(event)).slice(0, 3);
-              return aliasEvents.length > 0
-                ? ["【其他联系人互动】\n" + aliasEvents.join("\n") + "\n这些是你与其他联系人之间发生的真实互动。你可以在与当前用户聊天时，根据性格和语境自然提及“最近有人联系过你”等内容，但不要说明这些联系人与当前用户属于同一系统账户，也不要声称你已经确认他们是同一个人。"]
-                : [];
-            })()
-            : []),
           ...(characterPhone
             ? [(() => {
               const hiddenGalleryPasscode = resolveCharacterPhoneHiddenGalleryPasscode(turnCharacter, characterPhone);
@@ -3548,7 +3541,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         })}${immediateCharacterPhoneProxyMessage?.sentFromCharacterPhone
           ? `\n\n[本轮隐性归因提醒] 历史中的“角色手机代发消息”不是${activeCharacter.name}本人说的。用户当前只是在对这条消息作反应；回复第一句必须先自然地质疑或否认作者身份（例如“分手？我什么时候说过这句？”），再回应用户，不要先道歉、认领、说成玩笑或把代发内容归因于模型抽风。不要把代发内容改写成${activeCharacter.name}刚刚主动说过的话，也不要主动告诉用户是谁操作的。`
           : ""}`
-        : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
+        : resolveChatIdentityMode(turnCharacter)==="model-direct" ? "请根据当前对话自然补充回应；没有话题时简短问候即可。" : "请继续续写我们的故事，继续推进剧情走向或日常对话交互。";
       // An explicit callback request is a user command, not proactive
       // behavior. It deliberately bypasses enableProactiveCall; that setting
       // remains reserved for unsolicited scheduler/model call actions.
@@ -3578,7 +3571,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         historyInjections: wbBlocks.at_depth,
         settings,
         signal,
-        includeInnerVoice: true,
+        includeInnerVoice: resolveChatIdentityMode(turnCharacter)!=="model-direct",
         aliasIdentityGuard: isAliasIdentity
           ? {
             aliasName: promptUserName,
@@ -3795,6 +3788,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             const keepPeriods = /(严谨|严肃|正式|书面|习惯句号|用句号|使用标点|使用句号)/i.test((activeCharacter?.personality || "") + (activeCharacter?.backstory || ""));
             return {
               rawText: data.text,
+              preserveProse: resolveChatIdentityMode(turnCharacter)==="model-direct",
               requestedStickerMessage: userMsg?.content,
               disableBracketActions: turnSettings.disableBracketActions,
               keepPeriods,
@@ -4215,6 +4209,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     setCallTranscriptTranslationLoadingId(target.id);
     showToast("正在翻译通话内容…");
     try {
+      const settings=resolveCharacterApiSettings(globalApiSettings,activeCharacter,characters);
       const result = await apiTranslate({
         text: sanitizeCharacterActionText(sourceText),
         apiKey: settings.apiKey || "",
@@ -4770,13 +4765,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const momentsForMainPersona = momentSource
     .filter((moment) => isMomentVisibleToUser(moment, momentsFeedIdentityId));
 
-  const latestActiveMessageId = messages
-    .filter((message) => !message.isOffline && (activeRelationship
-      ? message.relationId === activeRelationship.id
-      : message.characterId === activeChatCharId && activeCharacter?.isGroupChat))
-    .at(-1)?.id || null;
+  const latestActiveMessageId = currentChatMessages.at(-1)?.id || null;
 
   // Auto scroll in chats with smart detection
+  const latestScrollMessageRef = useRef<string>();
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!activeChatCharId || !container) {
@@ -4789,24 +4781,23 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       return;
     }
 
-    const currentChatMsgs = messages.filter((message) => !message.isOffline && (activeRelationship
-      ? message.relationId === activeRelationship.id
-      : message.characterId === activeChatCharId && activeCharacter?.isGroupChat));
+    const currentChatMsgs = currentChatMessages;
     const msgCount = currentChatMsgs.length;
 
-    const isFreshOpen = lastActiveCharIdRef.current !== activeChatCharId;
+    const isFreshOpen = lastActiveCharIdRef.current !== chatViewportKey;
     const lastMsg = currentChatMsgs[currentChatMsgs.length - 1];
-    const isUserSent = lastMsg && lastMsg.sender === "user";
+    const isUserSent = !isFreshOpen && lastMsg && lastMsg.sender === "user" && latestScrollMessageRef.current !== lastMsg.id;
+    latestScrollMessageRef.current = lastMsg?.id;
 
     // Measure distance to bottom
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const isNearBottom = distanceToBottom < 250;
 
     // Update refs for next run
-    lastActiveCharIdRef.current = activeChatCharId;
+    lastActiveCharIdRef.current = chatViewportKey;
     lastMsgCountRef.current = msgCount;
 
-    if (isFreshOpen || isUserSent || isNearBottom || isTyping) {
+    if ((isFreshOpen && !hasChatViewportSnapshot(chatViewportKey)) || isUserSent || (!isFreshOpen && isNearBottom)) {
       const behavior = isFreshOpen ? "auto" : "smooth";
       // The message list can finish its layout one or more frames after the
       // chat shell mounts, especially on mobile.
@@ -4824,7 +4815,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         window.clearTimeout(lateTimer);
       };
     }
-  }, [messages.length, activeChatCharId, activeChatRelationId, latestActiveMessageId, isTyping, activeBlockedDeliveries.length]);
+  }, [currentChatMessages.length, activeChatCharId, activeChatRelationId, latestActiveMessageId, activeBlockedDeliveries.length]);
 
   // The root viewport controller owns sizing. Only keep the latest message visible
   // when the reader was already near the bottom; opening the keyboard must not pull
@@ -4889,6 +4880,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   // Manual Trigger Proactive Message simulation
 
   const { handleSaveSettings } = useChatSaveSettings({
+    draftCharacterApi,
     activeCharacter,
     activeRelationship,
     settings,
@@ -4915,9 +4907,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     draftChatStylePreset,
     draftEnableProactiveCall,
     draftEnableStickerAssociation,
+    draftEnableMomentGeneration,
     draftProactiveChatInterval,
     draftDisableBracketActions,
     draftHistoryMemoryLimit,
+    draftChatHistoryPageSize,
     draftContextMemoryLimit,
     draftRetrievalHistoryLimit,
     draftArchiveTemplateType,
@@ -4972,6 +4966,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     relationships,
     activeIdentityId,
   });
+
+  // Paid continuity work is owned by the app-wide scoped scheduler, never page effects.
 
   useEffect(() => {
     if (!isDirectChatMemoryAdmissionDevRuntime()) return undefined;
@@ -5226,10 +5222,15 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     if (!relationship || !character || relationship.characterId !== character.id || character.isGroupChat) {
       return { status: "rejected" };
     }
+    if (character.enableMomentGeneration === false) return { status: "rejected" };
+    const requestingMessage = [...messagesRef.current].reverse().find(message => message.sender === "user"
+      && message.relationId === relationship.id && !message.recalledAt);
+    if (!hasExplicitMomentGenerationRequest(requestingMessage?.content || "")) return { status: "rejected" };
     if (characterActionInFlightRef.current.has(input.actionKey)) return { status: "rejected" };
     characterActionInFlightRef.current.add(input.actionKey);
     try {
       const generated = await generateCharacterMoment(relationship, Date.now(), {
+        explicitUserAction: true,
         allowProfileDrivenPost: true,
         momentPromptHint: directive.contentHint || "用户刚刚明确要求你发布一条朋友圈",
       });
@@ -5263,7 +5264,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   };
 
   const { handleRegenerateResponse } = useChatRegenerationAction({
-    activeChatCharId, activeCharacter, onDeleteMessage, deleteMessageAndLinkedImage, currentChatMessages,
+    characters,activeChatCharId, activeCharacter, onDeleteMessage, onReplaceMessages, showToast, deleteMessageAndLinkedImage, currentChatMessages,
     activeRelationship, listCharacterEventsByRelation, buildRelationshipCognitiveProjection, buildCharacterCognitiveContext,
     createDirectChatKnowledgeBoundary, resolveChatRoutine, buildCharacterRoutine, resolveChatTurnSettings, setIsTyping,
     latestActiveCharacterRef, settings, serializeMessageContentForPrompt,
@@ -5303,6 +5304,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
     proactiveMessageInFlightRef.current.add(relationId);
     try {
+      const settings=resolveCharacterApiSettings(globalApiSettings,friend,characters);
       let instructionsPrompt = `Instructions:
 1. Follow the character's configured language and nationality according to the character language policy. Maintain character role-play thoroughly.
 2. Use a natural WeChat style. Reply length, warmth, initiative, and emotional intensity must follow the character profile and relationship.
@@ -5357,7 +5359,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         ? `\n【当前现实时间】\n${formatLocalTimeContext()}\n`
         : "";
       const knowledgeBoundary = formatCharacterKnowledgeBoundary({ currentCharacterId: friend.id });
-      const truthPrompt = formatTruthRetrievalForPrompt(retrieveTruthForPrivatePrompt({
+      const truthPrompt = formatTruthRetrievalForPrompt(await contributeSemanticDirectReplyTruthContext({configuration:settings.memoryEmbedding,retrieval:{
+        unboundedMemory:true,
         scope: {
           relationId: relationship.id,
           characterId: relationship.characterId,
@@ -5367,6 +5370,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         queryText: recentConversation.recentMessages.slice(-2).map((message) => serializeMessageContentForPrompt(message, { mode: "history", userName: proactiveIdentityName, characterName: friend.name })).join(" "),
         limit: resolveChatLongTermMemoryLimit(friend.retrievalHistoryLimit),
         alreadyPromptedMessageIds: recentConversation.recentMessages.map((message) => message.id),
+          recentAssistantTurns:recentConversation.recentMessages.filter(message=>message.sender==="character").slice(-2).map(message=>({id:message.id,text:serializeMessageContentForPrompt(message,{mode:"history",userName:proactiveIdentityName,characterName:friend.name}),at:message.timestamp})),
         alreadyPromptedTexts: recentConversation.recentMessages.map((message) => serializeMessageContentForPrompt(message, {
           mode: "history",
           userName: proactiveIdentityName,
@@ -5375,7 +5379,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         claims: loadKnowledgeClaims().value,
         summaries: loadConversationSummaries().value,
         corrections: loadBehaviorCorrections().value,
-      }));
+      }}));
       const cognitiveContext = buildProactiveCognitiveContext({
         character: friend,
         relationship,
@@ -6807,10 +6811,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const generateCharacterMoment = async (
     relationship: CharacterRelationship,
     occurredAt: number,
-    options: { allowProfileDrivenPost?: boolean; momentPromptHint?: string } = {},
+    options: { explicitUserAction?: boolean; allowProfileDrivenPost?: boolean; momentPromptHint?: string } = {},
   ): Promise<boolean> => {
     const friend = findMomentRelationshipCharacter(characters, relationship);
-    if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) return false;
+    if (!canGenerateCharacterMoment(friend?.enableMomentGeneration, options.explicitUserAction ? "user_requested" : "timer")) return false;
+    if (!friend || friend.isGroupChat || friend.enableMomentGeneration === false || isOfflineStoryActiveFor(relationship.id)) return false;
     try {
       const generated = await generateCharacterMomentPipeline({
         relationship,
@@ -6974,61 +6979,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     }
   };
 
+  // Only explicit user actions may generate posts; startup and timer passes are read-only.
   const checkAndTriggerCharacterMoments = async () => {
     if (backgroundGenerationBlockedRef.current || activeRelationships.length === 0) return;
-
-    // Always evaluate the relationship that has waited longest first. The old
-    // fixed-order loop plus `break` starved later friends whenever an earlier
-    // relationship was also eligible.
-    const orderedRelationships = [...activeRelationships].sort((left, right) => {
-      const leftFriend = findMomentRelationshipCharacter(characters, left);
-      const rightFriend = findMomentRelationshipCharacter(characters, right);
-      const leftAt = leftFriend ? getRelationshipLastMomentTimestamp(moments, left, leftFriend.id) : Number.MAX_SAFE_INTEGER;
-      const rightAt = rightFriend ? getRelationshipLastMomentTimestamp(moments, right, rightFriend.id) : Number.MAX_SAFE_INTEGER;
-      return leftAt - rightAt;
-    });
-
-    for (const relationship of orderedRelationships) {
-      const friend = characters.find((character) => character.id === resolveCanonicalCharacterId(relationship.characterId, characters));
-      if (!friend || friend.isGroupChat || isOfflineStoryActiveFor(relationship.id)) continue;
-      const now = Date.now();
-      const lastPostTime = getRelationshipLastMomentTimestamp(moments, relationship, friend.id);
-      const interval = getPostIntervalMs(friend);
-      const timeElapsed = now - lastPostTime;
-
-      if (timeElapsed >= interval) {
-        const occurredAt = calculateCharacterMomentOccurredAt({
-          now,
-          relationId: relationship.id,
-          lastMomentAt: lastPostTime || undefined,
-          lastActiveAt: relationship.lastActiveTime,
-          scheduledAt: relationship.scheduledProactiveTime,
-          relationshipCreatedAt: relationship.createdAt,
-          intervalMs: interval,
-          occupiedTimestamps: moments
-            .filter((moment) => (moment.ownerIdentityId || "identity-1") === relationship.userIdentityId)
-            .map((moment) => moment.timestamp),
-        });
-        const generated = await generateCharacterMoment(relationship, occurredAt);
-        // Generate one per scheduler pass, then rotate to the next oldest
-        // eligible relationship on the following pass.
-        if (generated) break;
-      }
-    }
+    // Deliberately no generation: the scheduler may restore content only.
   };
 
-  const runRelationshipNetworkNpcAutomationPass = async () => {
-    if (!onCheckRelationshipNetworkNpcAutomation || backgroundGenerationBlockedRef.current) return;
-    const npcs = listRelationshipNetworkNpcsForIdentity(activeIdentityId)
-      .filter((npc) => npc.momentAutoMode && npc.momentAutoMode !== "manual")
-      .filter((npc) => listRelationshipNetworkChatLinksForIdentity(activeIdentityId).some((link) => link.npcId === npc.id));
-    // Keep the background pass gentle: one NPC may call the AI per minute,
-    // while the persisted trigger key prevents the same event from retrying.
-    for (const npc of npcs) {
-      const result = await onCheckRelationshipNetworkNpcAutomation(npc);
-      if (result.success) break;
-    }
-  };
+  // NPC posts follow the same explicit-action rule as canonical character posts.
+  const runRelationshipNetworkNpcAutomationPass = async () => {};
 
   const proactivePassDependencies = {
     relationships: activeRelationships,
@@ -8162,6 +8120,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   setAdvancedSettingsSection(null);
                   setIsShowingCardModal(!isShowingCardModal);
                 }}
+                aria-label="聊天设置"
                 className="app-nav-icon-button w-8 h-8 flex items-center justify-center hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn menu-btn chat-header__more-button chat-header-control--plain"
               >
                 <span className="cv-menu-icon flex items-center justify-center w-full h-full">
@@ -8183,6 +8142,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     if (isShowingAdvancedSettings) setAdvancedSettingsSection(null);
                     else setIsShowingCardModal(false);
                   }}
+                  aria-label={isShowingAdvancedSettings ? "返回聊天设置" : "返回聊天"}
                   className="app-nav-icon-button w-8 h-8 flex items-center justify-center transition-colors z-10 shrink-0"
                 >
                   <ChevronLeft className="w-4 h-4 text-slate-700" />
@@ -8203,7 +8163,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               </div>
 
               {/* Body */}
-              <div className="flex-1 overflow-y-auto p-4 pb-[34px] space-y-3">
+              <div key={advancedSettingsSection === "roleApi" ? "roleApi" : "settings"} className="flex-1 overflow-y-auto p-4 pb-[34px] space-y-3">
                  {!isShowingAdvancedSettings && (
                     <>
                   {/* Character Profile Summary & Remark Settings */}
@@ -8503,6 +8463,12 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       </div>
                       <SettingsSwitch checked={draftEnableStickerAssociation} onChange={setDraftEnableStickerAssociation} label="表情包联想" />
                     </div>}
+                    {!activeCharacter.isGroupChat && <div className="flex h-[52px] px-4 items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-slate-800 font-medium text-[16px] block">朋友圈生成</span>
+                      </div>
+                      <SettingsSwitch checked={draftEnableMomentGeneration} onChange={setDraftEnableMomentGeneration} label="朋友圈生成" />
+                    </div>}
                   </div>
                 </div>
 
@@ -8515,6 +8481,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
                  {isShowingAdvancedSettings ? (
                    <>
+                     {advancedSettingsSection === "roleApi" && <CharacterApiSettings global={settings} value={draftCharacterApi} onChange={setDraftCharacterApi} onSave={handleSaveSettings} onSaveGlobal={onSaveSettings}/>}
+                     {advancedSettingsSection === "history" && <>
+                       <ChatHistorySearch messages={currentChatMessages} stories={offlineStories}
+                         scope={{ characterId: activeCharacter.id, relationId: activeRelationship?.id, conversationId: activeRelationship?.conversationId, userIdentityId: activeIdentityId, group: activeCharacter.isGroupChat }}
+                         state={chatHistorySearchState} onStateChange={setChatHistorySearchState} characterName={activeCharacterDisplayName}
+                         onSelect={result => {
+                           if (result.storyId) { setIsShowingCardModal(false); setAdvancedSettingsSection(null); onOpenOfflineStory?.(result.storyId, result.messageId); return; }
+                           setIsShowingCardModal(false); setAdvancedSettingsSection(null);
+                           setChatHistoryJump({ id: result.messageId, requestId: Date.now() });
+                         }} />
+                     </>}
                      {advancedSettingsSection === "memory" && (
                        <>
                      {/* Three-Layer Memory Optimization System Panel */}
@@ -8598,7 +8575,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                           <input
                             type="range"
                             min={10}
-                            max={100}
+                            max={300}
                             step={10}
                             value={draftRetrievalHistoryLimit}
                             onChange={(e) => setDraftRetrievalHistoryLimit(parseInt(e.target.value))}
@@ -8606,12 +8583,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                           />
                           <div className="flex justify-between text-[8px] text-[var(--text-tertiary)] font-mono">
                             <span>10条</span>
-                            <span>25条</span>
                             <span>50条(默认)</span>
-                            <span>75条</span>
                             <span>100条</span>
+                            <span>200条</span>
+                            <span>300条</span>
                           </div>
                         </div>
+                        <p className="text-[10px] leading-relaxed text-[var(--text-secondary)]">从全部合法记忆中按相关性选择，最多使用设置的条数；不足不凑数。选中的记忆完整提供给模型。</p>
                       </div>
 
                       {/* One-click manual archive button */}
@@ -8776,14 +8754,16 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   ) : (
                     <div className="bg-white rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] divide-y divide-slate-100 overflow-hidden">
                       {[
-                        { key: "memory", label: "记忆设置" },
+                        { key: "roleApi", label: "角色API" },
                         { key: "voiceImage", label: "语音图片" },
+                        { key: "memory", label: "记忆设置" },
                         { key: "appearance", label: "美化样式" },
+                        { key: "history", label: "查找聊天记录" },
                       ].map(({ key, label }) => (
                         <button
                           key={key}
                           type="button"
-                          onClick={() => setAdvancedSettingsSection(key as "memory" | "voiceImage" | "appearance")}
+                          onClick={() => setAdvancedSettingsSection(key as "roleApi" | "memory" | "voiceImage" | "history" | "appearance")}
                           className="w-full h-[52px] px-4 flex items-center gap-3 text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
                           aria-label={`打开${label}`}
                         >
@@ -9174,7 +9154,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             key={`${activeChatCharId ?? "none"}:${activeRelationship?.id ?? activeChatRelationId ?? "none"}:${isOfflineModeActive ? "offline" : "online"}`}
             messages={visibleChatMessages}
             scrollRef={scrollContainerRef}
-            renderWindowSize={120}
+            conversationKey={chatViewportKey}
+            jumpToMessage={chatHistoryJump}
+            onJumpHandled={() => setChatHistoryJump(undefined)}
+            renderWindowSize={resolveChatPageSize(activeCharacter.chatHistoryPageSize)}
             className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-0 cv-messages-list chat-message-list"
             style={{
               background: activeCharacter.chatBg
@@ -9184,6 +9167,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             }}
             contentClassName="chat-message-list-content"
             renderMessage={(msg, idx) => {
+              msg = projectChatDisplayMessage(msg);
               // Do not show URL suffix fragments persisted by pre-fix builds.
               // The actual image bubble remains visible, while new messages no
               // longer create these fragments in the first place.
@@ -9487,14 +9471,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               // Inline inner voice records are attached to the last delivered
               // bubble, so use that bubble as the lookup key when the avatar is
               // clicked. This keeps the visible avatar aligned with the record.
-              let innerVoiceTriggerMessage = msg;
-              if (!isSelf && !activeCharacter.isGroupChat) {
-                for (let nextIndex = idx + 1; nextIndex < visibleChatMessages.length; nextIndex += 1) {
-                  const candidate = visibleChatMessages[nextIndex];
-                  if (candidate.isNarration || candidate.sender !== msg.sender) break;
-                  innerVoiceTriggerMessage = candidate;
-                }
-              }
+              const innerVoiceTriggerMessage = !isSelf && !activeCharacter.isGroupChat ? chatTurnEnds.get(msg.id) || msg : msg;
               const renderBubbleInner = () => {
                 return (
                   <div 
@@ -10026,29 +10003,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           </MessageList>
 
           {pendingOfflineAppointment && !isMultiSelectDeleteMode && (
-            <div className="chat-appointment-invitation mx-3 mb-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 shadow-sm">
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">线下邀约 · 待你确认</div>
-                  <div className="mt-1 truncate text-sm font-bold text-[var(--text-primary)]">
-                    {getCurrentAppointmentProposal(pendingOfflineAppointment)?.activity || pendingOfflineAppointment.title}
-                  </div>
-                  <div className="mt-1 text-[10px] leading-5 text-[var(--text-secondary)]">
-                    {(() => {
-                      const proposal = getCurrentAppointmentProposal(pendingOfflineAppointment);
-                      if (!proposal?.startAt) return pendingOfflineAppointment.mode === "immediate" ? "现在见面 · 等你选择" : "时间待确认";
-                      const date = new Date(proposal.startAt);
-                      return `${date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })} ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}${proposal.location ? ` · ${proposal.location}` : ""}`;
-                    })()}
-                  </div>
-                </div>
-                <span className="shrink-0 rounded-full bg-[var(--surface-raised)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">待你确认</span>
-              </div>
-              <div className="mt-3 flex gap-2">
-                <button type="button" onClick={() => decidePendingOfflineInvitation("decline")} className="flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-[11px] font-bold text-[var(--text-secondary)]">拒绝</button>
-                <button type="button" disabled={!canConfirmAppointment(pendingOfflineAppointment)} onClick={() => decidePendingOfflineInvitation("accept")} className="flex-1 rounded-xl bg-[var(--button-primary-bg)] px-3 py-2 text-[11px] font-bold text-[var(--button-primary-text)] disabled:cursor-not-allowed disabled:opacity-40">接受</button>
-              </div>
-            </div>
+            <React.Fragment key={pendingOfflineAppointment.id}>
+              <OfflineInvitationCard appointment={pendingOfflineAppointment}
+                onSave={appointment => onSaveAppointment?.(appointment) ?? false} onNotice={showToast} />
+            </React.Fragment>
           )}
 
           {readyOfflineAppointment && !isMultiSelectDeleteMode && (
@@ -13764,8 +13722,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           aria-modal="true"
           aria-labelledby="offline-story-choice-title"
         >
-          <div className="w-full max-w-sm space-y-3 rounded-3xl bg-white p-5 text-slate-800 shadow-2xl">
-            <div className="flex items-start justify-between gap-3">
+          <div className="offline-story-choice-panel flex min-h-0 w-full max-w-sm flex-col gap-3 overflow-hidden rounded-3xl bg-white p-5 text-slate-800 shadow-2xl" style={{maxHeight:"min(100%, calc(100dvh - 2.5rem))"}}>
+            <div className="flex shrink-0 items-start justify-between gap-3">
               <div>
                 <h2 id="offline-story-choice-title" className="text-sm font-black">进入线下故事</h2>
                 <p className="mt-1 text-[11px] leading-5 text-slate-500">检测到这个角色有可以继续的剧情，请选择进入方式。</p>
@@ -13775,7 +13733,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               </button>
             </div>
 
-            <div className="space-y-2">
+            <div className="offline-story-choice-list min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain touch-pan-y" aria-label="可继续的线下剧情" tabIndex={0}>
               {pendingOfflineStoryChoice.stories.map((story) => (
                 <button
                   key={story.id}
@@ -13792,11 +13750,11 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             <button
               type="button"
               onClick={startNewOfflineStory}
-              className="w-full rounded-2xl bg-[var(--button-primary-bg)] px-3 py-3 text-xs font-bold text-[var(--button-primary-text)] transition-opacity hover:opacity-90"
+              className="w-full shrink-0 rounded-2xl bg-[var(--button-primary-bg)] px-3 py-3 text-xs font-bold text-[var(--button-primary-text)] transition-opacity hover:opacity-90"
             >
               开启新的剧情
             </button>
-            <button type="button" onClick={cancelOfflineStoryChoice} className="w-full py-1 text-[11px] font-medium text-slate-400 hover:text-slate-600">
+            <button type="button" onClick={cancelOfflineStoryChoice} className="w-full shrink-0 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-600">
               先不进入
             </button>
           </div>

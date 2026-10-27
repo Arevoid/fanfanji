@@ -1,5 +1,4 @@
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
-import { projectLegacySummary } from "../../../domain/characterCognitive/legacySummaryPolicy";
 import type {
   CognitivePromptBehaviorConstraint,
   CognitivePromptBoundary,
@@ -33,18 +32,10 @@ export function projectPromptRelationship(
   context: CharacterCognitiveContext,
   options?: PromptAdapterOptions,
 ): CognitivePromptRelationship {
-  const { stage, legacySummary } = context.relationship;
-  const summary = legacySummary
-    ? projectLegacySummary({
-      summary: legacySummary.content,
-      summaryRelationId: legacySummary.relationId,
-      targetRelationId: context.scope.relationId,
-      hasConfirmedEvent: context.recentEvents.some((event) => event.confidence === 1),
-      hasConfirmedClaim: options?.hasConfirmedClaim === true,
-      hasDerivedSummary: options?.hasDerivedSummary === true,
-    })
-    : undefined;
-  return { stage, ...(summary ? { legacySummary: summary } : {}) };
+  // Raw relationship summaries carry no source revision or dependency closure.
+  // A weak-reference label cannot make them safe after a source is forgotten.
+  // Migrated summaries are admitted by the unified Truth retrieval path instead.
+  return { stage: context.relationship.stage };
 }
 
 export function projectPromptTime(context: CharacterCognitiveContext): CognitivePromptTimeContext {

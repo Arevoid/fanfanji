@@ -37,15 +37,15 @@ const claims = [
 
 const common = {
   characters: [memberA, memberB], relationships, activeIdentityId: "identity-1",
-  claims, summaries: [], corrections: [], queryText: "", limit: 5,
+  claims, summaries: [], corrections: [], queryText: "怕雷声 喜欢蓝色", limit: 5,
 };
 const contextA = buildGroupMemberPrivateContext({ ...common, member: memberA });
 const contextB = buildGroupMemberPrivateContext({ ...common, member: memberB });
 
-assert.match(contextA, /A 与用户共同养猫/);
+assert.doesNotMatch(contextA, /A 与用户共同养猫/,"raw legacy relationship summary cannot bypass source validation");
 assert.match(contextA, /A 私聊中知道用户怕雷声/);
 assert.doesNotMatch(contextA, /B 私聊|另一个身份/);
-assert.match(contextB, /B 与用户约定看电影/);
+assert.doesNotMatch(contextB, /B 与用户约定看电影/,"raw legacy relationship summary cannot bypass source validation");
 assert.match(contextB, /B 私聊中知道用户喜欢蓝色/);
 assert.doesNotMatch(contextB, /A 私聊|另一个身份/);
 assert.match(contextA, /其他群成员看不到/);

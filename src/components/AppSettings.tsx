@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { MEMORY_BACKUP_KEYS } from "../features/settings/systemBackup";
 import { createPortal } from "react-dom";
 import { UserSettings, StylePreset, type ChatIconKey, type ChatIconOverrides, type OfflineStory, type UserSettingsUpdate } from "../types";
 import {
@@ -216,6 +217,7 @@ const GLOBAL_CSS_EXAMPLE_TEMPLATE = `/* 全局主题 CSS：作用于手机桌面
 }`;
 
 const BACKUP_KEYS = [
+  ...MEMORY_BACKUP_KEYS,
   "phone_schedule_v1",
   "phone_characters",
   "phone_characters_v3",
@@ -223,6 +225,10 @@ const BACKUP_KEYS = [
   "phone_installed_apps",
   "phone_memory_vault_items",
   "phone_memory_vault_settings",
+  "phone_character_memory_continuity_v1",
+  "phone_memory_continuity_migration_v1",
+  "phone_memory_continuity_legacy_snapshot_v1",
+  "phone_memory_extraction_tasks_v1",
   "phone_image_generation_records",
   "phone_messages",
   "phone_messages_v3",
@@ -296,6 +302,11 @@ const BACKUP_KEYS = [
 const BACKUP_KEY_SET = new Set<string>(BACKUP_KEYS);
 
 const LIGHT_BACKUP_KEYS = [
+  ...MEMORY_BACKUP_KEYS,
+  "phone_character_memory_continuity_v1",
+  "phone_memory_continuity_migration_v1",
+  "phone_memory_continuity_legacy_snapshot_v1",
+  "phone_memory_extraction_tasks_v1",
   "phone_characters",
   "phone_characters_v3",
   "phone_messages",

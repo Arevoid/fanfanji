@@ -1,0 +1,42 @@
+import assert from "node:assert/strict";
+import {applyMemorySettingReview,createMemorySettingReviewer} from "../src/features/characterKnowledge/services/memorySettingReviewService";
+import {saveKnowledgeClaims} from "../src/core/storage/repositories/characterKnowledgeRepository";
+import type {KnowledgeClaim} from "../src/domain/characterKnowledge/characterKnowledgeTypes";
+import type {Character,UserSettings} from "../src/types";
+const values=new Map<string,string>();Object.defineProperty(globalThis,"window",{configurable:true,value:{localStorage:{getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>values.set(key,value),removeItem:(key:string)=>values.delete(key)}}});
+const scope={characterId:"a",relationId:"r",userIdentityId:"u",conversationId:"c"};
+const base:KnowledgeClaim={...scope,id:"compliment",statement:"好帅好帅好帅",kind:"preference",subject:"user",truthStatus:"asserted",temporalStatus:"present",confidence:.99,userConfirmed:false,recordedAt:1,status:"active",visibility:"relation_private",schemaVersion:1,admissionStatus:"retained",source:{kind:"user_message",authorship:"user",producer:"synthetic",evidenceKey:"m",messageIds:["m"],evidenceQuote:"好帅好帅好帅"}};
+const verdict=(claim:KnowledgeClaim,decision:string)=>({id:claim.id,sourceQuote:claim.source.evidenceQuote,decision,confidence:.99,reason:"合成测试中的独立判断"});
+assert.equal(applyMemorySettingReview([base],[],{reviews:[verdict(base,"ephemeral")]}).claims.length,0,"a preference label does not exempt a fleeting compliment from value review");
+const durable={...base,id:"fear",statement:"一直害怕打雷",source:{...base.source,evidenceQuote:"一直害怕打雷"}};
+assert.equal(applyMemorySettingReview([durable],[],{reviews:[verdict(durable,"new_experience")]}).claims[0].admissionStatus,"retained");
+assert.equal(applyMemorySettingReview([durable],[],{reviews:[{...verdict(durable,"new_experience"),confidence:.85}]}).claims[0].admissionStatus,"retained","two value checks can admit an evidenced memory without pretending its truth confidence is 95%");
+assert.equal(applyMemorySettingReview([base],[],{reviews:[{...verdict(base,"ephemeral"),confidence:.9}]}).claims.length,0);
+assert.equal(applyMemorySettingReview([base],[],{reviews:[{...verdict(base,"ephemeral"),confidence:.85}]}).claims[0].admissionStatus,"review","less certain filtering preserves content for review");
+const pending={...durable,admissionStatus:"review" as const};assert.equal(applyMemorySettingReview([pending],[],{reviews:[verdict(pending,"new_experience")]}).claims[0].admissionStatus,"review","second review cannot invent missing primary evidence");
+const setting={id:"setting",text:"角色喜欢天文"};
+assert.equal(applyMemorySettingReview([durable],[setting],{reviews:[{...verdict(durable,"duplicate_setting"),settingId:setting.id,settingQuote:setting.text}]}).claims.length,0);
+assert.equal(applyMemorySettingReview([durable],[setting],{reviews:[{...verdict(durable,"conflict"),settingId:setting.id,settingQuote:setting.text}]}).claims[0].admissionStatus,"review");
+for(const pinned of [{...base,coreMemory:true},{...base,source:{...base.source,kind:"manual" as const}}])assert.equal(applyMemorySettingReview([pinned],[],{reviews:[verdict(pinned,"ephemeral")]}).claims.length,1,"automated filtering preserves explicit user ownership");
+const requested={...base,source:{...base.source,evidenceQuote:"请记住我今天说的这句好帅。"},valueAssessment:{quote:"请记住我今天说的这句好帅。",impact:0,durability:0,novelty:0,confidence:.99,reason:"用户明确要求保存",explicitRemember:true}};
+assert.equal(applyMemorySettingReview([requested],[],{reviews:[verdict(requested,"ephemeral")]}).claims.length,1,"independent value review cannot silently discard a source-grounded explicit remember request");
+saveKnowledgeClaims([durable,{...durable,id:"foreign",relationId:"other",statement:"不应发送的另一关系秘密"}]);
+let called=0;
+const reviewer=createMemorySettingReviewer({id:"a",name:"合成角色",personality:"",backstory:""} as Character,scope,"chat",{apiKey:"synthetic",selectedModel:"synthetic"} as UserSettings,async params=>{
+ called++;const payload=JSON.parse(params.message);
+ assert.equal(payload.settings.length,0);assert.equal(payload.contexts.length,1);assert.equal(payload.contexts[0].text,durable.statement);assert.ok(!params.message.includes("另一关系秘密"));assert.equal(payload.candidates[0].id,"C1");
+ assert.match(params.systemInstruction||"",/ephemeral/);
+ return {text:JSON.stringify({reviews:[{...verdict(durable,"new_experience"),id:payload.candidates[0].id}]})};
+});
+assert.equal((await reviewer([durable])).claims.length,1);assert.equal(called,1,"absence of persona/worldbook does not bypass independent retention assessment");
+const longClaims=Array.from({length:8},(_,i)=>({...durable,id:`long-${i}`,source:{...durable.source,evidenceQuote:"这段有来源的共同经历。".repeat(80)}}));let longRequests=0;
+const longReviewer=createMemorySettingReviewer({id:"a",name:"合成角色"} as Character,scope,"chat",{apiKey:"synthetic"} as UserSettings,async params=>{
+ longRequests++;const body=JSON.parse(params.message);assert.ok(body.candidates.reduce((n:number,c:{sourceQuote:string})=>n+c.sourceQuote.length,0)<=2400);assert.equal(params.maxOutputTokens,4096);
+ return {text:JSON.stringify({reviews:body.candidates.map((c:{id:string;sourceQuote:string})=>({id:c.id,sourceQuote:c.sourceQuote,decision:"new_experience",confidence:.99,reason:"有持续价值"}))})};
+});assert.equal((await longReviewer(longClaims)).claims.length,8);assert.ok(longRequests>1,"long evidence is split across review requests rather than truncated or sent beyond the output budget");
+const badRefReviewer=createMemorySettingReviewer({id:"a",name:"合成角色"} as Character,scope,"chat",{apiKey:"synthetic"} as UserSettings,async()=>({text:JSON.stringify({reviews:[verdict(durable,"new_experience")]})}));
+assert.equal((await badRefReviewer([durable])).claims[0].admissionStatus,"review","a model must echo the provided local reference; guessing a canonical ID cannot grant admission");
+const settingReviewer=createMemorySettingReviewer({id:"a",name:"合成角色",personality:"角色喜欢天文。"} as Character,scope,"chat",{apiKey:"synthetic"} as UserSettings,async params=>{
+ const body=JSON.parse(params.message);assert.equal(body.settings[0].id,"W1");return {text:JSON.stringify({reviews:[{id:body.candidates[0].id,sourceQuote:body.candidates[0].sourceQuote,decision:"duplicate_setting",settingId:body.settings[0].id,settingQuote:body.settings[0].text,confidence:.99,reason:"只有设定原有信息"}]})};
+});assert.equal((await settingReviewer([{...durable,statement:"角色喜欢天文。",source:{...durable.source,evidenceQuote:"角色喜欢天文。"}}])).claims.length,0,"local setting references resolve only to the authorized setting in this request");
+console.log("PASS independent retention: instant praise rejected despite preference label, durable fact retained, settings checked, manual/core protected, missing evidence never promoted, context remains exact-scope");

@@ -21,6 +21,8 @@ export interface MemoryWriteBundleInput {
   summary?: ConversationSummaryRecord;
   /** Build the existing synchronous projection after canonical claims commit. */
   buildSummary?: () => ConversationSummaryRecord | undefined;
+  /** Bounded archive-window records, resolved against the final canonical IDs. */
+  buildEpisodes?: () => readonly ConversationSummaryRecord[];
   /** Best-effort side effect between canonical commit and derived writes. */
   afterCanonicalWrite?: () => void | Promise<void>;
   summaries?: readonly ConversationSummaryRecord[];
@@ -119,6 +121,7 @@ export async function commitMemoryWriteBundle(
   const summaries = [
     ...(input.summary ? [input.summary] : []),
     ...(input.buildSummary ? [input.buildSummary()].filter((summary): summary is ConversationSummaryRecord => Boolean(summary)) : []),
+    ...(input.buildEpisodes?.()||[]),
     ...(input.summaries || []),
   ];
   let summaryWritten = summaries.length === 0;

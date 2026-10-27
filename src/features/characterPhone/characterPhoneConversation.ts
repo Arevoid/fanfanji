@@ -1,3 +1,4 @@
+import { resolveCharacterTextSettings } from "../../domain/character/characterTextApiRouting";
 import { apiChat } from "../../utils/apiHelper";
 import type { Character, UserSettings } from "../../types";
 import type {
@@ -39,6 +40,7 @@ function formatThreadMessage(
 export function buildCharacterPhoneContactReplyPrompt(
   input: CharacterPhoneContactReplyInput,
 ): CharacterPhoneContactReplyPrompt {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const now = input.now ?? Date.now();
   const recentMessages = (input.phone.threadMessages ?? [])
     .filter((message) => message.contactId === input.contact.id && trim(message.content))
@@ -87,6 +89,7 @@ export function normalizeCharacterPhoneContactReply(value: unknown): string | nu
 export async function generateCharacterPhoneContactReply(
   input: CharacterPhoneContactReplyInput,
 ): Promise<string | null> {
+  input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const settings = input.settings;
   if (!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) return null;
   const prompt = buildCharacterPhoneContactReplyPrompt(input);
