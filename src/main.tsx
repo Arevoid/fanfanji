@@ -13,11 +13,9 @@ installDevRuntimeProbe();
 const applicationRoot = createRoot(document.getElementById('root')!);
 function MemoryWriterNotice() {
   const current = useSyncExternalStore(subscribeMemoryWriterState, getMemoryWriterState);
-  if (current === 'writer') return null;
+  if (current !== 'unsupported') return null;
   return <div role="status" className="fixed left-0 right-0 top-0 z-[10000] bg-amber-100 p-3 text-center text-sm text-amber-950">
-    {current === 'unsupported' ? '当前浏览器无法建立安全写入保护，聊天和记忆暂为只读。请允许网站存储，或更新浏览器后重试。'
-      : current === 'expired' ? '页面写入权限已过期，聊天和记忆暂为只读。请刷新本页，重新加载最新数据后继续。'
-      : '另一个窗口正在维护聊天和记忆，此窗口只读。关闭另一个窗口后刷新本页；异常关闭时，请等待约30秒再刷新。'}
+    {'存储保存保护暂时无法初始化，请允许网站存储后重试。'}
     <button type="button" className="ml-3 underline" onClick={() => void reloadApplicationSafely()}>刷新本页</button>
   </div>;
 }

@@ -1,4 +1,5 @@
 export type StorageErrorKind =
+  | "conflict"
   | "unavailable"
   | "read"
   | "parse"

@@ -2,24 +2,27 @@ import { readJson, readString, writeJson, writeString, remove, STORAGE_WRITE_FAI
 import type { StorageWriteResult } from "./storageTypes";
 import { storageKeys } from "./storageKeys";
 import { memoryContentStore } from "./memoryContentStore";
-import { canWriteMemoryStorage, invalidateMemoryWriter } from "./memoryWriterCoordination";
+import { canWriteMemoryStorage, flushMemoryWriterSaves } from "./memoryWriterCoordination";
 
 export async function initializeMemoryContentStorage(writable: boolean): Promise<StorageWriteResult> {
   if (typeof window === "undefined" || typeof indexedDB === "undefined") return { success: false, error: "unavailable" };
   return memoryContentStore.initialize({ factory: indexedDB, legacy: window.localStorage, writable,
     canWrite: () => writable && canWriteMemoryStorage(storageKeys.characterKnowledgeClaims),
     onStatus: status => { if (status.phase === "failed" && status.failure) {
-      invalidateMemoryWriter();
       window.dispatchEvent(new CustomEvent(STORAGE_WRITE_FAILURE_EVENT, { detail: { key: status.failure.key, error: status.failure.error, source: "memory-indexeddb" } }));
     } },
   });
 }
 export async function confirmMemoryPersistence<T extends StorageWriteResult>(result: T): Promise<T> {
-  if (!result.success || !memoryContentStore.active) return result;
-  const committed = result.durable ? await result.durable : await memoryContentStore.flush();
+  if (!result.success) return result;
+  const committed = result.durable ? await result.durable : memoryContentStore.active ? await memoryContentStore.flush() : {success:true};
   return { ...result, ...committed, pending: false, durable: undefined };
 }
-export const flushMemoryContentStorage = () => memoryContentStore.active ? memoryContentStore.flush() : Promise.resolve({ success: true });
+export const flushMemoryContentStorage = async () => {
+  const local = await flushMemoryWriterSaves();
+  if (!local.success) return local;
+  return memoryContentStore.active ? memoryContentStore.flush() : { success: true };
+};
 export const getMemoryContentStorageStatus = () => memoryContentStore.status;
 
 const JOURNAL_KEY = "phone_memory_restore_transaction_v1";

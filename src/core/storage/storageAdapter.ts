@@ -1,6 +1,7 @@
 import type { StorageResult, StorageWriteResult } from "./storageTypes";
 import * as LZStringModule from "lz-string";
-import { canWriteMemoryStorage } from "./memoryWriterCoordination";
+import { canWriteMemoryStorage, usesPerSaveProtection, isProtectedStorageKey } from "./memoryWriterCoordination";
+import { localSaveGuard } from "./localSaveGuard";
 import { memoryContentStore } from "./memoryContentStore";
 import { isMemoryContentKey } from "./memoryContentKeys";
 
@@ -64,7 +65,7 @@ export function readString(key: string): StorageResult<string | null> {
   if (!storage) return { value: null, found: false, valid: false, error: "unavailable" };
 
   try {
-    const value = storage.getItem(key);
+    const value = usesPerSaveProtection() && isProtectedStorageKey(key) ? localSaveGuard.read(storage,key) : storage.getItem(key);
     return { value, found: value !== null, valid: true };
   } catch (error) {
     console.warn(`[storage] Failed to read "${key}".`, error);
@@ -89,6 +90,12 @@ export function readJson<T>(key: string, fallback: T): StorageResult<T> {
 export function writeString(key: string, value: string): StorageWriteResult {
   if (!canWriteMemoryStorage(key)) return { success: false, error: "verification" };
   if (memoryContentStore.active && isMemoryContentKey(key)) return memoryContentStore.stage({ [key]: value });
+  const storage = getStorage();
+  if (storage && usesPerSaveProtection() && isProtectedStorageKey(key))
+    return localSaveGuard.stage(storage,key,value,() => writeStringUnchecked(key,value));
+  return writeStringUnchecked(key,value);
+}
+function writeStringUnchecked(key: string, value: string): StorageWriteResult {
   const storage = getStorage();
   if (!storage) return { success: false, error: "unavailable" };
   if (typeof value !== "string") {
@@ -157,6 +164,7 @@ export function writeJson<T>(key: string, value: T, options?: StorageWriteOption
     JSON.parse(serialized);
     const result = writeString(key, encodeJsonStorageText(key, serialized));
     if (!result.success) notifyJsonWriteFailure(key, result.error, routedOptions);
+    if (result.durable) void result.durable.then(saved => { if (!saved.success) notifyJsonWriteFailure(key,saved.error,routedOptions); });
     return result;
   } catch (error) {
     console.warn(`[storage] Failed to serialize "${key}".`, error);
@@ -168,6 +176,12 @@ export function writeJson<T>(key: string, value: T, options?: StorageWriteOption
 export function remove(key: string): StorageWriteResult {
   if (!canWriteMemoryStorage(key)) return { success: false, error: "verification" };
   if (memoryContentStore.active && isMemoryContentKey(key)) return memoryContentStore.stage({ [key]: null });
+  const storage = getStorage();
+  if (storage && usesPerSaveProtection() && isProtectedStorageKey(key))
+    return localSaveGuard.stage(storage,key,null,() => removeUnchecked(key));
+  return removeUnchecked(key);
+}
+function removeUnchecked(key: string): StorageWriteResult {
   const storage = getStorage();
   if (!storage) return { success: false, error: "unavailable" };
 

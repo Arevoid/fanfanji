@@ -1,3 +1,4 @@
+import { SnapshotWriteGuard } from "./saveConflictGuard";
 import type { Message } from "../../types";
 import { canWriteMemoryStorage } from "./memoryWriterCoordination";
 import { storageKeys } from "./storageKeys";
@@ -54,7 +55,8 @@ function fromEntries(entries: readonly MessageEntryRecord[]): Message[] {
     .map((entry) => clone(entry.message));
 }
 
-class MessageEntryDB {
+export class MessageEntryDB {
+  private guard = new SnapshotWriteGuard();
   private db: IDBDatabase | null = null;
   private writeQueue: Promise<void> = Promise.resolve();
   private persistedEntries: MessageEntryRecord[] | null = null;
@@ -114,6 +116,7 @@ class MessageEntryDB {
       request.onerror = () => reject(request.error);
     });
     this.persistedEntries = entries;
+    this.guard.capture(MESSAGE_ENTRY_STORE_NAME, entries);
     return fromEntries(entries);
   }
 
@@ -174,9 +177,11 @@ class MessageEntryDB {
     const entries = toEntries(messages);
     await this.enqueue((database) => new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(MESSAGE_ENTRY_STORE_NAME, "readwrite");
+      this.guard.protect(transaction, [MESSAGE_ENTRY_STORE_NAME]);
       const store = transaction.objectStore(MESSAGE_ENTRY_STORE_NAME);
       store.clear();
       entries.forEach((entry) => store.put(entry));
+      this.guard.captureAfter(transaction, [MESSAGE_ENTRY_STORE_NAME]);
       transaction.oncomplete = () => {
         this.persistedEntries = entries;
         resolve();
@@ -192,6 +197,7 @@ class MessageEntryDB {
       const previous = new Map((this.persistedEntries || []).map((entry) => [entry.recordId, entry]));
       const nextIds = new Set(entries.map((entry) => entry.recordId));
       const transaction = database.transaction(MESSAGE_ENTRY_STORE_NAME, "readwrite");
+      this.guard.protect(transaction, [MESSAGE_ENTRY_STORE_NAME]);
       const store = transaction.objectStore(MESSAGE_ENTRY_STORE_NAME);
       previous.forEach((entry, recordId) => {
         if (!nextIds.has(recordId)) store.delete(recordId);
@@ -200,6 +206,7 @@ class MessageEntryDB {
         const old = previous.get(entry.recordId);
         if (!old || JSON.stringify(old) !== JSON.stringify(entry)) store.put(entry);
       });
+      this.guard.captureAfter(transaction, [MESSAGE_ENTRY_STORE_NAME]);
       transaction.oncomplete = () => {
         this.persistedEntries = entries;
         resolve();
@@ -216,7 +223,9 @@ class MessageEntryDB {
   async clearAll(): Promise<void> {
     await this.enqueue((database) => new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(MESSAGE_ENTRY_STORE_NAME, "readwrite");
+      this.guard.protect(transaction, [MESSAGE_ENTRY_STORE_NAME]);
       transaction.objectStore(MESSAGE_ENTRY_STORE_NAME).clear();
+      this.guard.captureAfter(transaction, [MESSAGE_ENTRY_STORE_NAME]);
       transaction.oncomplete = () => {
         this.persistedEntries = [];
         resolve();

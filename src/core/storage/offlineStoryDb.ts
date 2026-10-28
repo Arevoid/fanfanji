@@ -1,3 +1,4 @@
+import { SnapshotWriteGuard } from "./saveConflictGuard";
 import type { OfflineStory } from "../../types";
 import { canWriteMemoryStorage } from "./memoryWriterCoordination";
 import { storageKeys } from "./storageKeys";
@@ -5,7 +6,8 @@ import { isOfflineStoryEntryStoreEnabled } from "./contentStorageFlags";
 import { offlineStoryEntryDb } from "./offlineStoryEntryDb";
 import { enterContentStorageOperation } from "./contentStorageRuntimeLock";
 
-class OfflineStoryDB {
+export class OfflineStoryDB {
+  private guard = new SnapshotWriteGuard();
   private readonly dbName = "FanfanjiOfflineStoryDB";
   private readonly storeName = "stories";
   private db: IDBDatabase | null = null;
@@ -54,7 +56,7 @@ class OfflineStoryDB {
     const db = await this.init();
     return new Promise((resolve, reject) => {
       const request = db.transaction(this.storeName, "readonly").objectStore(this.storeName).getAll();
-      request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result as OfflineStory[] : []);
+      request.onsuccess = () => { const rows = Array.isArray(request.result) ? request.result as OfflineStory[] : []; this.guard.capture(this.storeName,rows); resolve(rows); };
       request.onerror = () => reject(request.error);
     });
   }
@@ -80,7 +82,9 @@ class OfflineStoryDB {
       if (this.useEntryStore()) return await offlineStoryEntryDb.save(story);
       await this.enqueueWrite((db) => new Promise((resolve, reject) => {
         const transaction = db.transaction(this.storeName, "readwrite");
+        this.guard.protect(transaction,[this.storeName]);
         transaction.objectStore(this.storeName).put(story);
+        this.guard.captureAfter(transaction,[this.storeName]);
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error);
         transaction.onabort = () => reject(transaction.error);
@@ -96,9 +100,11 @@ class OfflineStoryDB {
       if (this.useEntryStore()) return await offlineStoryEntryDb.replaceAll(stories);
       await this.enqueueWrite((db) => new Promise((resolve, reject) => {
         const transaction = db.transaction(this.storeName, "readwrite");
+        this.guard.protect(transaction,[this.storeName]);
         const store = transaction.objectStore(this.storeName);
         store.clear();
         stories.forEach((story) => store.put(story));
+        this.guard.captureAfter(transaction,[this.storeName]);
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error);
         transaction.onabort = () => reject(transaction.error);
@@ -114,7 +120,9 @@ class OfflineStoryDB {
       if (this.useEntryStore()) return await offlineStoryEntryDb.delete(storyId);
       await this.enqueueWrite((db) => new Promise((resolve, reject) => {
         const transaction = db.transaction(this.storeName, "readwrite");
+        this.guard.protect(transaction,[this.storeName]);
         transaction.objectStore(this.storeName).delete(storyId);
+        this.guard.captureAfter(transaction,[this.storeName]);
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error);
         transaction.onabort = () => reject(transaction.error);
@@ -130,7 +138,9 @@ class OfflineStoryDB {
       if (this.useEntryStore()) return await offlineStoryEntryDb.clearAll();
       await this.enqueueWrite((db) => new Promise((resolve, reject) => {
         const transaction = db.transaction(this.storeName, "readwrite");
+        this.guard.protect(transaction,[this.storeName]);
         transaction.objectStore(this.storeName).clear();
+        this.guard.captureAfter(transaction,[this.storeName]);
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error);
         transaction.onabort = () => reject(transaction.error);
@@ -146,7 +156,9 @@ class OfflineStoryDB {
     try {
       await this.enqueueWrite((db) => new Promise((resolve, reject) => {
         const transaction = db.transaction(this.storeName, "readwrite");
+        this.guard.protect(transaction,[this.storeName]);
         transaction.objectStore(this.storeName).clear();
+        this.guard.captureAfter(transaction,[this.storeName]);
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error);
         transaction.onabort = () => reject(transaction.error);

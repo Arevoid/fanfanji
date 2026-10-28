@@ -34,8 +34,8 @@ try {
   assert.equal(await first.api.initializeMemoryWriterCoordination(), "writer", "no Web Locks: single page can write");
   assert.equal(first.api.canWriteMemoryStorage("phone_messages"), true);
   const second = await page();
-  assert.equal(await second.api.initializeMemoryWriterCoordination(), "readonly");
-  assert.equal(second.api.canWriteMemoryStorage("phone_messages"), false);
+  assert.equal(await second.api.initializeMemoryWriterCoordination(), "writer", "each page can attempt guarded saves");
+  assert.equal(second.api.canWriteMemoryStorage("phone_messages"), true);
   first.window.dispatchEvent(new Event("pagehide"));
   await new Promise(resolve => setTimeout(resolve, 20));
   const third = await page();
@@ -43,8 +43,8 @@ try {
   const originalNow = Date.now;
   try {
     Date.now = () => originalNow() + MEMORY_WRITER_LEASE_MS + 1;
-    assert.equal(third.api.canWriteMemoryStorage("phone_messages"), false, "frozen writer fails closed before next write");
-    assert.equal(third.api.getMemoryWriterState(), "expired");
+    assert.equal(third.api.canWriteMemoryStorage("phone_messages"), true, "background pause cannot expire page write access");
+    assert.equal(third.api.getMemoryWriterState(), "writer");
   } finally { Date.now = originalNow; }
   await new Promise(resolve => setTimeout(resolve, 20));
   Object.defineProperty(globalThis, "navigator", { value: { locks: { request: () => { throw new Error("not supported"); } } }, configurable: true });
@@ -57,7 +57,7 @@ try {
   assert.equal(await native.api.initializeMemoryWriterCoordination(), "writer");
   Object.defineProperty(globalThis, "navigator", { value: {}, configurable: true });
   const mixed = await page();
-  assert.equal(await mixed.api.initializeMemoryWriterCoordination(), "readonly", "fallback client respects native writer's shared lease");
+  assert.equal(await mixed.api.initializeMemoryWriterCoordination(), "writer", "native and non-native clients both use per-save protection");
   native.window.dispatchEvent(new Event("pagehide"));
   await new Promise(resolve => setTimeout(resolve, 20));
   Object.defineProperty(globalThis, "indexedDB", { value: { open() { throw new Error("storage denied"); } }, configurable: true });
@@ -67,4 +67,4 @@ try {
 } finally {
   for (const item of modules) item.window.dispatchEvent(new Event("pagehide"));
 }
-console.log("Memory writer compatibility: atomic election, takeover, expiry, fallback and denied storage passed");
+console.log("Memory writer compatibility: legacy lease tests retained; pages no longer elect or expire writers, unavailable storage still fails safely");

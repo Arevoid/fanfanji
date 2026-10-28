@@ -1,3 +1,4 @@
+import { SnapshotWriteGuard } from "./saveConflictGuard";
 import type { Message, OfflineStory } from "../../types";
 import { canWriteMemoryStorage } from "./memoryWriterCoordination";
 import { storageKeys } from "./storageKeys";
@@ -37,7 +38,8 @@ function toMessageEntries(story: OfflineStory): OfflineStoryMessageRecord[] {
   }));
 }
 
-class OfflineStoryEntryDB {
+export class OfflineStoryEntryDB {
+  private guard = new SnapshotWriteGuard();
   private db: IDBDatabase | null = null;
   private writeQueue: Promise<void> = Promise.resolve();
 
@@ -96,6 +98,8 @@ class OfflineStoryEntryDB {
       messagesRequest.onerror = () => reject(messagesRequest.error);
       transaction.onerror = () => reject(transaction.error);
     });
+    this.guard.capture(OFFLINE_STORY_METADATA_STORE_NAME, records.metadata);
+    this.guard.capture(OFFLINE_STORY_MESSAGE_STORE_NAME, records.messages);
     const groupedMessages = new Map<string, OfflineStoryMessageRecord[]>();
     records.messages.forEach((entry) => {
       const existing = groupedMessages.get(entry.storyId) || [];
@@ -116,6 +120,7 @@ class OfflineStoryEntryDB {
   async replaceAll(stories: readonly OfflineStory[]): Promise<void> {
     await this.enqueue((database) => new Promise<void>((resolve, reject) => {
       const transaction = database.transaction([OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME], "readwrite");
+      this.guard.protect(transaction, [OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME]);
       const metadataStore = transaction.objectStore(OFFLINE_STORY_METADATA_STORE_NAME);
       const messageStore = transaction.objectStore(OFFLINE_STORY_MESSAGE_STORE_NAME);
       metadataStore.clear();
@@ -124,6 +129,7 @@ class OfflineStoryEntryDB {
         metadataStore.put(toMetadata(story, position));
         toMessageEntries(story).forEach((entry) => messageStore.put(entry));
       });
+      this.guard.captureAfter(transaction, [OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME]);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
@@ -133,6 +139,7 @@ class OfflineStoryEntryDB {
   async save(story: OfflineStory): Promise<void> {
     await this.enqueue((database) => new Promise<void>((resolve, reject) => {
       const transaction = database.transaction([OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME], "readwrite");
+      this.guard.protect(transaction, [OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME]);
       const metadataStore = transaction.objectStore(OFFLINE_STORY_METADATA_STORE_NAME);
       const messageStore = transaction.objectStore(OFFLINE_STORY_MESSAGE_STORE_NAME);
       const existingKeysRequest = messageStore.index("byStoryId").getAllKeys(story.id);
@@ -145,6 +152,7 @@ class OfflineStoryEntryDB {
         existingKeys.forEach((key) => messageStore.delete(key));
         metadataStore.put(toMetadata(story, existingPosition));
         toMessageEntries(story).forEach((entry) => messageStore.put(entry));
+        this.guard.captureAfter(transaction, [OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME]);
       };
       existingKeysRequest.onsuccess = () => {
         existingKeys = existingKeysRequest.result;
@@ -168,11 +176,13 @@ class OfflineStoryEntryDB {
   async delete(storyId: string): Promise<void> {
     await this.enqueue((database) => new Promise<void>((resolve, reject) => {
       const transaction = database.transaction([OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME], "readwrite");
+      this.guard.protect(transaction, [OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME]);
       const messageStore = transaction.objectStore(OFFLINE_STORY_MESSAGE_STORE_NAME);
       const keysRequest = messageStore.index("byStoryId").getAllKeys(storyId);
       keysRequest.onsuccess = () => {
         keysRequest.result.forEach((key) => messageStore.delete(key));
         transaction.objectStore(OFFLINE_STORY_METADATA_STORE_NAME).delete(storyId);
+        this.guard.captureAfter(transaction, [OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME]);
       };
       keysRequest.onerror = () => transaction.abort();
       transaction.oncomplete = () => resolve();
@@ -184,8 +194,10 @@ class OfflineStoryEntryDB {
   async clearAll(): Promise<void> {
     await this.enqueue((database) => new Promise<void>((resolve, reject) => {
       const transaction = database.transaction([OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME], "readwrite");
+      this.guard.protect(transaction, [OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME]);
       transaction.objectStore(OFFLINE_STORY_METADATA_STORE_NAME).clear();
       transaction.objectStore(OFFLINE_STORY_MESSAGE_STORE_NAME).clear();
+      this.guard.captureAfter(transaction, [OFFLINE_STORY_METADATA_STORE_NAME, OFFLINE_STORY_MESSAGE_STORE_NAME]);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);

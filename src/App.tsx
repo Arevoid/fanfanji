@@ -719,6 +719,10 @@ export default function App() {
   useEffect(() => {
     const onStorageWriteFailure = (event: Event) => {
       const detail = (event as CustomEvent<{ error?: string; key?: string; source?: string }>).detail;
+      if (detail?.error === "conflict") {
+        setStorageWriteWarning("数据已被其他页面更新，本次未覆盖。请先保留当前输入，再刷新页面后重试；其他功能仍可使用。");
+        return;
+      }
       const target = detail?.source === "memory-indexeddb" ? "记忆 IndexedDB" : "LocalStorage";
       const reason = detail?.error === "quota"
         ? `${target} 空间不足`

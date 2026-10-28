@@ -1,3 +1,4 @@
+import { KeyWriteGuard } from "./saveConflictGuard";
 import type { ReadingBookAsset, ReadingStore } from "../../domain/reading/types";
 import { canWriteMemoryStorage } from "./memoryWriterCoordination";
 import { storageKeys } from "./storageKeys";
@@ -22,7 +23,8 @@ function isValidAsset(asset: ReadingBookAsset): boolean {
     && Number.isFinite(asset.createdAt) && asset.createdAt >= 0;
 }
 
-class ReadingAssetDB {
+export class ReadingAssetDB {
+  private metadataGuard = new KeyWriteGuard();
   private db: IDBDatabase | null = null;
   private coverDb: IDBDatabase | null = null;
   private metadataDb: IDBDatabase | null = null;
@@ -168,7 +170,9 @@ class ReadingAssetDB {
     if (key === "messages-v4" && !canWriteMemoryStorage(storageKeys.messages)) throw new Error("聊天存储只读，请刷新页面后重试");
     return new Promise((resolve, reject) => {
       const transaction = database.transaction(METADATA_STORE, "readwrite");
+      this.metadataGuard.protect(transaction,METADATA_STORE,key);
       transaction.objectStore(METADATA_STORE).put(value, key);
+      this.metadataGuard.captureAfter(transaction,METADATA_STORE,key);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
@@ -183,8 +187,9 @@ class ReadingAssetDB {
     if (!key) return null;
     const database = await this.initMetadata();
     return new Promise((resolve, reject) => {
-      const request = database.transaction(METADATA_STORE, "readonly").objectStore(METADATA_STORE).get(key);
-      request.onsuccess = () => resolve(request.result && typeof request.result === "object" ? request.result as T : null);
+      const tx = database.transaction(METADATA_STORE, "readonly");
+      const request = tx.objectStore(METADATA_STORE).get(key);
+      request.onsuccess = () => { this.metadataGuard.capture(key,request.result); resolve(request.result && typeof request.result === "object" ? request.result as T : null); };
       request.onerror = () => reject(request.error);
     });
   }
@@ -194,7 +199,9 @@ class ReadingAssetDB {
     const database = await this.initMetadata();
     return new Promise((resolve, reject) => {
       const transaction = database.transaction(METADATA_STORE, "readwrite");
+      this.metadataGuard.protect(transaction,METADATA_STORE,key);
       transaction.objectStore(METADATA_STORE).delete(key);
+      this.metadataGuard.captureAfter(transaction,METADATA_STORE,key);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);

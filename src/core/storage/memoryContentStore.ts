@@ -1,5 +1,6 @@
 import type { StorageErrorKind, StorageResult, StorageWriteResult } from "./storageTypes";
 import { isMemoryContentKey, LEGACY_MEMORY_TRANSACTION_KEY, MEMORY_CONTENT_DB_NAME } from "./memoryContentKeys";
+import { reportSaveConflict } from "./saveConflictGuard";
 
 interface ContentRow { key: [string, string]; dataset: string; value: string; order: number; characterId?: string; relationId?: string; userIdentityId?: string; conversationId?: string }
 interface Dataset { key: string; shape: "array" | "object" | "value"; fields?: Record<string, unknown>; arrays?: string[] }
@@ -108,7 +109,25 @@ export class MemoryContentStore {
     this.running = (async () => {
       try {
         const tx = this.db!.transaction([RECORDS, DATASETS], "readwrite"), done = complete(tx);
+        void done.catch(() => {});
         const records = tx.objectStore(RECORDS), datasets = tx.objectStore(DATASETS);
+        // Compare and write share one serialized transaction. A suspended page
+        // may save again, but may never overwrite a newer dataset snapshot.
+        for (const key of batch.keys()) {
+          const [dataset, rows] = await Promise.all([
+            request(datasets.get(key)) as Promise<Dataset | undefined>,
+            request(records.index("dataset").getAll(key)) as Promise<ContentRow[]>,
+          ]);
+          const current = dataset ? decode(dataset,rows) : undefined;
+          const before = this.committed.get(key);
+          if ((current === undefined) !== (before === undefined)
+            || current !== undefined && before !== undefined && canonical(JSON.parse(current)) !== canonical(JSON.parse(before))) {
+            tx.abort(); await done.catch(() => {});
+            this.cache = new Map(this.committed); this.pending.clear();
+            reportSaveConflict(key);
+            return {success:false,error:"conflict" as const};
+          }
+        }
         for (const [key, raw] of batch) {
           const before = this.committed.get(key);
           const old = before === undefined ? undefined : encode(key, before);
@@ -135,26 +154,34 @@ export class MemoryContentStore {
     this.starting = this.start(input);
     return this.starting;
   }
-  private async copyMigration(source: Map<string, string>, oldRows: ContentRow[], oldDatasets: Dataset[]): Promise<void> {
-    const keys = new Set([...source.keys(), ...oldDatasets.map(dataset => dataset.key), ...oldRows.map(row => row.dataset)]);
-    for (const key of keys) {
-      const raw = source.get(key), next = raw === undefined ? undefined : encode(key, raw);
-      const previous = new Map(oldRows.filter(row => row.dataset === key).map(row => [row.key[1], row]));
-      const incoming = new Map(next?.rows.map(row => [row.key[1], row]) || []);
-      const deletes = [...previous].filter(([id]) => !incoming.has(id)).map(([, row]) => row.key);
-      const puts = [...incoming].filter(([id, row]) => previous.get(id)?.value !== row.value || previous.get(id)?.order !== row.order).map(([, row]) => row);
-      for (let offset = 0; offset < Math.max(deletes.length, puts.length); offset += 200) {
-        if (!this.allowed()) throw new Error("Writer permission expired during migration");
-        const tx = this.db!.transaction(RECORDS, "readwrite"), done = complete(tx), records = tx.objectStore(RECORDS);
-        for (const id of deletes.slice(offset, offset + 200)) records.delete(id);
-        for (const row of puts.slice(offset, offset + 200)) records.put(row);
-        await done;
+  private async copyMigration(source: Map<string, string>, _oldRows: ContentRow[], _oldDatasets: Dataset[], verifySource: () => boolean): Promise<void> {
+    if (!this.allowed()) throw new Error("Migration unavailable");
+    const tx = this.db!.transaction([RECORDS, DATASETS, META], "readwrite"), done = complete(tx);
+    void done.catch(() => {});
+    try {
+      // A concurrent opener may already have completed cutover. Never replace
+      // its now-live datasets using an earlier legacy snapshot.
+      const active = await request(tx.objectStore(META).get("active"));
+      if (active) { await done; return; }
+      const records = tx.objectStore(RECORDS), datasets = tx.objectStore(DATASETS);
+      records.clear(); datasets.clear();
+      for (const [key, raw] of source) {
+        const next = encode(key, raw);
+        for (let index = 0; index < next.rows.length; index++) {
+          if (index % 200 === 0 && !this.allowed()) throw new Error("Migration interrupted");
+          records.put(next.rows[index]);
+        }
+        datasets.put(next.dataset);
       }
-      if (!this.allowed()) throw new Error("Writer permission expired during migration");
-      const tx = this.db!.transaction(DATASETS, "readwrite"), done = complete(tx);
-      if (next) tx.objectStore(DATASETS).put(next.dataset); else tx.objectStore(DATASETS).delete(key);
+      const [verifiedDatasets, verifiedRows] = await Promise.all([
+        request(datasets.getAll()) as Promise<Dataset[]>, request(records.getAll()) as Promise<ContentRow[]>,
+      ]);
+      const verified = new Map(verifiedDatasets.map(dataset => [dataset.key, decode(dataset, verifiedRows.filter(row => row.dataset === dataset.key))]));
+      if (!verifySource() || !this.allowed() || [...source].some(([key, raw]) => !verified.has(key) || canonical(JSON.parse(verified.get(key)!)) !== canonical(JSON.parse(raw))))
+        throw new Error("Migration verification failed");
+      tx.objectStore(META).put({version:1,at:Date.now()},"active");
       await done;
-    }
+    } catch (error) { try { tx.abort(); } catch {} await done.catch(() => {}); throw error; }
   }
   private async start(input: { factory: IDBFactory; legacy: Storage; writable: boolean }): Promise<StorageWriteResult> {
     try {
@@ -190,7 +217,7 @@ export class MemoryContentStore {
         try { applyLegacyMemoryJournal(source, journalRaw); } catch { return this.fail(LEGACY_MEMORY_TRANSACTION_KEY, "validation"); }
         // A readonly window may display a consistent legacy view, but never migrates.
         if (!input.writable) { this.cache = source; this.committed = new Map(source); this.phase = "ready"; return { success: true }; }
-        await this.copyMigration(source, rows, datasets);
+        await this.copyMigration(source, rows, datasets, () => [...originals].every(([key, raw]) => input.legacy.getItem(key) === raw) && input.legacy.getItem(LEGACY_MEMORY_TRANSACTION_KEY) === journalRaw);
         // Read back every dataset before publishing the cutover marker.
         const verifyTx = this.db.transaction([RECORDS, DATASETS], "readonly");
         const [verifiedDatasets, verifiedRows] = await Promise.all([request(verifyTx.objectStore(DATASETS).getAll()) as Promise<Dataset[]>, request(verifyTx.objectStore(RECORDS).getAll()) as Promise<ContentRow[]>]);
