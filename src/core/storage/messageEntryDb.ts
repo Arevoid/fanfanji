@@ -1,4 +1,6 @@
 import type { Message } from "../../types";
+import { canWriteMemoryStorage } from "./memoryWriterCoordination";
+import { storageKeys } from "./storageKeys";
 
 export const MESSAGE_ENTRY_DB_NAME = "FanfanjiMessageEntryDB";
 export const MESSAGE_ENTRY_DB_VERSION = 3;
@@ -95,7 +97,11 @@ class MessageEntryDB {
   }
 
   private enqueue(operation: (database: IDBDatabase) => Promise<void>): Promise<void> {
-    const next = this.writeQueue.then(async () => operation(await this.init()));
+    const next = this.writeQueue.then(async () => {
+      const database = await this.init();
+      if (!canWriteMemoryStorage(storageKeys.messages)) throw new Error("聊天存储只读，请刷新页面后重试");
+      return operation(database);
+    });
     this.writeQueue = next.catch(() => undefined);
     return next;
   }

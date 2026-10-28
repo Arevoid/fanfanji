@@ -1,4 +1,6 @@
 import type { OfflineStory } from "../../types";
+import { canWriteMemoryStorage } from "./memoryWriterCoordination";
+import { storageKeys } from "./storageKeys";
 import { isOfflineStoryEntryStoreEnabled } from "./contentStorageFlags";
 import { offlineStoryEntryDb } from "./offlineStoryEntryDb";
 import { enterContentStorageOperation } from "./contentStorageRuntimeLock";
@@ -14,7 +16,11 @@ class OfflineStoryDB {
   }
 
   private enqueueWrite(operation: (db: IDBDatabase) => Promise<void>): Promise<void> {
-    const next = this.writeQueue.then(async () => operation(await this.init()));
+    const next = this.writeQueue.then(async () => {
+      const database = await this.init();
+      if (!canWriteMemoryStorage(storageKeys.offlineStories)) throw new Error("线下存储只读，请刷新页面后重试");
+      return operation(database);
+    });
     // Keep the queue usable after a failed write while preserving the error for
     // the caller that initiated this operation.
     this.writeQueue = next.catch(() => undefined);

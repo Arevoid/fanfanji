@@ -1,4 +1,6 @@
 import type { ReadingBookAsset, ReadingStore } from "../../domain/reading/types";
+import { canWriteMemoryStorage } from "./memoryWriterCoordination";
+import { storageKeys } from "./storageKeys";
 
 const DB_NAME = "FanfanjiReadingDB";
 const DB_VERSION = 1;
@@ -163,6 +165,7 @@ class ReadingAssetDB {
   async saveMetadataValue<T>(key: string, value: T): Promise<void> {
     if (!key) throw new Error("Reading metadata key is required");
     const database = await this.initMetadata();
+    if (key === "messages-v4" && !canWriteMemoryStorage(storageKeys.messages)) throw new Error("聊天存储只读，请刷新页面后重试");
     return new Promise((resolve, reject) => {
       const transaction = database.transaction(METADATA_STORE, "readwrite");
       transaction.objectStore(METADATA_STORE).put(value, key);

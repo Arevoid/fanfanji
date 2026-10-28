@@ -1,4 +1,4 @@
-import {StrictMode} from 'react';
+import {StrictMode, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
 import './index.css';
 import { ThemeProvider } from './features/theme/ThemeProvider.tsx';
@@ -6,11 +6,21 @@ import { isDevLoopbackOrigin } from './core/runtime/devOrigin.ts';
 import { installDevRuntimeProbe } from './core/runtime/devDiagnostics.ts';
 import { initializeMemoryAdmissionV2Promotion } from './features/chat/services/directChatMemoryAdmissionPromotion.ts';
 import { recoverMemoryStoreTransaction } from './core/storage/memoryStoreTransaction.ts';
-import { initializeMemoryWriterCoordination } from './core/storage/memoryWriterCoordination.ts';
+import { initializeMemoryWriterCoordination, getMemoryWriterState, subscribeMemoryWriterState } from './core/storage/memoryWriterCoordination.ts';
 import { recoverSourceMessageMutation } from './features/characterKnowledge/services/sourceMessageMutationService.ts';
 
 installDevRuntimeProbe();
 const applicationRoot = createRoot(document.getElementById('root')!);
+function MemoryWriterNotice() {
+  const current = useSyncExternalStore(subscribeMemoryWriterState, getMemoryWriterState);
+  if (current === 'writer') return null;
+  return <div role="status" className="fixed left-0 right-0 top-0 z-[10000] bg-amber-100 p-3 text-center text-sm text-amber-950">
+    {current === 'unsupported' ? '当前浏览器无法建立安全写入保护，聊天和记忆暂为只读。请允许网站存储，或更新浏览器后重试。'
+      : current === 'expired' ? '页面写入权限已过期，聊天和记忆暂为只读。请刷新本页，重新加载最新数据后继续。'
+      : '另一个窗口正在维护聊天和记忆，此窗口只读。关闭另一个窗口后刷新本页；异常关闭时，请等待约30秒再刷新。'}
+    <button type="button" className="ml-3 underline" onClick={() => window.location.reload()}>刷新本页</button>
+  </div>;
+}
 async function mountApplication() {
 applicationRoot.render(<div role="status" style={{ padding: 24, fontFamily: 'system-ui' }}>正在打开米饭机…</div>);
 const memoryWriter = await initializeMemoryWriterCoordination();
@@ -33,10 +43,7 @@ const App = appModule.default;
 applicationRoot.render(
   <StrictMode>
     <ThemeProvider>
-      {memoryWriter !== 'writer' && <div role="status" className="fixed left-0 right-0 top-0 z-[10000] bg-amber-100 p-3 text-center text-sm text-amber-950">
-        {memoryWriter === 'unsupported' ? '当前浏览器无法提供跨窗口写入保护，聊天来源和记忆暂为只读。请使用支持 Web Locks 的浏览器。' : '另一个窗口正在维护聊天和记忆，此窗口只读，不能保存相关修改。关闭另一个窗口后，刷新本页即可编辑。'}
-        <button type="button" className="ml-3 underline" onClick={() => window.location.reload()}>刷新本页</button>
-      </div>}
+      <MemoryWriterNotice />
       {memoryRecovery.success ? <App /> : <div role="alert">记忆恢复尚未完成。原始快照已保留，请释放浏览器存储空间后重新打开。</div>}
     </ThemeProvider>
   </StrictMode>,

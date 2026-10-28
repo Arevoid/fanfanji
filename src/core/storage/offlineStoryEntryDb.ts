@@ -1,4 +1,6 @@
 import type { Message, OfflineStory } from "../../types";
+import { canWriteMemoryStorage } from "./memoryWriterCoordination";
+import { storageKeys } from "./storageKeys";
 
 export const OFFLINE_STORY_ENTRY_DB_NAME = "FanfanjiOfflineStoryEntryDB";
 export const OFFLINE_STORY_ENTRY_DB_VERSION = 1;
@@ -68,7 +70,11 @@ class OfflineStoryEntryDB {
   }
 
   private enqueue(operation: (database: IDBDatabase) => Promise<void>): Promise<void> {
-    const next = this.writeQueue.then(async () => operation(await this.init()));
+    const next = this.writeQueue.then(async () => {
+      const database = await this.init();
+      if (!canWriteMemoryStorage(storageKeys.offlineStories)) throw new Error("线下存储只读，请刷新页面后重试");
+      return operation(database);
+    });
     this.writeQueue = next.catch(() => undefined);
     return next;
   }
