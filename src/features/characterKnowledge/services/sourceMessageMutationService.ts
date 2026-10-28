@@ -7,7 +7,7 @@ import { loadCharacterContinuity, CHARACTER_CONTINUITY_KEY } from "../../../core
 import { loadMemories } from "../../../core/storage/repositories/memoryRepository";
 import { loadMemoryMentions, MEMORY_MENTION_KEY } from "../../../core/storage/repositories/memoryMentionRepository";
 import { readJson } from "../../../core/storage/storageAdapter";
-import { replaceMemoryStores } from "../../../core/storage/memoryStoreTransaction";
+import { replaceMemoryStores, confirmMemoryPersistence } from "../../../core/storage/memoryStoreTransaction";
 import { storageKeys } from "../../../core/storage/storageKeys";
 import { retractKnowledgeClaimsBySourceMessageIds } from "../../../domain/characterKnowledge/knowledgeConflictPolicy";
 import { invalidateMemoryCaches } from "../../../core/storage/memoryCacheInvalidation";
@@ -32,7 +32,7 @@ export async function recoverSourceMessageMutation(): Promise<boolean> {
     ||op.replacements.some(message=>!message||typeof message.id!=="string"||typeof message.content!=="string"||!op.targets.some(target=>target.characterId===message.characterId&&target.relationId===message.relationId&&target.conversationId===message.conversationId)))return false;
   const source=await loadCommittedMessages();if(!source.valid)return false;
   if(!saveMessages(patch(source.value,op)).success||!(await flushMessages()).success)return false;
-  return replaceMemoryStores({[SOURCE_MUTATION_KEY]:null}).success;
+  return (await confirmMemoryPersistence(replaceMemoryStores({[SOURCE_MUTATION_KEY]:null}))).success;
 }
 
 export async function mutateSourceMessages(targets: readonly Message[], replacements: readonly Message[] = []): Promise<boolean> {
@@ -73,7 +73,7 @@ export async function mutateSourceMessages(targets: readonly Message[], replacem
       [CHARACTER_CONTINUITY_KEY]:{...continuity.value,revision:continuity.value.revision+1,
         impressions:continuity.value.impressions.map(record=>scopeMatches(record.scope)&&record.sourceClaimIds.some(id=>invalid.has(id))?{...record,status:"invalid"}:record)},
     });
-    if(!written.success)return false;
+    if(!(await confirmMemoryPersistence(written)).success)return false;
     invalidateMemoryCaches();
     return await recoverSourceMessageMutation();
   } finally {busy=false;}

@@ -1,3 +1,4 @@
+import {confirmMemoryPersistence} from '../../../core/storage/repositories/diaryRepository';
 import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
 import type {DiaryEntry,UserSettings} from "../../../types";
 import type {KnowledgeClaim} from "../../../domain/characterKnowledge/characterKnowledgeTypes";
@@ -43,13 +44,13 @@ export async function archivePendingDiaryReflection(settings:UserSettings,reques
  settings=resolveCharacterTextSettings(settings,undefined,entry.characterId);
  if(!settings.apiKey)return;
  const previous=budget.value[entry.ownerIdentityId];
- if(!writeJson(DIARY_ATTEMPTS_KEY,{...budget.value,[entry.ownerIdentityId]:{day,count:(previous?.day===day?previous.count:0)+1,nextAt:now+5*60_000}}).success)return;
+ if(!(await confirmMemoryPersistence(writeJson(DIARY_ATTEMPTS_KEY,{...budget.value,[entry.ownerIdentityId]:{day,count:(previous?.day===day?previous.count:0)+1,nextAt:now+5*60_000}}))).success)return;
  running=true;
  try{
   const result=await request({message:JSON.stringify({body:entry.body}),history:[],systemInstruction:"从这篇日记只提炼一条有持续意义的主观感受或反思。不要确认事件、推断用户性格或生成新事实。仅返回JSON {text,quote}：text不超过200字；quote为正文中不超过200字的连续原话。无持续意义返回null。",apiKey:settings.apiKey,apiEndpoint:settings.apiEndpoint,model:settings.selectedModel,purpose:"memory_extract",characterId:entry.characterId,relationId:entry.relationId,conversationId:entry.conversationId,maxOutputTokens:600,timeoutMs:30000});
   const raw=JSON.parse(result.text.trim().replace(/^```(?:json)?\s*/u,"").replace(/\s*```$/u,""));
   const latest=loadDiaryEntries();if(!visible()||!latest.valid||!latest.value.some(current=>current.id===entry.id&&current.body===entry.body&&current.updatedAt===entry.updatedAt))return;
   const reflection=raw===null?{text:"",quote:"",revision:sourceRevision(entry.body)}:typeof raw?.text==="string"&&typeof raw?.quote==="string"&&raw.text.length<=400&&raw.quote.trim()&&raw.quote.length<=400&&entry.body.includes(raw.quote)?{text:raw.text,quote:raw.quote,revision:sourceRevision(entry.body)}:undefined;
-  if(reflection&&saveDiaryEntries(latest.value.map(current=>current.id===entry.id?{...current,memoryReflection:reflection}:current)).success)syncDiaryReflections();
+  if(reflection&&(await confirmMemoryPersistence(saveDiaryEntries(latest.value.map(current=>current.id===entry.id?{...current,memoryReflection:reflection}:current)))).success)syncDiaryReflections();
  }catch{/* Source stays in its original diary store for a later bounded retry. */}finally{running=false;}
 }

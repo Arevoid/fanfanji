@@ -25,6 +25,7 @@ import { resolveCanonicalCharacterId } from "../domain/character/characterIdenti
 import { createDiaryId, getDiaryDayKey } from "../domain/diary/diaryData";
 import {
   loadDiaryDrafts,
+  confirmMemoryPersistence,
   loadDiaryEntries,
   loadDiaryGenerationTasks,
   loadDiaryShares,
@@ -183,9 +184,11 @@ export default function AppDiary({
     (entry) => entry.authorType === "user",
   );
 
-  const persist = (next: DiaryEntry[]) => {
-    saveDiaryEntries(next);
+  const persist = async (next: DiaryEntry[]) => {
+    const saved = await confirmMemoryPersistence(saveDiaryEntries(next));
+    if (!saved.success) { window.alert("日记未保存，原数据已保留。请检查存储诊断。"); return false; }
     setEntries(next);
+    return true;
   };
   const beginEdit = (entry?: DiaryEntry) => {
     setEditing(
@@ -211,7 +214,7 @@ export default function AppDiary({
       tags: entry?.tags.join("，") || "",
     });
   };
-  const saveEntry = (selectSavedEntry = true) => {
+  const saveEntry = async (selectSavedEntry = true) => {
     if (!editing || !draft.body.trim()) return;
     const now = Date.now();
     const entry: DiaryEntry = {
@@ -236,7 +239,7 @@ export default function AppDiary({
           item.entryId !== editing.id,
       ),
     );
-    persist([entry, ...entries.filter((item) => item.id !== entry.id)]);
+    if (!await persist([entry, ...entries.filter((item) => item.id !== entry.id)])) return;
     setEditing(null);
     if (selectSavedEntry) setSelectedId(entry.id);
   };
@@ -247,13 +250,13 @@ export default function AppDiary({
     }
     setEditing(null);
   };
-  const removeEntry = (entry: DiaryEntry) => {
+  const removeEntry = async (entry: DiaryEntry) => {
     if (!window.confirm("删除这篇日记？关联翻译会删除；已经发送到聊天中的冻结分享仍会保留。")) return;
     removeDiaryEntryArtifacts(entry.id);
-    persist(entries.filter((item) => item.id !== entry.id));
+    if (!await persist(entries.filter((item) => item.id !== entry.id))) return;
     setSelectedId(null);
   };
-  const shareEntry = (entry: DiaryEntry, target: (typeof directRelations)[number]) => {
+  const shareEntry = async (entry: DiaryEntry, target: (typeof directRelations)[number]) => {
     if (sharingRelationId) return;
     const displayName = target.character.remark || target.character.name;
     if (!window.confirm(`将当前日记的冻结副本明确分享给 ${displayName}？`)) return;
@@ -261,10 +264,10 @@ export default function AppDiary({
     setSharingRelationId(target.relation.id);
     try {
       const { share, message } = createDiaryShareMessage({ entry, relation: target.relation });
-      const writeResult = saveDiaryShares([
+      const writeResult = (await confirmMemoryPersistence(saveDiaryShares([
         share,
         ...loadDiaryShares().value.filter((item) => item.id !== share.id),
-      ]);
+      ])));
       if (!writeResult.success) throw new Error("分享快照保存失败，请检查本地存储空间");
       onSendMessage(message);
       onOpenChat(target.relation.characterId, target.relation.id, message.id);
@@ -319,7 +322,7 @@ export default function AppDiary({
         (task) => task.taskKey !== result.task.taskKey,
       ),
     ]);
-    if (result.entry) persist([result.entry, ...entries]);
+    if (result.entry) await persist([result.entry, ...entries]);
     else window.alert("生成失败，请检查模型设置后重试。");
     setBusyRelationId(null);
   };
@@ -430,8 +433,8 @@ export default function AppDiary({
                 {formatDate(selected.occurredAt)}
               </span>
               <button
-                onClick={() =>
-                  persist(
+                onClick={async () =>
+                  await persist(
                     entries.map((item) =>
                       item.id === selected.id
                         ? {

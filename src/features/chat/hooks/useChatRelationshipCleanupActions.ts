@@ -12,7 +12,7 @@ import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, load
 import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from "../../../domain/forum/forumShare";
 import { removeForumGenerationTasksByRelation } from "../../../domain/forum/forumGenerationGuard";
 import { removeCharacterLifeEventsForRelations } from "../../characterLife/services/characterEventCaptureService";
-import { removeCharacterTruthForRelations } from "../../characterKnowledge/services/characterTruthCleanupService";
+import { removeCharacterTruthForRelationsDurable as removeCharacterTruthForRelations } from "../../characterKnowledge/services/characterTruthCleanupService";
 import { removeProactiveTopicsForRelations } from "../../../core/storage/repositories/proactiveTopicRepository";
 import { removeContinuityRuntimeForRelations } from "../../../core/storage/repositories/continuityRuntimeRepository";
 import { removeCharacterLifeRuntimeForRelations } from "../../../core/storage/repositories/characterLifeRepository";
@@ -68,7 +68,7 @@ export function useChatRelationshipCleanupActions({
         .map((comment) => `${moment.id}:${comment.id}`)),
     );
 
-    const memoryCleanup=removeCharacterTruthForRelations([relationId]);
+    const memoryCleanup=await removeCharacterTruthForRelations([relationId]);
     if(!Object.values(memoryCleanup).every(Boolean)){window.alert("记忆清理未完成，聊天原文保留，请检查存储后重试。");return;}
     if(await clearMessagesAndLinkedArtifacts(friendId, relationId)===false){window.alert("聊天清理未完成，请重试。");return;}
     removeCharacterLifeEventsForRelations([relationId]);

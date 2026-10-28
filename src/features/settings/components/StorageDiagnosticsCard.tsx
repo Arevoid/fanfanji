@@ -85,6 +85,12 @@ export function StorageDiagnosticsCard({
             {diagnostics.health.indexedDb.length > 0 && <div>IndexedDB：{diagnostics.health.indexedDb.map((database) => `${database.name}（${database.records} 条）`).join("、")}</div>}
             {diagnostics.health.resources.length > 0 && <div>资源引用：{diagnostics.health.resources.map((resource) => `${resource.database}/${resource.store}（已存 ${resource.stored}，引用 ${resource.referenced}，孤儿 ${resource.orphaned}，缺失 ${resource.missing}）`).join("；")}</div>}
             {diagnostics.health.findings.slice(0, 5).map((finding) => <div key={`${finding.key}-${finding.kind}`} className="text-amber-700">待检查：{finding.key} · {finding.detail}</div>)}
+            {diagnostics.memoryContent && <div className="rounded-lg border border-current/15 p-2">
+              <div>记忆 IndexedDB：{diagnostics.memoryContent.phase === "ready" ? "已就绪" : diagnostics.memoryContent.phase === "failed" ? "保存失败，等待处理" : "尚未就绪"} · 正文估算 {formatStorageBytes(diagnostics.memoryContent.bytes)} · {diagnostics.memoryContent.datasets} 个数据集</div>
+              <div>待确认保存：{diagnostics.memoryContent.pending}；旧副本剩余：{diagnostics.memoryContent.legacyRemaining}</div>
+              {diagnostics.memoryContent.failure && <div role="alert">最近失败：{diagnostics.memoryContent.failure.key} · {diagnostics.memoryContent.failure.error} · {new Date(diagnostics.memoryContent.failure.at).toLocaleString()}。原正式数据保留，请先备份再处理。</div>}
+            </div>}
+            <div>结构检查正常不代表容量充足；浏览器总配额不能替代 LocalStorage 的独立容量限制。</div>
             {diagnostics.localStorageEntries.slice(0, 3).map((entry) => <div key={entry.key} className="truncate">最大项目：{entry.key}（{formatStorageBytes(entry.bytes)}）</div>)}
             {!diagnostics.persisted && <button type="button" onClick={onRequestPersistence} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">申请浏览器持久化存储</button>}
             <button type="button" onClick={onDownloadDiagnosticReport} className="mt-2 rounded-[10px] bg-white px-3 py-2 font-bold text-slate-600 border border-slate-200">下载无隐私诊断报告</button>

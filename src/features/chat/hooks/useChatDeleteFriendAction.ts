@@ -12,7 +12,7 @@ import { commitForumMutation, loadForumActivityTasks, loadForumActorStates, load
 import { removeForumSharesByRelation, unlinkForumPrivateAuthorByRelation } from "../../../domain/forum/forumShare";
 import { removeForumGenerationTasksByRelation } from "../../../domain/forum/forumGenerationGuard";
 import { removeCharacterLifeEventsForRelations } from "../../characterLife/services/characterEventCaptureService";
-import { removeCharacterTruthForRelations } from "../../characterKnowledge/services/characterTruthCleanupService";
+import { removeCharacterTruthForRelationsDurable as removeCharacterTruthForRelations } from "../../characterKnowledge/services/characterTruthCleanupService";
 import { removeProactiveTopicsForRelations } from "../../../core/storage/repositories/proactiveTopicRepository";
 import { removeBlockedDeliveriesByRelation, removeFriendRequestsByRelation } from "../services/relationshipBlockRuntime";
 import { RED_PACKET_STATUSES_KEY, removePaymentStatusesByRelation, type RedPacketStatusMap } from "../services/paymentScope";
@@ -87,7 +87,7 @@ export function useChatDeleteFriendAction({
     }
     const friendId = activeCharacter.id;
     const relationId = relationToDelete?.id || orphanRelationId!;
-    const memoryCleanup=removeCharacterTruthForRelations([relationId]);
+    const memoryCleanup=await removeCharacterTruthForRelations([relationId]);
     if(!Object.values(memoryCleanup).every(Boolean)){showToast("记忆清理未完成，好友和聊天保留，请检查存储后重试。");return;}
     removeBlockedDeliveriesByRelation(relationId);
     removeFriendRequestsByRelation(relationId);

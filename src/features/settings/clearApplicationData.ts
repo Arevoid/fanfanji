@@ -29,6 +29,10 @@ function getDefaultDependencies(): ClearApplicationDataDependencies {
     sessionStorage: window.sessionStorage,
     cacheStorage: typeof caches === "undefined" ? undefined : caches,
     binaryStoreClearers: [
+      async () => { if (memoryContentStore.active) {
+        const result = memoryContentStore.stage(Object.fromEntries(Object.keys(memoryContentStore.exportSnapshot()).map(key => [key, null])));
+        if (!result.success || !(await memoryContentStore.flush()).success) throw new Error("记忆数据库清理失败，已保留原数据");
+      } },
       () => audioDb.clearAll(),
       () => imageAssetDb.clearAll(),
       () => stickerDb.clearAll(),
@@ -65,3 +69,4 @@ export async function clearApplicationData(
 }
 
 export type { ClearApplicationDataDependencies };
+import { memoryContentStore } from "../../core/storage/memoryContentStore";

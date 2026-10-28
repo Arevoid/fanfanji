@@ -25,3 +25,4 @@ export const getMemoryDiaryHistory=(identityId:string,characterId:string,relatio
  &&(characterId==="all"||entry.characterId===characterId)&&(relationId==="all"||entry.relationId===relationId)
  &&`${entry.title||""}\n${entry.body}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).sort((a,b)=>b.createdAt-a.createdAt);
 export { loadCharacterContinuity as readMemoryContinuityBackup } from "../../../core/storage/repositories/characterContinuityRepository";
+export { confirmMemoryPersistence } from "../../../core/storage/memoryStoreTransaction";

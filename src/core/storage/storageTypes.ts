@@ -23,4 +23,7 @@ export interface StorageResult<T> {
 export interface StorageWriteResult {
   success: boolean;
   error?: StorageErrorKind;
+  /** Accepted into the working snapshot; callers must await durable confirmation. */
+  pending?: boolean;
+  durable?: Promise<StorageWriteResult>;
 }

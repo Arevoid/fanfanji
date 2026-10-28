@@ -4,7 +4,7 @@ import { notifyForumStateChanged } from "../../../core/storage/repositories/foru
 import { notifyAppearanceSettingsChanged } from "../../theme/appearanceRepository";
 import { offlineStoryDb } from "../../../core/storage/offlineStoryDb";
 import { mergeOfflineStoryCollections } from "../../../core/storage/repositories/offlineRepository";
-import { buildSystemBackup, checksumPayload, filterSystemBackupLocalStorageForRestore, inspectSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb, snapshotSystemBackupIndexedDb, splitSystemBackupJson } from "../systemBackup";
+import { buildSystemBackup, checksumPayload, filterSystemBackupLocalStorageForRestore, inspectSystemBackup, parseSystemBackup, restoreSystemBackupIndexedDb, snapshotSystemBackupIndexedDb, iterateSystemBackupJson, memoryBackupSnapshot, isMemoryContentKey, restoreMemoryBackupEntries, applyLegacyMemoryJournal, prepareMemoryBackupEntries } from "../systemBackup";
 import { readString, remove as removeStoredValue, writeString } from "../../../core/storage/storageAdapter";
 import { storageKeys } from "../../../core/storage/storageKeys";
 import { missingMemoryBackupKeys } from "../../../core/storage/memoryBackupKeys";
@@ -18,7 +18,7 @@ interface UseSystemBackupActionsOptions {
 }
 
 function snapshotLocalStorage(): Map<string, string> {
-  const snapshot = new Map<string, string>();
+  const snapshot = new Map<string, string>(Object.entries(memoryBackupSnapshot()));
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
     if (key !== null) {
@@ -79,7 +79,7 @@ export function useSystemBackupActions({ backupKeys, fullBackupKeys, lightBackup
     // final bytes so an exported backup can pass checksum verification when it
     // is imported again.
     const signedBackupData = { ...backupData, checksum: checksumPayload(backupData) };
-    const blob = new Blob(splitSystemBackupJson(JSON.stringify(signedBackupData, null, 2)), { type: "application/json" });
+    const blob = new Blob([...iterateSystemBackupJson(signedBackupData)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -119,6 +119,7 @@ export function useSystemBackupActions({ backupKeys, fullBackupKeys, lightBackup
         const snapshot = snapshotLocalStorage();
         const indexedDbSnapshot = await snapshotSystemBackupIndexedDb();
         const writtenKeys: string[] = [];
+        const memoryEntries = prepareMemoryBackupEntries(parsedBackup.localStorage);
         const previousOfflineStories = await offlineStoryDb.loadAll();
         let indexedDbRestoreReport = { restoredKeys: [] as string[], skippedKeys: [] as string[] };
         const hasOfflineEntryBackup = Array.isArray(parsedBackup.indexedDb["offline-story-entry-v1"]);
@@ -126,25 +127,37 @@ export function useSystemBackupActions({ backupKeys, fullBackupKeys, lightBackup
         try {
           for (const key of missingMemoryBackupKeys(parsedBackup.localStorage)) {
             writtenKeys.push(key);
+            if (isMemoryContentKey(key)) { memoryEntries[key] = null; continue; }
             const removed = removeStoredValue(key);
             if (!removed.success) throw new Error(`清理旧记忆进度失败：${key}`);
           }
           for (const [key, value] of entriesToWrite) {
+            if (key === "phone_memory_restore_transaction_v1") continue;
+            if (isMemoryContentKey(key) && value === null) { memoryEntries[key] = null; continue; }
             if (typeof value !== "string") continue;
             writtenKeys.push(key);
             const restoredValue = sanitizeValue(key, value, parsedBackup.localStorage) || value;
+            if (isMemoryContentKey(key)) { JSON.parse(restoredValue); memoryEntries[key] = restoredValue; continue; }
             const writeResult = writeString(key, restoredValue);
             if (!writeResult.success) throw new Error(`恢复 ${key} 失败：${writeResult.error || "write"}`);
           }
+          const consistentMemory = new Map(Object.entries(memoryEntries).filter((entry): entry is [string, string] => entry[1] !== null));
+          applyLegacyMemoryJournal(consistentMemory, parsedBackup.localStorage.phone_memory_restore_transaction_v1 ?? null);
+          for (const key of Object.keys(memoryEntries)) memoryEntries[key] = consistentMemory.get(key) ?? null;
+          for (const [key, raw] of consistentMemory) memoryEntries[key] = raw;
           indexedDbRestoreReport = await restoreSystemBackupIndexedDb(parsedBackup.indexedDb);
           if (typeof restoredOfflineStories === "string") {
             const parsedStories = JSON.parse(restoredOfflineStories) as unknown;
             if (!Array.isArray(parsedStories)) throw new Error("线下故事备份格式无效");
             await offlineStoryDb.replaceAll(parsedStories as OfflineStory[]);
           }
+          const memoryWrite = await restoreMemoryBackupEntries(memoryEntries);
+          if (!memoryWrite.success) throw new Error(`记忆数据库恢复失败：${memoryWrite.error}`);
         } catch (writeError) {
+          const restoreMemory: Record<string, string | null> = {};
           for (const key of writtenKeys) {
             const previousValue = snapshot.get(key);
+            if (isMemoryContentKey(key)) { restoreMemory[key] = previousValue ?? null; continue; }
             try {
               if (previousValue === undefined) removeStoredValue(key);
               else writeString(key, previousValue);
@@ -152,6 +165,7 @@ export function useSystemBackupActions({ backupKeys, fullBackupKeys, lightBackup
               console.error("Backup restore rollback failed:", rollbackError);
             }
           }
+          await restoreMemoryBackupEntries(restoreMemory);
           try {
             await offlineStoryDb.replaceAll(previousOfflineStories);
           } catch (offlineRollbackError) {

@@ -1,4 +1,37 @@
 import { readingAssetDb } from "../../core/storage/readingAssetDb";
+import { memoryContentStore, applyLegacyMemoryJournal } from "../../core/storage/memoryContentStore";
+import { isMemoryContentKey } from "../../core/storage/memoryContentKeys";
+import { writeString, remove as removeStoredValue } from "../../core/storage/storageAdapter";
+import { missingMemoryBackupKeys } from "../../core/storage/memoryBackupKeys";
+
+export function prepareMemoryBackupEntries(source: Readonly<Record<string, string | null>>): Record<string, string | null> {
+  const result: Record<string, string | null> = Object.fromEntries(Object.entries(source).filter(([key]) => isMemoryContentKey(key)));
+  if (["phone_character_knowledge_claims", "phone_memory_vault_items", "phone_characters", "phone_characters_v3"].some(key => Object.hasOwn(source, key))) {
+    for (const key of Object.keys(memoryBackupSnapshot())) if (!Object.hasOwn(source, key)) result[key] = null;
+    for (const key of missingMemoryBackupKeys(source)) if (isMemoryContentKey(key)) result[key] = null;
+  }
+  const consistent = new Map(Object.entries(result).filter((entry): entry is [string, string] => entry[1] !== null));
+  applyLegacyMemoryJournal(consistent, source.phone_memory_restore_transaction_v1 ?? null);
+  for (const key of Object.keys(result)) result[key] = consistent.get(key) ?? null;
+  for (const [key, value] of consistent) result[key] = value;
+  return result;
+}
+
+/** Logical backup keys remain compatible with v2/v3 files, regardless of their physical store. */
+export function memoryBackupSnapshot(): Record<string, string> { return memoryContentStore.active ? memoryContentStore.exportSnapshot() : {}; }
+export { isMemoryContentKey };
+export { applyLegacyMemoryJournal };
+export async function restoreMemoryBackupEntries(entries: Readonly<Record<string, string | null>>): Promise<StorageWriteResult> {
+  if (!memoryContentStore.active) {
+    for (const [key, value] of Object.entries(entries)) {
+      const result = value === null ? removeStoredValue(key) : writeString(key, value);
+      if (!result.success) return result;
+    }
+    return { success: true };
+  }
+  const staged = memoryContentStore.stage(entries);
+  return staged.success ? memoryContentStore.flush() : staged;
+}
 export {MEMORY_BACKUP_KEYS} from "../../core/storage/memoryBackupKeys";
 import { flushCharacters } from "../../core/storage/repositories/characterRepository";
 import { flushMoments, mergeMomentSnapshots } from "../../core/storage/repositories/momentRepository";
@@ -166,10 +199,57 @@ export function normalizeSystemBackupIndexedDb(indexedDb: SystemBackupIndexedDb)
   return normalized;
 }
 
+function* jsonParts(value: unknown, parents = new Set<object>()): Generator<string> {
+  if (typeof value === "string") {
+    yield '"';
+    for (let start = 0; start < value.length;) {
+      let end = Math.min(value.length, start + 64 * 1024);
+      const last = value.charCodeAt(end - 1), next = value.charCodeAt(end);
+      if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end++;
+      yield JSON.stringify(value.slice(start, end)).slice(1, -1); start = end;
+    }
+    yield '"'; return;
+  }
+  if (!value || typeof value !== "object") { yield JSON.stringify(value) ?? "null"; return; }
+  if (parents.has(value)) throw new Error("备份内容含循环引用");
+  parents.add(value);
+  if (Array.isArray(value)) {
+    yield "[";
+    for (let i = 0; i < value.length; i++) { if (i) yield ","; yield* jsonParts(value[i], parents); }
+    yield "]";
+  } else {
+    yield "{"; let first = true;
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry === undefined || typeof entry === "function" || typeof entry === "symbol") continue;
+      if (!first) yield ","; first = false;
+      yield* jsonParts(key, parents); yield ":"; yield* jsonParts(entry, parents);
+    }
+    yield "}";
+  }
+  parents.delete(value);
+}
+
+/** Existing v3 wire format, emitted in bounded pieces rather than one giant string. */
+export function* iterateSystemBackupJson(value: SystemBackupEnvelope): Generator<string> {
+  let buffer = "";
+  for (const part of jsonParts(value)) {
+    buffer += part;
+    while (buffer.length >= SYSTEM_BACKUP_JSON_CHUNK_SIZE) {
+      let end = SYSTEM_BACKUP_JSON_CHUNK_SIZE;
+      const last = buffer.charCodeAt(end - 1), next = buffer.charCodeAt(end);
+      // Blob converts each string part separately to Unicode scalar values.
+      // Never split a surrogate pair across two parts.
+      if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end--;
+      yield buffer.slice(0, end); buffer = buffer.slice(end);
+    }
+  }
+  if (buffer) yield buffer;
+}
+
 export function checksumPayload(value: Pick<SystemBackupEnvelope, "format" | "version" | "exportedAt" | "localStorage" | "indexedDb">): string {
   // Serialize only the signed envelope fields. Callers may pass an envelope
   // that already has a stale `checksum` property while re-signing sanitized data.
-  const serialized = JSON.stringify({
+  const parts = jsonParts({
     format: value.format,
     version: value.version,
     exportedAt: value.exportedAt,
@@ -177,15 +257,16 @@ export function checksumPayload(value: Pick<SystemBackupEnvelope, "format" | "ve
     indexedDb: value.indexedDb,
   });
   let hash = 2166136261;
-  for (let index = 0; index < serialized.length; index += 1) {
-    hash ^= serialized.charCodeAt(index);
+  for (const part of parts) for (let index = 0; index < part.length; index += 1) {
+    hash ^= part.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
   return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 function readLocalStorage(storage: Storage, keys: readonly string[]): SystemBackupLocalStorage {
-  return Object.fromEntries(keys.map((key) => [key, storage.getItem(key)]));
+  const memory = memoryBackupSnapshot();
+  return Object.fromEntries(keys.map((key) => [key, isMemoryContentKey(key) && memoryContentStore.active ? memory[key] ?? null : storage.getItem(key)]));
 }
 
 function mergeMomentBackupCopies(localStorage: SystemBackupLocalStorage, indexedDb: SystemBackupIndexedDb): void {
@@ -282,7 +363,9 @@ export async function buildSystemBackup(
   localStorageKeys: readonly string[],
   flushers: SystemBackupFlushers = DEFAULT_SYSTEM_BACKUP_FLUSHERS,
 ): Promise<SystemBackupEnvelope> {
-  const backupLocalStorageKeys = includeCharacterPhoneLocalStorageKeys(storage, localStorageKeys);
+  if (memoryContentStore.active && !(await memoryContentStore.flush()).success) throw new Error("记忆尚未保存，不能导出成功备份。请保留页面并检查存储诊断。");
+  const memoryKeys = localStorageKeys.includes(storageKeys.characterKnowledgeClaims) || localStorageKeys.includes(storageKeys.memoryVaultItems) ? Object.keys(memoryBackupSnapshot()) : [];
+  const backupLocalStorageKeys = includeCharacterPhoneLocalStorageKeys(storage, [...new Set([...localStorageKeys, ...memoryKeys])]);
   const localStorageBeforeFlush = readLocalStorage(storage, backupLocalStorageKeys);
   await flushSystemBackupRepositories(flushers);
   const indexedDbEntries = await Promise.all(SYSTEM_BACKUP_INDEXED_DB_KEYS.map(async (key) => [
@@ -297,7 +380,8 @@ export async function buildSystemBackup(
   const localStorageAfterFlush = readLocalStorage(storage, backupLocalStorageKeys);
   const localStorage = Object.fromEntries(backupLocalStorageKeys.map((key) => [
     key,
-    localStorageAfterFlush[key] ?? localStorageBeforeFlush[key] ?? null,
+    isMemoryContentKey(key) && memoryContentStore.active ? localStorageAfterFlush[key] ?? null
+      : localStorageAfterFlush[key] ?? localStorageBeforeFlush[key] ?? null,
   ])) as SystemBackupLocalStorage;
   if (Array.isArray(indexedDbEntries.find(([key]) => key === INNER_VOICE_INDEXED_DB_KEY)?.[1])) {
     localStorage.phone_inner_voice_records = null;

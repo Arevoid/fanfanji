@@ -1,0 +1,55 @@
+import assert from "node:assert/strict";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
+import { memoryContentStore, MemoryContentStore } from "../src/core/storage/memoryContentStore";
+import { storageKeys } from "../src/core/storage/storageKeys";
+import { createManualKnowledgeClaim } from "../src/features/characterKnowledge/services/manualKnowledgeService";
+import { appendMany, loadKnowledgeClaims, listByRelation, saveKnowledgeClaims } from "../src/core/storage/repositories/characterKnowledgeRepository";
+import { loadConversationSummaries, saveConversationSummaries } from "../src/core/storage/repositories/conversationSummaryRepository";
+import { commitMemoryWriteBundle } from "../src/domain/memory/memoryWriteCoordinator";
+import { confirmMemoryPersistence, replaceMemoryStores } from "../src/core/storage/memoryStoreTransaction";
+import { buildSystemBackup, restoreMemoryBackupEntries, prepareMemoryBackupEntries } from "../src/features/settings/systemBackup";
+import { forgetKnowledgeClaim, filterRecallableKnowledge } from "../src/features/characterKnowledge/services/characterContinuityService";
+
+const factory = new IDBFactory(), values = new Map<string, string>();
+let modelCalls = 0, physicalWrites = 0;
+const storage: Storage = { get length() { return values.size; }, key: i => [...values.keys()][i] ?? null, getItem: key => values.get(key) ?? null,
+  setItem: () => { physicalWrites++; throw new DOMException("full", "QuotaExceededError"); }, removeItem: key => { values.delete(key); }, clear: () => values.clear() };
+Object.assign(globalThis, { indexedDB: factory, IDBKeyRange, fetch: async () => { modelCalls++; throw new Error("No provider requests permitted"); } });
+Object.defineProperty(globalThis, "window", { value: { localStorage: storage, dispatchEvent: () => true }, configurable: true });
+assert.equal((await memoryContentStore.initialize({ factory, legacy: storage, writable: true })).success, true);
+const scopeA = { characterId: "role-a", relationId: "relation-a", userIdentityId: "identity-a", conversationId: "conversation-a" };
+const scopeB = { characterId: "role-b", relationId: "relation-b", userIdentityId: "identity-b", conversationId: "conversation-b" };
+const claimA = createManualKnowledgeClaim({ id: "claim-a", scope: scopeA, statement: "用户喜欢咖啡", sourceRecordId: "manual-a", recordedAt: 1700000000000, importance: 9 })!;
+const claimB = createManualKnowledgeClaim({ id: "claim-b", scope: scopeB, statement: "用户喜欢茶", sourceRecordId: "manual-b", recordedAt: 1700000000000 })!;
+assert.ok(claimA && claimB);
+const written = await commitMemoryWriteBundle({ claims: [claimA, claimB], appendClaims: appendMany });
+assert.equal(written.complete, true);
+assert.equal(listByRelation(scopeA).length, 1);
+assert.equal(listByRelation(scopeB)[0].id, "claim-b");
+const summary = { id: "summary-a", ...scopeA, summary: "用户表达了咖啡偏好", sourceMessageIds: [], sourceClaimIds: [claimA.id], generatedAt: 1700000000000, generator: "acceptance", projectionVersion: 1, schemaVersion: 1, status: "active", layer: "legacy" };
+assert.equal((await confirmMemoryPersistence(saveConversationSummaries([summary as never]))).success, true);
+assert.equal((await confirmMemoryPersistence(replaceMemoryStores({ [storageKeys.characterKnowledgeClaims]: loadKnowledgeClaims().value.map(claim => claim.id === "claim-a" ? { ...claim, importance: 10 } : claim),
+  [storageKeys.conversationSummaries]: loadConversationSummaries().value.map(item => ({ ...item, summary: "已更新的摘要" })) }))).success, true);
+assert.equal(loadKnowledgeClaims().value.find(claim => claim.id === "claim-a")?.importance, 10);
+const backup = await buildSystemBackup(storage, [storageKeys.characterKnowledgeClaims, storageKeys.conversationSummaries, storageKeys.memoryVaultItems], []);
+assert.ok(backup.localStorage[storageKeys.characterKnowledgeClaims], "logical backup includes physically migrated data");
+assert.equal(storage.getItem(storageKeys.characterKnowledgeClaims), null);
+assert.equal((await confirmMemoryPersistence(forgetKnowledgeClaim(loadKnowledgeClaims().value.find(claim => claim.id === "claim-a")!))).success, true);
+assert.equal(loadKnowledgeClaims().value.find(claim => claim.id === "claim-a")?.status, "retracted");
+assert.equal(listByRelation(scopeB)[0].statement, claimB.statement);
+assert.equal((await restoreMemoryBackupEntries(prepareMemoryBackupEntries(backup.localStorage))).success, true);
+assert.equal(loadConversationSummaries().value[0].summary, "已更新的摘要");
+assert.equal(loadKnowledgeClaims().value.find(claim => claim.id === "claim-a")?.status, "active");
+assert.equal(filterRecallableKnowledge(loadKnowledgeClaims().value).some(claim => claim.id === "claim-a"), true, "full restore must also restore its own deletion/forget metadata");
+assert.equal((await confirmMemoryPersistence(saveKnowledgeClaims(loadKnowledgeClaims().value.filter(claim => claim.id !== "claim-a")))).success, true);
+const second = new MemoryContentStore();
+assert.equal((await second.initialize({ factory, legacy: storage, writable: false })).success, true);
+assert.deepEqual(JSON.parse(second.read(storageKeys.characterKnowledgeClaims).value!).map((claim: { id: string }) => claim.id), ["claim-b"], "restart reads durable deletion, no resurrection");
+assert.equal(modelCalls, 0); assert.equal(physicalWrites, 0);
+second.close();
+const deletedDuringExport = await buildSystemBackup(storage, [storageKeys.characterKnowledgeClaims], [["delete-during-export", async () => {
+  return confirmMemoryPersistence(memoryContentStore.stage({ [storageKeys.characterKnowledgeClaims]: null }));
+}]]);
+assert.equal(deletedDuringExport.localStorage[storageKeys.characterKnowledgeClaims], null, "backup must not resurrect a dataset deleted while flushing");
+memoryContentStore.close();
+console.log("Memory content business: scoped archive, edits, forget, backup restore and durable restart passed without LocalStorage writes or API calls");

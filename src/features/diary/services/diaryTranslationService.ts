@@ -1,3 +1,4 @@
+import {confirmMemoryPersistence} from '../../../core/storage/repositories/diaryRepository';
 import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
 import { apiTranslate } from "../../../utils/apiHelper";
 import type { DiaryEntry, DiaryTranslation, UserSettings } from "../../../types";
@@ -16,6 +17,6 @@ export const translateDiaryEntry = async (entry: DiaryEntry, settings: UserSetti
   const title = text.match(/\[DIARY_TITLE\]\s*([^\n]+)/)?.[1]?.trim();
   const emotion = text.match(/\[DIARY_EMOTION\]\s*([^\n]+)/)?.[1]?.trim();
   const translation: DiaryTranslation = { id: createDiaryId("diary-translation"), ownerIdentityId: entry.ownerIdentityId, diaryEntryId: entry.id, sourceContentHash: createDiaryContentHash(entry), targetLanguage, ...(title ? { translatedTitle: title } : {}), translatedBody: body, ...(emotion ? { translatedEmotionalState: emotion } : {}), createdAt: Date.now(), lastAccessedAt: Date.now() };
-  if (!upsertDiaryTranslation(translation).success) throw new Error("翻译缓存保存失败。");
+  if (!(await confirmMemoryPersistence(upsertDiaryTranslation(translation))).success) throw new Error("翻译缓存保存失败。");
   return translation;
 };

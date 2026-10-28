@@ -30,7 +30,7 @@ import { upsertMomentPreservingOrder } from "./features/moments/services/momentS
 import { limitMomentCommentsPerActor } from "./features/moments/services/momentCommentLimit";
 import { migrateMomentIdentitySnapshots, toggleMomentLike } from "./features/moments/services/momentIdentityPresentation";
 import { loadWorldBookEntries, saveWorldBookEntries } from "./core/storage/repositories/worldBookRepository";
-import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings } from "./core/storage/repositories/memoryRepository";
+import { loadMemories, loadMemorySettings, saveMemories, saveMemorySettings, confirmMemoryPersistence } from "./core/storage/repositories/memoryRepository";
 import { loadOfflineStories, mergeOfflineStoryCollections, installOfflineSourceReader } from "./core/storage/repositories/offlineRepository";
 import { offlineStoryDb } from "./core/storage/offlineStoryDb";
 import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./core/storage/contentStorageFlags";
@@ -151,7 +151,7 @@ import { useGlobalTypography } from "./features/theme/useGlobalTypography";
 import { useVisualViewport } from "./features/viewport/useVisualViewport";
 import { removeCharacterLifeEventsForRelations } from "./features/characterLife/services/characterEventCaptureService";
 import { listByRelation as listCharacterEventsByRelation, retractByOfflineStoryIds } from "./core/storage/repositories/characterEventRepository";
-import { removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
+import { removeCharacterTruthForRelationsDurable as removeCharacterTruthForRelations } from "./features/characterKnowledge/services/characterTruthCleanupService";
 import { loadMomentTopicRecords, removeMomentTopicsForCharacters, removeMomentTopicsForMoments } from "./core/storage/repositories/momentTopicRepository";
 import { removeProactiveTopicsForRelations, removeProactiveTopicsForCharacters } from "./core/storage/repositories/proactiveTopicRepository";
 import { runLegacyCharacterKnowledgeMigration } from "./features/characterKnowledge/services/legacyCharacterKnowledgeMigrationRunner";
@@ -715,12 +715,13 @@ export default function App() {
 
   useEffect(() => {
     const onStorageWriteFailure = (event: Event) => {
-      const detail = (event as CustomEvent<{ error?: string; key?: string }>).detail;
+      const detail = (event as CustomEvent<{ error?: string; key?: string; source?: string }>).detail;
+      const target = detail?.source === "memory-indexeddb" ? "记忆 IndexedDB" : "LocalStorage";
       const reason = detail?.error === "quota"
-        ? "LocalStorage 空间不足"
+        ? `${target} 空间不足`
         : detail?.error === "unavailable"
-          ? "LocalStorage 不可用"
-          : "LocalStorage 未能确认写入完成";
+          ? `${target} 不可用`
+          : `${target} 未能确认写入完成`;
       const keyHint = detail?.key ? `（数据项：${detail.key}）` : "";
       setStorageWriteWarning(`${reason}${keyHint}，部分更改可能尚未保存。请先导出系统备份，再检查本地存储诊断。`);
     };
@@ -2160,14 +2161,14 @@ export default function App() {
   // Offline-story handoffs must be persisted before their story is marked as
   // synced. The ordinary effect remains the single path for every other memory
   // update, while this callback gives the offline exit flow a durable result.
-  const persistOfflineStoryMemories = (nextMemories: MemoryItem[]): boolean => {
-    const result = saveMemories(nextMemories);
+  const persistOfflineStoryMemories = async (nextMemories: MemoryItem[]): Promise<boolean> => {
+    const result = await confirmMemoryPersistence(saveMemories(nextMemories));
     if (!result.success) {
       console.error("Failed to persist offline story memories:", result.error);
       return false;
     }
     skipNextMemoriesPersistenceRef.current = true;
-    setMemories(nextMemories);
+    setMemories(loadMemories(nextMemories).value);
     return true;
   };
 
@@ -3258,7 +3259,7 @@ export default function App() {
     }));
   };
 
-  const handleDeleteCharacter = (id: string, skipConfirm = false, preserveGroupMemories = false) => {
+  const handleDeleteCharacter = async (id: string, skipConfirm = false, preserveGroupMemories = false) => {
     if (skipConfirm || confirm("确定要删除这名角色人设吗？删除后其相关聊天和动态也将被清空。")) {
       const deletingGroup = characters.some((character) => character.id === id && character.isGroupChat);
       // A previous bad merge could leave a relationship pointing to a contact
@@ -3272,7 +3273,7 @@ export default function App() {
       const relationIds = relationships
         .filter((relation) => characterIds.has(relation.characterId))
         .map((relation) => relation.id);
-      const memoryCleanup=removeCharacterTruthForRelations(relationIds,deletedCharacterIds);
+      const memoryCleanup=await removeCharacterTruthForRelations(relationIds,deletedCharacterIds);
       if(!Object.values(memoryCleanup).every(Boolean)){alert("角色记忆清理未完成，角色和聊天保留，请检查存储后重试。");return;}
       removeCharacterLifeEventsForRelations(relationIds);
       removeMomentTopicsForCharacters(deletedCharacterIds);
@@ -5468,7 +5469,7 @@ export default function App() {
                     worldBookEntries={worldBookEntries}
                     onClearMessages={handleClearMessages}
                     memories={memories}
-                    onSaveMemories={setMemories}
+                    onSaveMemories={persistOfflineStoryMemories}
                     recallSettings={recallSettings}
                     activeChatCharId={activeChatCharId}
                     setActiveChatCharId={setActiveChatCharId}
@@ -5639,7 +5640,7 @@ export default function App() {
                       characters={characters}
                       relationships={relationships}
                       memories={memories}
-                      onSaveMemories={setMemories}
+                      onSaveMemories={persistOfflineStoryMemories}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>
@@ -5802,7 +5803,7 @@ export default function App() {
                     identities={settings.identities}
                     activeIdentityId={activeIdentityId}
                     memories={memories}
-                    onSaveMemories={setMemories}
+                    onSaveMemories={persistOfflineStoryMemories}
                     recallSettings={recallSettings}
                     onSaveRecallSettings={setRecallSettings}
                     embeddingConfiguration={settings.memoryEmbedding}
@@ -5867,7 +5868,7 @@ export default function App() {
                         setActiveApp("chat");
                       }}
                       memories={memories}
-                      onSaveMemories={setMemories}
+                      onSaveMemories={persistOfflineStoryMemories}
                       onPersistMemories={persistOfflineStoryMemories}
                       recallSettings={recallSettings}
                     />

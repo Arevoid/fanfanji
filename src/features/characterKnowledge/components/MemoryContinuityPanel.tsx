@@ -1,3 +1,4 @@
+import {confirmMemoryPersistence} from '../services/memoryManagementService';
 import { isLifeExperience } from "../../../domain/memory/lifePlanProjection";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Edit3, MoreVertical, PauseCircle, PlayCircle, Trash2 } from "lucide-react";
@@ -81,7 +82,7 @@ export function MemoryContinuityPanel(props: {
         </header>
         {impressionMenu === record.id && <div className="memory-card-menu" aria-label="认识操作">
           <button type="button" className="memory-card-menu-item" onClick={() => { setImpressionMenu(undefined); setEditing(record.id); setDraft(record.proposition); }}><Edit3 aria-hidden="true" className="h-4 w-4" />纠正认识</button>
-          <button type="button" className="memory-card-menu-item" onClick={() => { const result = pauseCharacterImpression(record.id, record.scope, !record.paused);
+          <button type="button" className="memory-card-menu-item" onClick={async () => { const result = (await confirmMemoryPersistence(pauseCharacterImpression(record.id, record.scope, !record.paused)));
             setImpressionMenu(undefined); setNotice(result.success ? record.paused ? "已恢复使用这份印象" : "已暂停使用这份印象" : "保存失败，原状态未改变"); refresh(value => value + 1);
           }}>{record.paused ? <PlayCircle aria-hidden="true" className="h-4 w-4" /> : <PauseCircle aria-hidden="true" className="h-4 w-4" />}{record.paused ? "恢复使用" : "暂停使用"}</button>
           <button type="button" className="memory-card-menu-item memory-card-danger" onClick={() => { setImpressionMenu(undefined); setDeleting({ kind: "impression", id: record.id }); }}><Trash2 aria-hidden="true" className="h-4 w-4" />删除认识</button>
@@ -109,8 +110,8 @@ export function MemoryContinuityPanel(props: {
           sharingAllowed={episode.publicSharing?.revision === lifePublicRevision(episode)}
           onEdit={() => { setDraft(episode.summary); setEditingLife(episode.id); }}
           onDelete={() => setDeleting({ kind: "life", id: episode.id })}
-          onSharing={() => { const allowed = episode.publicSharing?.revision === lifePublicRevision(episode);
-            const result = setLifePublicSharing(episode.id, episode.characterId, episode.userIdentityId, !allowed);
+          onSharing={async () => { const allowed = episode.publicSharing?.revision === lifePublicRevision(episode);
+            const result = (await confirmMemoryPersistence(setLifePublicSharing(episode.id, episode.characterId, episode.userIdentityId, !allowed)));
             setNotice(result.success ? allowed ? "已撤销公开许可，已发布的动态保留" : "已允许这条生活用于公开动态" : "保存失败，原公开许可不变"); refresh(value => value + 1);
           }} /> })),
         ...extraLifeCards,
@@ -123,9 +124,9 @@ export function MemoryContinuityPanel(props: {
       <h2 id="memory-impression-edit-title" className="text-lg font-semibold">纠正角色的认识</h2>
       <p className="my-3">直接修改将标记为用户干预，过去的认识仍保留。</p>
       <label htmlFor="impression-content">修改内容</label><textarea id="impression-content" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={400} className="my-2 min-h-28 w-full rounded-lg border p-3" />
-      <div className="flex gap-2"><button className={button} disabled={!draft.trim()} onClick={() => {
+      <div className="flex gap-2"><button className={button} disabled={!draft.trim()} onClick={async () => {
         const record = impressions.find((item) => item.id === editing); if (!record) return;
-        const result = editCharacterImpression(record, draft);
+        const result = (await confirmMemoryPersistence(editCharacterImpression(record, draft)));
         if (result.success) { setEditing(undefined); refresh(revision + 1); } else setNotice("纠正保存失败，原记录保留");
       }}>保存纠正</button><button className={button} onClick={() => setEditing(undefined)}>取消</button></div>
     </dialog>
@@ -134,12 +135,12 @@ export function MemoryContinuityPanel(props: {
       <h2 id="memory-continuity-delete-title" className="text-lg font-semibold">{deleting?.kind === "life" ? "删除生活记录" : "删除角色认识"}</h2>
       <p className="my-3">{deleting?.kind === "life" ? "有持续目标时会同时删除该目标的全部推进记录，并重新计算生活状态与参与者知情。" : "删除后停止使用这条认识，同一批旧证据不会自动重建它；新的经历仍可形成新的认识。"}</p>
       {actionError && <p role="alert" className="my-2">{actionError}</p>}
-      <div className="flex flex-wrap gap-2"><button className={button} onClick={() => {
+      <div className="flex flex-wrap gap-2"><button className={button} onClick={async () => {
         if (!deleting) return;
         const impression = impressions.find((record) => record.id === deleting.id);
         const episode = life.find((record) => record.id === deleting.id);
-        const result = deleting.kind === "impression" && impression ? deleteCharacterImpression(impression.id, impression.scope)
-          : deleting.kind === "life" && episode ? deleteCharacterLife(episode.id, episode.characterId, episode.userIdentityId) : undefined;
+        const result = deleting.kind === "impression" && impression ? (await confirmMemoryPersistence(deleteCharacterImpression(impression.id, impression.scope)))
+          : deleting.kind === "life" && episode ? (await confirmMemoryPersistence(deleteCharacterLife(episode.id, episode.characterId, episode.userIdentityId))) : undefined;
         if (result?.success) { setDeleting(undefined); setNotice("已删除，相关状态已更新"); refresh((value) => value + 1); }
         else setActionError("删除未保存，原记录保留，请重试");
       }}>确认删除</button><button autoFocus className={button} onClick={() => setDeleting(undefined)}>取消</button></div>
@@ -151,9 +152,9 @@ export function MemoryContinuityPanel(props: {
       <label htmlFor="life-summary-content">生活描述</label><textarea id="life-summary-content" className="my-2 min-h-28 w-full rounded-lg border p-3"
         value={draft} maxLength={400} onChange={(event) => setDraft(event.target.value)} />
       {actionError && <p role="alert" className="my-2">{actionError}</p>}
-      <div className="flex flex-wrap gap-2"><button className={button} disabled={!draft.trim()} onClick={() => {
+      <div className="flex flex-wrap gap-2"><button className={button} disabled={!draft.trim()} onClick={async () => {
         const record = life.find((item) => item.id === editingLife); if (!record) return;
-        const result = editCharacterLifeSummary(record.id, record.characterId, record.userIdentityId, draft);
+        const result = (await confirmMemoryPersistence(editCharacterLifeSummary(record.id, record.characterId, record.userIdentityId, draft)));
         if (result.success) { setEditingLife(undefined); setNotice("生活描述已纠正，历史保留"); refresh((value) => value + 1); }
         else setActionError("保存失败；描述需保留目标名称，且不能添加用户或私聊事件。原记录保留。");
       }}>保存描述</button><button className={button} onClick={() => setEditingLife(undefined)}>取消</button></div>

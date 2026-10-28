@@ -1,4 +1,5 @@
 import type { DiaryDraft, DiaryEntry, DiaryGenerationTask, DiaryShare, DiaryTranslation } from "../../../types";
+export { confirmMemoryPersistence } from "../memoryStoreTransaction";
 import { isValidDiaryEntry } from "../../../domain/diary/diaryValidation";
 import { createDiaryContentHash } from "../../../domain/diary/diaryData";
 import { storageKeys } from "../storageKeys";

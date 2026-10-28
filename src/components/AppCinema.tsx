@@ -1,3 +1,4 @@
+import {confirmMemoryPersistence} from '../features/cinema/cinemaMemoryArchiveService';
 import { resolveCharacterTextSettings } from "../domain/character/characterTextApiRouting";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowUp, Film, Save, Send, Settings as SettingsIcon, Trash2, Upload, Users, X } from "lucide-react";
@@ -527,7 +528,7 @@ export default function AppCinema({
   const saveDiscussionToMemory = async (discussion: CinemaDiscussion) => {
     const relation = scopedRelations.find((item) => item.id === discussion.relationId);
     if (!relation) return;
-    const write = archiveCinemaDiscussion({ relation, discussionId: discussion.id });
+    const write = (await confirmMemoryPersistence(archiveCinemaDiscussion({ relation, discussionId: discussion.id })));
     if (!write.success) {
       setNotice("观影记忆保存失败，已保护当前关系认知");
       return;
@@ -543,7 +544,7 @@ export default function AppCinema({
       const roomDiscussions = discussions.filter((discussion) => discussion.roomId === room.id);
       if (!relation || !roomDiscussions.length) continue;
       for (const discussion of roomDiscussions) {
-        if (!archiveCinemaDiscussion({ relation, discussionId: discussion.id }).success) {
+        if (!(await confirmMemoryPersistence(archiveCinemaDiscussion({ relation, discussionId: discussion.id }))).success) {
           setNotice("观影讨论归档失败，已取消删除以保护数据"); return false;
         }
       }

@@ -1,4 +1,5 @@
 import type { MemoryItem, MemoryVaultSettings } from "../../../types";
+export { confirmMemoryPersistence } from "../memoryStoreTransaction";
 import { storageKeys } from "../storageKeys";
 import { readArray, readObject, writeArray } from "./repositoryUtils";
 import { writeJson } from "../storageAdapter";

@@ -12,3 +12,4 @@ export function archiveReadingExperience(input: { scope: ReadingRoomScope; relat
     app: "reading", recordId: input.commentId || input.discussionId || "", title: input.title, now: input.now,
     messages: records.map((record) => ({ id: record.id, author: record.author === "ai" ? "character" : "user", text: record.body, occurredAt: record.createdAt })) });
 }
+export { confirmMemoryPersistence } from "../../../core/storage/memoryStoreTransaction";

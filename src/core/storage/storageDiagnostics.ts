@@ -2,6 +2,7 @@ import { decodeJsonStorageText, readString, remove } from "./storageAdapter";
 import { loadStorageMigrationState, type StorageMigrationState } from "./storageMigrationState";
 import { loadStorageMigrationLock, type StorageMigrationLock } from "./storageMigrationLock";
 import { storageKeys } from "./storageKeys";
+import { memoryContentStore, type MemoryContentStatus } from "./memoryContentStore";
 import { isMessageEntryStoreEnabled, isOfflineStoryEntryStoreEnabled } from "./contentStorageFlags";
 import { messageEntryDb } from "./messageEntryDb";
 import { offlineStoryDb } from "./offlineStoryDb";
@@ -23,6 +24,7 @@ export interface LocalStorageUsageEntry {
 }
 
 export interface StorageDiagnostics {
+  memoryContent?: MemoryContentStatus;
   localStorageBytes: number;
   localStorageEntries: LocalStorageUsageEntry[];
   /** Bytes in legacy content copies that are safe to remove only after IDB verification. */
@@ -684,6 +686,7 @@ export async function inspectStorage(): Promise<StorageDiagnostics> {
     : undefined;
   return {
     localStorageBytes,
+    memoryContent: memoryContentStore.status,
     localStorageEntries: entries,
     retainedContentCopyBytes,
     runtimeMetadataBytes,

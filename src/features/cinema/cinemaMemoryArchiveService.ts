@@ -16,3 +16,4 @@ export function archiveCinemaDiscussion(input: { relation: CharacterRelationship
         occurredAt: automatic ? input.now ?? Date.now() : record.createdAt, confirmationAction: automatic },
       ...(record.characterText?.trim() ? [{ id: `${record.id}:character`, author: "character" as const, text: record.characterText, occurredAt: record.createdAt }] : [])] });
 }
+export { confirmMemoryPersistence } from "../../core/storage/memoryStoreTransaction";

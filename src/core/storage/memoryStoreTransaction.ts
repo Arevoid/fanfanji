@@ -1,6 +1,26 @@
-import { readJson, readString, writeJson, writeString, remove } from "./storageAdapter";
+import { readJson, readString, writeJson, writeString, remove, STORAGE_WRITE_FAILURE_EVENT } from "./storageAdapter";
 import type { StorageWriteResult } from "./storageTypes";
 import { storageKeys } from "./storageKeys";
+import { memoryContentStore } from "./memoryContentStore";
+import { canWriteMemoryStorage, invalidateMemoryWriter } from "./memoryWriterCoordination";
+
+export async function initializeMemoryContentStorage(writable: boolean): Promise<StorageWriteResult> {
+  if (typeof window === "undefined" || typeof indexedDB === "undefined") return { success: false, error: "unavailable" };
+  return memoryContentStore.initialize({ factory: indexedDB, legacy: window.localStorage, writable,
+    canWrite: () => writable && canWriteMemoryStorage(storageKeys.characterKnowledgeClaims),
+    onStatus: status => { if (status.phase === "failed" && status.failure) {
+      invalidateMemoryWriter();
+      window.dispatchEvent(new CustomEvent(STORAGE_WRITE_FAILURE_EVENT, { detail: { key: status.failure.key, error: status.failure.error, source: "memory-indexeddb" } }));
+    } },
+  });
+}
+export async function confirmMemoryPersistence<T extends StorageWriteResult>(result: T): Promise<T> {
+  if (!result.success || !memoryContentStore.active) return result;
+  const committed = result.durable ? await result.durable : await memoryContentStore.flush();
+  return { ...result, ...committed, pending: false, durable: undefined };
+}
+export const flushMemoryContentStorage = () => memoryContentStore.active ? memoryContentStore.flush() : Promise.resolve({ success: true });
+export const getMemoryContentStorageStatus = () => memoryContentStore.status;
 
 const JOURNAL_KEY = "phone_memory_restore_transaction_v1";
 const ALLOWED_KEYS = new Set<string>([
@@ -20,6 +40,7 @@ interface Journal { version: 1; status: "pending" | "committed"; before: Record<
 
 /** Recover before opening a second transaction. The snapshot is user data, not telemetry. */
 export function recoverMemoryStoreTransaction(): StorageWriteResult {
+  if (memoryContentStore.active) return memoryContentStore.status.phase === "ready" ? { success: true } : { success: false, error: "unavailable" };
   const result = readJson<Journal | undefined>(JOURNAL_KEY, undefined);
   if (!result.valid) return { success: false, error: result.error };
   if (!result.found) return { success: true };
@@ -41,6 +62,10 @@ export function recoverMemoryStoreTransaction(): StorageWriteResult {
 /** Synchronous write-ahead recovery: no partially restored snapshot is reported successful. */
 export function replaceMemoryStores(values: Readonly<Record<string, unknown>>): StorageWriteResult {
   if (Object.keys(values).some((key) => !ALLOWED_KEYS.has(key))) return { success: false, error: "validation" };
+  if (memoryContentStore.active) {
+    try { return memoryContentStore.stage(Object.fromEntries(Object.entries(values).map(([key, value]) => [key, JSON.stringify(value)]))); }
+    catch { return { success: false, error: "serialize" }; }
+  }
   const recovery = recoverMemoryStoreTransaction();
   if (!recovery.success) return recovery;
   const before: Record<string, string | null> = {};

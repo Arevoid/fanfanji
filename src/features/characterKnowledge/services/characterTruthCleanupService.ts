@@ -2,7 +2,7 @@ import {loadKnowledgeClaims} from "../../../core/storage/repositories/characterK
 import {loadConversationSummaries} from "../../../core/storage/repositories/conversationSummaryRepository";
 import {loadBehaviorCorrections} from "../../../core/storage/repositories/behaviorCorrectionRepository";
 import {loadCharacterContinuity,CHARACTER_CONTINUITY_KEY} from "../../../core/storage/repositories/characterContinuityRepository";
-import {replaceMemoryStores} from "../../../core/storage/memoryStoreTransaction";
+import {replaceMemoryStores,confirmMemoryPersistence} from "../../../core/storage/memoryStoreTransaction";
 import {storageKeys} from "../../../core/storage/storageKeys";
 import {MEMORY_INDEX_CLEANUP_KEY,readSemanticMemoryCleanupQueue,processSemanticMemoryCleanup} from "../../../core/storage/repositories/semanticMemoryIndexRepository";
 import {createId} from "../../../core/id/createId";
@@ -10,6 +10,7 @@ import {MEMORY_MENTION_KEY,loadMemoryMentions} from "../../../core/storage/repos
 import {invalidateMemoryCaches} from "../../../core/storage/memoryCacheInvalidation";
 
 export interface CharacterTruthCleanupResult {
+  durable?: Promise<{success:boolean}>;
   claimsRemoved: boolean;
   summariesRemoved: boolean;
   correctionsRemoved: boolean;
@@ -34,5 +35,10 @@ export function removeCharacterTruthForRelations(relationIds: readonly string[],
       lifeWitnesses:store.lifeWitnesses?.filter(c=>!deletedCharacters.has(c.ownerCharacterId)),forgotten:store.forgotten.filter(c=>!deletedCharacters.has(c.scope.characterId)),
       suppressedImpressions:store.suppressedImpressions?.filter(c=>!removed.has(c.scope.relationId)&&!deletedCharacters.has(c.scope.characterId))}});
   if(write.success){invalidateMemoryCaches();void processSemanticMemoryCleanup();}
-  return {claimsRemoved:write.success,summariesRemoved:write.success,correctionsRemoved:write.success,continuityRemoved:write.success};
+  return {claimsRemoved:write.success,summariesRemoved:write.success,correctionsRemoved:write.success,continuityRemoved:write.success,...(write.durable?{durable:write.durable}:{})};
+}
+export async function removeCharacterTruthForRelationsDurable(relationIds:readonly string[],characterIds:readonly string[]=[]):Promise<CharacterTruthCleanupResult>{
+  const result=removeCharacterTruthForRelations(relationIds,characterIds);
+  const committed=await confirmMemoryPersistence({success:result.claimsRemoved&&result.summariesRemoved&&result.correctionsRemoved&&result.continuityRemoved});
+  return committed.success?result:{claimsRemoved:false,summariesRemoved:false,correctionsRemoved:false,continuityRemoved:false};
 }

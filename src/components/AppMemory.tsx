@@ -10,7 +10,7 @@ import { loadBehaviorCorrections, saveBehaviorCorrections } from "../core/storag
 import type { BehaviorCorrectionRecord, ConversationSummaryRecord, KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
 import { createManualKnowledgeClaim } from "../features/characterKnowledge/services/manualKnowledgeService";
 import { restoreMemoryStoreBackup } from "../features/characterKnowledge/services/memoryBackupRestoreService";
-import { readMemoryContinuityBackup, setCoreMemory, getRemainingLegacyMemories } from "../features/characterKnowledge/services/memoryManagementService";
+import { readMemoryContinuityBackup, setCoreMemory, getRemainingLegacyMemories, confirmMemoryPersistence } from "../features/characterKnowledge/services/memoryManagementService";
 import {MEMORY_GALLERY_CATEGORIES,memoryGalleryCategories,isMemoryGalleryOldMaterial,memoryGalleryEvidenceLabel,memoryGalleryTitle,memoryGalleryDisplayText,relatedMemorySummaries,type MemoryGalleryCategory} from "../domain/memory/memoryGallery";
 import { forgetKnowledgeClaim,filterRecallableKnowledge } from "../features/characterKnowledge/services/characterContinuityService";
 import {isConversationSummarySourceValid} from "../domain/characterKnowledge/conversationSummaryProjection";
@@ -67,7 +67,7 @@ interface AppMemoryProps {
   identities?: UserIdentity[];
   activeIdentityId?: string;
   memories: MemoryItem[];
-  onSaveMemories: (updated: MemoryItem[]) => void;
+  onSaveMemories: (updated: MemoryItem[]) => void | boolean | Promise<void | boolean>;
   recallSettings: MemoryVaultSettings;
   onSaveRecallSettings: (updated: MemoryVaultSettings) => void;
   onUpdateCharacter?: (char: Character) => void;
@@ -362,18 +362,18 @@ export default function AppMemory({
     ? getLastTruthRetrievalDiagnostics(toTruthScope(selectedDiagnosticRelation))
     : undefined;
 
-  const toggleMemoryRecall = (item: MemoryItem) => {
+  const toggleMemoryRecall = async (item: MemoryItem) => {
     const nextDisabled = !item.recallDisabled;
     const claimIds = new Set(item.sourceKnowledgeClaimIds || []);
     if (claimIds.size > 0) {
       const nextClaims = allKnowledgeClaims.map((claim) => claimIds.has(claim.id) ? { ...claim, recallDisabled: nextDisabled } : claim);
-      const claimWrite = saveKnowledgeClaims(nextClaims);
+      const claimWrite = (await confirmMemoryPersistence(saveKnowledgeClaims(nextClaims)));
       if (!claimWrite.success) {
         alert("记忆状态保存失败，未改变召回状态。");
         return;
       }
     }
-    onSaveMemories(memories.map((candidate) => candidate.id === item.id ? { ...candidate, recallDisabled: nextDisabled } : candidate));
+    if (await onSaveMemories(memories.map((candidate) => candidate.id === item.id ? { ...candidate, recallDisabled: nextDisabled } : candidate)) === false) alert("记忆状态未保存，请检查存储诊断。");
   };
 
   const getMemoryCenterRecallDisabled = (record: MemoryCenterRecord): boolean => {
@@ -409,7 +409,7 @@ export default function AppMemory({
     const ids=episodeCards.find(card=>card.id===record.id)?.memberClaimIds||[record.id];
     return [...new Set(ids.flatMap(id=>{const claim=knowledgeClaims.find(item=>item.id===id);return claim?groupedClaimIds(claim,records):[];}))];
   };
-  const toggleMemoryCenterRecall = (record: MemoryCenterRecord) => {
+  const toggleMemoryCenterRecall = async (record: MemoryCenterRecord) => {
     if (record.recordType === "truth") {
       const claim = knowledgeClaims.find((candidate) => candidate.id === record.id);
       if (!claim) {
@@ -420,9 +420,9 @@ export default function AppMemory({
       const latest=loadKnowledgeClaims();
       if(!latest.valid){alert("记忆暂时无法读取，请稍后重试。");return;}
       const group=new Set(cardClaimIds(record,latest.value));
-      const write = saveKnowledgeClaims(latest.value.map((candidate) => group.has(candidate.id)&&candidate.characterId===claim.characterId&&candidate.relationId===claim.relationId&&candidate.userIdentityId===claim.userIdentityId&&candidate.conversationId===claim.conversationId
+      const write = (await confirmMemoryPersistence(saveKnowledgeClaims(latest.value.map((candidate) => group.has(candidate.id)&&candidate.characterId===claim.characterId&&candidate.relationId===claim.relationId&&candidate.userIdentityId===claim.userIdentityId&&candidate.conversationId===claim.conversationId
         ? { ...candidate, recallDisabled: nextDisabled }
-        : candidate));
+        : candidate))));
       if (!write.success) {
         alert("Truth 召回状态保存失败，记录未改变。");
         return;
@@ -482,7 +482,7 @@ export default function AppMemory({
     setDeleteMode(null);
   };
 
-  const deleteMemoryCenterRecord = (record: MemoryCenterRecord, mode: MemoryCenterDeleteMode): boolean => {
+  const deleteMemoryCenterRecord = async (record: MemoryCenterRecord, mode: MemoryCenterDeleteMode): Promise<boolean> => {
     if (record.recordType === "truth") {
       const claim = knowledgeClaims.find((candidate) => candidate.id === record.id);
       if (!claim) {
@@ -496,21 +496,21 @@ export default function AppMemory({
         conversationId: claim.conversationId,
       };
       const write = mode === "permanent"
-        ? forgetKnowledgeClaim(claim,cardClaimIds(record,loadKnowledgeClaims().value))
-        : retractKnowledgeClaimGroup(scope, cardClaimIds(record,loadKnowledgeClaims().value), "memory_center_retracted");
+        ? (await confirmMemoryPersistence(forgetKnowledgeClaim(claim,cardClaimIds(record,loadKnowledgeClaims().value))))
+        : (await confirmMemoryPersistence(retractKnowledgeClaimGroup(scope, cardClaimIds(record,loadKnowledgeClaims().value), "memory_center_retracted")));
       if (!write.success) {
         alert(mode === "permanent" ? "Truth 忘记记忆失败，记录未改变。" : "Truth 撤回失败，记录未改变。");
         return false;
       }
-      if(mode==="permanent")onSaveMemories(getRemainingLegacyMemories());
+      if(mode==="permanent" && await onSaveMemories(getRemainingLegacyMemories()) === false) return false;
     } else if (record.recordType === "summary") {
-      const write = saveConversationSummaries(allConversationSummaries.filter((summary) => summary.id !== record.id));
+      const write = (await confirmMemoryPersistence(saveConversationSummaries(allConversationSummaries.filter((summary) => summary.id !== record.id))));
       if (!write.success) {
         alert("对话摘要删除失败，记录未改变。");
         return false;
       }
     } else if (record.recordType === "rule") {
-      const write = saveBehaviorCorrections(allBehaviorCorrections.filter((correction) => correction.id !== record.id));
+      const write = (await confirmMemoryPersistence(saveBehaviorCorrections(allBehaviorCorrections.filter((correction) => correction.id !== record.id))));
       if (!write.success) {
         alert("规则记忆删除失败，记录未改变。");
         return false;
@@ -532,18 +532,19 @@ export default function AppMemory({
         alert("关联 Truth 撤回失败，兼容记忆未删除。");
         return false;
       }
-      onSaveMemories(memories.filter((candidate) => candidate.id !== record.id));
+      if (await onSaveMemories(memories.filter((candidate) => candidate.id !== record.id)) === false) return false;
     }
     setSelectedMemoryCenterRecord(null);
     return true;
   };
 
-  const confirmDeleteMemoryCenterRecord = () => {
+  const confirmDeleteMemoryCenterRecord = async () => {
     if (!deleteTarget || !deleteMode) return;
-    if (deleteMemoryCenterRecord(deleteTarget, deleteMode)) closeDeleteDialog();
+    if (await deleteMemoryCenterRecord(deleteTarget, deleteMode)) closeDeleteDialog();
   };
 
-  const downloadMemoryBackup = () => {
+  const downloadMemoryBackup = async () => {
+    if (!(await confirmMemoryPersistence({ success: true })).success) { alert("记忆尚未保存，暂不能导出成功备份。"); return; }
     const payload = {
       format: "fanfanji-memory-backup",
       version: 2,
@@ -592,20 +593,20 @@ export default function AppMemory({
         return;
       }
       if (!window.confirm("恢复记忆备份会替换当前记忆、Truth、摘要和修正记录。继续前请确认已有备份。")) return;
-      const restored = restoreMemoryStoreBackup({
+      const restored = (await confirmMemoryPersistence(restoreMemoryStoreBackup({
         claims: parsed.claims, summaries: parsed.summaries, corrections: parsed.corrections,
         memories: parsed.memories, recallSettings: parsed.recallSettings, continuity: parsed.continuity,
         organization: parsed.organization,
         reviewActions: parsed.reviewActions,
         memorySystem: parsed.memorySystem,
-      });
+      })));
       if (!restored.success) {
         alert(restored.error === "rollback"
           ? "恢复未完成，已保留恢复快照。请释放存储空间后重新打开应用以恢复原数据。"
           : "记忆备份恢复失败，原有数据已保留；请检查备份格式和存储空间。");
         return;
       }
-      onSaveMemories(parsed.memories);
+      if (await onSaveMemories(parsed.memories) === false) { alert("记忆正文恢复未完成，请检查存储诊断。"); return; }
       if (parsed.recallSettings) onSaveRecallSettings(parsed.recallSettings);
       alert("记忆备份已恢复。页面中的记忆、摘要和 Truth 会在下一次读取时重新同步。");
     } catch {
@@ -681,13 +682,13 @@ export default function AppMemory({
     const primaryClaimId = previousClaimIds[0];
     const write = await commitMemoryWriteBundle({
       claims: [replacement],
-      writeClaims: () => {
+      writeClaims: async () => {
         const stored = primaryClaimId
-          ? supersedeKnowledgeClaim(toTruthScope(relation), primaryClaimId, replacement).success
-          : appendKnowledgeClaim(replacement).success;
+          ? (await confirmMemoryPersistence(supersedeKnowledgeClaim(toTruthScope(relation), primaryClaimId, replacement))).success
+          : (await confirmMemoryPersistence(appendKnowledgeClaim(replacement))).success;
         if (!stored) return false;
-        previousClaimIds.slice(1).forEach((claimId) => {
-          retractKnowledgeClaim(toTruthScope(relation), claimId, "manual_memory_replaced");
+        previousClaimIds.slice(1).forEach(async (claimId) => {
+          (await confirmMemoryPersistence(retractKnowledgeClaim(toTruthScope(relation), claimId, "manual_memory_replaced")));
         });
         return true;
       },
@@ -765,8 +766,8 @@ export default function AppMemory({
         return;
       }
       const write = claim.status === "active"
-        ? supersedeKnowledgeClaimGroup(scope, groupedClaimIds(claim,loadKnowledgeClaims().value), replacement, editTruthMode)
-        : appendKnowledgeClaim(replacement);
+        ? (await confirmMemoryPersistence(supersedeKnowledgeClaimGroup(scope, groupedClaimIds(claim,loadKnowledgeClaims().value), replacement, editTruthMode)))
+        : (await confirmMemoryPersistence(appendKnowledgeClaim(replacement)));
       if (!write.success) {
         alert("记忆修改失败，原记录保持不变。");
         return;
@@ -776,17 +777,17 @@ export default function AppMemory({
     }
 
     if (record.recordType === "summary") {
-      const write = saveConversationSummaries(allConversationSummaries.map((summary) => summary.id === record.id
+      const write = (await confirmMemoryPersistence(saveConversationSummaries(allConversationSummaries.map((summary) => summary.id === record.id
         ? { ...summary, summary: content, generatedAt: Date.now(), generator: "memory-ui.manual.v1", status: "active" as const }
-        : summary));
+        : summary))));
       if (!write.success) {
         alert("对话摘要修改失败，原记录保持不变。");
         return;
       }
     } else {
-      const write = saveBehaviorCorrections(allBehaviorCorrections.map((correction) => correction.id === record.id
+      const write = (await confirmMemoryPersistence(saveBehaviorCorrections(allBehaviorCorrections.map((correction) => correction.id === record.id
         ? { ...correction, instruction: content, updatedAt: Date.now(), status: "active" as const }
-        : correction));
+        : correction))));
       if (!write.success) {
         alert("规则记忆修改失败，原记录保持不变。");
         return;
@@ -867,9 +868,9 @@ export default function AppMemory({
                   编辑记忆
                 </button>
                 {record.recordType === "truth" && record.status === "active" && (
-                  <button type="button" onClick={() => {
+                  <button type="button" onClick={async () => {
                     const claim = knowledgeClaims.find((item) => item.id === record.id); if (!claim) return;
-                    const result = setCoreMemory(claim.id, claim, !claim.coreMemory,cardClaimIds(record,loadKnowledgeClaims().value));
+                    const result = (await confirmMemoryPersistence(setCoreMemory(claim.id, claim, !claim.coreMemory,cardClaimIds(record,loadKnowledgeClaims().value))));
                     if (!result.success) alert("核心记忆保存失败，原记录保留。");
                     setMemoryCenterActionMenuId(null);
                   }} className="memory-card-menu-item">

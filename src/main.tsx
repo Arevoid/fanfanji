@@ -5,8 +5,8 @@ import { ThemeProvider } from './features/theme/ThemeProvider.tsx';
 import { isDevLoopbackOrigin } from './core/runtime/devOrigin.ts';
 import { installDevRuntimeProbe } from './core/runtime/devDiagnostics.ts';
 import { initializeMemoryAdmissionV2Promotion } from './features/chat/services/directChatMemoryAdmissionPromotion.ts';
-import { recoverMemoryStoreTransaction } from './core/storage/memoryStoreTransaction.ts';
-import { initializeMemoryWriterCoordination, getMemoryWriterState, subscribeMemoryWriterState } from './core/storage/memoryWriterCoordination.ts';
+import { recoverMemoryStoreTransaction, initializeMemoryContentStorage, flushMemoryContentStorage, getMemoryContentStorageStatus } from './core/storage/memoryStoreTransaction.ts';
+import { initializeMemoryWriterCoordination, getMemoryWriterState, subscribeMemoryWriterState, releaseMemoryWriterForReload } from './core/storage/memoryWriterCoordination.ts';
 import { recoverSourceMessageMutation } from './features/characterKnowledge/services/sourceMessageMutationService.ts';
 
 installDevRuntimeProbe();
@@ -18,15 +18,17 @@ function MemoryWriterNotice() {
     {current === 'unsupported' ? '当前浏览器无法建立安全写入保护，聊天和记忆暂为只读。请允许网站存储，或更新浏览器后重试。'
       : current === 'expired' ? '页面写入权限已过期，聊天和记忆暂为只读。请刷新本页，重新加载最新数据后继续。'
       : '另一个窗口正在维护聊天和记忆，此窗口只读。关闭另一个窗口后刷新本页；异常关闭时，请等待约30秒再刷新。'}
-    <button type="button" className="ml-3 underline" onClick={() => window.location.reload()}>刷新本页</button>
+    <button type="button" className="ml-3 underline" onClick={() => void reloadApplicationSafely()}>刷新本页</button>
   </div>;
 }
 async function mountApplication() {
 applicationRoot.render(<div role="status" style={{ padding: 24, fontFamily: 'system-ui' }}>正在打开米饭机…</div>);
 const memoryWriter = await initializeMemoryWriterCoordination();
-if (memoryWriter === 'writer') initializeMemoryAdmissionV2Promotion();
-const memoryRecovery = memoryWriter === 'writer' ? recoverMemoryStoreTransaction() : { success: true };
+const memoryRecovery = await initializeMemoryContentStorage(memoryWriter === 'writer');
+if (memoryWriter === 'writer' && memoryRecovery.success) initializeMemoryAdmissionV2Promotion();
+if (memoryWriter === 'writer' && memoryRecovery.success) Object.assign(memoryRecovery, recoverMemoryStoreTransaction());
 if(memoryWriter === 'writer' && memoryRecovery.success && !await recoverSourceMessageMutation()) memoryRecovery.success=false;
+if (memoryRecovery.success) Object.assign(memoryRecovery, await flushMemoryContentStorage());
 const appModule = await import('./App.tsx');
 if(import.meta.env.DEV&&window.location.hostname==='127.0.0.4'&&window.location.port==='3104'
  &&new URLSearchParams(window.location.search).get('memoryAcceptanceFixture')==='1'&&memoryWriter==='writer'){
@@ -44,12 +46,26 @@ applicationRoot.render(
   <StrictMode>
     <ThemeProvider>
       <MemoryWriterNotice />
-      {memoryRecovery.success ? <App /> : <div role="alert">记忆恢复尚未完成。原始快照已保留，请释放浏览器存储空间后重新打开。</div>}
+      {memoryRecovery.success ? <App /> : <div role="alert" className="p-6">记忆存储初始化未完成，原数据已保留，未开始新的记忆写入。
+        <p>失败阶段：{getMemoryContentStorageStatus().failure?.key || 'source_recovery'}；原因：{getMemoryContentStorageStatus().failure?.error || memoryRecovery.error || 'verification'}。</p>
+        <p>请不要清除网站数据。可重新加载后重试；持续失败时请保留原备份。</p>
+        <button onClick={() => window.location.reload()}>重新加载</button>
+      </div>}
     </ThemeProvider>
   </StrictMode>,
 );
 }
-void mountApplication().catch(() => applicationRoot.render(<div role="alert" style={{ padding: 24 }}>页面暂时无法打开。<button onClick={() => window.location.reload()}>重新加载</button></div>));
+const applicationStartup = mountApplication().catch(() => applicationRoot.render(<div role="alert" style={{ padding: 24 }}>页面暂时无法打开。<button onClick={() => window.location.reload()}>重新加载</button></div>));
+let applicationReloading = false;
+async function reloadApplicationSafely() {
+  if (applicationReloading) return;
+  applicationReloading = true;
+  await applicationStartup;
+  const saved = await flushMemoryContentStorage();
+  if (!saved.success) { applicationReloading = false; return; }
+  await releaseMemoryWriterForReload();
+  window.location.reload();
+}
 
 // Register service worker for PWA capability and listen to beforeinstallprompt
 if (typeof window !== "undefined") {
@@ -80,7 +96,7 @@ if (typeof window !== "undefined") {
     } catch {
       // A failed cleanup should not leave the user stuck on the old module.
     } finally {
-      window.location.reload();
+      await reloadApplicationSafely();
     }
   };
 
@@ -125,7 +141,7 @@ if (typeof window !== "undefined") {
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (reloadedForControllerChange) return;
       reloadedForControllerChange = true;
-      window.location.reload();
+      void reloadApplicationSafely();
     });
 
     const registerSW = () => {

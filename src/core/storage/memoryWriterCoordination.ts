@@ -6,6 +6,7 @@ type WriterState = "uninitialized" | "pending" | "writer" | "readonly" | "unsupp
 let state: WriterState = typeof window !== "undefined" && typeof document !== "undefined" ? "pending" : "uninitialized";
 let release: (() => void) | undefined;
 let started: Promise<WriterState> | undefined;
+let releasing: Promise<void> = Promise.resolve();
 let deadline = 0;
 let monotonicDeadline = 0;
 let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -23,6 +24,8 @@ const protectedKeys = new Set<string>([
   storageKeys.smsStore,
 ]);
 export const getMemoryWriterState = () => state;
+export async function releaseMemoryWriterForReload(): Promise<void> { release?.(); await releasing; }
+export function invalidateMemoryWriter(): void { if (state === "writer") { setState("expired"); release?.(); } }
 export function canWriteMemoryStorage(key: string): boolean {
   if (state === "writer" && !leaseIsLive()) {
     setState("expired");
@@ -58,7 +61,7 @@ export function initializeMemoryWriterCoordination(): Promise<WriterState> {
           clearInterval(heartbeat); deadline = 0; monotonicDeadline = 0;
           if (state === "writer") setState("expired");
           release = undefined;
-          void updateMemoryWriterLease(db, owner, "release").catch(() => {}).finally(() => { db.close(); done(); });
+          releasing = updateMemoryWriterLease(db, owner, "release").then(() => {}).catch(() => {}).finally(() => { db.close(); done(); });
         };
         let renewing = false;
         heartbeat = setInterval(async () => {

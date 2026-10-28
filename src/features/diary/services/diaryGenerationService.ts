@@ -12,7 +12,7 @@ import type { CharacterCognitiveContext } from "../../../domain/characterCogniti
 import { buildDiaryPromptContext, formatDiaryPromptContext } from "../../characterCognitive/promptAdapters/diaryPromptAdapter";
 import { buildWorldBookSystemBlocks } from "../../../utils/worldBook";
 import { serializeMessageContentForPrompt } from "../../chat/prompts/messagePromptSerializer";
-import { loadDiaryEntries, loadDiaryGenerationTasks, saveDiaryEntries, saveDiaryGenerationTasks } from "../../../core/storage/repositories/diaryRepository";
+import { loadDiaryEntries, loadDiaryGenerationTasks, saveDiaryEntries, saveDiaryGenerationTasks, confirmMemoryPersistence } from "../../../core/storage/repositories/diaryRepository";
 import { buildDiaryCognitiveContext } from "./diaryCognitiveContext";
 import { listByRelation as listCharacterEventsByRelation } from "../../../core/storage/repositories/characterEventRepository";
 import {sourceRevision} from "../../../domain/characterKnowledge/knowledgeEvolution";
@@ -56,11 +56,12 @@ export const maybeGenerateDiaryAfterChat = async (input: {
       occurredAt: now,
       cognitiveContext,
     });
-    saveDiaryGenerationTasks([
+    const taskWrite = saveDiaryGenerationTasks([
       result.task,
       ...loadDiaryGenerationTasks().value.filter((task) => task.taskKey !== result.task.taskKey),
     ]);
-    if (result.entry) saveDiaryEntries([result.entry, ...loadDiaryEntries().value]);
+    const entryWrite = result.entry ? saveDiaryEntries([result.entry, ...loadDiaryEntries().value]) : { success: true };
+    if (!taskWrite.success || !(await confirmMemoryPersistence(entryWrite)).success) throw new Error("日记生成结果未能持久保存，原数据保留");
   } catch (error) {
     console.warn("Automatic diary generation skipped:", error);
   } finally {

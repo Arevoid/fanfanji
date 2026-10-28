@@ -1,6 +1,8 @@
 import type { StorageResult, StorageWriteResult } from "./storageTypes";
 import * as LZStringModule from "lz-string";
 import { canWriteMemoryStorage } from "./memoryWriterCoordination";
+import { memoryContentStore } from "./memoryContentStore";
+import { isMemoryContentKey } from "./memoryContentKeys";
 
 const LZString = ((LZStringModule as typeof LZStringModule & { default?: typeof LZStringModule }).default ?? LZStringModule) as typeof import("lz-string");
 const COMPRESSED_SETTINGS_PREFIX = "lz-settings-v1:";
@@ -57,6 +59,7 @@ function getStorage(): Storage | null {
 }
 
 export function readString(key: string): StorageResult<string | null> {
+  if (memoryContentStore.active && isMemoryContentKey(key)) return memoryContentStore.read(key);
   const storage = getStorage();
   if (!storage) return { value: null, found: false, valid: false, error: "unavailable" };
 
@@ -85,6 +88,7 @@ export function readJson<T>(key: string, fallback: T): StorageResult<T> {
 
 export function writeString(key: string, value: string): StorageWriteResult {
   if (!canWriteMemoryStorage(key)) return { success: false, error: "verification" };
+  if (memoryContentStore.active && isMemoryContentKey(key)) return memoryContentStore.stage({ [key]: value });
   const storage = getStorage();
   if (!storage) return { success: false, error: "unavailable" };
   if (typeof value !== "string") {
@@ -143,6 +147,7 @@ export function writeString(key: string, value: string): StorageWriteResult {
 }
 
 export function writeJson<T>(key: string, value: T, options?: StorageWriteOptions): StorageWriteResult {
+  const routedOptions = memoryContentStore.active && isMemoryContentKey(key) ? { ...options, source: "memory-indexeddb" } : options;
   try {
     const serialized = JSON.stringify(value);
     if (serialized === undefined) {
@@ -151,17 +156,18 @@ export function writeJson<T>(key: string, value: T, options?: StorageWriteOption
     }
     JSON.parse(serialized);
     const result = writeString(key, encodeJsonStorageText(key, serialized));
-    if (!result.success) notifyJsonWriteFailure(key, result.error, options);
+    if (!result.success) notifyJsonWriteFailure(key, result.error, routedOptions);
     return result;
   } catch (error) {
     console.warn(`[storage] Failed to serialize "${key}".`, error);
-    notifyJsonWriteFailure(key, "serialize", options);
+    notifyJsonWriteFailure(key, "serialize", routedOptions);
     return { success: false, error: "serialize" };
   }
 }
 
 export function remove(key: string): StorageWriteResult {
   if (!canWriteMemoryStorage(key)) return { success: false, error: "verification" };
+  if (memoryContentStore.active && isMemoryContentKey(key)) return memoryContentStore.stage({ [key]: null });
   const storage = getStorage();
   if (!storage) return { success: false, error: "unavailable" };
 

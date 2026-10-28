@@ -10,6 +10,7 @@ import type { ConversationSummaryRecord, KnowledgeClaim } from "../characterKnow
 export interface MemoryWriteResultLike {
   success: boolean;
   error?: unknown;
+  durable?: Promise<MemoryWriteResultLike>;
 }
 
 export type MemoryWriteCallback<T> = (
@@ -86,7 +87,8 @@ export async function commitMemoryWriteBundle(
       };
     }
     try {
-      const result = await writeClaims(claims);
+      const accepted = await writeClaims(claims);
+      const result = accepted && typeof accepted === "object" && accepted.durable ? await accepted.durable : accepted;
       if (!didWrite(result)) {
         return {
           canonicalWritten: false,
@@ -131,7 +133,8 @@ export async function commitMemoryWriteBundle(
       summaryError = "summary_writer_missing";
     } else {
       try {
-        const result = await input.appendSummaries(summaries);
+        const accepted = await input.appendSummaries(summaries);
+        const result = accepted && typeof accepted === "object" && accepted.durable ? await accepted.durable : accepted;
         summaryWritten = didWrite(result);
         if (!summaryWritten) summaryError = getWriteError(result) || "summary_write_failed";
       } catch (error) {
@@ -147,7 +150,8 @@ export async function commitMemoryWriteBundle(
       memoriesError = "compatibility_memory_writer_missing";
     } else {
       try {
-        const result = await input.saveMemories(input.memories);
+        const accepted = await input.saveMemories(input.memories);
+        const result = accepted && typeof accepted === "object" && accepted.durable ? await accepted.durable : accepted;
         memoriesWritten = didWrite(result);
         if (!memoriesWritten) memoriesError = getWriteError(result) || "compatibility_memory_write_failed";
       } catch (error) {
