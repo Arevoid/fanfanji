@@ -166,7 +166,7 @@ export async function extractMemories(
     singlePass:context.singlePass,memorySettings:context.memorySettings,
     history,
     characterName: context.character.name,
-    characterProfile: context.scenario==="offline" ? undefined : [
+    characterProfile: (context.scenario==="offline" || context.scenario==="immediate-summary") ? undefined : [
       context.character.personality,
       context.character.backstory,
       ...(context.character.references || []).map((reference) => `${reference.title}：${reference.content}`),
@@ -190,7 +190,7 @@ export async function extractMemories(
     conversationId: context.conversationId,
     parentActionId: context.parentActionId,
     ...(context.enableMemoryExtractionV2Shadow ? { enableV2Shadow: true } : {}),
-    ...(context.scenario === "offline" ? { scenario: "offline" as const } : {}),
+    ...((context.scenario === "offline" || context.scenario === "immediate-summary") ? { scenario: context.scenario } : {}),
   };
   const data = await extractApi(extractionParams);
   structuredOutputTelemetry = data.structuredOutputTelemetry;

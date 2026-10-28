@@ -786,6 +786,7 @@ async function runMemoryExtractionTextTransport(params: MemoryExtractionParams,l
 
       const result = await request({
         singleAttempt:params.singlePass,
+        timeoutMs: params.scenario === "immediate-summary" ? 180_000 : API_REQUEST_TIMEOUTS.memoryTask,
         message: prompt,
         history: [],
         apiKey: params.apiKey,
@@ -863,7 +864,7 @@ async function apiExtractMemoriesImpl(params: {
   templateType?: "refined" | "delicate";
   sourceReferenceMode?: "canonical" | "local";
   /** Offline continuations need factual handoff summaries, not screenplay prose. */
-  scenario?: "offline";
+  scenario?: "offline" | "immediate-summary";
   characterId?: string;
   relationId?: string;
   conversationId?: string;
@@ -888,7 +889,7 @@ async function apiExtractMemoriesImpl(params: {
   errorDetails?: { status: number; code: string };
 }> {
   const { ledger, purpose, logicalActionId, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
-  if(params.scenario==="offline"){
+  if(params.scenario==="offline" || params.scenario==="immediate-summary"){
     try{return await runMemoryExtractionTextTransport(params,ledger,next=>apiChatImpl({...next,purpose:"memory_extract",characterId:params.characterId,relationId:params.relationId,conversationId:params.conversationId}));}
     catch(error){return {text:"",items:[],error:error instanceof Error?error.message:"offline_text_transport_unavailable"};}
   }
@@ -971,7 +972,7 @@ async function apiExtractMemoriesImpl(params: {
 }
 
 export async function apiExtractMemories(params: Parameters<typeof apiExtractMemoriesImpl>[0]): Promise<Awaited<ReturnType<typeof apiExtractMemoriesImpl>>> {
-  if(params.scenario==="offline")params={...params,singlePass:params.singlePass!==false};
+  if(params.scenario==="offline" || params.scenario==="immediate-summary")params={...params,singlePass:params.singlePass!==false};
   params = routeCharacterTextRequest(params);
   const inputCharacters = params.history.reduce((total, entry) => total + String(entry.text || "").length, 0);
   const logicalActionId = params.logicalActionId || createAiActionId();

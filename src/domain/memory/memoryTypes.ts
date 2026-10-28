@@ -93,7 +93,7 @@ export interface MemoryExtractionApiParams {
   model: string;
   apiEndpoint?: string;
   templateType?: Character["archiveTemplateType"];
-  scenario?: "offline";
+  scenario?: "offline" | "immediate-summary";
   characterId?: string;
   relationId?: string;
   conversationId?: string;

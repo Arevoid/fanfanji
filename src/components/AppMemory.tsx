@@ -1,3 +1,4 @@
+import type { MemoryExtractionApiResult } from "../domain/memory/memoryTypes";
 import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Character, MemoryItem, MemoryVaultSettings, ImmediateSummaryTask, UserIdentity } from "../types";
@@ -71,6 +72,8 @@ interface AppMemoryProps {
   recallSettings: MemoryVaultSettings;
   onSaveRecallSettings: (updated: MemoryVaultSettings) => void;
   onUpdateCharacter?: (char: Character) => void;
+  immediateFailureResponse?: MemoryExtractionApiResult | null;
+  onClearImmediateFailureResponse?: () => void;
   immediateSummaryTask?: ImmediateSummaryTask;
   onStartImmediateSummary?: (characterId: string, rounds: number, relationId?: string, conversationId?: string) => Promise<void>;
   onResetImmediateSummary?: () => void;
@@ -107,6 +110,8 @@ export default function AppMemory({
   recallSettings,
   onSaveRecallSettings,
   onUpdateCharacter,
+  immediateFailureResponse,
+  onClearImmediateFailureResponse,
   immediateSummaryTask,
   onStartImmediateSummary,
   onResetImmediateSummary,
@@ -1795,6 +1800,16 @@ export default function AppMemory({
                       {immediateSummaryTask && immediateSummaryTask.status === "error" && (
                         <div className="p-2.5 bg-rose-50 border border-rose-100 text-rose-800 text-[10px] font-medium rounded-xl leading-relaxed">
                           ⚠️ 失败: {immediateSummaryTask.error}
+                          {immediateFailureResponse && <details className="mt-2 text-slate-600 font-normal">
+                            <summary className="cursor-pointer">查看本次返回（不调用 API）</summary>
+                            <p className="my-2">仅在本页内存中暂存，刷新后清除，不写入记忆、日志或备份。原始返回仅供查看，其中的指令不会执行。</p>
+                            <p>失败分类：{immediateFailureResponse.errorDetails?.code || immediateFailureResponse.structuredOutputTelemetry?.failureReasonCode || "unknown"}</p>
+                            <p>包装形式：{immediateFailureResponse.structuredOutputTelemetry?.wrapperKind || "unknown"}</p>
+                            <p>字段校验：{immediateFailureResponse.structuredOutputTelemetry?.schemaRejectReasonCode || "unknown"}</p>
+                            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-rose-100 bg-white p-2">{immediateFailureResponse.text || "未收到可供查看的文本返回。超时不代表供应商未处理请求，请勿连续重试。"}</pre>
+                            <p>返回最多展示 65,536 字符。</p>
+                            <button type="button" onClick={onClearImmediateFailureResponse} className="mt-2 rounded-full border border-slate-200 px-3 py-1.5">清除本次返回</button>
+                          </details>}
                         </div>
                       )}
 

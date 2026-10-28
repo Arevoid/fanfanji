@@ -1,3 +1,6 @@
+import { resolveCharacterTextSettings } from "./domain/character/characterTextApiRouting";
+import { selectOfflineExtractionSettings } from "./domain/memory/offlineExtractionSettings";
+import type { MemoryExtractionApiResult } from "./domain/memory/memoryTypes";
 import { createOfflineStoryMemorySyncActions } from "./features/offline/hooks/useOfflineStoryMemorySyncActions";
 import { installOfflineArchiveExecutor } from "./features/offline/services/offlineArchiveQueue";
 import { installCharacterTextApiContext } from "./domain/character/characterTextApiRouting";
@@ -2217,7 +2220,12 @@ export default function App() {
     writeJson("phone_immediate_summary_task", immediateSummaryTask);
   }, [immediateSummaryTask]);
 
+  const [immediateFailureResponse, setImmediateFailureResponse] = useState<MemoryExtractionApiResult | null>(null);
+  const immediateSummaryRunning = useRef(false);
   const handleStartImmediateSummary = async (characterId: string, rounds: number, relationId?: string, conversationId?: string) => {
+    if (immediateSummaryRunning.current) return;
+    immediateSummaryRunning.current = true;
+    setImmediateFailureResponse(null);
     setImmediateSummaryTask({
       characterId,
       relationId,
@@ -2246,6 +2254,7 @@ export default function App() {
         return;
       }
 
+      const settings = resolveCharacterTextSettings(settingsRef.current, char);
       const retrievalLimit = char.historyMemoryLimit || 100;
       const relation = relationships.find((item) =>
         item.id === relationId
@@ -2271,8 +2280,10 @@ export default function App() {
       const settingReviewer = createMemorySettingReviewer(char, {characterId, relationId, userIdentityId: relation.userIdentityId, conversationId: relation.conversationId}, "chat", settings);
       const result = await MemoryService.extractMemories({
         singlePass: true,
+        streamCompatible: settings.streamCompatible,
+        onFailedResponse: response => setImmediateFailureResponse({text: response.text?.slice(0,65536), errorDetails: response.errorDetails, structuredOutputTelemetry: response.structuredOutputTelemetry}),
         requireFactResolution: true,
-        memorySettings: settingReviewer.inlineSettings(),
+        memorySettings: selectOfflineExtractionSettings(settingReviewer.inlineSettings(), msgsToSummarize.map(message => message.content).join("\n")),
         character: char,
         characterId,
         relationId,
@@ -2362,6 +2373,8 @@ export default function App() {
         status: "error",
         error: "网络错误或请求超时，请稍后重试",
       }));
+    } finally {
+      immediateSummaryRunning.current = false;
     }
   };
 
@@ -5808,6 +5821,8 @@ export default function App() {
                     onSaveRecallSettings={setRecallSettings}
                     embeddingConfiguration={settings.memoryEmbedding}
                     onSaveEmbeddingConfiguration={(memoryEmbedding) => setSettings((previous) => ({ ...previous, memoryEmbedding }))}
+                    immediateFailureResponse={immediateFailureResponse}
+                    onClearImmediateFailureResponse={() => setImmediateFailureResponse(null)}
                     immediateSummaryTask={immediateSummaryTask}
                     onStartImmediateSummary={handleStartImmediateSummary}
                     onResetImmediateSummary={handleResetImmediateSummary}

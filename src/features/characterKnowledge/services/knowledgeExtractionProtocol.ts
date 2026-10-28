@@ -532,7 +532,7 @@ export function buildKnowledgeExtractionPrompt(input: {
   history: readonly KnowledgeExtractionHistoryItem[];
   sourceReferenceMode?: "canonical" | "local";
   templateType?: "refined" | "delicate";
-  scenario?: "offline";
+  scenario?: "offline" | "immediate-summary";
   includeV2Shadow?: boolean;
 }): string {
   if (input.identityReview !== undefined) return buildMissingFactResolutionPrompt(input.identityReview,input.semanticRegistry||[]);
