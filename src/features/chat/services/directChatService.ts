@@ -5,6 +5,7 @@ import type { ReplyCandidateContext, ReplyCandidatesResult } from "./chatService
 import { containsNonChineseText } from "../../../utils/textLanguage";
 import { normalizeVoiceTranslation } from "./voiceMessageContent";
 import { sanitizeCharacterActionText } from "./characterActionProtocol";
+import { splitModelDirectBubbles } from "./modelDirectBubbles";
 
 export function createDirectReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
   const replyText = sanitizeCharacterActionText(ensureExplicitStickerDelivery(context.rawText, context.requestedStickerMessage));
@@ -15,14 +16,16 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
   // Never fall back to rawText here: it may consist solely of a model's fake
   // “sent a photo” claim that the parser intentionally removed.
   let bubbles = cleanedText
-    ? normalizeDirectReplyBubbles(removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup)), context.keepPeriods)
+    ? context.preserveProse ? splitModelDirectBubbles(cleanedText)
+      : normalizeDirectReplyBubbles(removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup)), context.keepPeriods)
     : [];
   let translatedBubbles = context.translationText
-    ? splitAiReplyBubbles(sanitizeCharacterActionText(context.translationText), context.keepPeriods).map(normalizePaymentMarkup)
+    ? context.preserveProse ? splitModelDirectBubbles(sanitizeCharacterActionText(context.translationText))
+      : splitAiReplyBubbles(sanitizeCharacterActionText(context.translationText), context.keepPeriods).map(normalizePaymentMarkup)
     : [];
-  // Keep one response/translation pair intact for model chat. Independent
-  // paragraph splitting cannot safely pair languages with different lengths.
-  if (context.preserveProse || translatedBubbles.length > 0 && translatedBubbles.length !== bubbles.length) {
+  // Pair natural paragraphs only when both languages have matching blocks.
+  // If they differ, keep the complete pair rather than misassign translations.
+  if (translatedBubbles.length > 0 && translatedBubbles.length !== bubbles.length) {
     bubbles = cleanedText ? [cleanedText] : [];
     translatedBubbles = context.translationText ? [sanitizeCharacterActionText(context.translationText).trim()] : [];
   }

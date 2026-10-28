@@ -1,5 +1,6 @@
 import type { apiChat } from "../../../utils/apiHelper";
 import { MODEL_DIRECT_MARKER } from "../../../domain/prompt/modelDirectIdentity";
+import { splitModelDirectBubbles } from "./modelDirectBubbles";
 import type { Message } from "../../../types";
 import type { CharacterCognitiveContext } from "../../../domain/characterCognitive/characterCognitiveTypes";
 import type { ProactiveCognitiveContext } from "./proactiveCognitiveContext";
@@ -55,7 +56,7 @@ export async function generateProactiveReplyCandidates(input: {
     return input.keepPeriods ? normalized : normalized.replace(/。+$/u, "").trim();
   };
   const bubbles = cleanedText
-    ? request.systemInstruction?.includes(MODEL_DIRECT_MARKER) ? [cleanedText] : removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, input.keepPeriods).map(normalizeProactiveBubble))
+    ? request.systemInstruction?.includes(MODEL_DIRECT_MARKER) ? splitModelDirectBubbles(cleanedText) : removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, input.keepPeriods).map(normalizeProactiveBubble))
     : [];
   return {
     data,

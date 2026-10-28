@@ -4,6 +4,8 @@ import {createRegeneratedReplyCandidates} from "../src/features/chat/services/re
 import {parseGeminiTextWithTelemetry,parseOpenAiTextWithTelemetry} from "../src/server/textProtocolAdapters";
 import {requestDirectChatTurn,generateRegeneratedChatTurn} from "../src/features/chat/controllers/chatGenerationController";
 import {buildModelDirectIdentity} from "../src/domain/prompt/modelDirectIdentity";
+import {splitModelDirectBubbles} from "../src/features/chat/services/modelDirectBubbles";
+import {generateProactiveReplyCandidates} from "../src/features/chat/services/proactiveMessageService";
 const text="Hello! Here is a complete English paragraph with punctuation, identity and interoperability. ".repeat(6)+"\n\nA second paragraph stays in the same reply.";
 const translation="你好，这是完整段落的中文译文。";
 const context={characterId:"synthetic-ai",rawText:text,translationText:translation,preserveProse:true,disableBracketActions:true,keepPeriods:true,createId:(i:number)=>`test-${i}`,currentTime:()=>1};
@@ -14,7 +16,20 @@ for(const build of [createDirectReplyCandidates,createRegeneratedReplyCandidates
  assert.ok(result.messages[0].content.includes("identity and interoperability"));
  assert.ok(result.messages[0].content.includes("\n\nA second paragraph"));
  assert.equal(result.messages[0].translation,translation);
+ const paragraphs=build({...context,translationText:undefined});
+ assert.equal(paragraphs.messages.length,2,"model-direct paragraphs become separate bubbles");
+ assert.equal(paragraphs.messages.map(message=>message.content).join("\n\n"),paragraphs.cleanedText);
+ const bilingual=build({...context,rawText:"First paragraph.\n\nSecond paragraph.",translationText:"第一段。\n\n第二段。"});
+ assert.deepEqual(bilingual.messages.map(message=>message.translation),["第一段。","第二段。"]);
+ assert.equal(new Set(bilingual.messages.map(message=>message.id)).size,2);
 }
+assert.deepEqual(splitModelDirectBubbles("Short reply. Another sentence!"),["Short reply. Another sentence!"]);
+const code="Before.\n\n```js\nconst x = 1;\n\nconsole.log(x);\n```\n\nAfter.";
+assert.deepEqual(splitModelDirectBubbles(code),["Before.","```js\nconst x = 1;\n\nconsole.log(x);\n```","After."]);
+assert.deepEqual(splitModelDirectBubbles("Steps:\n\n1. First\n\n2. Second\n\nDone."),["Steps:","1. First\n\n2. Second","Done."]);
+assert.deepEqual(splitModelDirectBubbles("Steps:\n1. First\n\n2. Second\n\nDone."),["Steps:\n1. First\n\n2. Second","Done."]);
+assert.deepEqual(splitModelDirectBubbles("~~~txt\nfirst\n\nsecond"),["~~~txt\nfirst\n\nsecond"],"unfinished code block is not fragmented");
+assert.deepEqual(splitModelDirectBubbles("A\r\n\r\nB"),["A","B"]);
 const mismatched=createDirectReplyCandidates({...context,preserveProse:false});
 assert.equal(mismatched.messages.length,1,"unequal language splits must not be paired by index");
 assert.equal(mismatched.messages[0].translation,translation);
@@ -26,4 +41,11 @@ const response=await requestDirectChatTurn({prompt,settings:{selectedModel:"gemi
 assert.equal(response.text,text);assert.equal(response.translation,translation);assert.equal(response.innerVoice,undefined);
 const regenerated=await generateRegeneratedChatTurn({prompt:{...prompt,scenario:"regenerate"},settings:{selectedModel:"gemini-test"} as any,requestAi,candidateContext:context});
 assert.equal(regenerated.candidates?.messages.length,1);assert.equal(regenerated.candidates?.messages[0].translation,translation);
+let proactiveCalls=0;
+const proactive=await generateProactiveReplyCandidates({requestAi:async()=>{proactiveCalls++;return {text:"Hello there.\n\nHow was your day?"};},
+ request:{message:"hello",history:[],apiKey:"synthetic",model:"test",systemInstruction:prompt.systemInstruction},characterId:context.characterId,
+ disableBracketActions:true,keepPeriods:true,createId:context.createId,currentTime:context.currentTime,replyBatchId:"same-turn"});
+assert.equal(proactiveCalls,1);
+assert.deepEqual(proactive.messages.map(message=>message.content),["Hello there.","How was your day?"]);
+assert.ok(proactive.messages.every(message=>message.replyBatchId==="same-turn"));
 console.log("PASS model-direct long prose, translation pairing, thought isolation and parsed direct/regenerated replies; synthetic provider only");
