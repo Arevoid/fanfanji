@@ -1,3 +1,4 @@
+import { useForumFeedback } from "../features/forum/hooks/useForumFeedback";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createId as createApplicationId } from "../core/id/createId";
 import {
@@ -239,8 +240,7 @@ export default function AppForum({
   const [isThreadRefreshing, setIsThreadRefreshing] = useState(false);
   const [waitingReplyThreadIds, setWaitingReplyThreadIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const { error, notice, setError, setNotice } = useForumFeedback();
   const [profileName, setProfileName] = useState("");
   const [profileBio, setProfileBio] = useState("");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
@@ -258,7 +258,6 @@ export default function AppForum({
   const [selectedCommunityNpcIds, setSelectedCommunityNpcIds] = useState<string[]>([]);
   const [forumStoryRevision, setForumStoryRevision] = useState(0);
   const [isStoryUpdating, setIsStoryUpdating] = useState(false);
-  const storyLikeNoticeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const replyLockRef = useRef(false);
   const postLockRef = useRef(false);
   const shareLockRef = useRef(false);
@@ -268,9 +267,6 @@ export default function AppForum({
   const communityNpcMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
   const communityNpcImportRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => () => {
-    if (storyLikeNoticeTimerRef.current !== null) window.clearTimeout(storyLikeNoticeTimerRef.current);
-  }, []);
   const newestReplyRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -555,11 +551,7 @@ export default function AppForum({
   const showStoryLikeNotice = () => {
     const message = "点赞过的帖子更大几率收到楼主的更新提醒哦";
     setNotice(message);
-    if (storyLikeNoticeTimerRef.current !== null) window.clearTimeout(storyLikeNoticeTimerRef.current);
-    storyLikeNoticeTimerRef.current = window.setTimeout(() => {
-      setNotice((current) => current === message ? "" : current);
-      storyLikeNoticeTimerRef.current = null;
-    }, 3_000);
+
   };
 
   const likeForumStory = (storyId: string) => {
@@ -1176,7 +1168,7 @@ export default function AppForum({
   };
 
   return (
-    <div data-theme-page="forum" className="flex h-full min-h-0 flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
+    <div data-theme-page="forum" className="relative flex h-full min-h-0 flex-col bg-[var(--app-bg)] text-[var(--text-primary)]">
       <header className="relative z-10 flex h-[72px] shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 pt-1">
         <button
           type="button"
@@ -1311,16 +1303,12 @@ export default function AppForum({
       </PopoverMenu>
       <input ref={communityNpcImportRef} type="file" accept="application/json,.json" multiple className="hidden" onChange={(event) => { void importCommunityNpcs(event.target.files); event.target.value = ""; }} />
 
-      {error && (
-        <div role="alert" className="mx-4 mt-3 shrink-0 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div role="status" className="mx-4 mt-3 shrink-0 rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-600">
-          {notice}
-        </div>
-      )}
+      <div className="pointer-events-none absolute inset-x-4 top-20 z-[80] flex justify-center">
+        {(error || notice) && <div role={error ? "alert" : "status"} aria-atomic="true"
+          className={`max-w-full break-words rounded-xl border px-4 py-2.5 text-xs leading-relaxed shadow-md ${error ? "border-red-100 bg-red-50 text-red-700" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+          {error || notice}
+        </div>}
+      </div>
 
       {readonlySnapshot ? (
         <ForumSnapshotDetail snapshot={readonlySnapshot} />

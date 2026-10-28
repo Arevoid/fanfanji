@@ -549,13 +549,31 @@ const createGeneratedThread = (input: {
 };
 
 export const mapForumGenerationError = (error: unknown): string => {
+  const detail = error as { code?: string; reason?: string; status?: number; origin?: string } | null;
+  if (detail?.reason === "cloudflare_block" || detail?.reason === "html_error") {
+    return detail.origin === "site_proxy" ? "网站请求入口拒绝了论坛请求，请检查检测日志。" : "论坛接口访问受限，请检查检测日志或联系接口供应商。";
+  }
+  const descriptions: Record<string, string> = {
+    timeout: "论坛生成请求超时；请先查看检测日志，避免重复请求。",
+    provider_auth: "论坛生成认证失败：请检查文本 API Key 或模型权限。",
+    provider_rate_limit: "论坛接口已限流，请稍后再操作。",
+    provider_safety: "论坛请求被模型内容策略拒绝，未生成新内容。",
+    context_too_large: "论坛请求内容超过模型上下文限制。",
+    provider_unavailable: "论坛模型服务暂不可用，请稍后再操作。",
+    provider_empty: "论坛模型未返回内容，未生成新帖子。",
+    provider_invalid_response: "论坛接口返回格式异常，请查看检测日志。",
+    provider_request: "论坛接口拒绝了请求，请查看检测日志中的状态码。",
+    network: "论坛请求连接失败，请检查网络及接口地址。",
+    aborted: "论坛生成请求已取消。",
+  };
+  if (detail?.code && descriptions[detail.code]) return descriptions[detail.code];
   const message = error instanceof Error ? error.message : String(error || "");
   if (/401|403|unauthorized|forbidden|api key.*invalid|认证/i.test(message)) return "论坛生成认证失败：请检查文本 API Key 或模型权限。";
-  if (/429|rate|限流|too many/i.test(message)) return "论坛生成请求过于频繁，请稍后重试。";
+  if (/429|rate[ _-]?limit|限流|too many/i.test(message)) return "论坛生成请求过于频繁，请稍后重试。";
   if (/结构解析|json/i.test(message)) return "论坛生成结果结构解析失败，请重试。";
   if (/生成内容无效|无效/i.test(message)) return "AI 返回的论坛内容无效，未写入任何帖子。";
   if (/配置缺失/i.test(message)) return message;
-  return "论坛生成网络异常，请稍后重试。";
+  return "论坛生成失败，原因未确认，请查看检测日志。";
 };
 
 export async function generateForumThreads(input: {
