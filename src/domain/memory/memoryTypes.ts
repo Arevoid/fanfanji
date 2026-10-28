@@ -106,7 +106,7 @@ export interface MemoryExtractionApiParams {
 
 export interface MemoryExtractionApiResult {
   text?: string;
-  errorDetails?: { status?: number; code?: string };
+  errorDetails?: { status?: number; code?: string; reason?:string; origin?: "site_proxy" | "provider" | "unknown"; requestId?:string };
   identityReviews?: unknown[];
   semanticReviews?: unknown[];
   items?: unknown;

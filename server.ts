@@ -321,7 +321,7 @@ async function startServer() {
     } catch (error: any) {
       const normalized = normalizeTextApiError(error, "聊天 API 请求失败。");
       console.error("Chat API Error:", { code: normalized.code, status: normalized.status, reason: normalized.reason, message: normalized.message });
-      return res.status(normalized.status).json({ success: false, code: normalized.code, reason: normalized.reason, error: normalized.message });
+      return res.status(normalized.status).json({ success: false, code: normalized.code, reason: normalized.reason, origin: normalized.origin, requestId: normalized.requestId, error: normalized.message });
     }
   });
 

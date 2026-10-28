@@ -19,6 +19,28 @@ export interface TextApiErrorDetails {
   code: TextApiErrorCode;
   message: string;
   reason?: string;
+  origin?: "site_proxy" | "provider" | "unknown";
+  requestId?: string;
+}
+
+export function safeApiRequestId(value: unknown): string | undefined {
+  return typeof value === "string" && /^[a-z0-9:_-]{1,100}$/iu.test(value) ? value : undefined;
+}
+export function proxyTextErrorOrigin(raw:string,details:TextApiErrorDetails):TextApiErrorDetails["origin"] {
+  if (details.origin) return details.origin;
+  // An older application proxy may return structured errors without origin.
+  // Do not mislabel its sanitized upstream error as a block at our own site.
+  try { JSON.parse(raw); return "unknown"; } catch { /* inspect an actual error page */ }
+  return details.reason === "cloudflare_block" || details.reason === "html_error" ? "site_proxy" : "unknown";
+}
+export function describeTextApiFailure(error: unknown): string {
+  const value = error as {message?: string;status?: number;code?: string;reason?: string;origin?: string;requestId?: string};
+  const origin = value?.origin === "site_proxy" ? "网站请求入口" : value?.origin === "provider" ? "模型供应商接口" : "位置未确认";
+  const status = Number.isInteger(value?.status) ? `HTTP ${value.status}` : "";
+  const code = typeof value?.code === "string" && /^[a-z_]{1,40}$/u.test(value.code) ? value.code : "unknown";
+  const reason = typeof value?.reason === "string" && /^[a-z0-9_-]{1,64}$/iu.test(value.reason) ? value.reason : "";
+  const requestId = safeApiRequestId(value?.requestId);
+  return [redactTextApiError(value?.message || "请求未完成"), [origin,status,code,reason,requestId ? `请求标识 ${requestId}` : ""].filter(Boolean).join(" · ")].join("\n");
 }
 
 const SAFETY_PATTERN = /PROHIBITED_CONTENT|content[_ -]?filter|content[_ -]?safety|prompt[_ -]?blocked|safety|harmful|unsafe|policy|responsible\s*ai|内容安全|安全策略|内容被拦截|请求被拦截/iu;
@@ -95,7 +117,9 @@ export function parseTextApiErrorPayload(raw: string, status?: number): TextApiE
   const providerCode = typeof parsed?.code === "string" && KNOWN_CODES.has(parsed.code as TextApiErrorCode)
     ? parsed.code as TextApiErrorCode
     : undefined;
-  return { message, reason: reason || undefined, code: providerCode || classifyTextApiErrorCode(status, message, reason) };
+  const origin = ["site_proxy","provider","unknown"].includes(parsed?.origin) ? parsed.origin as TextApiErrorDetails["origin"] : undefined;
+  return { message, reason: reason || undefined, code: providerCode || classifyTextApiErrorCode(status, message, reason),
+    ...(origin ? {origin} : {}), ...(safeApiRequestId(parsed?.requestId) ? {requestId:safeApiRequestId(parsed.requestId)} : {}) };
 }
 
 export function emptyTextApiErrorDetails(status = 502, reason = ""): TextApiErrorDetails {

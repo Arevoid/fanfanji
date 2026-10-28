@@ -1,3 +1,4 @@
+import { describeTextApiFailure } from "../../../utils/textApiError";
 import { readOfflineCumulativeMemoryContext } from "../services/offlineCumulativeMemoryContext";
 import { mergeOfflineArchiveProgress } from "../../../domain/memory/offlineArchivePolicy";
 import {resolveCharacterApiSettings} from "../../../domain/character/characterApiSettings";
@@ -494,7 +495,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
       }
     } catch (err: any) {
       console.error("Offline story generation failed:", err);
-      const detail = err instanceof Error ? err.message.trim() : String(err || "").trim();
+      const detail = describeTextApiFailure(err);
       setErrorMsg(detail
         ? `呼叫主脑剧本引擎失败：${detail}`
         : "呼叫主脑剧本引擎失败，请检查网络或 API Key 设置。",

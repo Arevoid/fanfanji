@@ -6,7 +6,7 @@ import {
   type TransportHistoryEntry,
 } from "../domain/prompt/promptTransport";
 import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError, readResponseTextWithTimeout } from "../utils/fetchWithTimeout";
-import { emptyTextApiErrorDetails, parseTextApiErrorPayload, redactTextApiError, type TextApiErrorCode } from "../utils/textApiError";
+import { emptyTextApiErrorDetails, parseTextApiErrorPayload, redactTextApiError, safeApiRequestId, type TextApiErrorCode, type TextApiErrorDetails } from "../utils/textApiError";
 import {
   emptyStructuredOutputTelemetry,
   textLengthBucket,
@@ -16,7 +16,8 @@ import {
 } from "../features/characterKnowledge/services/structuredOutputTelemetry";
 
 export class TextApiError extends Error {
-  constructor(public status: number, message: string, public code: TextApiErrorCode = "unknown", public reason?: string) {
+  constructor(public status: number, message: string, public code: TextApiErrorCode = "unknown", public reason?: string,
+    public origin?: TextApiErrorDetails["origin"], public requestId?: string) {
     super(message);
     this.name = "TextApiError";
   }
@@ -299,7 +300,7 @@ export async function callTextProviderWithDiagnostics(input: TextProviderInput):
     const raw = await readResponseTextWithTimeout(response, requestTimeoutMs);
     if (!response.ok) {
       const details = parseTextApiErrorPayload(raw, response.status);
-      throw new TextApiError(response.status, details.message, details.code, details.reason);
+      throw new TextApiError(response.status, details.message, details.code, details.reason, "provider", safeApiRequestId(response.headers.get("cf-ray") || response.headers.get("x-request-id")));
     }
     const parsedOutput = parseOpenAiTextWithTelemetry(raw);
     const text = parsedOutput.text;
@@ -345,7 +346,7 @@ export async function callTextProviderWithDiagnostics(input: TextProviderInput):
   const raw = await readResponseTextWithTimeout(response, requestTimeoutMs);
   if (!response.ok) {
     const details = parseTextApiErrorPayload(raw, response.status);
-    throw new TextApiError(response.status, details.message, details.code, details.reason);
+    throw new TextApiError(response.status, details.message, details.code, details.reason, "provider", safeApiRequestId(response.headers.get("cf-ray") || response.headers.get("x-request-id")));
   }
   let parsedPayload: any;
   try { parsedPayload = JSON.parse(raw); } catch {
@@ -380,7 +381,7 @@ export async function fetchTextModels(input: { apiKey: string; apiEndpoint?: str
   const raw = await readResponseTextWithTimeout(response, API_REQUEST_TIMEOUTS.modelList);
   if (!response.ok) {
     const details = parseTextApiErrorPayload(raw, response.status);
-    throw new TextApiError(response.status, details.message, details.code, details.reason);
+    throw new TextApiError(response.status, details.message, details.code, details.reason, "provider", safeApiRequestId(response.headers.get("cf-ray") || response.headers.get("x-request-id")));
   }
   let data: any;
   try { data = JSON.parse(raw); } catch { throw new TextApiError(502, "模型列表响应无法解析。", "provider_invalid_response"); }

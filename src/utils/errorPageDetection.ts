@@ -12,7 +12,7 @@ const HTML_ERROR_MARKER_PATTERN = /(?:error|blocked|forbidden|denied|gateway|sec
 export function detectErrorPage(value: unknown): ErrorPageDetection | undefined {
   if (typeof value !== "string") return undefined;
   const sample = value.slice(0, 20000);
-  if (CLOUDFLARE_BLOCK_PATTERN.test(sample)) return { code: "cloudflare_block" };
+  if (CLOUDFLARE_BLOCK_PATTERN.test(sample) || /^\s*error code:\s*(?:1010|1020)\s*$/iu.test(sample)) return { code: "cloudflare_block" };
   if (HTML_DOCUMENT_PATTERN.test(sample) && HTML_ERROR_MARKER_PATTERN.test(sample)) return { code: "html_error" };
   return undefined;
 }

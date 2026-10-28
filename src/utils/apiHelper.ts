@@ -23,7 +23,7 @@ import {
   type AiRequestLedgerInput,
   type AiRequestLedgerSession,
 } from "../core/monitoring/aiRequestLedger";
-import { emptyTextApiErrorDetails, parseTextApiErrorPayload, isProviderSafetyNotice, type TextApiErrorCode } from "./textApiError";
+import { emptyTextApiErrorDetails, parseTextApiErrorPayload, isProviderSafetyNotice, safeApiRequestId, describeTextApiFailure, proxyTextErrorOrigin, type TextApiErrorDetails, type TextApiErrorCode } from "./textApiError";
 import { isStructuredOutputTelemetry, withStructuredOutputTelemetry, type StructuredOutputTelemetry } from "../features/characterKnowledge/services/structuredOutputTelemetry";
 
 type ApiProviderUsage = AiRequestUsage;
@@ -102,13 +102,17 @@ export class ApiChatError extends Error {
   readonly status?: number;
   readonly code: TextApiErrorCode;
   readonly reason?: string;
+  readonly origin?: TextApiErrorDetails["origin"];
+  readonly requestId?: string;
 
-  constructor(message: string, options: { status?: number; code?: TextApiErrorCode; reason?: string; cause?: unknown } = {}) {
+  constructor(message: string, options: { status?: number; code?: TextApiErrorCode; reason?: string; origin?: TextApiErrorDetails["origin"]; requestId?: string; cause?: unknown } = {}) {
     super(message, options.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = "ApiChatError";
     this.status = options.status;
     this.code = options.code || "unknown";
     this.reason = options.reason;
+    this.origin = options.origin;
+    this.requestId = safeApiRequestId(options.requestId);
   }
 }
 
@@ -224,7 +228,7 @@ async function directClientChatImpl(params: {
 
     if (!responseFetch.ok) {
       const details = parseTextApiErrorPayload(await readResponseTextWithTimeout(responseFetch, requestTimeoutMs), responseFetch.status);
-      throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason });
+      throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason, origin: "provider", requestId: safeApiRequestId(responseFetch.headers.get("cf-ray") || responseFetch.headers.get("x-request-id")) });
     }
 
     const responseText = await readResponseTextWithTimeout(responseFetch, requestTimeoutMs);
@@ -364,7 +368,7 @@ async function directClientChatImpl(params: {
     const responseText = await readResponseTextWithTimeout(responseFetch, requestTimeoutMs);
     if (!responseFetch.ok) {
       const details = parseTextApiErrorPayload(responseText, responseFetch.status);
-      throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason });
+      throw new ApiChatError(details.message, { status: responseFetch.status, code: details.code, reason: details.reason, origin: "provider", requestId: safeApiRequestId(responseFetch.headers.get("cf-ray") || responseFetch.headers.get("x-request-id")) });
     }
 
     let dataFetch: any;
@@ -539,7 +543,7 @@ async function apiChatImpl(params: ApiChatParams & { ledger?: AiRequestLedgerSes
   }
   if (!res.ok) {
     const details = parseTextApiErrorPayload(responseText, res.status);
-    const error=new ApiChatError(details.message, { status: res.status, code: details.code, reason: details.reason });
+    const error=new ApiChatError(details.message, { status: res.status, code: details.code, reason: details.reason, origin: proxyTextErrorOrigin(responseText,details), requestId: details.requestId || safeApiRequestId(res.headers.get("cf-ray") || res.headers.get("x-request-id")) });
     if(!singleAttempt&&params.responseFormat&&isUnsupportedJsonResponseFormat(error)){
       ledger?.markFallback("provider rejected JSON response format; retry without format");
       return apiChatImpl({...params,responseFormat:undefined});
@@ -886,12 +890,14 @@ async function apiExtractMemoriesImpl(params: {
   runtimeLineageTransport?: import("../features/characterKnowledge/services/knowledgeExtractionProtocol").KnowledgeExtractionLineageTransport;
   structuredOutputTelemetry?: StructuredOutputTelemetry;
   error?: string;
-  errorDetails?: { status: number; code: string };
+  errorDetails?: { status: number; code: string; reason?:string; origin?:TextApiErrorDetails["origin"]; requestId?:string };
 }> {
   const { ledger, purpose, logicalActionId, parentActionId, characterId, relationId, conversationId, ...requestBody } = params;
   if(params.scenario==="offline" || params.scenario==="immediate-summary"){
     try{return await runMemoryExtractionTextTransport(params,ledger,next=>apiChatImpl({...next,purpose:"memory_extract",characterId:params.characterId,relationId:params.relationId,conversationId:params.conversationId}));}
-    catch(error){return {text:"",items:[],error:error instanceof Error?error.message:"offline_text_transport_unavailable"};}
+    catch(error){return {text:"",items:[],error:describeTextApiFailure(error),
+      errorDetails:{status:error instanceof ApiChatError ? error.status || 0 : 0,code:error instanceof ApiChatError ? error.code : "unknown",
+        ...(error instanceof ApiChatError ? {reason: /^[a-z0-9_-]{1,64}$/iu.test(error.reason || "") ? error.reason : undefined,origin:error.origin,requestId:error.requestId} : {})}};}
   }
   try {
     ledger?.markAttempt({ provider: "server-proxy", model: params.model, endpoint: "/api/extract-memories", transport: "backend_proxy" });

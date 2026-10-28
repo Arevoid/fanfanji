@@ -50,7 +50,7 @@ function errorResponse(error: unknown, fallbackCode: string, fallbackMessage: st
 
 function textErrorResponse(error: unknown, fallbackMessage: string) {
   const normalized = normalizeTextApiError(error, fallbackMessage);
-  return json({ success: false, code: normalized.code, reason: normalized.reason, error: normalized.message }, normalized.status);
+  return json({ success: false, code: normalized.code, reason: normalized.reason, origin: normalized.origin, requestId: normalized.requestId, error: normalized.message }, normalized.status);
 }
 
 function neteaseErrorResponse(error: unknown, fallbackMessage: string) {
