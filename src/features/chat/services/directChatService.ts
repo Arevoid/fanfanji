@@ -19,7 +19,10 @@ export function createDirectReplyCandidates(context: ReplyCandidateContext): Rep
     ? context.preserveProse ? splitModelDirectBubbles(cleanedText)
       : normalizeDirectReplyBubbles(removeRedundantCharacterBubbles(splitAiReplyBubbles(cleanedText, context.keepPeriods).map(normalizePaymentMarkup)), context.keepPeriods)
     : [];
-  let translatedBubbles = context.translationText
+  // Chinese replies never display a translation. A redundant translation field
+  // must therefore not collapse their otherwise valid paragraph boundaries.
+  const needsTranslation = containsNonChineseText(cleanedText);
+  let translatedBubbles = context.translationText && needsTranslation
     ? context.preserveProse ? splitModelDirectBubbles(sanitizeCharacterActionText(context.translationText))
       : splitAiReplyBubbles(sanitizeCharacterActionText(context.translationText), context.keepPeriods).map(normalizePaymentMarkup)
     : [];
