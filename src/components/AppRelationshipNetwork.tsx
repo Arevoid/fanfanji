@@ -1,8 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { RelationshipPeopleView, PersonAvatar } from "../features/relationshipNetwork/components/RelationshipPeopleView";
+import { readRelationshipView, saveRelationshipView } from "../features/relationshipNetwork/services/relationshipViewPreference";
+import { generateRelationshipPeople, personNameKey } from "../features/relationshipNetwork/services/generateRelationshipPeople";
+import { saveGeneratedRelationshipPeople, type RelationshipPersonSelection } from "../features/relationshipNetwork/services/saveGeneratedRelationshipPeople";
+import { relationshipNeighbors, relationshipCharacterGraph } from "../domain/relationshipNetwork/relationshipPeople";
+import { LayoutGrid, Network, ChevronDown } from "lucide-react";
 import {
   ArrowLeft,
   ArrowLeftRight,
-  Expand,
   Hand,
   Link2,
   Minus,
@@ -56,7 +61,7 @@ import type {
   RelationshipNetworkNpcMomentAutoFrequency,
   RelationshipNetworkNpcMomentAutoMode,
 } from "../domain/relationshipNetwork/relationshipNetworkTypes";
-import type { Character, UserIdentity } from "../types";
+import type { Character, UserIdentity, UserSettings, WorldBookEntry } from "../types";
 import type { CharacterRelationship } from "../domain/relationship/characterRelationship";
 
 const WORLD_WIDTH = 1200;
@@ -67,6 +72,8 @@ const MIN_SCALE = 0.55;
 const MAX_SCALE = 1.35;
 
 interface AppRelationshipNetworkProps {
+  settings?: UserSettings;
+  worldBookEntries?: WorldBookEntry[];
   activeIdentity: UserIdentity;
   characters?: Character[];
   relationships?: CharacterRelationship[];
@@ -232,6 +239,8 @@ function directionLabel(direction: RelationshipNetworkEdgeDirection): string {
 }
 
 export default function AppRelationshipNetwork({
+  settings,
+  worldBookEntries = [],
   activeIdentity,
   characters = [],
   relationships = [],
@@ -241,6 +250,14 @@ export default function AppRelationshipNetwork({
   onCheckNpcAutomation,
   onClose,
 }: AppRelationshipNetworkProps) {
+  const [view, setView] = useState(() => readRelationshipView(activeIdentity.id));
+  const [personId, setPersonId] = useState("");
+  const [personPickerOpen, setPersonPickerOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [associationSourceId, setAssociationSourceId] = useState<string | null>(null);
+  const [generationProgress, setGenerationProgress] = useState("");
+  const generationLock = useRef(false);
+  const [generated, setGenerated] = useState<{ characterId: string; characterName: string; rows: RelationshipPersonSelection[] } | null>(null);
   const [network, setNetwork] = useState<RelationshipNetworkMap>(() =>
     listRelationshipNetworkMapsForIdentity(activeIdentity.id)[0] || createInitialNetwork(activeIdentity.id));
   const [npcs, setNpcs] = useState<RelationshipNetworkNpc[]>(() => {
@@ -262,6 +279,8 @@ export default function AppRelationshipNetwork({
   const [editingNpcId, setEditingNpcId] = useState<string | null>(null);
   const [npcNameDraft, setNpcNameDraft] = useState("");
   const [npcAvatarDraft, setNpcAvatarDraft] = useState("");
+  const [npcGenderDraft, setNpcGenderDraft] = useState("");
+  const [npcAgeDraft, setNpcAgeDraft] = useState("");
   const [npcSummaryDraft, setNpcSummaryDraft] = useState("");
   const [npcRoleDraft, setNpcRoleDraft] = useState("");
   const [npcPersonalityDraft, setNpcPersonalityDraft] = useState("");
@@ -275,11 +294,14 @@ export default function AppRelationshipNetwork({
   const [checkingNpcAutomationId, setCheckingNpcAutomationId] = useState<string | null>(null);
   const [npcLinkConfirmOpen, setNpcLinkConfirmOpen] = useState(false);
   const [edgeDraft, setEdgeDraft] = useState<EdgeDraft | null>(null);
+  const [edgeOpenedFromNpc, setEdgeOpenedFromNpc] = useState(false);
+  const [npcDeleteTarget, setNpcDeleteTarget] = useState<RelationshipNetworkNpc | null>(null);
   const [edgeModalOpen, setEdgeModalOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const [nodeSearch, setNodeSearch] = useState("");
   const [nodeTypeFilter, setNodeTypeFilter] = useState<"all" | RelationshipNetworkEntityType>("all");
   const [edgeCategoryFilter, setEdgeCategoryFilter] = useState("all");
+  const [npcSocialDraft, setNpcSocialDraft] = useState<SocialDraft | null>(null);
   const [socialDraft, setSocialDraft] = useState<SocialDraft | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -354,6 +376,23 @@ export default function AppRelationshipNetwork({
   }), [activeIdentity, characters, network.nodes, npcs]);
 
   const selectedNode = nodeModels.find((model) => model.node.id === selectedNodeId);
+  const currentPerson = availableCharacters.find(character => character.id === personId) || availableCharacters[0];
+  const npcEditorNode = network.nodes.find(node => node.entityType === "npc" && node.entityId === editingNpcId);
+  const npcEditorCenter = network.nodes.find(node => node.entityType === "character" && node.entityId === currentPerson?.id);
+  const npcEditorEdge = npcEditorNode && npcEditorCenter && network.edges.find(edge => (edge.sourceNodeId === npcEditorNode.id && edge.targetNodeId === npcEditorCenter.id) || (edge.targetNodeId === npcEditorNode.id && edge.sourceNodeId === npcEditorCenter.id));
+  const switchView = () => {
+    setAssociationSourceId(null);
+    setAddMenuOpen(false);
+    const next = view === "graph" ? "cards" : "graph";
+    setView(next);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setNodeSearch("");
+    setNodeTypeFilter("all");
+    setEdgeCategoryFilter("all");
+    setConnectMode(false);
+    if (!saveRelationshipView(activeIdentity.id, next).success) setError("展示方式暂未保存，下次打开可能恢复默认。");
+  };
   const selectedNpc = selectedNode?.type === "npc" ? npcs.find((npc) => npc.id === selectedNode.node.entityId) : undefined;
   const linkedCharacter = selectedNpc
     ? characters.find((character) =>
@@ -389,31 +428,34 @@ export default function AppRelationshipNetwork({
     ? listRelationshipNetworkInteractionRecordsForSocialLink(activeIdentity.id, draftSocialLink.id)
     : [];
 
+  const characterGraph = useMemo(() => relationshipCharacterGraph(network, currentPerson?.id), [network, currentPerson?.id]);
+  const characterGraphIds = useMemo(() => new Set(characterGraph.nodes.map(node => node.id)), [characterGraph]);
   const visibleNodeModels = useMemo(() => {
     const query = nodeSearch.trim().toLowerCase();
     return nodeModels.filter((model) => {
+      if (!characterGraphIds.has(model.node.id)) return false;
       if (nodeTypeFilter !== "all" && model.type !== nodeTypeFilter) return false;
       if (!query) return true;
       return `${model.name} ${model.summary} ${model.typeLabel}`.toLowerCase().includes(query);
     });
-  }, [nodeModels, nodeSearch, nodeTypeFilter]);
+  }, [nodeModels, nodeSearch, nodeTypeFilter, characterGraphIds]);
   const visibleNodeIds = useMemo(() => new Set(visibleNodeModels.map((model) => model.node.id)), [visibleNodeModels]);
   const edgeCategories = useMemo(() => {
     const categories = new Set<string>();
-    network.edges.forEach((edge) => categories.add(edge.category?.trim() || "未分类"));
+    characterGraph.edges.forEach((edge) => categories.add(edge.category?.trim() || "未分类"));
     return Array.from(categories).sort((left, right) => left.localeCompare(right));
-  }, [network.edges]);
-  const matchingEdges = useMemo(() => network.edges.filter((edge) => {
+  }, [characterGraph.edges]);
+  const matchingEdges = useMemo(() => characterGraph.edges.filter((edge) => {
     if (!visibleNodeIds.has(edge.sourceNodeId) && !visibleNodeIds.has(edge.targetNodeId)) return false;
     if (edgeCategoryFilter === "all") return true;
     return (edge.category?.trim() || "未分类") === edgeCategoryFilter;
-  }), [edgeCategoryFilter, network.edges, visibleNodeIds]);
+  }), [edgeCategoryFilter, characterGraph.edges, visibleNodeIds]);
   const visibleEdges = useMemo(() => matchingEdges.filter((edge) => visibleNodeIds.has(edge.sourceNodeId) && visibleNodeIds.has(edge.targetNodeId)), [matchingEdges, visibleNodeIds]);
 
   const hasEntityNode = (entityType: RelationshipNetworkEntityType, entityId: string) =>
     network.nodes.some((node) => node.entityType === entityType && node.entityId === entityId);
 
-  const getWorldCenter = () => {
+  const getWorldCenter = (occupied = networkRef.current.nodes) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     const width = rect?.width || 390;
     const height = rect?.height || 400;
@@ -424,7 +466,7 @@ export default function AppRelationshipNetwork({
       [NODE_WIDTH + 26, NODE_HEIGHT + 28], [-(NODE_WIDTH + 26), NODE_HEIGHT + 28], [NODE_WIDTH + 26, -(NODE_HEIGHT + 28)], [-(NODE_WIDTH + 26), -(NODE_HEIGHT + 28)],
       [2 * (NODE_WIDTH + 26), 0], [-2 * (NODE_WIDTH + 26), 0], [0, 2 * (NODE_HEIGHT + 28)], [0, -2 * (NODE_HEIGHT + 28)],
     ];
-    const overlaps = (x: number, y: number) => networkRef.current.nodes.some((node) =>
+    const overlaps = (x: number, y: number) => occupied.some((node) =>
       Math.abs((node.x + NODE_WIDTH / 2) - (x + NODE_WIDTH / 2)) < NODE_WIDTH + 18
       && Math.abs((node.y + NODE_HEIGHT / 2) - (y + NODE_HEIGHT / 2)) < NODE_HEIGHT + 18);
     const available = candidates.find(([offsetX, offsetY]) => {
@@ -453,6 +495,22 @@ export default function AppRelationshipNetwork({
   };
 
   const addEntityNode = (entityType: RelationshipNetworkEntityType, entityId: string) => {
+    if (associationSourceId) {
+      if (entityType === "character" && entityId === associationSourceId) { setError("不能与自己建立关系。"); return; }
+      const next = { ...networkRef.current, nodes: [...networkRef.current.nodes] };
+      const ensure = (type: RelationshipNetworkEntityType, id: string) => {
+        let node = next.nodes.find(item => item.entityType === type && item.entityId === id);
+        if (!node) { node = { id: createId("relationship-network-node"), entityType: type, entityId: id, ...getWorldCenter(next.nodes) }; next.nodes.push(node); }
+        return node;
+      };
+      const source = ensure("character", associationSourceId);
+      const target = ensure(entityType, entityId);
+      const existing = next.edges.find(edge => (edge.sourceNodeId === source.id && edge.targetNodeId === target.id) || (edge.targetNodeId === source.id && edge.sourceNodeId === target.id));
+      if (!commitNetwork(next)) return;
+      setNodePickerOpen(false); setAssociationSourceId(null);
+      if (existing) openExistingEdge(existing); else openNewEdge(source.id, target.id);
+      return;
+    }
     if (hasEntityNode(entityType, entityId)) {
       setNotice("这个人物已经在当前画布上了。");
       return;
@@ -600,62 +658,13 @@ export default function AppRelationshipNetwork({
       ? networkRef.current.edges.map((item) => item.id === edge.id ? edge : item)
       : [...networkRef.current.edges, edge];
     if (commitNetwork({ ...networkRef.current, edges }, "关系已保存。")) {
-      const existingSocialLinks = listRelationshipNetworkSocialLinksForEdge(activeIdentity.id, edge.id);
-      if (socialDraft?.enabled) {
-        const sourceNode = networkRef.current.nodes.find((node) => node.id === edge.sourceNodeId);
-        const targetNode = networkRef.current.nodes.find((node) => node.id === edge.targetNodeId);
-        const isCharacterPair = sourceNode?.entityType === "character" && targetNode?.entityType === "character";
-        const desiredDirections = edge.direction === "both"
-          ? [[sourceNode, targetNode], [targetNode, sourceNode]]
-          : edge.direction === "reverse" ? [[targetNode, sourceNode]] : [[sourceNode, targetNode]];
-        let failed = false;
-        const desiredKeys = new Set<string>();
-        desiredDirections.forEach(([sourceDirection, targetDirection], index) => {
-          if (!sourceDirection || !targetDirection) return;
-          const sourceEntityType = sourceDirection.entityType as RelationshipNetworkEntityType;
-          const targetEntityType = targetDirection.entityType as RelationshipNetworkEntityType;
-          const sourceEntityId = sourceDirection.entityId;
-          const targetEntityId = targetDirection.entityId;
-          const key = `${sourceEntityType}:${sourceEntityId}->${targetEntityType}:${targetEntityId}`;
-          desiredKeys.add(key);
-          const existing = existingSocialLinks.find((link) => `${link.sourceEntityType}:${link.sourceEntityId}->${link.targetEntityType}:${link.targetEntityId}` === key);
-          const result = upsertRelationshipNetworkSocialLink({
-            id: existing?.id || (index === 0 && !isCharacterPair && socialDraft.id) || createId("relationship-network-social"),
-            ownerIdentityId: activeIdentity.id,
-            sourceEntityType,
-            sourceEntityId,
-            targetEntityType,
-            targetEntityId,
-            relationshipLabel: resolveRelationshipLabel(edge, sourceEntityId),
-            enabled: true,
-            canViewMoments: socialDraft.canViewMoments,
-            canCommentMoments: socialDraft.canCommentMoments,
-            canLikeMoments: socialDraft.canLikeMoments,
-            canReplyMoments: socialDraft.canReplyMoments,
-            interactionApprovalMode: socialDraft.interactionApprovalMode,
-            commentFrequency: socialDraft.commentFrequency,
-            networkEdgeId: edge.id,
-            createdAt: existing?.createdAt || now,
-            updatedAt: now,
-          });
-          if (!result.success) failed = true;
-        });
-        existingSocialLinks
-          .filter((link) => !desiredKeys.has(`${link.sourceEntityType}:${link.sourceEntityId}->${link.targetEntityType}:${link.targetEntityId}`))
-          .forEach((link) => { removeRelationshipNetworkSocialLink(activeIdentity.id, link.id); });
-        if (failed) setError("关系已保存，但朋友圈互动设置保存失败。");
-        else setSocialLinks(listRelationshipNetworkSocialLinksForIdentity(activeIdentity.id));
-      } else if (existingSocialLinks.length > 0) {
-        // Keep the disabled record so its frequency and audit trail can be
-        // restored when the user enables this relationship again.
-        const socialResults = existingSocialLinks.map((link) => upsertRelationshipNetworkSocialLink({ ...link, enabled: false, updatedAt: now }));
-        if (socialResults.some((result) => !result.success)) setError("关系已保存，但朋友圈互动设置未能关闭。");
-        else setSocialLinks(listRelationshipNetworkSocialLinksForIdentity(activeIdentity.id));
-      }
+      // Relationship editing does not change separately configured social permissions.
       setSelectedEdgeId(edge.id);
       setEdgeModalOpen(false);
       setEdgeDraft(null);
       setSocialDraft(null);
+      if (edgeOpenedFromNpc) setNpcModalOpen(true);
+      setEdgeOpenedFromNpc(false);
     }
   };
 
@@ -725,9 +734,15 @@ export default function AppRelationshipNetwork({
   };
 
   const openNpcComposer = (npc?: RelationshipNetworkNpc) => {
+    const node = networkRef.current.nodes.find(item => item.entityType === "npc" && item.entityId === npc?.id);
+    const center = networkRef.current.nodes.find(item => item.entityType === "character" && item.entityId === currentPerson?.id);
+    const edge = node && center && networkRef.current.edges.find(item => (item.sourceNodeId === node.id && item.targetNodeId === center.id) || (item.targetNodeId === node.id && item.sourceNodeId === center.id));
+    setNpcSocialDraft(edge ? createSocialDraft(edge.sourceNodeId, edge.targetNodeId, edge.id) : null);
     setEditingNpcId(npc?.id || null);
     setNpcNameDraft(npc?.name || "");
     setNpcAvatarDraft(npc?.avatar || "");
+    setNpcGenderDraft(npc?.gender || "");
+    setNpcAgeDraft(npc?.age == null ? "" : String(npc.age));
     setNpcSummaryDraft(npc?.summary || "");
     setNpcRoleDraft(npc?.role || "");
     setNpcPersonalityDraft(npc?.personality || "");
@@ -817,6 +832,7 @@ export default function AppRelationshipNetwork({
     }
     const now = Date.now();
     const previous = editingNpcId ? npcs.find((npc) => npc.id === editingNpcId) : undefined;
+    if (npcAgeDraft && npcAgeDraft !== "∞" && (!/^\d+$/.test(npcAgeDraft) || Number(npcAgeDraft) > 100000)) { setError("年龄请填写非负整数、∞或留空。"); return; }
     const npc = previous
       ? {
           ...previous,
@@ -847,10 +863,25 @@ export default function AppRelationshipNetwork({
           momentAutoFrequency: npcMomentAutoFrequencyDraft,
           now,
         });
-    const result = upsertRelationshipNetworkNpc(npc);
+    const result = upsertRelationshipNetworkNpc({ ...npc, gender: npcGenderDraft.trim() || undefined, age: npcAgeDraft === "∞" ? "∞" : npcAgeDraft ? Number(npcAgeDraft) : "" });
     if (!result.success) {
       setError(result.error === "scope" ? "NPC 作用域校验失败，未保存。" : "NPC 保存失败，请检查浏览器本地存储空间。");
       return;
+    }
+    if (npcSocialDraft && npcEditorEdge) {
+      const existing = listRelationshipNetworkSocialLinksForEdge(activeIdentity.id, npcEditorEdge.id);
+      const source = networkRef.current.nodes.find(item => item.id === npcEditorEdge.sourceNodeId);
+      const target = networkRef.current.nodes.find(item => item.id === npcEditorEdge.targetNodeId);
+      const directions = npcEditorEdge.direction === "both" ? [[source, target], [target, source]] : npcEditorEdge.direction === "reverse" ? [[target, source]] : [[source, target]];
+      for (const [from, to] of directions) {
+        if (!from || !to) continue;
+        const old = existing.find(link => link.sourceEntityType === from.entityType && link.sourceEntityId === from.entityId && link.targetEntityType === to.entityType && link.targetEntityId === to.entityId);
+        const saved = upsertRelationshipNetworkSocialLink({ ...npcSocialDraft, id: old?.id || createId("relationship-network-social"), ownerIdentityId: activeIdentity.id,
+          sourceEntityType: from.entityType, sourceEntityId: from.entityId, targetEntityType: to.entityType, targetEntityId: to.entityId,
+          relationshipLabel: resolveRelationshipLabel(npcEditorEdge, from.entityId), networkEdgeId: npcEditorEdge.id, createdAt: old?.createdAt || now, updatedAt: now });
+        if (!saved.success) { setError("NPC 已保存，但朋友圈互动设置保存失败，请重试保存。"); return; }
+      }
+      setSocialLinks(listRelationshipNetworkSocialLinksForIdentity(activeIdentity.id));
     }
     setNpcs(listRelationshipNetworkNpcsForIdentity(activeIdentity.id));
     if (!previous) addEntityNode("npc", npc.id);
@@ -860,7 +891,11 @@ export default function AppRelationshipNetwork({
   };
 
   const deleteNpc = (npc: RelationshipNetworkNpc) => {
-    if (!window.confirm(`删除 NPC「${npc.name}」？这会同时移除它在当前关系网中的节点。`)) return;
+    if (npc.ownerIdentityId !== activeIdentity.id || !listRelationshipNetworkNpcsForIdentity(activeIdentity.id).some(item => item.id === npc.id)) {
+      setNpcDeleteTarget(null);
+      setError("这个 NPC 已不存在或不属于当前身份，请重新打开关系网。");
+      return;
+    }
     const result = removeRelationshipNetworkNpc(activeIdentity.id, npc.id);
     if (!result.success) {
       setError("NPC 删除失败，请稍后重试。");
@@ -890,15 +925,18 @@ export default function AppRelationshipNetwork({
     setSocialLinks(listRelationshipNetworkSocialLinksForIdentity(activeIdentity.id));
     setInteractionRecords(listRelationshipNetworkInteractionRecordsForIdentity(activeIdentity.id));
     setSelectedNodeId(null);
+    setNpcDeleteTarget(null);
+    if (editingNpcId === npc.id) { setNpcModalOpen(false); setEditingNpcId(null); setNpcSocialDraft(null); }
   };
 
   const fitView = () => {
+    const nodes = relationshipCharacterGraph(networkRef.current, currentPerson?.id).nodes;
     const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect || networkRef.current.nodes.length === 0) return;
-    const minX = Math.min(...networkRef.current.nodes.map((node) => node.x));
-    const minY = Math.min(...networkRef.current.nodes.map((node) => node.y));
-    const maxX = Math.max(...networkRef.current.nodes.map((node) => node.x + NODE_WIDTH));
-    const maxY = Math.max(...networkRef.current.nodes.map((node) => node.y + NODE_HEIGHT));
+    if (!rect || nodes.length === 0) return;
+    const minX = Math.min(...nodes.map((node) => node.x));
+    const minY = Math.min(...nodes.map((node) => node.y));
+    const maxX = Math.max(...nodes.map((node) => node.x + NODE_WIDTH));
+    const maxY = Math.max(...nodes.map((node) => node.y + NODE_HEIGHT));
     const scale = clamp(Math.min((rect.width - 36) / Math.max(maxX - minX, NODE_WIDTH), (rect.height - 36) / Math.max(maxY - minY, NODE_HEIGHT)), MIN_SCALE, 1.1);
     setViewport({
       scale,
@@ -927,7 +965,7 @@ export default function AppRelationshipNetwork({
   };
 
   const arrangeNodes = () => {
-    const nodes = networkRef.current.nodes;
+    const nodes = relationshipCharacterGraph(networkRef.current, currentPerson?.id).nodes;
     if (nodes.length === 0) return;
     if (nodes.length === 1) {
       fitView();
@@ -953,7 +991,7 @@ export default function AppRelationshipNetwork({
     }]));
     const next = {
       ...networkRef.current,
-      nodes: nodes.map((node) => ({ ...node, ...positions.get(node.id) })),
+      nodes: networkRef.current.nodes.map((node) => ({ ...node, ...positions.get(node.id) })),
     };
     if (!commitNetwork(next, "画布已自动整理。")) return;
     requestAnimationFrame(fitView);
@@ -961,8 +999,12 @@ export default function AppRelationshipNetwork({
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(fitView);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    setConnectMode(false);
+    setConnectStartNodeId(null);
     return () => window.cancelAnimationFrame(frame);
-  }, [activeIdentity.id]);
+  }, [activeIdentity.id, currentPerson?.id, view]);
 
   const zoomBy = (amount: number) => setViewport((current) => ({ ...current, scale: clamp(current.scale + amount, MIN_SCALE, MAX_SCALE) }));
 
@@ -1049,6 +1091,34 @@ export default function AppRelationshipNetwork({
     return !query || `${npc.name} ${npc.summary} ${npc.role || ""} ${npc.personality || ""} ${npc.motivation || ""} ${(npc.tags || []).join(" ")}`.toLowerCase().includes(query);
   });
 
+  const generatePeople = async () => {
+    if (!currentPerson || generationLock.current) return;
+    setAddMenuOpen(false);
+    if (!settings) { setError("文本 API 设置不可用。"); return; }
+    const center = currentPerson;
+    const existingNames = relationshipNeighbors(networkRef.current, center.id).map(({ node }) => nodeModels.find(model => model.node.id === node.id)?.name).filter((name): name is string => !!name);
+    generationLock.current = true; setGenerationProgress("正在读取人物设定…");
+    try {
+      const rows = await generateRelationshipPeople({ character: center, characters: availableCharacters, settings,
+        worldBookEntries, identityId: activeIdentity.id,
+        relationId: relationships.find(relation => relation.characterId === center.id && relation.userIdentityId === activeIdentity.id)?.id,
+        existingNames, onProgress: (done, total) => setGenerationProgress(`正在提取关联人物 ${done}/${total}`) });
+      if (!rows.length) setNotice("当前设定中未找到可新增的关联人物。");
+      else setGenerated({ characterId: center.id, characterName: center.name, rows: rows.map(person => ({ person })) });
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "人物提取失败，未保存任何人物。"); }
+    finally { generationLock.current = false; setGenerationProgress(""); }
+  };
+
+  const confirmGenerated = () => {
+    if (!generated || !generated.rows.length) return;
+    try {
+      const result = saveGeneratedRelationshipPeople({ ownerIdentityId: activeIdentity.id, map: networkRef.current,
+        characterId: generated.characterId, characterIds: availableCharacters.map(character => character.id), selections: generated.rows });
+      networkRef.current = result.map; setNetwork(result.map); setNpcs(result.npcs);
+      setPersonId(generated.characterId); setGenerated(null); setNotice(`已添加 ${result.added} 位关联人物。`);
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "保存失败，草稿仍保留。"); }
+  };
+
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[#f6f4ef] text-[#332f2a]" data-theme-page="relationship-network">
       <header className="relative z-30 flex shrink-0 items-center justify-between border-b border-[#e7e2d9] bg-[#faf9f6]/95 px-3 py-2 backdrop-blur-md">
@@ -1057,19 +1127,58 @@ export default function AppRelationshipNetwork({
         </button>
         <div className="flex min-w-0 items-center gap-2">
           <div className="text-center">
-            <h1 className="text-[15px] font-black tracking-tight">关系网</h1>
-            <p className="text-[9px] font-medium text-[#928b80]">{network.name}</p>
+            <button type="button" onClick={() => setPersonPickerOpen(true)} aria-label="选择关系网角色" className="flex max-w-[180px] items-center justify-center gap-1.5 text-[15px] font-black tracking-tight"><span className="truncate">{currentPerson?.name || "关系网"}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 rounded-full bg-[#eeeae2] p-0.5" /></button>
           </div>
           <div className="hidden items-center gap-1 rounded-full bg-[#eeeae2] px-2 py-1 text-[9px] font-bold text-[#6c665d] min-[390px]:flex">
             <Avatar value={activeIdentity.avatar} name={activeIdentity.name} className="h-4 w-4 text-[8px]" />
             <span className="max-w-[70px] truncate">{activeIdentity.name}</span>
           </div>
         </div>
-        <button type="button" onClick={arrangeNodes} className="app-nav-icon-button flex h-8 w-8 items-center justify-center" aria-label="整理画布" title="整理画布">
-          <Expand className="h-4 w-4" />
+        <button type="button" onClick={switchView} className="app-nav-icon-button flex h-10 w-10 items-center justify-center" aria-label={view === "graph" ? "切换人物卡片" : "切换关系图"} title={view === "graph" ? "人物卡片" : "关系图"}>
+          {view === "graph" ? <LayoutGrid className="h-4 w-4" /> : <Network className="h-4 w-4" />}
         </button>
       </header>
+      {generationProgress && <div role="status" className="shrink-0 bg-[#eeebe4] px-4 py-2 text-xs text-[#756c61]">{generationProgress} · 退出本应用不会自动重试</div>}
 
+      {view === "cards" && <RelationshipPeopleView key={currentPerson?.id} character={currentPerson} map={network} characters={availableCharacters} npcs={npcs} identity={activeIdentity}
+        onAdd={() => { setAssociationSourceId(currentPerson?.id || null); setAddMenuOpen(true); }}
+        onOpen={(node, edges) => { setSelectedNodeId(node.id); if (node.entityType === "npc") openNpcComposer(npcs.find(npc => npc.id === node.entityId)); else openExistingEdge(edges[0]); }} />}
+
+      {personPickerOpen && <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/25 p-4" onClick={() => setPersonPickerOpen(false)}>
+        <section role="dialog" aria-modal="true" aria-label="选择关系网角色" className="flex max-h-[75%] w-full max-w-sm flex-col rounded-3xl bg-[#fffdfa] p-4 shadow-xl" onClick={event => event.stopPropagation()}>
+          <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-bold">选择人物</h2><button aria-label="关闭角色选择" onClick={() => setPersonPickerOpen(false)} className="flex h-10 w-10 items-center justify-center"><X className="h-4 w-4" /></button></div>
+          <div className="min-h-0 space-y-2 overflow-y-auto">{availableCharacters.map(character => <button key={character.id} className="flex w-full items-center gap-3 rounded-xl bg-[#f5f2ec] p-3 text-left text-sm" onClick={() => { setPersonId(character.id); setPersonPickerOpen(false); setSelectedNodeId(null); }}><PersonAvatar avatar={character.avatar} name={character.name} /><span className="break-words">{character.name}</span></button>)}{availableCharacters.length === 0 && <p className="p-4 text-xs">请先在档案馆添加角色。</p>}</div>
+        </section>
+      </div>}
+
+      {addMenuOpen && <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/25 p-4" onClick={() => setAddMenuOpen(false)}>
+        <section role="dialog" aria-modal="true" aria-label="添加关联人物" className="w-full max-w-sm rounded-3xl bg-[#fffdfa] p-4" onClick={event => event.stopPropagation()}>
+          <div className="flex items-center justify-between"><h2 className="text-sm font-bold">添加关联人物</h2><button aria-label="关闭添加菜单" className="h-10 w-10" onClick={() => setAddMenuOpen(false)}>×</button></div>
+          <button className="mt-2 w-full rounded-xl bg-[#f5f2ec] p-3 text-left text-sm" onClick={() => { setAddMenuOpen(false); setPickerSearch(""); setNodePickerOpen(true); }}>添加已有角色</button>
+          <button className="mt-2 w-full rounded-xl bg-[#f5f2ec] p-3 text-left text-sm" onClick={() => { setAddMenuOpen(false); openNpcComposer(); }}>新建 NPC</button>
+          <button disabled={!!generationProgress} className="mt-2 w-full rounded-xl bg-[#51483e] p-3 text-left text-sm text-white disabled:opacity-40" onClick={() => void generatePeople()}>{generationProgress ? "正在生成…" : "自动生成"}</button>
+        </section>
+      </div>}
+
+      {generated && <div className="absolute inset-0 z-[110] flex min-h-0 items-center justify-center bg-black/25 p-4" onClick={() => setGenerated(null)}>
+        <section role="dialog" aria-modal="true" aria-label="生成的关联人物" className="flex max-h-[85%] w-full max-w-sm flex-col overflow-hidden rounded-3xl bg-[#fffdfa] p-4 shadow-xl" onClick={event => event.stopPropagation()}>
+          <div className="mb-3 flex items-center justify-between"><div className="min-w-0"><h2 className="break-words text-sm font-bold">{generated.characterName} 的关联人物</h2><p className="mt-1 text-xs text-[#92877b]">删除不需要的人物，确认后添加。</p></div><button aria-label="关闭生成结果" className="h-10 w-10 shrink-0" onClick={() => setGenerated(null)}>×</button></div>
+          <div className="min-h-0 space-y-3 overflow-y-auto">{generated.rows.map((row, index) => {
+            const matches = [
+              ...availableCharacters.filter(character => character.id !== generated.characterId && personNameKey(character.name) === personNameKey(row.person.name)).map(character => ({ value: `character:${character.id}`, label: `关联已有角色：${character.name}` })),
+              ...npcs.filter(npc => personNameKey(npc.name) === personNameKey(row.person.name)).map(npc => ({ value: `npc:${npc.id}`, label: `关联已有 NPC：${npc.name}` })),
+            ];
+            return <article key={index} className="rounded-2xl border border-[#e7e2d9] p-3">
+              <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><h3 className="break-words text-sm font-bold">{row.person.name}</h3><p className="mt-1 break-words text-xs text-[#857b6e]">{[row.person.gender, row.person.age != null ? `${row.person.age} 岁` : "", row.person.role, row.person.relationship].filter(Boolean).join(" · ")}</p></div><button type="button" aria-label={`移除候选 ${row.person.name}`} onClick={() => setGenerated({ ...generated, rows: generated.rows.filter((_, i) => i !== index) })} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600"><Trash2 className="h-4 w-4" /></button></div>
+              {row.person.summary && <p className="mt-2 break-words text-xs leading-5 text-[#857b6e]">{row.person.summary}</p>}
+              {matches.length > 0 && <label className="mt-2 block text-xs text-[#857b6e]">发现同名人物，请选择是否关联<select aria-label={`匹配人物 ${row.person.name}`} value={row.target || ""} onChange={event => setGenerated({ ...generated, rows: generated.rows.map((item, i) => i === index ? { ...item, target: event.target.value } : item) })} className="mt-1 w-full rounded-lg border border-[#e7e2d9] p-2"><option value="">作为独立 NPC 添加</option>{matches.map(match => <option key={match.value} value={match.value}>{match.label}</option>)}</select></label>}
+            </article>;
+          })}{!generated.rows.length && <p className="py-6 text-center text-xs text-[#92877b]">已移除全部候选人物。</p>}</div>
+          <button type="button" disabled={!generated.rows.length} onClick={confirmGenerated} className="mt-4 shrink-0 rounded-xl bg-[#51483e] py-3 text-sm text-white disabled:opacity-40">确认添加</button>
+        </section>
+      </div>}
+
+      {view === "graph" && <>
       <section
         ref={canvasRef}
         className="relative min-h-0 flex-1 overflow-hidden bg-[#f1eee7]"
@@ -1080,10 +1189,10 @@ export default function AppRelationshipNetwork({
         onPointerCancel={handleCanvasPointerUp}
       >
         <div className="absolute left-3 right-3 top-3 z-20 flex items-center gap-1.5" onPointerDown={(event) => event.stopPropagation()}>
-          <button type="button" onClick={() => { setPickerSearch(""); setNodePickerOpen(true); }} className="flex h-8 items-center gap-1 rounded-full bg-[#fffdfa]/95 px-2.5 text-[10px] font-bold text-[#544e45] shadow-sm ring-1 ring-[#e0dbd1]">
+          <button type="button" onClick={() => { setAssociationSourceId(currentPerson?.id || null); setPickerSearch(""); setNodePickerOpen(true); }} className="flex h-8 items-center gap-1 rounded-full bg-[#fffdfa]/95 px-2.5 text-[10px] font-bold text-[#544e45] shadow-sm ring-1 ring-[#e0dbd1]">
             <Plus className="h-3.5 w-3.5" />添加人物
           </button>
-          <button type="button" onClick={() => openNpcComposer()} className="flex h-8 items-center gap-1 rounded-full bg-[#fffdfa]/95 px-2.5 text-[10px] font-bold text-[#544e45] shadow-sm ring-1 ring-[#e0dbd1]">
+          <button type="button" onClick={() => { setAssociationSourceId(currentPerson?.id || null); openNpcComposer(); }} className="flex h-8 items-center gap-1 rounded-full bg-[#fffdfa]/95 px-2.5 text-[10px] font-bold text-[#544e45] shadow-sm ring-1 ring-[#e0dbd1]">
             <UserRound className="h-3.5 w-3.5" />新建 NPC
           </button>
           <button
@@ -1215,7 +1324,7 @@ export default function AppRelationshipNetwork({
                   {onGenerateNpcMoment && <button type="button" onClick={generateSelectedNpcMoment} disabled={generatingNpcMomentId === selectedNpc?.id} className="rounded-full bg-[#6c8570] px-3 py-2 text-[10px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{generatingNpcMomentId === selectedNpc?.id ? "正在生成…" : "让 NPC 发动态"}</button>}
                   {onCheckNpcAutomation && <button type="button" onClick={checkSelectedNpcAutomation} disabled={checkingNpcAutomationId === selectedNpc?.id} className="rounded-full border border-[#cfc7bb] bg-white px-3 py-2 text-[10px] font-bold text-[#6c6258] disabled:cursor-not-allowed disabled:opacity-50">{checkingNpcAutomationId === selectedNpc?.id ? "检查中…" : "检查自动行为"}</button>}
                   <button type="button" onClick={() => openNpcComposer(npcs.find((npc) => npc.id === selectedNode.node.entityId))} className="flex items-center gap-1 rounded-full bg-[#eeeae2] px-3 py-2 text-[10px] font-bold text-[#62594f]"><Pencil className="h-3 w-3" />编辑 NPC</button>
-                  <button type="button" onClick={() => { const npc = npcs.find((item) => item.id === selectedNode.node.entityId); if (npc) deleteNpc(npc); }} className="flex items-center gap-1 rounded-full bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-600"><Trash2 className="h-3 w-3" />删除 NPC</button>
+                  <button type="button" onClick={() => { const npc = npcs.find((item) => item.id === selectedNode.node.entityId); if (npc) setNpcDeleteTarget(npc); }} className="flex items-center gap-1 rounded-full bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-600"><Trash2 className="h-3 w-3" />删除 NPC</button>
                 </>
               )}
               {selectedNode.type !== "identity" && <button type="button" onClick={() => removeNodeFromCanvas(selectedNode.node)} className="rounded-full border border-[#ded8ce] px-3 py-2 text-[10px] font-bold text-[#7d7469]">仅从画布移除</button>}
@@ -1225,9 +1334,9 @@ export default function AppRelationshipNetwork({
               <button type="button" onClick={() => setSelectedNodeId(null)} className="text-[10px] font-bold text-[#958c80]">查看全部</button>
             </div>
             <div className="mt-2 space-y-1.5">
-              {network.edges.filter((edge) => edge.sourceNodeId === selectedNode.node.id || edge.targetNodeId === selectedNode.node.id).length === 0 ? (
+              {characterGraph.edges.filter((edge) => edge.sourceNodeId === selectedNode.node.id || edge.targetNodeId === selectedNode.node.id).length === 0 ? (
                 <p className="rounded-xl bg-[#f3f0ea] px-3 py-3 text-center text-[10px] text-[#9b9287]">还没有关系，点击上方“连线”开始设置。</p>
-              ) : network.edges.filter((edge) => edge.sourceNodeId === selectedNode.node.id || edge.targetNodeId === selectedNode.node.id).map((edge) => {
+              ) : characterGraph.edges.filter((edge) => edge.sourceNodeId === selectedNode.node.id || edge.targetNodeId === selectedNode.node.id).map((edge) => {
                 const socialLink = socialLinks.find((link) => link.networkEdgeId === edge.id);
                 const completedInteractionCount = socialLink
                   ? interactionRecords.filter((record) => record.socialLinkId === socialLink.id && record.status === "completed").length
@@ -1244,7 +1353,7 @@ export default function AppRelationshipNetwork({
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-black">关系清单</h2>
-                <p className="mt-0.5 text-[10px] text-[#968d82]">{visibleNodeModels.length} 个人物 · {matchingEdges.length} 条关系 · {socialLinks.filter((link) => link.enabled).length} 条已启用互动 · {interactionRecords.filter((record) => record.status === "completed").length} 次已完成互动</p>
+                <p className="mt-0.5 text-[10px] text-[#968d82]">{visibleNodeModels.length} 个人物 · {matchingEdges.length} 条关系 · {socialLinks.filter((link) => link.enabled && characterGraph.edges.some(edge => edge.id === link.networkEdgeId)).length} 条已启用互动 · {interactionRecords.filter((record) => record.status === "completed" && socialLinks.some(link => link.id === record.socialLinkId && characterGraph.edges.some(edge => edge.id === link.networkEdgeId))).length} 次已完成互动</p>
               </div>
               <div className="flex items-center gap-1.5 text-[9px] font-bold text-[#90877c]"><Hand className="h-3.5 w-3.5" />拖动节点整理布局</div>
             </div>
@@ -1271,12 +1380,14 @@ export default function AppRelationshipNetwork({
               {matchingEdges.length === 0 ? (
                 <div className="rounded-2xl bg-[#f3f0ea] px-4 py-5 text-center">
                   <ArrowLeftRight className="mx-auto h-5 w-5 text-[#9b9185]" />
-                  <p className="mt-2 text-[11px] font-bold text-[#746b60]">{network.edges.length === 0 ? "还没有关系线" : "没有匹配的关系"}</p>
-                  <p className="mt-1 text-[10px] leading-4 text-[#9b9287]">{network.edges.length === 0 ? "先添加人物，再点击“连线”连接两个节点。" : "换一个人物或关系分类筛选试试。"}</p>
+                  <p className="mt-2 text-[11px] font-bold text-[#746b60]">{characterGraph.edges.length === 0 ? "还没有关系线" : "没有匹配的关系"}</p>
+                  <p className="mt-1 text-[10px] leading-4 text-[#9b9287]">{characterGraph.edges.length === 0 ? "先添加人物，再点击“连线”连接两个节点。" : "换一个人物或关系分类筛选试试。"}</p>
                 </div>
               ) : matchingEdges.map((edge) => {
                 const source = nodeModels.find((model) => model.node.id === edge.sourceNodeId);
                 const target = nodeModels.find((model) => model.node.id === edge.targetNodeId);
+                const npcModel = source?.type === "npc" ? source : target?.type === "npc" ? target : undefined;
+                const editableNpc = npcModel && npcs.find(npc => npc.id === npcModel.node.entityId);
                 const socialLink = socialLinks.find((link) => link.networkEdgeId === edge.id);
                 const completedInteractionCount = socialLink
                   ? interactionRecords.filter((record) => record.socialLinkId === socialLink.id && record.status === "completed").length
@@ -1287,7 +1398,7 @@ export default function AppRelationshipNetwork({
                       <span className="min-w-0 flex-1 truncate text-[10px] font-bold text-[#62594f]">{source?.name || "人物 A"} {edge.direction === "reverse" ? "←" : edge.direction === "both" ? "↔" : "→"} {target?.name || "人物 B"}</span>
                       <span className="flex max-w-[150px] shrink-0 items-center gap-1 text-[9px] text-[#958c80]"><span className="max-w-[82px] truncate">{edgeLabel(edge)}</span>{socialLink && <span className={`${socialLink.enabled && socialLink.canCommentMoments ? "text-[#6c8570]" : socialLink.enabled ? "text-[#8b7861]" : "text-[#9b9287]"}`}>{socialStatusLabel(socialLink)}</span>}{completedInteractionCount > 0 && <span>{completedInteractionCount} 次</span>}</span>
                     </button>
-                    <button type="button" onClick={() => openExistingEdge(edge)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#81776b] hover:bg-[#e5dfd5]" aria-label={`编辑关系 ${source?.name || "人物 A"} ${target?.name || "人物 B"}`}><Pencil className="h-3.5 w-3.5" /></button>
+                    <button type="button" onClick={() => editableNpc ? openNpcComposer(editableNpc) : openExistingEdge(edge)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#81776b] hover:bg-[#e5dfd5]" aria-label={editableNpc ? `编辑关系网 NPC ${editableNpc.name}` : `编辑关系 ${source?.name || "人物 A"} ${target?.name || "人物 B"}`}><Pencil className="h-3.5 w-3.5" /></button>
                   </div>
                 );
               })}
@@ -1296,8 +1407,10 @@ export default function AppRelationshipNetwork({
         )}
       </section>
 
+      </>}
+
       {(notice || error) && (
-        <div className={`pointer-events-none absolute bottom-[41%] left-1/2 z-[80] max-w-[88%] -translate-x-1/2 rounded-full px-3 py-2 text-center text-[10px] font-bold shadow-lg ${error ? "bg-rose-50 text-rose-700 ring-1 ring-rose-200" : "bg-[#51483e] text-white"}`} role={error ? "alert" : "status"}>
+        <div className={`pointer-events-none absolute bottom-[41%] left-1/2 z-[130] max-w-[88%] -translate-x-1/2 rounded-full px-3 py-2 text-center text-[10px] font-bold shadow-lg ${error ? "bg-rose-50 text-rose-700 ring-1 ring-rose-200" : "bg-[#51483e] text-white"}`} role={error ? "alert" : "status"}>
           {error || notice}
         </div>
       )}
@@ -1317,14 +1430,14 @@ export default function AppRelationshipNetwork({
               <div className="mt-4 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#9b9287]"><UsersRound className="h-3.5 w-3.5" />角色</div>
               <div className="mt-2 space-y-1.5">
                 {filteredCharacters.length === 0 ? <p className="rounded-xl bg-[#f5f2ec] px-3 py-3 text-center text-[10px] text-[#a0988d]">还没有可添加的角色</p> : filteredCharacters.map((character) => {
-                  const added = hasEntityNode("character", character.id);
+                  const added = associationSourceId ? character.id === associationSourceId : hasEntityNode("character", character.id);
                   return <button key={character.id} type="button" disabled={added} onClick={() => addEntityNode("character", character.id)} className="flex w-full items-center gap-3 rounded-2xl bg-[#f7f5f0] p-2.5 text-left disabled:opacity-50"><Avatar value={character.avatar} name={character.name} className="h-9 w-9" /><span className="min-w-0 flex-1"><strong className="block truncate text-xs">{character.name}</strong><small className="block truncate text-[10px] text-[#998f83]">{character.remark || character.personality || "角色档案"}</small></span><span className="text-[10px] font-bold text-[#9a9186]">{added ? "已添加" : "添加"}</span></button>;
                 })}
               </div>
               <div className="mt-4 flex items-center justify-between"><div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#9b9287]"><UserRound className="h-3.5 w-3.5" />关系网 NPC</div><button type="button" onClick={() => openNpcComposer()} className="text-[10px] font-bold text-[#6e6255]">+ 新建</button></div>
               <div className="mt-2 space-y-1.5">
                 {filteredNpcs.length === 0 ? <p className="rounded-xl bg-[#f5f2ec] px-3 py-3 text-center text-[10px] text-[#a0988d]">还没有关系网 NPC</p> : filteredNpcs.map((npc) => {
-                  const added = hasEntityNode("npc", npc.id);
+                  const added = associationSourceId ? false : hasEntityNode("npc", npc.id);
                   return <button key={npc.id} type="button" disabled={added} onClick={() => addEntityNode("npc", npc.id)} className="flex w-full items-center gap-3 rounded-2xl bg-[#f7f4fa] p-2.5 text-left disabled:opacity-50"><Avatar value={npc.avatar} name={npc.name} className="h-9 w-9" /><span className="min-w-0 flex-1"><strong className="block truncate text-xs">{npc.name}</strong><small className="block truncate text-[10px] text-[#998f83]">{npc.summary || "关系网辅助人物"}</small></span><span className="text-[10px] font-bold text-[#9a9186]">{added ? "已添加" : "添加"}</span></button>;
                 })}
               </div>
@@ -1334,28 +1447,56 @@ export default function AppRelationshipNetwork({
       )}
 
       {npcModalOpen && (
-        <div className="absolute inset-0 z-[100] flex items-end justify-center bg-[#2d2822]/30 p-3 backdrop-blur-[2px]" onPointerDown={() => setNpcModalOpen(false)}>
-          <div className="w-full max-w-[420px] rounded-[26px] bg-[#fffdfa] p-4 shadow-2xl" onPointerDown={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between"><div><h2 className="text-sm font-black">{editingNpcId ? "编辑关系网 NPC" : "新建关系网 NPC"}</h2><p className="mt-0.5 text-[10px] text-[#958c80]">创建后就是独立人物；与角色连线后可按设定参与互动。提升为完整角色是可选的。</p></div><button type="button" onClick={() => setNpcModalOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f1eee7] text-[#746b60]"><X className="h-4 w-4" /></button></div>
-            <div className="mt-4 max-h-[58vh] space-y-3 overflow-y-auto pr-0.5">
+        <div className="absolute inset-0 z-[100] flex min-h-0 items-center justify-center overflow-hidden bg-[#2d2822]/30 p-3 backdrop-blur-[2px]" onPointerDown={() => setNpcModalOpen(false)}>
+          <div role="dialog" aria-modal="true" aria-label={editingNpcId ? "编辑关系网 NPC" : "新建关系网 NPC"} className="flex min-h-0 w-full max-w-[420px] flex-col overflow-hidden rounded-[26px] bg-[#fffdfa] p-4 shadow-2xl" style={{ height: "calc(var(--app-viewport-height, 100dvh) - 48px)", maxHeight: "calc(var(--app-viewport-height, 100dvh) - 48px)" }} onPointerDown={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between"><div><h2 className="text-sm font-black">{editingNpcId ? "编辑关系网 NPC" : "新建关系网 NPC"}</h2></div>{editingNpcId ? <button type="button" aria-label="删除 NPC" onClick={() => { const npc = npcs.find(item => item.id === editingNpcId); if (npc) setNpcDeleteTarget(npc); }} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rose-50 text-rose-600"><Trash2 className="h-4 w-4" /></button> : <button type="button" aria-label="关闭新建 NPC" onClick={() => setNpcModalOpen(false)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f1eee7] text-[#746b60]"><X className="h-4 w-4" /></button>}</div>
+            <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
+              {npcEditorEdge && currentPerson && <button type="button" className="min-h-11 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-left text-xs text-[#51483e]" onClick={() => { setEdgeOpenedFromNpc(true); setNpcModalOpen(false); openExistingEdge(npcEditorEdge); }}>编辑与 {currentPerson.name} 的关系 ›</button>}
               <label className="block text-[10px] font-bold text-[#746b60]">名字<input autoFocus value={npcNameDraft} onChange={(event) => setNpcNameDraft(event.target.value)} placeholder="例如：周医生" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
-              <label className="block text-[10px] font-bold text-[#746b60]">头像（Emoji 或图片 URL）<input value={npcAvatarDraft} onChange={(event) => setNpcAvatarDraft(event.target.value)} placeholder="例如：🩺 或 https://…" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
               <div className="grid grid-cols-2 gap-2">
-                <label className="block text-[10px] font-bold text-[#746b60]">身份 / 职业<input value={npcRoleDraft} onChange={(event) => setNpcRoleDraft(event.target.value)} placeholder="例如：医生、同事" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
-                <label className="block text-[10px] font-bold text-[#746b60]">标签<input value={npcTagsDraft} onChange={(event) => setNpcTagsDraft(event.target.value)} placeholder="用逗号分隔" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
+                <label className="block text-[10px] font-bold text-[#746b60]">性别<input aria-label="NPC性别" value={npcGenderDraft} onChange={event => setNpcGenderDraft(event.target.value)} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
+                <label className="block text-[10px] font-bold text-[#746b60]">年龄<input aria-label="NPC年龄" value={npcAgeDraft} onChange={event => setNpcAgeDraft(event.target.value)} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
               </div>
+              <label className="block text-[10px] font-bold text-[#746b60]">头像（Emoji 或图片 URL）<input value={npcAvatarDraft} onChange={(event) => setNpcAvatarDraft(event.target.value)} placeholder="例如：🩺 或 https://…" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
               <label className="block text-[10px] font-bold text-[#746b60]">人物简介<textarea value={npcSummaryDraft} onChange={(event) => setNpcSummaryDraft(event.target.value)} placeholder="人物是谁、和谁有什么联系……" className="mt-1.5 min-h-16 w-full resize-none rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs leading-5 outline-none focus:border-[#a99a87]" /></label>
               <label className="block text-[10px] font-bold text-[#746b60]">性格关键词<textarea value={npcPersonalityDraft} onChange={(event) => setNpcPersonalityDraft(event.target.value)} placeholder="例如：温和、谨慎、观察力强" className="mt-1.5 min-h-14 w-full resize-none rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs leading-5 outline-none focus:border-[#a99a87]" /></label>
-              <label className="block text-[10px] font-bold text-[#746b60]">当前动机<textarea value={npcMotivationDraft} onChange={(event) => setNpcMotivationDraft(event.target.value)} placeholder="例如：想查清一件旧案、保护某个人" className="mt-1.5 min-h-14 w-full resize-none rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs leading-5 outline-none focus:border-[#a99a87]" /></label>
-              <label className="block text-[10px] font-bold text-[#746b60]">主动发动态方式<select value={npcMomentApprovalModeDraft} onChange={(event) => setNpcMomentApprovalModeDraft(event.target.value as RelationshipNetworkNpcMomentApprovalMode)} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]"><option value="automatic">自动发布</option><option value="confirm">生成后确认</option></select><span className="mt-1 block text-[9px] font-normal leading-4 text-[#958c80]">生成后确认：NPC 生成的朋友圈会先出现在朋友圈顶部的“待确认动态”，发布后才会公开；自动发布会直接进入朋友圈。</span></label>
-              <label className="block text-[10px] font-bold text-[#746b60]">自动发动态触发<select value={npcMomentAutoModeDraft} onChange={(event) => setNpcMomentAutoModeDraft(event.target.value as RelationshipNetworkNpcMomentAutoMode)} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]"><option value="manual">关闭（仅手动）</option><option value="scheduled_and_event">按时间或事件</option></select></label>
-              <label className="mt-2 block text-[10px] font-bold text-[#746b60]">自动频率<select value={npcMomentAutoFrequencyDraft} onChange={(event) => setNpcMomentAutoFrequencyDraft(event.target.value as RelationshipNetworkNpcMomentAutoFrequency)} disabled={npcMomentAutoModeDraft === "manual"} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87] disabled:opacity-50"><option value="low">低频（约每天一次）</option><option value="normal">正常（约半天一次）</option><option value="high">高频（约四小时一次）</option></select></label>
+              <section className="space-y-3 rounded-2xl border border-[#e5ddd0] bg-[#faf7f1] p-3">
+                <div className="flex items-center justify-between"><p className="text-[10px] font-black text-[#62594f]">朋友圈互动关系</p><span className="rounded-full bg-[#eeeae2] px-2 py-1 text-[8px] font-bold text-[#8d8377]">基础配置</span></div>
+                <p className="text-[9px] leading-4 text-[#958c80]">动态发布与关系互动分别设置。角色手机会读取已关联的 NPC；手机内生成不代表公开发布。</p>
+                {npcSocialDraft && <div>                <label className="mt-2 flex items-center gap-2 text-[10px] font-bold text-[#6d6459]"><input type="checkbox" checked={npcSocialDraft.enabled} onChange={(event) => setNpcSocialDraft({ ...npcSocialDraft, enabled: event.target.checked })} />启用朋友圈互动</label>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={npcSocialDraft.canViewMoments} disabled={!npcSocialDraft.enabled || npcSocialDraft.canCommentMoments} onChange={(event) => setNpcSocialDraft({ ...npcSocialDraft, canViewMoments: event.target.checked })} />允许查看朋友圈</label>
+                   <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={npcSocialDraft.canCommentMoments} disabled={!npcSocialDraft.enabled} onChange={(event) => setNpcSocialDraft({ ...npcSocialDraft, canCommentMoments: event.target.checked, canViewMoments: event.target.checked || npcSocialDraft.canViewMoments })} />允许发表评论</label>
+                   <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={Boolean(npcSocialDraft.canLikeMoments)} disabled={!npcSocialDraft.enabled} onChange={(event) => setNpcSocialDraft({ ...npcSocialDraft, canLikeMoments: event.target.checked })} />允许点赞</label>
+                   <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={Boolean(npcSocialDraft.canReplyMoments)} disabled={!npcSocialDraft.enabled} onChange={(event) => setNpcSocialDraft({ ...npcSocialDraft, canReplyMoments: event.target.checked })} />允许回复评论</label>
+                 </div>
+                 <label className="mt-2 block text-[10px] text-[#756c61]">互动频率<select value={npcSocialDraft.commentFrequency} disabled={!npcSocialDraft.enabled || (!npcSocialDraft.canCommentMoments && !npcSocialDraft.canLikeMoments && !npcSocialDraft.canReplyMoments)} onChange={(event) => setNpcSocialDraft({ ...npcSocialDraft, commentFrequency: event.target.value as RelationshipNetworkMomentCommentFrequency })} className="mt-1 w-full rounded-xl border border-[#e7e1d7] bg-white px-2.5 py-2 text-[10px] outline-none disabled:opacity-50"><option value="low">低：偶尔参与</option><option value="normal">正常：适度参与</option><option value="high">高：积极参与</option></select></label>
+                 <label className="mt-2 block text-[10px] text-[#756c61]">文字互动发布方式<select value={npcSocialDraft.interactionApprovalMode || "automatic"} disabled={!npcSocialDraft.enabled || (!npcSocialDraft.canCommentMoments && !npcSocialDraft.canReplyMoments)} onChange={(event) => setNpcSocialDraft({ ...npcSocialDraft, interactionApprovalMode: event.target.value as RelationshipNetworkInteractionApprovalMode })} className="mt-1 w-full rounded-xl border border-[#e7e1d7] bg-white px-2.5 py-2 text-[10px] outline-none disabled:opacity-50"><option value="automatic">自动发布</option><option value="confirm">生成后确认</option></select></label>
+                 {npcSocialDraft.interactionApprovalMode === "confirm" && <p className="mt-1 text-[9px] leading-4 text-[#958c80]">评论和回复会先进入朋友圈顶部的“待确认互动”；点赞仍会即时生效。</p>}
+</div>}
+              <label className="block text-[10px] font-bold text-[#746b60]">动态发布方式<select value={npcMomentApprovalModeDraft} onChange={(event) => setNpcMomentApprovalModeDraft(event.target.value as RelationshipNetworkNpcMomentApprovalMode)} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]"><option value="automatic">自动发布</option><option value="confirm">生成后确认</option></select><span className="mt-1 block text-[9px] font-normal leading-4 text-[#958c80]">生成后确认：NPC 生成的朋友圈会先出现在朋友圈顶部的“待确认动态”，发布后才会公开；自动发布会直接进入朋友圈。</span></label>
+              <label className="block text-[10px] font-bold text-[#746b60]">主动发布动态<select value={npcMomentAutoModeDraft} onChange={(event) => setNpcMomentAutoModeDraft(event.target.value as RelationshipNetworkNpcMomentAutoMode)} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]"><option value="manual">关闭（仅手动）</option><option value="scheduled_and_event">按时间或事件</option></select></label>
+              <label className="mt-2 block text-[10px] font-bold text-[#746b60]">发布频率<select value={npcMomentAutoFrequencyDraft} onChange={(event) => setNpcMomentAutoFrequencyDraft(event.target.value as RelationshipNetworkNpcMomentAutoFrequency)} disabled={npcMomentAutoModeDraft === "manual"} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87] disabled:opacity-50"><option value="low">低频（约每天一次）</option><option value="normal">正常（约半天一次）</option><option value="high">高频（约四小时一次）</option></select></label>
               <span className="block text-[9px] font-normal leading-4 text-[#958c80]">NPC 可直接使用自己的设定参与自动行为；提升为完整角色后，会额外使用档案馆中的完整人设和世界书。时间触发受上方频率控制；聊天事件会等待安静约 2 分钟，关系事件只使用已记录的关系变化。</span>
+              </section>
             </div>
             <div className="mt-4 flex gap-2"><button type="button" onClick={() => setNpcModalOpen(false)} className="flex-1 rounded-xl bg-[#f0ece5] py-2.5 text-xs font-bold text-[#756c61]">取消</button><button type="button" onClick={saveNpc} className="flex-1 rounded-xl bg-[#51483e] py-2.5 text-xs font-bold text-white">保存 NPC</button></div>
           </div>
         </div>
       )}
+
+      {npcDeleteTarget && <div className="absolute inset-0 z-[120] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+        <section role="alertdialog" aria-modal="true" aria-labelledby="npc-delete-title" aria-describedby="npc-delete-description" className="w-full max-w-xs overflow-hidden rounded-3xl bg-white shadow-2xl">
+          <div className="space-y-2 px-6 pb-5 pt-6 text-center">
+            <h3 id="npc-delete-title" className="text-lg font-bold text-slate-900">删除 NPC</h3>
+            <p id="npc-delete-description" className="text-sm leading-relaxed text-slate-600">删除“{npcDeleteTarget.name}”后，将移除这个 NPC、其关系网连线及互动设置，且无法恢复。已提升的完整角色和已有聊天记录不会删除。</p>
+          </div>
+          <div className="grid grid-cols-2 border-t border-slate-100">
+            <button type="button" autoFocus onClick={() => setNpcDeleteTarget(null)} className="border-r border-slate-100 py-4 text-base font-medium text-slate-600 hover:bg-slate-50">取消</button>
+            <button type="button" onClick={() => deleteNpc(npcDeleteTarget)} className="py-4 text-base font-medium text-red-500 hover:bg-red-50">确定</button>
+          </div>
+        </section>
+      </div>}
 
       {npcLinkConfirmOpen && selectedNpc && (
         <div className="absolute inset-0 z-[110] flex items-end justify-center bg-[#2d2822]/30 p-3 backdrop-blur-[2px]" onPointerDown={() => setNpcLinkConfirmOpen(false)}>
@@ -1371,35 +1512,18 @@ export default function AppRelationshipNetwork({
       )}
 
       {edgeModalOpen && edgeDraft && (
-      <div className="absolute inset-0 z-[100] flex min-h-0 items-center justify-center overflow-hidden bg-[#2d2822]/30 p-3 backdrop-blur-[2px]" onPointerDown={() => { setEdgeModalOpen(false); setEdgeDraft(null); setSocialDraft(null); }}>
-          <div role="dialog" aria-modal="true" aria-labelledby="relationship-dialog-title" className="flex min-h-0 w-full max-w-[420px] flex-col overflow-hidden rounded-[26px] bg-[#fffdfa] p-4 shadow-2xl" style={{ height: "calc(var(--app-viewport-height, 100dvh) - 48px)", maxHeight: "calc(var(--app-viewport-height, 100dvh) - 48px)" }} onPointerDown={(event) => event.stopPropagation()}>
-            <div className="flex shrink-0 items-center justify-between"><div><h2 id="relationship-dialog-title" className="text-sm font-black">设置人物关系</h2><p className="mt-0.5 text-[10px] text-[#958c80]">{sourceName} 与 {targetName}</p></div><button type="button" onClick={() => { setEdgeModalOpen(false); setEdgeDraft(null); setSocialDraft(null); }} className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f1eee7] text-[#746c61]"><X className="h-4 w-4" /></button></div>
+      <div className="absolute inset-0 z-[100] flex min-h-0 items-center justify-center overflow-hidden bg-[#2d2822]/30 p-3 backdrop-blur-[2px]" onPointerDown={() => { setEdgeModalOpen(false); setEdgeDraft(null); setSocialDraft(null); if (edgeOpenedFromNpc) setNpcModalOpen(true); setEdgeOpenedFromNpc(false); }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="relationship-dialog-title" className="flex min-h-0 w-full max-w-[420px] flex-col overflow-hidden rounded-[26px] bg-[#fffdfa] p-4 shadow-2xl" style={{ maxHeight: "calc(var(--app-viewport-height, 100dvh) - 48px)" }} onPointerDown={(event) => event.stopPropagation()}>
+            <div className="flex shrink-0 items-center justify-between"><div><h2 id="relationship-dialog-title" className="text-sm font-black">设置人物关系</h2><p className="mt-0.5 text-[10px] text-[#958c80]">{sourceName} 与 {targetName}</p></div><button type="button" onClick={() => { setEdgeModalOpen(false); setEdgeDraft(null); setSocialDraft(null); if (edgeOpenedFromNpc) setNpcModalOpen(true); setEdgeOpenedFromNpc(false); }} className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f1eee7] text-[#746c61]"><X className="h-4 w-4" /></button></div>
             <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-0.5">
               <label className="block text-[10px] font-bold text-[#746b60]">箭头方向<select value={edgeDraft.direction} onChange={(event) => setEdgeDraft({ ...edgeDraft, direction: event.target.value as RelationshipNetworkEdgeDirection })} className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none"><option value="forward">{sourceName} → {targetName}</option><option value="reverse">{sourceName} ← {targetName}</option><option value="both">{sourceName} ↔ {targetName}（双向）</option></select></label>
               {edgeDraft.direction !== "reverse" && <label className="block text-[10px] font-bold text-[#746c61]">{sourceName} 对 {targetName}<input value={edgeDraft.forwardLabel} onChange={(event) => setEdgeDraft({ ...edgeDraft, forwardLabel: event.target.value })} placeholder="例如：喜欢、信任、是同事" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>}
               {edgeDraft.direction !== "forward" && <label className="block text-[10px] font-bold text-[#746c61]">{targetName} 对 {sourceName}<input value={edgeDraft.reverseLabel} onChange={(event) => setEdgeDraft({ ...edgeDraft, reverseLabel: event.target.value })} placeholder="例如：依赖、提防、是同事" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>}
               <label className="block text-[10px] font-bold text-[#746c61]">关系分类（可选）<input value={edgeDraft.category} onChange={(event) => setEdgeDraft({ ...edgeDraft, category: event.target.value })} placeholder="例如：现实、过去、故事线" className="mt-1.5 w-full rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs outline-none focus:border-[#a99a87]" /></label>
               <label className="block text-[10px] font-bold text-[#746c61]">备注（可选）<textarea value={edgeDraft.note} onChange={(event) => setEdgeDraft({ ...edgeDraft, note: event.target.value })} placeholder="补充这段关系的背景" className="mt-1.5 min-h-16 w-full resize-none rounded-xl border border-[#e7e1d7] bg-[#f8f6f1] px-3 py-2.5 text-xs leading-5 outline-none focus:border-[#a99a87]" /></label>
-              {socialDraft && <div className="rounded-2xl border border-[#e5ddd0] bg-[#faf7f1] p-3">
-                <div className="flex items-center justify-between"><div><p className="text-[10px] font-black text-[#62594f]">朋友圈互动关系</p><p className="mt-0.5 text-[9px] text-[#958c80]">{isCharacterToCharacterSocialDraft ? `角色「${socialSourceName}」→ 角色「${socialTargetName}」` : `${socialDraft?.sourceEntityType === "npc" ? "NPC" : socialDraft?.sourceEntityType === "identity" ? "身份" : "角色"}「${socialSourceName}」→ ${socialTargetTypeLabel}「${socialTargetName}」`}</p><p className="mt-0.5 text-[9px] text-[#a1988c]">箭头左侧是互动发起者，右侧是它会查看和回应的对象；双向关系会分别保存两条互动权限。</p></div><span className="rounded-full bg-[#eeeae2] px-2 py-1 text-[8px] font-bold text-[#8d8377]">基础配置</span></div>
-                <p className="mt-2 text-[9px] leading-4 text-[#958c80]">{isCharacterToCharacterSocialDraft || isCharacterToNpcSocialDraft ? "角色会使用自己的人设、关系和世界书浏览目标的公开朋友圈；允许查看只提供读取，想让“关系网”按钮产生互动还需开启评论、点赞或回复。" : (socialDraftNpcReady ? "NPC 会直接使用自己的设定参与目标朋友圈；允许查看只提供读取，想让“关系网”按钮产生互动还需开启评论、点赞或回复。提升为完整角色后，会额外使用完整档案和世界书。" : "当前 NPC 已不存在，无法启用这条朋友圈互动关系。")}</p>
-                <label className="mt-2 flex items-center gap-2 text-[10px] font-bold text-[#6d6459]"><input type="checkbox" checked={socialDraft.enabled} onChange={(event) => setSocialDraft({ ...socialDraft, enabled: event.target.checked })} />启用朋友圈互动</label>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={socialDraft.canViewMoments} disabled={!socialDraft.enabled || socialDraft.canCommentMoments} onChange={(event) => setSocialDraft({ ...socialDraft, canViewMoments: event.target.checked })} />允许查看朋友圈</label>
-                   <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={socialDraft.canCommentMoments} disabled={!socialDraft.enabled} onChange={(event) => setSocialDraft({ ...socialDraft, canCommentMoments: event.target.checked, canViewMoments: event.target.checked || socialDraft.canViewMoments })} />允许发表评论</label>
-                   <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={Boolean(socialDraft.canLikeMoments)} disabled={!socialDraft.enabled} onChange={(event) => setSocialDraft({ ...socialDraft, canLikeMoments: event.target.checked })} />允许点赞</label>
-                   <label className="flex items-center gap-2 text-[10px] text-[#756c61]"><input type="checkbox" checked={Boolean(socialDraft.canReplyMoments)} disabled={!socialDraft.enabled} onChange={(event) => setSocialDraft({ ...socialDraft, canReplyMoments: event.target.checked })} />允许回复评论</label>
-                 </div>
-                 <label className="mt-2 block text-[10px] text-[#756c61]">互动频率<select value={socialDraft.commentFrequency} disabled={!socialDraft.enabled || (!socialDraft.canCommentMoments && !socialDraft.canLikeMoments && !socialDraft.canReplyMoments)} onChange={(event) => setSocialDraft({ ...socialDraft, commentFrequency: event.target.value as RelationshipNetworkMomentCommentFrequency })} className="mt-1 w-full rounded-xl border border-[#e7e1d7] bg-white px-2.5 py-2 text-[10px] outline-none disabled:opacity-50"><option value="low">低：偶尔参与</option><option value="normal">正常：适度参与</option><option value="high">高：积极参与</option></select></label>
-                 <label className="mt-2 block text-[10px] text-[#756c61]">文字互动发布方式<select value={socialDraft.interactionApprovalMode || "automatic"} disabled={!socialDraft.enabled || (!socialDraft.canCommentMoments && !socialDraft.canReplyMoments)} onChange={(event) => setSocialDraft({ ...socialDraft, interactionApprovalMode: event.target.value as RelationshipNetworkInteractionApprovalMode })} className="mt-1 w-full rounded-xl border border-[#e7e1d7] bg-white px-2.5 py-2 text-[10px] outline-none disabled:opacity-50"><option value="automatic">自动发布</option><option value="confirm">生成后确认</option></select></label>
-                 {socialDraft.interactionApprovalMode === "confirm" && <p className="mt-1 text-[9px] leading-4 text-[#958c80]">评论和回复会先进入朋友圈顶部的“待确认互动”；点赞仍会即时生效。</p>}
-                {socialDraft.id && <div className="mt-3 rounded-xl border border-[#e8e1d8] bg-white/70 p-2.5">
-                  <div className="flex items-center justify-between gap-2"><div><p className="text-[10px] font-black text-[#62594f]">互动回溯</p><p className="mt-0.5 text-[9px] text-[#958c80]">只记录自动互动结果，不保存提示词或私密上下文。</p></div>{draftInteractionRecords.length > 0 && <button type="button" onClick={clearSocialInteractionHistory} className="shrink-0 text-[9px] font-bold text-rose-500">清空记录</button>}</div>
-                  {draftInteractionRecords.length === 0 ? <p className="mt-2 text-[9px] text-[#a1988c]">还没有自动互动记录。</p> : <div className="mt-2 space-y-1.5">{draftInteractionRecords.slice(0, 3).map((record) => <div key={record.id} className="rounded-lg bg-[#f7f4ee] px-2 py-1.5"><div className="flex items-center justify-between gap-2 text-[9px]"><span className={`${record.status === "completed" ? "text-[#6c8570]" : record.status === "failed" ? "text-rose-500" : "text-[#988a75]"}`}>{interactionActionLabel(record.action)} · {interactionStatusLabel(record.status)}</span><span className="text-[#a1988c]">{new Date(record.occurredAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span></div><p className="mt-0.5 line-clamp-2 text-[9px] leading-4 text-[#756c61]">{record.content || record.reason || (record.action === "like" ? "已点赞这条朋友圈" : record.action === "reply" ? "已回复这条朋友圈评论" : "未产生可展示内容")}</p></div>)}</div>}
-                </div>}
-              </div>}
+
             </div>
-            <div className="mt-3 flex shrink-0 gap-2 border-t border-[#eee9e0] pt-3"><button type="button" onClick={() => { setEdgeModalOpen(false); setEdgeDraft(null); setSocialDraft(null); }} className="flex-1 rounded-xl bg-[#f0ece5] py-2.5 text-xs font-bold text-[#756c61]">取消</button>{edgeDraft.id && <button type="button" onClick={deleteSelectedEdge} className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600" aria-label="删除关系"><Trash2 className="h-4 w-4" /></button>}<button type="button" onClick={saveEdge} className="flex-1 rounded-xl bg-[#51483e] py-2.5 text-xs font-bold text-white">保存关系</button></div>
+            <div className="mt-3 flex shrink-0 gap-2 border-t border-[#eee9e0] pt-3"><button type="button" onClick={() => { setEdgeModalOpen(false); setEdgeDraft(null); setSocialDraft(null); if (edgeOpenedFromNpc) setNpcModalOpen(true); setEdgeOpenedFromNpc(false); }} className="flex-1 rounded-xl bg-[#f0ece5] py-2.5 text-xs font-bold text-[#756c61]">取消</button>{edgeDraft.id && <button type="button" onClick={deleteSelectedEdge} className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600" aria-label="删除关系"><Trash2 className="h-4 w-4" /></button>}<button type="button" onClick={saveEdge} className="flex-1 rounded-xl bg-[#51483e] py-2.5 text-xs font-bold text-white">保存关系</button></div>
           </div>
         </div>
       )}

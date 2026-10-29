@@ -16,6 +16,7 @@ import {
 } from "../../../core/monitoring/aiRequestLedger";
 
 const PURPOSE_LABELS: Record<string, string> = {
+  relationship_generate: "关系网 · 人物提取",
   character_now_generate: "姝ゆ椂 路 瑙傚療",
   chat_reply: "聊天 · 角色回复",
   group_chat_reply: "群聊 · 角色回复",
@@ -46,6 +47,7 @@ const PURPOSE_LABELS: Record<string, string> = {
 };
 
 const PURPOSE_CONTEXT_ITEMS: Record<string, string[]> = {
+  relationship_generate: ["当前角色设定", "适用世界书", "已关联人物名称"],
   character_now_generate: ["瑙掕壊浜鸿", "涓栫晫涔?", "鑱婂ぉ缁撴潫锚鐐?", "瑙傚療鐗囨"],
   chat_reply: ["角色人设", "关系上下文", "聊天历史"],
   group_chat_reply: ["群聊成员人设", "群聊关系", "群聊历史"],

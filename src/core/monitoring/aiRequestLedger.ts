@@ -8,6 +8,7 @@ export const AI_REQUEST_LEDGER_MAX_RECORDS = 300;
 const AI_REQUEST_LEDGER_FLUSH_DELAY_MS = 25;
 
 export const AI_PURPOSES = [
+  "relationship_generate",
   "chat_reply",
   "group_chat_reply",
   "offline_story_generate",
@@ -43,6 +44,7 @@ export type AiPurpose = typeof AI_PURPOSES[number];
 
 /** Stable, user-facing names for the built-in prompt used by each AI flow. */
 export const AI_PURPOSE_PROMPT_LABELS: Partial<Record<AiPurpose, string>> = {
+  relationship_generate: "关系网人物提取提示词",
   character_now_generate: "姝ゆ椂瑙傚療鎻愮ず璇?",
   chat_reply: "线上对话提示词",
   group_chat_reply: "群聊对话提示词",

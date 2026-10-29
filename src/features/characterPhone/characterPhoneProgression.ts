@@ -1,3 +1,4 @@
+import { resolvePhoneNpcPost } from "./characterPhoneNpcPost";
 import { resolveCharacterTextSettings } from "../../domain/character/characterTextApiRouting";
 import { apiChat } from "../../utils/apiHelper";
 import { createId } from "../../core/id/createId";
@@ -209,14 +210,14 @@ function parseGeneratedScheduleItems(value: unknown, sourceFileName?: string): A
   }).slice(0, 6);
 }
 
-function parseGeneratedPosts(value: unknown, sourceFileName?: string): Array<{ content: string; visibility: "public" | "private" | "user" | "specific"; visibilityTargetIds?: string[] }> {
+function parseGeneratedPosts(value: unknown, sourceFileName?: string): Array<{ content: string; visibility: "public" | "private" | "user" | "specific"; visibilityTargetIds?: string[]; npcId?: string; roleReply?: string }> {
   return generatedRecords(value).flatMap((record) => {
     const content = cleanGeneratedText(record.content ?? record.body, sourceFileName);
     const visibility: "public" | "private" | "user" | "specific" = record.visibility === "private" || record.visibility === "user" || record.visibility === "specific" ? record.visibility : "public";
     const targets = Array.isArray(record.visibilityTargetIds)
       ? record.visibilityTargetIds.filter((id): id is string => typeof id === "string").slice(0, 12)
       : [];
-    return content ? [{ content, visibility, ...(targets.length > 0 ? { visibilityTargetIds: targets } : {}) }] : [];
+    return content ? [{ content, visibility, ...(typeof record.npcId === "string" ? { npcId: record.npcId } : {}), ...(typeof record.roleReply === "string" ? { roleReply: cleanGeneratedText(record.roleReply, sourceFileName, 1200) } : {}), ...(targets.length > 0 ? { visibilityTargetIds: targets } : {}) }] : [];
   }).slice(0, 4);
 }
 
@@ -378,7 +379,7 @@ function buildRecentContext(input: {
       const profile = [npc.summary, npc.personality, npc.role ? `身份/职业：${npc.role}` : "", npc.motivation ? `当前动机：${npc.motivation}` : ""]
         .filter(Boolean)
         .join("；");
-      return `${redactSourceFileName(npc.name, input.character.sourceFileName)}（${redactSourceFileName(relation, input.character.sourceFileName)}）${profile ? `：${redactSourceFileName(profile, input.character.sourceFileName)}` : ""}`;
+      return `NPC ID=${npc.id} ${redactSourceFileName(npc.name, input.character.sourceFileName)}（${redactSourceFileName(relation, input.character.sourceFileName)}）${profile ? `：${redactSourceFileName(profile, input.character.sourceFileName)}` : ""}`;
     })
     .join("\n");
   const recentSearches = input.phone.browserHistory
@@ -1028,6 +1029,7 @@ export async function advanceCharacterPhoneWithResult(
 11. ${isContactThreadRepair ? "联系人聊天修复只允许返回 evidenceSourceIds、lifeEventSummary 和 contactThreads；禁止填充或修改其他应用数据。" : isInitialGeneration ? "首次初始化必须优先使用批量数组字段满足数量下限，并让所有记录围绕同一事件；直接用户聊天只从真实主聊天同步；NPC和服务联系人可依最近事件合理推演。" : allAppsSelected ? `用户选择全部应用时，按上下文为每个选中应用追加内容，其他字段必须为空。` : selectedAppLabels ? `只允许生成这些应用：${selectedAppLabels.join("、")}；其他应用字段必须为空，不得通过兼容旧字段绕过范围限制。` : "每次随机选择 2—4 个最有依据的字段生成，其余全部留空；不要为了填满字段编造无依据内容。"}
 12. 角色手机解锁密码和隐藏相册密码在手机创建时已经由系统按该角色资料先行设置并持久化；不要创建、修改、猜测或透露任何密码，也不要因为上下文中出现一串数字就回写密码字段。密码相关内容若确有证据，只能作为普通生活记录保留。
 13. 不要生成解释、旁白、占位符、统一问候或应用说明；只返回 JSON。
+朋友圈可包含已关联 NPC 发布的日常动态：posts 条目使用 npcId（逐字复制关系网 NPC ID）、content 和可选 roleReply（当前角色的自然评论）；不填 npcId 则是角色自己发布。仅使用本次关系网列出的 NPC，不得虚构 ID、冒充用户或泄露角色与用户的私聊。NPC 的内容只依据其自身设定及双方公开关系，不可让其知道其他私聊；无依据就不生成 NPC 动态。角色手机里的这些动态和评论只在手机内展示，不向主朋友圈发布。联系人聊天优先使用已关联 NPC 的既有 contactId/contactName，不强制每次出现所有 NPC。
 14. 最终数量与结构以本条为准，覆盖前文任何相反的数量/留空要求：${isContactThreadRepair ? "仅输出指定联系人的2—5条独立聊天消息，不生成其他内容。" : isInitialGeneration ? "9个可生成应用必须每个新增2—5条可见内容；聊天必须有3—5位非用户NPC，每人2—5条消息；直接用户聊天不得伪造。" : `本次选中的每个应用必须新增2—5条可见内容；仅限：${selectedAppLabels?.join("、") || "本次请求应用"}。`} 统一使用批量字段：contactThreads:[{contactName,messages:[{sender,content}]}]；browserEntries:[{query,title,results,reflection}]；scheduleItems:[{title,detail,daysFromNow}]；diaryEntries:[{title,body}]；noteEntries:[{title,content}]；todoEntries:[{text}]；posts:[{content,visibility}]；musicTracks:[{title,artist,duration,current}] 和 musicListening:[{trackTitle,playedHoursAgo,durationSeconds,playCount}]；电话使用 phoneCalls:[{contactName,direction,durationSeconds}]；相册使用 galleryEntries:[{title,caption,hidden}]。批量字段优先，不要只返回旧版单条字段。成功与否由应用校验，若某项无法满足数量，就提供有上下文依据的不同记录，不要输出空内容。`,
       apiKey: input.settings.apiKey,
       model: input.settings.selectedModel,
@@ -1565,8 +1567,10 @@ export async function advanceCharacterPhoneWithResult(
     postDrafts[0] = { ...postDrafts[0], visibility: "private" };
   }
   postDrafts.forEach((draft, index) => {
-    const entry: CharacterPhonePost = { id: createId("phone-life-post"), author: roleName, authorId: input.character.id, authorAvatar: input.character.avatar, content: draft.content, timestamp: now - (2 + (postDrafts.length - index) * 13) * 60 * 1000, likes: 0, comments: [], source: "generated", visibility: draft.visibility, ...(draft.visibilityTargetIds ? { visibilityTargetIds: draft.visibilityTargetIds } : {}) };
-    pushArtifact("moments", next.posts, entry, (value) => normalizeArtifactText(value.content));
+    const npcPost = resolvePhoneNpcPost(draft, relationshipNetworkContacts, input.character, now - (2 + (postDrafts.length - index) * 13) * 60 * 1000);
+    if (!npcPost) return;
+    const entry: CharacterPhonePost = { id: createId("phone-life-post"), author: roleName, authorId: input.character.id, authorAvatar: input.character.avatar, content: draft.content, timestamp: now - (2 + (postDrafts.length - index) * 13) * 60 * 1000, likes: 0, comments: [], source: "generated", visibility: draft.visibility, ...(draft.visibilityTargetIds ? { visibilityTargetIds: draft.visibilityTargetIds } : {}), ...npcPost };
+    pushArtifact("moments", next.posts, entry, (value) => `${value.authorId}|${normalizeArtifactText(value.content)}`);
   });
 
   if (isAppSelected("music")) {

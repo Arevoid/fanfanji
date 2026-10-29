@@ -4,6 +4,7 @@ import {
   advanceCharacterPhoneWithResult,
 } from "../src/features/characterPhone/characterPhoneProgression";
 import { createTextImageMarkup } from "../src/features/chat/services/messageParser";
+import { ensureCharacterPhoneContent } from "../src/features/characterPhone/characterPhoneContent";
 import type { Character, Message, UserIdentity, UserSettings, WorldBookEntry } from "../src/types";
 import type { CharacterPhoneContact, CharacterPhoneRecord } from "../src/domain/characterPhone/types";
 
@@ -813,6 +814,38 @@ try {
   });
   assert.equal(incompleteBrowser.reason, "incomplete_content", "one visible record cannot masquerade as a successful app update");
   assert.equal(incompleteBrowser.phone.generationCooldowns?.browser, undefined, "failed app generation does not start cooldown");
+  responsePayload = {
+    lifeEventSummary: "林晓分享海边散步照片，角色回应",
+    evidenceSourceIds: ["chat:chat-generation"],
+    posts: [
+      { npcId: "linked-npc", content: "今天海边的风很舒服。", roleReply: "下次一起走走。" },
+      { content: "又想去海边吹吹风。", visibility: "private" },
+      { npcId: "unlinked-npc", content: "不应出现在手机中" },
+    ],
+  };
+  const beforeNpcRequest = requestBodies.length;
+  const npcPhone = await advanceCharacterPhoneWithResult({
+    phone: { ...phone, initialContentGeneratedAt: 900 }, character, activeIdentity: identity,
+    relationships: [relation], messages, moments: [], worldBookEntries: worldBook, settings,
+    selectedApps: ["moments"], now: 10_000,
+    relationshipNetworkNpcs: [{ id: "linked-npc", ownerIdentityId: identity.id, name: "林晓", summary: "旧友", createdAt: 1, updatedAt: 1 }],
+    relationshipNetworkMaps: [{ id: "network", ownerIdentityId: identity.id, name: "关系网", schemaVersion: 1, createdAt: 1, updatedAt: 1,
+      nodes: [{ id: "role-node", entityType: "character", entityId: character.id, x: 0, y: 0 }, { id: "npc-node", entityType: "npc", entityId: "linked-npc", x: 1, y: 1 }],
+      edges: [{ id: "edge", sourceNodeId: "role-node", targetNodeId: "npc-node", direction: "both", forwardLabel: "朋友", reverseLabel: "朋友", createdAt: 1, updatedAt: 1 }],
+    }],
+  });
+  assert.equal(npcPhone.status, "generated");
+  assert.equal(requestBodies.length - beforeNpcRequest, 1, "NPC posts and role comments share the existing phone request");
+  const npcPost = npcPhone.phone.posts.find(post => post.relationshipNetworkNpcId === "linked-npc");
+  assert.equal(npcPost?.author, "林晓");
+  assert.equal(npcPost?.source, "npc");
+  assert.equal(npcPost?.commentDetails?.[0].authorId, character.id);
+  assert.equal(npcPost?.commentDetails?.[0].content, "下次一起走走。");
+  assert.ok(!npcPhone.phone.posts.some(post => post.content === "不应出现在手机中"));
+  const detachedPhone = ensureCharacterPhoneContent({ phone: npcPhone.phone, character, characters: [character], activeIdentity: identity,
+    identities: [identity], relationships: [relation], messages, moments: [], worldBookEntries: worldBook,
+    relationshipNetworkNpcs: [], relationshipNetworkMaps: [], now: 10_001 });
+  assert.ok(!detachedPhone.posts.some(post => post.relationshipNetworkNpcId === "linked-npc"), "unlinked NPC posts leave the phone projection");
 } finally {
   globalThis.fetch = originalFetch;
 }

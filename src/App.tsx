@@ -5666,6 +5666,8 @@ export default function App() {
                 {isAppMounted("relationship-network") && (
                   <LazyAppBoundary visible={activeApp === "relationship-network"}>
                     <AppRelationshipNetwork
+                      settings={settings}
+                      worldBookEntries={worldBookEntries}
                       key={`relationship-network-${activeIdentityId}`}
                       activeIdentity={activeIdentity}
                       characters={characters}

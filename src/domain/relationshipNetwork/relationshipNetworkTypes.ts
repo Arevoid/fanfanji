@@ -16,6 +16,8 @@ export interface RelationshipNetworkNpc {
   id: string;
   ownerIdentityId: string;
   name: string;
+  gender?: string;
+  age?: number | "" | "∞";
   avatar?: string;
   summary: string;
   role?: string;

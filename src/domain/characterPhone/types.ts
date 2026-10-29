@@ -81,6 +81,8 @@ export interface CharacterPhoneThreadMessage {
 
 export interface CharacterPhonePost {
   id: string;
+  /** Author is a linked relationship-network NPC; remains local to this phone. */
+  relationshipNetworkNpcId?: string;
   author: string;
   content: string;
   image?: string;

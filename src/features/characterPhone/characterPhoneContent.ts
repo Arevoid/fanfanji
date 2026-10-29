@@ -833,9 +833,10 @@ function syncMoments(
   // without a central Moment source are local phone content and remain intact.
   const relevantMomentIds = new Set(relevant.map((moment) => moment.id));
   const refreshedPosts = refreshedExistingPosts.filter((post) =>
+    (!post.relationshipNetworkNpcId || networkNpcIds.has(post.relationshipNetworkNpcId)) && (
     !post.sourceMomentId
     || relevantMomentIds.has(post.sourceMomentId)
-    || !moments.some((moment) => moment.id === post.sourceMomentId),
+    || !moments.some((moment) => moment.id === post.sourceMomentId)),
   );
   return {
     posts: [...refreshedPosts, ...newPosts].sort((left, right) => right.timestamp - left.timestamp),

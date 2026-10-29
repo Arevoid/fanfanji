@@ -1,0 +1,23 @@
+import assert from "node:assert/strict";
+import { resolvePhoneNpcPost } from "../src/features/characterPhone/characterPhoneNpcPost";
+import { listCharacterPhoneRelationshipNetworkContacts } from "../src/features/characterPhone/characterPhoneRelationshipNetwork";
+import type { Character } from "../src/types";
+import type { RelationshipNetworkMap, RelationshipNetworkNpc } from "../src/domain/relationshipNetwork/relationshipNetworkTypes";
+
+const role = { id: "role", name: "角色", avatar: "role.png" } as Character;
+const npc = { id: "npc", ownerIdentityId: "owner", name: "老朋友", avatar: "npc.png" } as RelationshipNetworkNpc;
+const map = { ownerIdentityId: "owner", nodes: [{ id: "r", entityType: "character", entityId: "role" }, { id: "n", entityType: "npc", entityId: "npc" }], edges: [{ sourceNodeId: "r", targetNodeId: "n", direction: "both", forwardLabel: "朋友" }] } as RelationshipNetworkMap;
+const contacts = listCharacterPhoneRelationshipNetworkContacts({ character: role, ownerIdentityId: "owner", characters: [role], npcs: [npc], maps: [map] });
+const post = resolvePhoneNpcPost({ npcId: "npc", roleReply: "下次一起去。" }, contacts, role, 100);
+assert.equal(post?.source, "npc");
+assert.equal(post?.authorId, "npc");
+assert.equal(post?.author, "老朋友");
+assert.equal(post?.commentDetails?.[0].authorId, "role");
+assert.equal(post?.commentDetails?.[0].content, "下次一起去。");
+assert.equal(post?.visibility, "public");
+assert.equal(resolvePhoneNpcPost({ npcId: "unknown" }, contacts, role, 100), null);
+const otherScope = listCharacterPhoneRelationshipNetworkContacts({ character: role, ownerIdentityId: "other", characters: [role], npcs: [npc], maps: [map] });
+assert.equal(resolvePhoneNpcPost({ npcId: "npc" }, otherScope, role, 100), null);
+assert.deepEqual(resolvePhoneNpcPost({}, contacts, role, 100), {});
+assert.deepEqual(resolvePhoneNpcPost({ npcId: "npc" }, contacts, role, 100)?.comments, []);
+console.log("characterPhoneNpcPost: passed author, reply, unknown NPC and identity isolation");
