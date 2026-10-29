@@ -51,7 +51,8 @@ const commitTask = createReadingAnalysisTask({ scope, type: "entity_index", inpu
 startReadingAnalysisTask(scope, commitTask.id, 11);
 const committed = commitReadingChapterAnalysisResult({ scope, taskId: commitTask.id, chapterId: "analysis-chapter-1", sourceHash: "chapter-hash", analysisVersion: "analysis-v1", result: validated.value, now: 12 });
 assert.equal(committed.task.status, "completed");
-assert.equal(getReadingBookBible(scope)?.premise, "故事 premise");
+assert.equal(getReadingBookBible(scope)?.premise, "一个关于选择的故事", "chapter analysis must preserve user-edited source material");
+assert.deepEqual(getReadingBookBible(scope)?.worldRules, ["规则一"]);
 assert.equal(listReadingAnalysisEntities(scope, "character").length, 1);
 assert.equal(validateReadingChapterAnalysisResponse({ summary: "", entities: [] }).ok, false);
 console.log("reading analysis task, checkpoint and scope tests passed");

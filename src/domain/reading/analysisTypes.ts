@@ -23,6 +23,7 @@ export interface ReadingChapterSummary extends ReadingAnalysisScope {
 }
 
 export interface ReadingAnalysisEntity extends ReadingAnalysisScope {
+  source?: "user" | "excerpt";
   id: string;
   kind: ReadingAnalysisEntityKind;
   name: string;
@@ -51,6 +52,7 @@ export interface ReadingAnalysisTask extends ReadingAnalysisScope {
 }
 
 export interface ReadingBookBible extends ReadingAnalysisScope {
+  source?: "user" | "excerpt";
   id: string;
   version: number;
   analysisVersion: string;

@@ -321,9 +321,11 @@ export function commitReadingChapterAnalysisResult(input: {
     );
   persist(saveReadingChapterSummary(summary), summary);
   for (const draft of input.result.entities.slice(0, 100)) {
+    if (listReadingAnalysisEntities(input.scope).some(entity => entity.source === "user" && entity.kind === draft.kind && entity.name === draft.name.trim())) continue;
     const entity: ReadingAnalysisEntity = {
       ...input.scope,
       id: stableEntityId(input.scope, draft.kind, draft.name),
+      source: "excerpt",
       kind: draft.kind,
       name: trim(draft.name, 300),
       aliases: draft.aliases.slice(0, 20).map((item) => trim(item, 200)),
@@ -339,12 +341,12 @@ export function commitReadingChapterAnalysisResult(input: {
   }
   const indexedEntities = listReadingAnalysisEntities(input.scope);
   const currentBible = getReadingBookBible(input.scope);
-  if (
+  if (!currentBible?.isUserEdited && (
     input.result.premise ||
     input.result.worldRules ||
     input.result.storyLines ||
     input.result.timeline
-  ) {
+  )) {
     const bible: ReadingBookBible = {
       ...input.scope,
       id:
@@ -370,6 +372,7 @@ export function commitReadingChapterAnalysisResult(input: {
         .filter((entity) => entity.kind === "faction")
         .map((entity) => entity.id),
       timeline: input.result.timeline || currentBible?.timeline || [],
+      source: currentBible?.isUserEdited ? currentBible.source : "excerpt",
       isUserEdited: currentBible?.isUserEdited || false,
       createdAt: currentBible?.createdAt || now,
       updatedAt: now,

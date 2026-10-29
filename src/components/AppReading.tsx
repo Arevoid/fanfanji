@@ -1,3 +1,4 @@
+import { saveReadingStoryManualSource, describeReadingStorySource } from "../features/reading/analysis/readingStoryManualSource";
 import React, {
   useCallback,
   useEffect,
@@ -700,7 +701,7 @@ export default function AppReading({
           worldDefinition: preparedBible
             ? {
                 genre: "小说穿书",
-                worldView: preparedBible.worldRules.join("\n"),
+                worldView: describeReadingStorySource(preparedBible, listReadingAnalysisEntities({ userIdentityId, bookId: book.id }, "character")),
                 synopsis: [preparedBible.premise, ...preparedBible.storyLines]
                   .filter(Boolean)
                   .join("\n"),
@@ -2573,6 +2574,7 @@ export default function AppReading({
             userIdentityId,
             bookId: storySetupBook.id,
           })}
+          onSaveManual={draft => saveReadingStoryManualSource(storySetupBook, draft)}
           onPrepare={(onProgress) =>
             prepareReadingStorySource({
               book: storySetupBook,

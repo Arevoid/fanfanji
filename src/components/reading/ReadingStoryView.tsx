@@ -1,3 +1,4 @@
+import { describeReadingStorySource } from "../../features/reading/analysis/readingStoryManualSource";
 import React, { useEffect, useMemo, useState } from "react";
 import { createId } from "../../core/id/createId";
 import {
@@ -30,7 +31,7 @@ import {
 } from "../../features/reading/story/readingStory";
 import { generateReadingStoryTurn } from "../../features/reading/story/readingStoryGeneration";
 import { ensureDistinctReadingStoryChoices } from "../../features/reading/story/readingStoryChoices";
-import { getReadingBookBible } from "../../core/storage/repositories/readingAnalysisRepository";
+import { getReadingBookBible, listReadingAnalysisEntities } from "../../core/storage/repositories/readingAnalysisRepository";
 import { getReadingStoryChapterNumber } from "../../domain/reading/storyChapterProgress";
 import ReadingStoryPlayShell, {
   type ReadingStoryPanel,
@@ -162,16 +163,7 @@ export default function ReadingStoryView({
         userAction: action,
         requestId: makeId(),
         bookTitle: book?.title,
-        bookContext: bookBible
-          ? [
-              bookBible.premise,
-              ...bookBible.worldRules,
-              ...bookBible.storyLines,
-              ...bookBible.timeline,
-            ]
-              .filter(Boolean)
-              .join("\n")
-          : undefined,
+        bookContext: book ? describeReadingStorySource(bookBible, listReadingAnalysisEntities({ userIdentityId, bookId: book.id }, "character")) : undefined,
         settings: {
           apiKey: settings.apiKey || "",
           selectedModel: settings.selectedModel || "",

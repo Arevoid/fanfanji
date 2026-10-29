@@ -1,3 +1,4 @@
+import { saveReadingStoryManualSource, describeReadingStorySource } from "../src/features/reading/analysis/readingStoryManualSource";
 import assert from "node:assert/strict";
 import { parseReadingStoryResponse } from "../src/features/reading/analysis/readingStoryResponse";
 import { prepareReadingStorySource } from "../src/features/reading/analysis/readingStoryPreparation";
@@ -44,9 +45,22 @@ try {
     const before = requests;
     const operation = prepareReadingStorySource({ book, settings: { apiKey: "test-only", selectedModel: "test-model", apiEndpoint: "https://example.test/v1" } });
     const scope = { userIdentityId: "owner", bookId: book.id };
-    if (index === 0) {
+    if (index !== 1) {
       const result = await operation;
-      assert.equal(result.coreCharacters[0].name, "林舟");
+      if (index === 0) assert.equal(result.coreCharacters[0].name, "林舟");
+      else {
+        assert.equal(result.coreCharacters.length, 0);
+        assert.deepEqual(result.bookBible?.worldRules, []);
+        assert.match(describeReadingStorySource(result.bookBible), /未确定/);
+      }
+      const manual = saveReadingStoryManualSource(book, { premise: "验收资料", characters: "验收旅人｜用户设定", worldRules: "", storyLines: "", timeline: "" });
+      const repeated = saveReadingStoryManualSource(book, { premise: "验收资料", characters: "验收旅人｜更新", worldRules: "", storyLines: "", timeline: "" });
+      assert.equal(repeated.coreCharacters[0].id, manual.coreCharacters[0].id);
+      assert.equal(repeated.coreCharacters[0].source, "user");
+      const cached = await prepareReadingStorySource({ book, settings: { apiKey: "", selectedModel: "" } });
+      assert.equal(cached.bookBible?.source, "user");
+      assert.match(describeReadingStorySource(cached.bookBible, cached.coreCharacters), /用户填写/);
+      assert.throws(() => saveReadingStoryManualSource({ ...book, userIdentityId: "other" }, { premise: "", characters: "", worldRules: "", storyLines: "", timeline: "" }), /找不到/);
     } else {
       await assert.rejects(operation, /不完整|核心人物/);
       assert.equal(listReadingAnalysisEntities(scope).length, 0, "failed extraction must not persist partial people");

@@ -1,3 +1,4 @@
+import type { ReadingStoryManualDraft } from "../../features/reading/analysis/readingStoryManualSource";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -183,6 +184,7 @@ export default function ReadingStorySetupWizard({
   coreCharacters,
   bookBible,
   onPrepare,
+  onSaveManual,
   onClose,
   onCreate,
 }: {
@@ -194,26 +196,34 @@ export default function ReadingStorySetupWizard({
     coreCharacters: ReadingAnalysisEntity[];
     bookBible?: ReadingBookBible;
   }>;
+  onSaveManual: (draft: ReadingStoryManualDraft) => { coreCharacters: ReadingAnalysisEntity[]; bookBible?: ReadingBookBible };
   onClose: () => void;
   onCreate: (draft: ReadingStorySetupDraft) => void;
 }) {
   const [step, setStep] = useState<"prepare" | "setup">("prepare");
-  const initiallyPrepared =
-    coreCharacters.length > 0 &&
-    Boolean(
-      bookBible?.premise &&
-        bookBible.worldRules.length &&
-        bookBible.storyLines.length,
-    );
-  const [progress, setProgress] = useState(initiallyPrepared ? 100 : 6);
+  const initiallyPrepared = coreCharacters.length > 0 || Boolean(bookBible);
+  const [progress, setProgress] = useState(initiallyPrepared ? 100 : 0);
   const [analysisStatus, setAnalysisStatus] = useState<
-    "running" | "done" | "error"
-  >(initiallyPrepared ? "done" : "running");
+    "idle" | "running" | "done" | "error"
+  >(initiallyPrepared ? "done" : "idle");
   const [analysisError, setAnalysisError] = useState("");
   const [recognizedCharacters, setRecognizedCharacters] =
     useState(coreCharacters);
   const [recognizedBible, setRecognizedBible] = useState(bookBible);
   const preparationIdRef = useRef(0);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manual, setManual] = useState<ReadingStoryManualDraft>({ premise: "", worldRules: "", storyLines: "", timeline: "", characters: "" });
+  const editManual = () => {
+    setManual({ premise: recognizedBible?.premise || "", worldRules: recognizedBible?.worldRules.join("\n") || "", storyLines: recognizedBible?.storyLines.join("\n") || "", timeline: recognizedBible?.timeline.join("\n") || "", characters: recognizedCharacters.map(item => `${item.name}｜${item.summary}`).join("\n") });
+    setManualOpen(true);
+  };
+  const saveManual = () => {
+    try {
+      const saved = onSaveManual(manual);
+      setRecognizedCharacters(saved.coreCharacters); setRecognizedBible(saved.bookBible);
+      setAnalysisStatus("done"); setProgress(100); setAnalysisError(""); setManualOpen(false);
+    } catch (error) { setAnalysisError(error instanceof Error ? error.message : "资料保存失败"); }
+  };
   const [mode, setMode] = useState<"solo" | "together">("solo");
   const [relationId, setRelationId] = useState(
     friends[0]?.relationship.id || "",
@@ -264,7 +274,6 @@ export default function ReadingStorySetupWizard({
     }
   };
   useEffect(() => {
-    if (!initiallyPrepared) void runPreparation();
     return () => {
       preparationIdRef.current += 1;
     };
@@ -289,7 +298,7 @@ export default function ReadingStorySetupWizard({
         <header className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-3">
           <button
             type="button"
-            onClick={step === "setup" ? () => setStep("prepare") : onClose}
+            onClick={manualOpen ? () => setManualOpen(false) : step === "setup" ? () => setStep("prepare") : onClose}
             aria-label="返回"
             className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)]"
           >
@@ -306,7 +315,15 @@ export default function ReadingStorySetupWizard({
           <Sparkles className="h-5 w-5 text-amber-300" />
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto p-4">
-          {step === "prepare" ? (
+          {manualOpen ? (
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold">手动填写小说资料</h3>
+              <p className="text-xs leading-5 text-[var(--text-muted)]">不调用 API。每项均可选填，未填内容保持未确定；保存的内容标记为用户填写，不作为原文核实结果。</p>
+              {([["premise", "故事梗概"], ["worldRules", "世界背景与规则"], ["storyLines", "主要故事线"], ["characters", "人物与关系"], ["timeline", "关键时间线"]] as const).map(([key, label]) => <label key={key} className="block text-xs font-bold">{label}<textarea value={manual[key]} onChange={event => setManual({ ...manual, [key]: event.target.value })} rows={3} maxLength={key === "premise" ? 4000 : 12000} placeholder={key === "characters" ? "每行一位：姓名｜非露骨的人物简介与关系" : "选填；多项请分行填写"} className="mt-2 w-full resize-y rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs font-normal leading-5" /></label>)}
+              {analysisError && <p role="alert" className="text-xs text-rose-500">{analysisError}</p>}
+              <div className="grid grid-cols-2 gap-3"><button type="button" onClick={() => setManualOpen(false)} className="h-11 rounded-2xl border border-[var(--border)] text-xs">取消填写</button><button type="button" onClick={saveManual} className="h-11 rounded-2xl bg-[var(--button-primary-bg)] text-xs text-[var(--button-primary-text)]">保存资料</button></div>
+            </section>
+          ) : step === "prepare" ? (
             <div className="space-y-4">
               <section className="rounded-3xl border border-amber-300/30 bg-amber-500/10 p-5">
                 <div className="flex items-center gap-3">
@@ -316,6 +333,8 @@ export default function ReadingStorySetupWizard({
                     <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-white">
                       <Check className="h-4 w-4" />
                     </span>
+                  ) : analysisStatus === "idle" ? (
+                    <Sparkles className="h-6 w-6 text-amber-400" />
                   ) : (
                     <X className="h-6 w-6 text-rose-300" />
                   )}
@@ -325,7 +344,7 @@ export default function ReadingStorySetupWizard({
                         ? "正在识别小说资料"
                         : analysisStatus === "done"
                           ? "故事资料已准备"
-                          : "小说识别未完成"}
+                          : analysisStatus === "idle" ? "选择资料准备方式" : "小说识别未完成"}
                     </h3>
                     <p className="mt-1 text-[10px] text-[var(--text-muted)]">
                       世界观 · 故事线 · 核心人物
@@ -369,12 +388,12 @@ export default function ReadingStorySetupWizard({
                 {recognizedBible && (
                   <div className="mt-3 space-y-2 rounded-2xl bg-[var(--surface-raised)] p-3 text-[10px] leading-4">
                     <p>
-                      <strong>世界观：</strong>
-                      {recognizedBible.worldRules.slice(0, 2).join("；")}
+                      <span className="block text-[var(--text-muted)]">{recognizedBible.source === "user" || recognizedBible.isUserEdited ? "用户填写" : recognizedBible.source === "excerpt" ? "摘录提取" : "已有资料"} · 未填写的信息尚未确定</span><strong>世界观：</strong>
+                      {recognizedBible.worldRules.slice(0, 2).join("；") || "尚未确定"}
                     </p>
                     <p>
                       <strong>主线：</strong>
-                      {recognizedBible.storyLines.slice(0, 2).join("；")}
+                      {recognizedBible.storyLines.slice(0, 2).join("；") || "尚未确定"}
                     </p>
                   </div>
                 )}
@@ -387,13 +406,14 @@ export default function ReadingStorySetupWizard({
                   </p>
                 )}
               </section>
-              {analysisStatus === "error" ? (
+              {analysisStatus !== "running" && <button type="button" onClick={editManual} className="h-11 w-full rounded-2xl border border-[var(--border)] text-xs font-bold">手动填写或补充资料（不调用 API）</button>}
+              {analysisStatus === "error" || analysisStatus === "idle" ? (
                 <button
                   type="button"
                   onClick={() => void runPreparation()}
                   className="h-11 w-full rounded-2xl border border-[var(--border)] text-xs font-bold"
                 >
-                  重新识别
+                  {analysisStatus === "idle" ? "自动识别资料（调用 API）" : "重新识别（调用 API）"}
                 </button>
               ) : (
                 <button
