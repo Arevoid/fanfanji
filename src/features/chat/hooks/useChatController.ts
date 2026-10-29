@@ -94,7 +94,7 @@ export function useChatController({
   currentScopeKeyRef.current = scopeKey;
   useEffect(() => {
     setQuotedMessage(null);
-    setIsReplyInFlight(false);
+    setIsReplyInFlight(replyInFlightRef.current.has(scopeKey));
     // Do not abort a reply when this controller unmounts. AppChat is a view
     // layer: navigating home, opening another app, or switching browser tabs
     // must not cancel the character's API request. The parent App and its
@@ -257,8 +257,8 @@ export function useChatController({
         : [...currentChatMessages, userMessage];
       await generateResponseForUserMessage(userMessage, history, abortController.signal);
     } finally {
-      replyInFlightRef.current.delete(scopeKey);
       if (replyAbortControllerRef.current.get(scopeKey) === abortController) {
+        replyInFlightRef.current.delete(scopeKey);
         replyAbortControllerRef.current.delete(scopeKey);
       }
       setIsReplyInFlight(replyInFlightRef.current.has(currentScopeKeyRef.current));

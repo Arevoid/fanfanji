@@ -1310,11 +1310,11 @@ export default function App() {
   }, [characters, relationships, settings.activeIdentityId, settings.identities]);
 
   // Do not download/mount the large chat application when another app is
-  // opened first. Once chat is active, keep it mounted while navigating to a
-  // related app (for example a shared forum post) so drafts and call state live.
+  // opened first. Once activated, keep its runtime mounted until App closes,
+  // including on the home screen: in-flight replies, stop controls and drafts
+  // belong to their conversations and must survive navigation.
   useEffect(() => {
     if (activeApp === "chat") setChatModuleActivated(true);
-    else if (activeApp === null) setChatModuleActivated(false);
   }, [activeApp]);
 
   // Offline Stories State & Handlers

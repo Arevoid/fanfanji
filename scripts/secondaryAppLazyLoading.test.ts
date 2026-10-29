@@ -36,7 +36,8 @@ assert.match(appSource, /const IDLE_PRELOAD_APP_IDS = \[[^\]]+\]/);
 assert.match(appSource, /IDLE_PRELOAD_APP_IDS = \[[^\]]*"chat"/);
 assert.match(appSource, /activeApp === "chat" \|\| chatModuleActivated/);
 assert.match(appSource, /if \(activeApp === "chat"\) setChatModuleActivated\(true\)/);
-assert.match(appSource, /else if \(activeApp === null\) setChatModuleActivated\(false\)/);
+assert.doesNotMatch(appSource, /setChatModuleActivated\(false\)/,
+  "returning home must not unmount the activated chat runtime during a reply");
 assert.match(appSource, /正在打开/);
 assert.doesNotMatch(appSource, /import AppChat(?:,\s*\{[^}]+\})? from "\.\/components\/AppChat"/);
 assert.match(appSource, /import \{ resolveActiveChatStylePreset \} from "\.\/features\/chat\/styles\/chatStylePreset"/);
