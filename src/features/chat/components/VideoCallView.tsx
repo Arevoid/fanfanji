@@ -1,5 +1,6 @@
+import { FloatingVideoCallPreview } from "./FloatingVideoCallPreview";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeftRight, Camera, Clock3, Image as ImageIcon, Maximize2, Mic, Phone, RefreshCw, Send, UserRound, Video, X } from "lucide-react";
+import { ArrowLeftRight, Camera, Clock3, Image as ImageIcon, Minimize2, Mic, Phone, RefreshCw, Send, UserRound, Video, X } from "lucide-react";
 import type { Character } from "../../../types";
 import type { CallTranscriptItem } from "../services/messageParser";
 import type { VideoCallInputMode } from "../hooks/useChatAttachmentState";
@@ -7,6 +8,7 @@ import { getVideoCallDisplayText, parseVideoCallResponse, type VideoCallSceneEnt
 
 interface VideoCallViewProps {
   character: Character;
+  onRestore: () => void;
   userName: string;
   userAvatar?: string;
   status: "ringing" | "connected" | "ended";
@@ -36,6 +38,7 @@ const formatDuration = (duration: number) => `${Math.floor(duration / 60).toStri
 
 export function VideoCallView({
   character,
+  onRestore,
   userName,
   userAvatar,
   status,
@@ -60,6 +63,7 @@ export function VideoCallView({
   onTranslateCallTranscript,
   translatingTranscriptId,
 }: VideoCallViewProps) {
+  const [minimized, setMinimized] = useState(false);
   const [showSceneHistory, setShowSceneHistory] = useState(false);
   const [showSelfSceneTicker, setShowSelfSceneTicker] = useState(false);
   const [selfPreviewPosition, setSelfPreviewPosition] = useState<{ left: number; top: number } | null>(null);
@@ -347,14 +351,15 @@ export function VideoCallView({
     onRegenerateCallTurn(item);
   };
 
-  return (
-    <div ref={callViewRef} className="absolute inset-0 z-50 flex transform-gpu flex-col overflow-hidden bg-[#080910] text-white animate-fade-in" data-video-call-view>
+  return (<>
+    {minimized && <FloatingVideoCallPreview name={characterName} avatar={avatar} selfAvatar={userAvatar} cameraStream={cameraStream} status={status} duration={duration} onRestore={() => { setMinimized(false); onRestore(); }} />}
+    <div ref={callViewRef} style={{ display: minimized ? "none" : undefined }} className="pointer-events-auto absolute inset-0 z-50 flex transform-gpu flex-col overflow-hidden bg-[#080910] text-white animate-fade-in" data-video-call-view>
       <div className="absolute -inset-5 scale-105 bg-cover bg-center blur-[6px]" style={{ backgroundImage: avatar ? `url(${avatar})` : undefined }} />
       <div className="absolute inset-0 bg-[#080910]/25" />
       <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/0 to-black/78" />
 
       <header className="relative z-10 flex shrink-0 items-center justify-between px-4 pb-2 pt-[calc(env(safe-area-inset-top,0px)+10px)] text-white/85">
-        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full bg-black/20" aria-label="展开视频画面"><Maximize2 className="h-4 w-4" /></button>
+        <button type="button" onClick={() => { setShowSceneHistory(false); setTranscriptMenu(null); setMinimized(true); }} className="flex h-7 w-7 items-center justify-center rounded-full bg-black/20" aria-label="缩小视频通话"><Minimize2 className="h-4 w-4" /></button>
         <div className="text-center"><p className="text-[13px] font-bold tracking-wide">{characterName}</p><p className="mt-0.5 text-[10px] text-white/65">{status === "connected" ? formatDuration(duration) : isIncoming ? "邀请你视频通话" : "正在呼叫..."}</p></div>
         <div className="flex items-center gap-3"><button type="button" className="flex h-7 w-7 items-center justify-center rounded-full bg-black/20" aria-label="视频通话设置"><UserRound className="h-4 w-4" /></button></div>
       </header>
@@ -501,5 +506,5 @@ export function VideoCallView({
         </div>
       </div>}
     </div>
-  );
+  </>);
 }

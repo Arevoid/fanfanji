@@ -669,7 +669,13 @@ export default function AppChat({
     aliasLongPressTimerRef.current = null;
   };
 
+  const [conversationHiddenForCall, setConversationHiddenForCall] = useState(false);
   const startChatWith = (relationId: string) => {
+    if (activeAttachModalRef.current === "calling" && callMode === "video" && voiceCallRelationId && relationId !== voiceCallRelationId && relationId !== activeChatCharId) {
+      showToast("视频通话仍在进行，请先通过小窗返回或结束通话");
+      return;
+    }
+    setConversationHiddenForCall(false);
     // Relation IDs are globally unique, and the visible list is still bounded
     // to the current主人设 workspace. A row may belong to an alias, in which
     // case the identity switch and conversation selection are committed
@@ -7229,6 +7235,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     ? document.querySelector<HTMLElement>("[data-chat-shell]")
     : null;
 
+  const callOverlayTarget = typeof document !== "undefined" ? document.querySelector<HTMLElement>("[data-call-overlay-host]") : null;
+
   return (
     <div className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans select-none overflow-hidden relative" data-chat-shell>
       <InnerVoiceModal
@@ -7243,8 +7251,40 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         getEmotion={innerVoiceController.getEmotion}
         onRefresh={innerVoiceController.refresh}
       />
+          {/* Video Calling Screen Modal Overlay */}
+          {activeAttachModal === "calling" && callMode === "video" && activeCharacter && callOverlayTarget && createPortal(
+            <VideoCallView
+              onRestore={() => { setConversationHiddenForCall(false); onNavigateToApp("chat"); }}
+              character={activeCharacter}
+              userName={activeIdentityName}
+              userAvatar={activeIdentityAvatar}
+              status={callingStatus}
+              duration={callingDuration}
+              isIncoming={isIncomingCall}
+              isTyping={isTyping}
+              inputText={callingInputText}
+              inputMode={videoCallInputMode}
+              transcript={callTranscript}
+              scene={videoCallScene}
+              sceneTranslation={videoCallSceneTranslation}
+              selfScene={videoCallSelfScene}
+              sceneHistory={videoCallSceneHistory}
+              onInputTextChange={setCallingInputText}
+              onInputModeChange={setVideoCallInputMode}
+              onSend={sendVoiceCallMessage}
+              onAccept={acceptIncomingCall}
+              onReject={rejectIncomingCall}
+              onEnd={endVoiceCall}
+              onCameraFrame={sendVideoCameraFrame}
+              onRegenerateCallTurn={regenerateCallTurn}
+              onTranslateCallTranscript={translateCallTranscript}
+              translatingTranscriptId={callTranscriptTranslationLoadingId}
+            />, callOverlayTarget
+          )}
+
+
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
-      {activeChatCharId && activeCharacter && isActiveChatScopeValid ? (
+      {activeChatCharId && activeCharacter && isActiveChatScopeValid && !conversationHiddenForCall ? (
         <div className={`absolute inset-0 z-40 bg-[var(--app-bg)] flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""} ${hasUserRedPacketCss ? "user-custom-redpacket-css" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"} data-user-chat-css={hasUserCustomChatCss ? "active" : "inactive"} data-chat-settings-open={isShowingCardModal ? "true" : "false"}>
             <div
               id="api-chat-screen"
@@ -8078,8 +8118,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             }`}>
               <button
                 onClick={() => {
-                  setActiveChatCharId(null);
-                  setActiveChatRelationId(null);
+                  if (activeAttachModal === "calling" && callMode === "video") setConversationHiddenForCall(true);
+                  else { setActiveChatCharId(null); setActiveChatRelationId(null); }
                   setIsShowingCardModal(false);
                   setAdvancedSettingsSection(null);
                 }}
@@ -10921,36 +10961,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 </div>
               </div>
             </div>
-          )}
-
-          {/* Video Calling Screen Modal Overlay */}
-          {activeAttachModal === "calling" && callMode === "video" && activeCharacter && (
-            <VideoCallView
-              character={activeCharacter}
-              userName={activeIdentityName}
-              userAvatar={activeIdentityAvatar}
-              status={callingStatus}
-              duration={callingDuration}
-              isIncoming={isIncomingCall}
-              isTyping={isTyping}
-              inputText={callingInputText}
-              inputMode={videoCallInputMode}
-              transcript={callTranscript}
-              scene={videoCallScene}
-              sceneTranslation={videoCallSceneTranslation}
-              selfScene={videoCallSelfScene}
-              sceneHistory={videoCallSceneHistory}
-              onInputTextChange={setCallingInputText}
-              onInputModeChange={setVideoCallInputMode}
-              onSend={sendVoiceCallMessage}
-              onAccept={acceptIncomingCall}
-              onReject={rejectIncomingCall}
-              onEnd={endVoiceCall}
-              onCameraFrame={sendVideoCameraFrame}
-              onRegenerateCallTurn={regenerateCallTurn}
-              onTranslateCallTranscript={translateCallTranscript}
-              translatingTranscriptId={callTranscriptTranslationLoadingId}
-            />
           )}
 
           {/* Calling Screen Modal Overlay */}

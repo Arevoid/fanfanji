@@ -5052,6 +5052,84 @@ export default function App() {
 
         {/* Home Screen Icons Layout or Active Application Render */}
         <div className="flex-1 relative overflow-hidden flex flex-col">
+                {(activeApp === "chat" || chatModuleActivated) && (
+                  <div style={{ display: activeApp === "chat" ? "block" : "none", paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)", paddingBottom: "env(safe-area-inset-bottom, 0px)" }} className="w-full h-full absolute inset-0 z-30">
+                  <div className="relative h-full w-full">
+                  <LazyAppBoundary>
+                    <AppChat
+                    // Keep the chat shell mounted while switching identities so
+                    // selecting a persona/alias does not reset the current tab
+                    // or sub-view back to the chat list. Identity-scoped data is
+                    // still selected by activeIdentityId in AppChat and its hooks.
+                    key="chat"
+                    characters={characters}
+                    relationships={relationships}
+                    settings={settings}
+                    messages={messages}
+                    moments={moments}
+                    onSendMessage={handleSendMessage}
+                    onEnsureMessageDurability={ensureMessagesDurable}
+                    onSaveImageToCharacterPhone={saveImageToCharacterPhone}
+                    characterPhoneOwnerIdentityId={characterPhoneIdentity.id}
+                    onSaveCharacter={handleSaveCharacter}
+                    onUpdateCharacter={handleUpdateCharacter}
+                    onAddMoment={handleAddMoment}
+                    onAddCommentToMoment={handleAddCommentToMoment}
+                    onDeleteCommentFromMoment={handleDeleteCommentFromMoment}
+                    onLikeMoment={handleLikeMoment}
+                    onDeleteMoment={handleDeleteMoment}
+                    onDeleteMomentsByRelation={handleDeleteMomentsByRelation}
+                    onToggleBookmark={handleToggleBookmark}
+                    onDeleteMessage={handleDeleteMessage}
+                    onReplaceMessages={handleReplaceMessages}
+                    onUpdateMessage={handleUpdateMessage}
+                    onClose={() => setActiveApp(null)}
+                    onSaveSettings={setSettings}
+                    onSwitchIdentity={handleSwitchIdentity}
+                    onNavigateToApp={handleChatNavigateToApp}
+                    worldBookEntries={worldBookEntries}
+                    onClearMessages={handleClearMessages}
+                    memories={memories}
+                    onSaveMemories={persistOfflineStoryMemories}
+                    recallSettings={recallSettings}
+                    activeChatCharId={activeChatCharId}
+                    setActiveChatCharId={setActiveChatCharId}
+                    activeChatRelationId={activeChatRelationId}
+                    setActiveChatRelationId={setActiveChatRelationId}
+                    onSaveRelationships={setRelationships}
+                    onClearScheduleForRelation={handleClearScheduleForRelation}
+                    appointments={scheduleStore.appointments}
+                    onSaveAppointment={handleSaveAppointment}
+                    offlineStories={offlineStories}
+                    onSaveOfflineStory={handleSaveOfflineStory}
+                    onOpenOfflineStory={(storyId, messageId) => {
+                      setPendingOfflineHistoryTarget(messageId ? { storyId, id: messageId, requestId: Date.now() } : undefined);
+                      setPendingOfflineStoryId(storyId);
+                      setActiveApp("offline");
+                    }}
+                    onDeleteOfflineStory={handleDeleteOfflineStory}
+                    onDeleteCharacter={handleDeleteCharacter}
+                    onDeleteRelationshipMusic={handleDeleteRelationshipMusic}
+                    musicTracks={tracks}
+                    identityMusicStates={identityMusicStates}
+                    relationshipMusicStates={relationshipMusicStates}
+                    pendingDiaryShareMessageId={pendingDiaryShareMessageId}
+                    onDiaryShareHandled={() => setPendingDiaryShareMessageId(null)}
+                    pendingRelationshipNetworkMoments={relationshipNetworkPendingMoments}
+                    onApproveRelationshipNetworkNpcMoment={approveRelationshipNetworkNpcMoment}
+                    onRejectRelationshipNetworkNpcMoment={rejectRelationshipNetworkNpcMoment}
+                    onCheckRelationshipNetworkNpcAutomation={checkRelationshipNetworkNpcAutomation}
+                    onOpenForumShare={(shareId) => {
+                      setOpenForumShareId(shareId);
+                      setActiveApp("forum");
+                    }}
+                      />
+                    </LazyAppBoundary>
+                  </div>
+                  </div>
+                )}
+
+          <div className="pointer-events-none absolute inset-0 z-[90]" data-call-overlay-host />
           {activeApp === null ? (
             <div 
               className="home-screen-drag-surface flex-1 min-h-0 overflow-hidden flex flex-col p-4 select-none touch-none"
@@ -5444,86 +5522,12 @@ export default function App() {
             <div 
               className={`absolute inset-0 z-30 ${activeApp === "character-phone" ? "bg-transparent" : "bg-slate-50/92 backdrop-blur-md"} flex flex-col h-full`}
               style={{
+                display: activeApp === "chat" ? "none" : undefined,
                  paddingTop: settings.hideStatusBar || activeApp === "character-phone" ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)",
                 paddingBottom: "env(safe-area-inset-bottom, 0px)"
               }}
             >
               <div className="w-full flex-1 min-h-0 relative">
-                {(activeApp === "chat" || chatModuleActivated) && (
-                  <div style={{ display: activeApp === "chat" ? "block" : "none" }} className="w-full h-full absolute inset-0">
-                  <LazyAppBoundary>
-                    <AppChat
-                    // Keep the chat shell mounted while switching identities so
-                    // selecting a persona/alias does not reset the current tab
-                    // or sub-view back to the chat list. Identity-scoped data is
-                    // still selected by activeIdentityId in AppChat and its hooks.
-                    key="chat"
-                    characters={characters}
-                    relationships={relationships}
-                    settings={settings}
-                    messages={messages}
-                    moments={moments}
-                    onSendMessage={handleSendMessage}
-                    onEnsureMessageDurability={ensureMessagesDurable}
-                    onSaveImageToCharacterPhone={saveImageToCharacterPhone}
-                    characterPhoneOwnerIdentityId={characterPhoneIdentity.id}
-                    onSaveCharacter={handleSaveCharacter}
-                    onUpdateCharacter={handleUpdateCharacter}
-                    onAddMoment={handleAddMoment}
-                    onAddCommentToMoment={handleAddCommentToMoment}
-                    onDeleteCommentFromMoment={handleDeleteCommentFromMoment}
-                    onLikeMoment={handleLikeMoment}
-                    onDeleteMoment={handleDeleteMoment}
-                    onDeleteMomentsByRelation={handleDeleteMomentsByRelation}
-                    onToggleBookmark={handleToggleBookmark}
-                    onDeleteMessage={handleDeleteMessage}
-                    onReplaceMessages={handleReplaceMessages}
-                    onUpdateMessage={handleUpdateMessage}
-                    onClose={() => setActiveApp(null)}
-                    onSaveSettings={setSettings}
-                    onSwitchIdentity={handleSwitchIdentity}
-                    onNavigateToApp={handleChatNavigateToApp}
-                    worldBookEntries={worldBookEntries}
-                    onClearMessages={handleClearMessages}
-                    memories={memories}
-                    onSaveMemories={persistOfflineStoryMemories}
-                    recallSettings={recallSettings}
-                    activeChatCharId={activeChatCharId}
-                    setActiveChatCharId={setActiveChatCharId}
-                    activeChatRelationId={activeChatRelationId}
-                    setActiveChatRelationId={setActiveChatRelationId}
-                    onSaveRelationships={setRelationships}
-                    onClearScheduleForRelation={handleClearScheduleForRelation}
-                    appointments={scheduleStore.appointments}
-                    onSaveAppointment={handleSaveAppointment}
-                    offlineStories={offlineStories}
-                    onSaveOfflineStory={handleSaveOfflineStory}
-                    onOpenOfflineStory={(storyId, messageId) => {
-                      setPendingOfflineHistoryTarget(messageId ? { storyId, id: messageId, requestId: Date.now() } : undefined);
-                      setPendingOfflineStoryId(storyId);
-                      setActiveApp("offline");
-                    }}
-                    onDeleteOfflineStory={handleDeleteOfflineStory}
-                    onDeleteCharacter={handleDeleteCharacter}
-                    onDeleteRelationshipMusic={handleDeleteRelationshipMusic}
-                    musicTracks={tracks}
-                    identityMusicStates={identityMusicStates}
-                    relationshipMusicStates={relationshipMusicStates}
-                    pendingDiaryShareMessageId={pendingDiaryShareMessageId}
-                    onDiaryShareHandled={() => setPendingDiaryShareMessageId(null)}
-                    pendingRelationshipNetworkMoments={relationshipNetworkPendingMoments}
-                    onApproveRelationshipNetworkNpcMoment={approveRelationshipNetworkNpcMoment}
-                    onRejectRelationshipNetworkNpcMoment={rejectRelationshipNetworkNpcMoment}
-                    onCheckRelationshipNetworkNpcAutomation={checkRelationshipNetworkNpcAutomation}
-                    onOpenForumShare={(shareId) => {
-                      setOpenForumShareId(shareId);
-                      setActiveApp("forum");
-                    }}
-                      />
-                    </LazyAppBoundary>
-                  </div>
-                )}
-
                 {isAppMounted("archives") && (
                   <LazyAppBoundary visible={activeApp === "archives"}>
                     <AppArchives
