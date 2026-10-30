@@ -18,7 +18,7 @@ const projection: AiReadingContextProjection = { scope: room, aiReadingPace: "pe
 const prompt = buildReadingPromptProjection({ character, relationship, room, aiContext: projection, currentFragment: { anchor: blockedAnchor, textSnapshot: "凶手在下一章现身。" }, discussion: { userPrompt: "你觉得他为什么沉默？", recentMessages: [{ author: "user", body: "我有点担心他。" }] } });
 assert.equal(prompt.priority[0], "role_card_persona");
 assert.match(prompt.system, /寡言、谨慎/);
-assert.match(prompt.system, /close_friend/);
+assert.match(prompt.system, /亲近的朋友/);
 assert.match(prompt.system, /第一人称/);
 assert.match(prompt.system, /不要描述自己的动作/);
 assert.match(prompt.user, /灯影在门缝里晃动/);

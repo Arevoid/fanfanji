@@ -8,7 +8,7 @@ import { initializeCinemaStore, loadCinemaStore, saveCinemaStore } from "../core
 import { apiChat } from "../utils/apiHelper";
 import { getConversationId, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import type { CinemaCue, CinemaDiscussion, CinemaMedia, CinemaStore, CinemaWatchRoom } from "../domain/cinema/types";
-import type { Character, MemoryItem, UserSettings } from "../types";
+import type { Character, MemoryItem, UserSettings, WorldBookEntry } from "../types";
 import { getSubtitleContext, parseSubtitleText, formatSubtitleTime } from "../features/cinema/subtitleParser";
 import { archiveCinemaDiscussion } from "../features/cinema/cinemaMemoryArchiveService";
 import { requestCinemaMemoryReply } from "../features/cinema/cinemaMemoryReply";
@@ -20,6 +20,7 @@ interface AppCinemaProps {
   characters?: Character[];
   relationships?: CharacterRelationship[];
   memories?: MemoryItem[];
+  worldBookEntries?: WorldBookEntry[];
   onSaveMemories?: (memories: MemoryItem[]) => void;
   onClose: () => void;
 }
@@ -101,6 +102,7 @@ export default function AppCinema({
   characters = [],
   relationships = [],
   memories = [],
+  worldBookEntries = [],
   onSaveMemories,
   onClose,
 }: AppCinemaProps) {
@@ -448,7 +450,7 @@ export default function AppCinema({
       const prompt = `你正在和用户一起观看影视《${selectedMedia.title}》。你扮演${selectedCharacter.name}，只能知道用户已经看到的内容。\n片名辅助信息：${selectedMedia.synopsis || "无"}\n其他辅助信息：${selectedMedia.auxiliaryInfo || "无"}\n当前播放时间：${formatSubtitleTime(positionMs)}。\n当前字幕：${currentSubtitle || "暂无字幕"}\n已播放剧情摘要：${selectedRoom.plotSummary || "未开启剧情摘要"}\n${effectiveFrameDataUrl ? "当前视频画面已附加，请优先识别画面中的主体、动作、场景和可见文字，只讨论当前画面，不要凭空猜测后续剧情。" : "当前使用字幕和观影摘要，不发送视频画面。"}\n${automatic ? "这是一次低频观影反应，请只用一句自然、符合角色性格的短回应，不要抢夺用户注意力。" : `用户说：${userText.trim()}`}\n只输出角色实际说的话，不要括号动作、舞台说明或旁白。`;
       const memoryRelation = relationships.find((relation) => relation.id === selectedRoom.relationId);
       const response = await requestCinemaMemoryReply({ relation: memoryRelation, characterId: selectedCharacter.id, userIdentityId,
-        settings, query: userText.trim() || currentSubtitle || selectedMedia.title, params: {
+        settings, character: selectedCharacter, worldBookEntries, query: userText.trim() || currentSubtitle || selectedMedia.title, params: {
         message: prompt,
         history: selectedDiscussions.slice(-8).flatMap((discussion) => [
           { role: "user", text: discussion.userText },

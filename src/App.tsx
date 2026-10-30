@@ -5659,6 +5659,7 @@ export default function App() {
                       userIdentityId={activeIdentityId}
                       settings={settings}
                       characters={characters}
+                      worldBookEntries={worldBookEntries}
                       relationships={relationships}
                       memories={memories}
                       onSaveMemories={persistOfflineStoryMemories}

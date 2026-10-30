@@ -33,6 +33,7 @@ function parseJsonObject(text: string): unknown {
 }
 
 export async function requestReadingCompanionResponse(input: ReadingCompanionRequest): Promise<ReadingAiResponse | undefined> {
+  if (input.room.characterId !== input.character.id || input.relationship.characterId !== input.character.id || input.relationship.id !== input.room.relationId || input.relationship.userIdentityId !== input.room.userIdentityId) throw new Error("共读角色或关系范围不匹配");
   input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   if (!input.settings.apiKey || !input.settings.selectedModel) throw new Error("请先配置 API 和模型，才能让好友参与共读讨论");
   const fragment = { anchor: input.paragraph.anchor, textSnapshot: input.paragraph.text };
@@ -50,6 +51,8 @@ export async function requestReadingCompanionResponse(input: ReadingCompanionReq
   });
   const outputContract = [
     input.autonomous ? "如果没有想评论的内容，只输出 SKIP。" : "必须回应用户。",
+    input.kind === "comment" ? "这是即时段评，不是读后感报告。只谈本段真正让你在意的一点，可以短到一句吐槽、喜恶、疑问或联想；不必完整总结、升华主题或教育用户。" : "这是与用户的对话，先接住用户这句话再表达自己的看法；不默认分点、总结中心思想或列建议，用户明确要求分析时再展开。",
+    "不机械复述正文，不默认赞美用户、不每次追问、不以‘作为’或‘这段文字展现了’套话开场；长度和情绪服从当前人设与问题。",
     "body 必须是角色本人用第一人称对用户说的聊天内容，不要写角色自己的动作、表情或旁白。",
     "共同经历和偏好应体现在措辞、关心和回应方式里。用户没有询问往事或记忆来源时，直接回应眼前的需要，不用‘我记得你’或‘你之前说过’作为关心的开场，也不要展示资料标签。",
     "否则只输出一个 JSON 对象，不要 Markdown：",
