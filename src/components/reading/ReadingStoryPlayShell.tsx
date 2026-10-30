@@ -203,25 +203,20 @@ export default function ReadingStoryPlayShell(
                         props.onActionChange(choice.id === "free-action" ? "" : choice.label);
                         setChoicesExpanded(false);
                       }}
-                      className={`w-full rounded-2xl border px-4 py-3 text-left text-xs leading-5 transition ${props.action === choice.label ? "border-amber-300 bg-amber-400/15" : "border-amber-500/25 bg-black/20"}`}
+                      title={choice.consequenceHint ? `${choice.label} · ${choice.consequenceHint}` : choice.label}
+                      className={`flex h-8 w-full items-center rounded-xl border px-3 text-left text-xs leading-5 transition ${props.action === choice.label ? "border-amber-300 bg-amber-400/15" : "border-amber-500/25 bg-black/20"}`}
                     >
-                      <span className="mr-2 font-black text-amber-300">
+                      <span className="mr-2 shrink-0 font-black text-amber-300">
                         {(["一", "二", "三", "四", "五", "六", "七", "八"] as const)[index] ||
                           `选项${index + 1}`}、
                       </span>
-                      {choice.label}
-                      {choice.consequenceHint && (
-                        <span className="mt-1 block pl-6 text-[10px] text-white/40">
-                          {choice.consequenceHint}
-                        </span>
-                      )}
+                      <span className="min-w-0 flex-1 truncate">{choice.label}</span>
                     </button>
                   ))}
                 </div>
               )}
             </div>
           )}
-          {props.choices.length === 1 && props.choices[0].id === "free-action" && <p className="mb-2 text-xs text-white/50">本段暂无可用推进选项，可以直接输入你的行动；不会自动补发请求。</p>}
           <div className="flex items-end gap-2">
             <textarea
               id="reading-story-action"
