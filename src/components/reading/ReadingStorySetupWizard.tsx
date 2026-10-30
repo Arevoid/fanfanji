@@ -1,3 +1,5 @@
+import { ReadingStorySourcePosition } from "./ReadingStorySourcePosition";
+import { listReadingStorySourceStarts } from "../../features/reading/story/readingStorySource";
 import type { ReadingStoryManualDraft } from "../../features/reading/analysis/readingStoryManualSource";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -224,6 +226,7 @@ export default function ReadingStorySetupWizard({
       setAnalysisStatus("done"); setProgress(100); setAnalysisError(""); setManualOpen(false);
     } catch (error) { setAnalysisError(error instanceof Error ? error.message : "资料保存失败"); }
   };
+  const [sourceCursor, setSourceCursor] = useState(() => listReadingStorySourceStarts(book.userIdentityId, book.id)[0]?.paragraphs[0]?.cursor);
   const [mode, setMode] = useState<"solo" | "together">("solo");
   const [relationId, setRelationId] = useState(
     friends[0]?.relationship.id || "",
@@ -241,12 +244,13 @@ export default function ReadingStorySetupWizard({
   const draft = useMemo(
     (): ReadingStorySetupDraft => ({
       mode,
+      sourceCursor,
       relationId: mode === "together" ? relationId : undefined,
       user,
       friend: mode === "together" ? friend : undefined,
       length,
     }),
-    [friend, length, mode, relationId, user],
+    [friend, length, mode, relationId, user, sourceCursor],
   );
   const error = validateReadingStorySetup(draft);
 
@@ -429,7 +433,7 @@ export default function ReadingStorySetupWizard({
           ) : (
             <div className="space-y-4">
               <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                <h3 className="text-sm font-black">参与方式</h3>
+                <h3 className="mb-3 text-sm font-black">原著起点</h3><ReadingStorySourcePosition userIdentityId={book.userIdentityId} bookId={book.id} cursor={sourceCursor} onChange={setSourceCursor} /><h3 className="mt-5 text-sm font-black">参与方式</h3>
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <button
                     type="button"

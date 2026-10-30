@@ -24,10 +24,11 @@ const settings = { apiKey: "key", selectedModel: "model" };
 
 const retryStory = createReadingStory({ scope: { userIdentityId: "identity-a", storyId: "retry" }, title: "Retry", entryMode: "soul_wear", length: "short", characterName: "角色", now: 1 });
 let retryCalls = 0;
-const retried = await generateReadingStoryTurn({ story: retryStory, userAction: "观察", requestId: "request-retry", settings, aiCall: async () => { retryCalls += 1; return { text: retryCalls === 1 ? "{}" : JSON.stringify(result("第二次响应通过校验")) }; }, now: 2 });
-assert.equal(retryCalls, 2);
-assert.equal(listReadingStoryTurns({ userIdentityId: "identity-a", storyId: "retry" }).length, 1);
-assert.equal(retried.attempts, 2);
+await assert.rejects(() => generateReadingStoryTurn({ story: retryStory, userAction: "观察", requestId: "request-retry", settings, aiCall: async () => { retryCalls += 1; return { text: "{}" }; }, now: 2 }));
+assert.equal(retryCalls, 1, "format failure cannot silently issue another request");
+assert.equal(listReadingStoryTurns(retryStory).length, 0);
+const retried = await generateReadingStoryTurn({ story: retryStory, userAction: "观察", requestId: "request-retry", settings, aiCall: async () => ({ text: JSON.stringify(result("用户明确重试后响应通过校验")) }), now: 2 });
+assert.equal(retried.attempts, 1);
 
 let duplicateCalls = 0;
 const duplicate = await generateReadingStoryTurn({ story: retried.story, userAction: "观察", requestId: "request-retry", settings, aiCall: async () => { duplicateCalls += 1; return { text: JSON.stringify(result("不应再次调用模型")) }; } });

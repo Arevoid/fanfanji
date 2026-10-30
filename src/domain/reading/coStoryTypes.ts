@@ -1,3 +1,4 @@
+import type { ReadingSourceContinuity, ReadingSourceUpdate } from "./sourceContinuity";
 import type { ReadingStoryChoice, ReadingStoryEntryMode, ReadingStoryGenerationPreferences, ReadingStoryLength } from "./storyTypes";
 
 export const READING_CO_STORY_STORE_VERSION = 1 as const;
@@ -34,6 +35,7 @@ export interface ReadingStoryAiFriendProfile {
 }
 
 export interface ReadingCoStoryState extends ReadingCoStoryScope {
+  sourceContinuity?: ReadingSourceContinuity;
   universeStoryId?: string;
   origin?: "book" | "custom";
   worldDefinition?: ReadingWorldDefinition;
@@ -70,6 +72,7 @@ export interface ReadingCoStoryPendingApproval {
 }
 
 export interface ReadingCoStoryTurn extends ReadingCoStoryScope {
+  sourceUpdate?: ReadingSourceUpdate;
   turnId: string;
   requestId?: string;
   turnIndex: number;

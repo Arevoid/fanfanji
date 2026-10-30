@@ -554,3 +554,18 @@ button, input, textarea, select {
   width: 0 !important;
   height: 0 !important;
 }
+
+/* Story play keeps its dark reading surface under global theme overrides. */
+[data-theme-page="reading-story-play"] header h1 {
+  color: #eee8df !important;
+}
+#reading-story-action {
+  background-color: #211c16 !important;
+  color: #eee8df !important;
+  border-color: #66502c !important;
+}
+#reading-story-action::placeholder {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #b5a78e !important;
+}

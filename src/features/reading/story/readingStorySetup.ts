@@ -1,3 +1,4 @@
+import type { ReadingSourceCursor } from "../../../domain/reading/sourceContinuity";
 import type { ReadingStoryEntryMode, ReadingStoryLength } from "../../../domain/reading/storyTypes";
 
 export interface ReadingStoryIdentityDraft {
@@ -12,6 +13,7 @@ export interface ReadingStoryIdentityDraft {
 }
 
 export interface ReadingStorySetupDraft {
+  sourceCursor?: ReadingSourceCursor;
   mode: "solo" | "together";
   relationId?: string;
   user: ReadingStoryIdentityDraft;

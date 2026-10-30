@@ -18,9 +18,10 @@ assert.throws(() => validateReadingCoStoryTurnResult({ narrative: "替用户离�
 let calls = 0;
 let sentMessage = "";
 const validResult = { narrative: "你检查石阶时，阿岚留在入口记录潮位。", dialogue: [{ speaker: "阿岚", text: "潮水比档案里早退了十分钟。" }], choices: [{ id: "a", label: "追查潮汐记录" }, { id: "b", label: "询问守门人" }], friendAction: "记录潮位并提醒用户异常", controlsUserCharacter: false, stateChanges: ["潮位异常"], userDiscoveredIntel: ["石阶刻有明日日期"], aiDiscoveredIntel: ["退潮时间提前十分钟"], taskChanges: ["查明潮汐异常"], inventoryChanges: ["拓印纸"], currentLocation: "雾港石阶", currentTime: "清晨", chapterProgress: 1, shouldEndChapter: true };
-const generated = await generateReadingCoStoryTurn({ story, userAction: "查看石阶上的刻痕", requestId: "request-a", settings: { apiKey: "key", selectedModel: "model" }, aiCall: async (request) => { calls += 1; sentMessage = request.message; return { text: calls === 1 ? "{}" : JSON.stringify(validResult) }; }, now: 3 });
-
-assert.equal(calls, 2, "结构校验失败后只允许一次格式修复重试");
+await assert.rejects(() => generateReadingCoStoryTurn({ story, userAction: "查看石阶上的刻痕", requestId: "request-a", settings: { apiKey: "key", selectedModel: "model" }, aiCall: async () => { calls += 1; return { text: "{}" }; }, now: 3 }));
+assert.equal(calls, 1, "结构失败不能自动付费重试");
+assert.equal(listReadingCoStoryTurns(scope).length, 1, "only the original opening remains after failure");
+const generated = await generateReadingCoStoryTurn({ story, userAction: "查看石阶上的刻痕", requestId: "request-a", settings: { apiKey: "key", selectedModel: "model" }, aiCall: async request => { sentMessage = request.message; return { text: JSON.stringify(validResult) }; }, now: 3 });
 assert.equal(generated.story.currentChapter, 1);
 assert.equal(generated.story.currentLocation, "雾港石阶");
 assert.deepEqual(generated.story.userKnownIntel, ["石阶刻有明日日期"]);

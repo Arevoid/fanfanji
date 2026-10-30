@@ -13,15 +13,13 @@ const scope = { userIdentityId: "identity-a", storyId: "story-a" };
 const story = createReadingStory({ scope, title: "穿书测试", bookId: book.id, entryMode: "soul_wear", length: "short", characterName: "林舟", characterRole: "边城医者", goals: ["找到回去的方法"], now: 1 });
 assert.equal(story.targetChapters, 3);
 const result = validateReadingStoryTurnResult({ narrative: "你在雨夜醒来。", dialogue: [{ speaker: "守门人", text: "你是谁？" }], choices: [{ id: "a", label: "说明身份" }], stateChanges: ["进入城门"], discoveredIntel: ["城中正在戒严"], taskChanges: ["调查戒严原因"], relationshipChanges: ["守门人信任+1"], currentLocation: "城门", currentTime: "第一夜", chapterProgress: 0.6, shouldEndChapter: true });
-assert.equal(validateReadingStoryTurnResult({ narrative: "Next scene", choices: [] }).choices.length, 4, "a continuing turn always offers directions");
+assert.equal(validateReadingStoryTurnResult({ narrative: "Next scene", choices: [] }).choices.length, 1, "missing choices preserve free input without invented actions");
 const distinctChoices = ensureDistinctReadingStoryChoices([
   { id: "a", label: "走左边" },
   { id: "b", label: "走左边" },
 ]);
 assert.deepEqual(distinctChoices.map((choice) => choice.label), [
   "走左边",
-  "观察当前场景，寻找能改变局面的线索",
-  "与在场人物直接交涉，试探对方的真实意图",
   "按自己的想法行动或说话",
 ]);
 assert.deepEqual(
@@ -32,10 +30,7 @@ assert.deepEqual(
     { id: "d", label: "按自己的想法行动" },
   ]).map((choice) => choice.label),
   [
-    "观察当前场景，寻找能改变局面的线索",
-    "与在场人物直接交涉，试探对方的真实意图",
-    "改变当前位置或采取主动行动，制造新的机会",
-    "按自己的想法行动或说话",
+        "按自己的想法行动或说话",
   ],
 );
 const committed = commitReadingStoryTurn({ scope, result, userAction: "说明身份", now: 2 });

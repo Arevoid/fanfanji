@@ -1,3 +1,5 @@
+import { ensureDistinctReadingStoryChoices } from "./readingStoryChoices";
+import { requireReadingStorySourceCursor, loadReadingStorySourceContext, describeReadingStorySourceContext, applyReadingStorySourceUpdate } from "./readingStorySource";
 import { resolveCharacterTextSettings } from "../../../domain/character/characterTextApiRouting";
 import { apiChat } from "../../../utils/apiHelper";
 import type { ReadingCoStoryActionMode, ReadingCoStoryState, ReadingStoryAiActionResult } from "../../../domain/reading/coStoryTypes";
@@ -9,7 +11,7 @@ import { ReadingCoStoryPolicyError, validateReadingStoryAiAction } from "./readi
 export interface ReadingCoStoryGenerationSettings { apiKey: string; selectedModel: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean; }
 export interface ReadingCoStoryAiRequest { characterId?:string; message: string; systemInstruction: string; apiKey: string; model: string; apiEndpoint?: string; apiTemperature?: number; streamCompatible?: boolean; }
 export type ReadingCoStoryAiCall = (request: ReadingCoStoryAiRequest) => Promise<{ text: string }>;
-const defaultAiCall: ReadingCoStoryAiCall = (request) => apiChat({ ...request, history: [], purpose: "reading_generate" });
+const defaultAiCall: ReadingCoStoryAiCall = (request) => apiChat({ ...request, history: [], purpose: "reading_generate", singleAttempt: true, responseFormat: "json_object" });
 
 const parseJson = (raw: string): unknown => {
   const trimmed = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
@@ -36,22 +38,13 @@ export async function generateReadingCoStoryAiAction(input: {
   const context = projectReadingCoStoryForAi({ story: current, turns: listReadingCoStoryTurns(scope) });
   const prompt = buildReadingCoStoryAiActionPrompt({ context, mode: input.mode, userRequest: input.userRequest });
   const call = input.aiCall || defaultAiCall;
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const response = await call({ characterId:input.story.characterId, message: prompt.message, systemInstruction: attempt === 0 ? prompt.systemInstruction : `${prompt.systemInstruction}\n上一次输出未通过校验，请只输出符合 schema 的 JSON。`, apiKey: input.settings.apiKey, model: input.settings.selectedModel, apiEndpoint: input.settings.apiEndpoint, apiTemperature: input.settings.apiTemperature, streamCompatible: input.settings.streamCompatible });
-      const result = validateReadingStoryAiAction(parseJson(response.text));
-      const committed = commitReadingCoStoryAiAction({ scope, result, mode: input.mode, expectedStoryUpdatedAt: current.updatedAt, now: input.now });
-      return { story: committed.story, result, attempts: attempt + 1 };
-    } catch (error) {
-      if ((error instanceof ReadingCoStoryPolicyError && error.code === "forbidden") || (error && typeof error === "object" && "code" in error && ["conflict", "storage", "missing"].includes(String((error as { code?: string }).code)))) throw error;
-      lastError = error;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error("AI 好友行动生成失败");
+  const response = await call({ characterId:input.story.characterId, message: prompt.message, systemInstruction: prompt.systemInstruction, apiKey: input.settings.apiKey, model: input.settings.selectedModel, apiEndpoint: input.settings.apiEndpoint, apiTemperature: input.settings.apiTemperature, streamCompatible: input.settings.streamCompatible });
+  const result = validateReadingStoryAiAction(parseJson(response.text));
+  const committed = commitReadingCoStoryAiAction({ scope, result, mode: input.mode, expectedStoryUpdatedAt: current.updatedAt, now: input.now });
+  return { story: committed.story, result, attempts: 1 };
 }
 
-const turnResultFromStored = (turn: ReturnType<typeof listReadingCoStoryTurns>[number]): ReadingCoStoryTurnResult => ({ narrative: turn.narrative, dialogue: turn.dialogue, choices: turn.choices, friendAction: turn.aiAction || "", controlsUserCharacter: false, stateChanges: turn.stateChanges || [], userDiscoveredIntel: turn.userDiscoveredIntel || [], aiDiscoveredIntel: turn.aiDiscoveredIntel || [], taskChanges: [], inventoryChanges: [], currentLocation: turn.currentLocation || "", currentTime: turn.currentTime || "", chapterProgress: turn.chapterProgress || 0, shouldEndChapter: Boolean(turn.shouldEndChapter) });
+const turnResultFromStored = (turn: ReturnType<typeof listReadingCoStoryTurns>[number]): ReadingCoStoryTurnResult => ({ sourceUpdate: turn.sourceUpdate, narrative: turn.narrative, dialogue: turn.dialogue, choices: turn.choices, friendAction: turn.aiAction || "", controlsUserCharacter: false, stateChanges: turn.stateChanges || [], userDiscoveredIntel: turn.userDiscoveredIntel || [], aiDiscoveredIntel: turn.aiDiscoveredIntel || [], taskChanges: [], inventoryChanges: [], currentLocation: turn.currentLocation || "", currentTime: turn.currentTime || "", chapterProgress: turn.chapterProgress || 0, shouldEndChapter: Boolean(turn.shouldEndChapter) });
 
 export async function generateReadingCoStoryTurn(input: {
   story: ReadingCoStoryState;
@@ -72,19 +65,17 @@ export async function generateReadingCoStoryTurn(input: {
   const existing = requestId ? turns.find((turn) => turn.requestId === requestId) : undefined;
   if (existing) return { story: current, result: turnResultFromStored(existing), requestId, attempts: 0 };
   if (current.updatedAt !== input.story.updatedAt) throw new ReadingCoStoryError("共同故事已变化，请刷新后重试", "conflict");
-  const prompt = buildReadingCoStoryTurnPrompt({ story: current, turns, userAction: input.userAction });
+  const bookId = current.origin === "custom" ? undefined : current.universeStoryId;
+  const originalSource = await loadReadingStorySourceContext(current.userIdentityId, bookId, current.sourceContinuity);
+  if (bookId && originalSource.status !== "ready") throw new ReadingCoStoryError("请先在原著定位中选择有效章节和段落；原有剧情已保留，本次未调用 API。", "invalid");
+  const prompt = buildReadingCoStoryTurnPrompt({ story: current, turns, userAction: input.userAction, originalContext: describeReadingStorySourceContext(originalSource, current.sourceContinuity) });
   const call = input.aiCall || defaultAiCall;
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const response = await call({ characterId:input.story.characterId, message: prompt.message, systemInstruction: attempt === 0 ? prompt.systemInstruction : `${prompt.systemInstruction}\n上一次输出未通过校验，只输出完全符合 schema 的 JSON。`, apiKey: input.settings.apiKey, model: input.settings.selectedModel, apiEndpoint: input.settings.apiEndpoint, apiTemperature: input.settings.apiTemperature, streamCompatible: input.settings.streamCompatible });
-      const result = validateReadingCoStoryTurnResult(parseJson(response.text));
-      const committed = commitReadingCoStoryTurn({ scope, result, userAction: input.userAction, requestId, expectedStoryUpdatedAt: current.updatedAt, now: input.now });
-      return { story: committed.story, result, requestId, attempts: attempt + 1 };
-    } catch (error) {
-      if (error && typeof error === "object" && "code" in error && ["conflict", "storage", "missing"].includes(String((error as { code?: string }).code))) throw error;
-      lastError = error;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error("共同故事回合生成失败");
+  const response = await call({ characterId:input.story.characterId, message: prompt.message, systemInstruction: prompt.systemInstruction, apiKey: input.settings.apiKey, model: input.settings.selectedModel, apiEndpoint: input.settings.apiEndpoint, apiTemperature: input.settings.apiTemperature, streamCompatible: input.settings.streamCompatible });
+  const result = validateReadingCoStoryTurnResult(parseJson(response.text));
+  result.choices = ensureDistinctReadingStoryChoices(result.choices, { previousChoices: turns.at(-1)?.choices.map(choice => choice.label) });
+  const nextContinuity = applyReadingStorySourceUpdate(current.sourceContinuity, originalSource, result.sourceUpdate);
+  if (nextContinuity === current.sourceContinuity) result.sourceUpdate = undefined;
+  if (bookId && current.sourceContinuity) requireReadingStorySourceCursor(current.userIdentityId, bookId, current.sourceContinuity.cursor);
+  const committed = commitReadingCoStoryTurn({ sourceContinuity: nextContinuity, scope, result, userAction: input.userAction, requestId, expectedStoryUpdatedAt: current.updatedAt, now: input.now });
+  return { story: committed.story, result, requestId, attempts: 1 };
 }

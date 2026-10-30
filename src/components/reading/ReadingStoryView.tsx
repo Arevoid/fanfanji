@@ -1,3 +1,5 @@
+import { ReadingStorySourcePanel } from "./ReadingStorySourcePosition";
+import { describeReadingStorySourceLocation } from "../../features/reading/story/readingStorySource";
 import { describeReadingStorySource } from "../../features/reading/analysis/readingStoryManualSource";
 import React, { useEffect, useMemo, useState } from "react";
 import { createId } from "../../core/id/createId";
@@ -95,12 +97,7 @@ export default function ReadingStoryView({
       result: {
         narrative: `《${book?.title || "这个世界"}》的文字在眼前散开，你以“${target.characterName}”的身份真正落入故事。原有剧情已经开始运转，远处传来的动静预示着第一场事件即将发生。`,
         dialogue: [],
-        choices: [
-          { id: "a", label: "先观察周围，确认当前位置与时间" },
-          { id: "b", label: "寻找一位原故事人物，判断剧情进度" },
-          { id: "c", label: "检查自己的身份、物品和目标" },
-          { id: "d", label: "按自己的想法行动或说话" },
-        ],
+        choices: [{ id: "start-original", label: "进入当前故事场景" }],
         stateChanges: ["故事已开始"],
         discoveredIntel: [],
         taskChanges: [],
@@ -340,21 +337,10 @@ export default function ReadingStoryView({
     );
 
   const latestTurn = turns.at(-1);
-  const latestChoices = latestTurn?.choices.length
-    ? ensureDistinctReadingStoryChoices(latestTurn.choices, {
-        narrative: latestTurn.narrative,
-        currentLocation: latestTurn.currentLocation,
-      })
-    : story.status === "completed"
-      ? []
-      : [
-          { id: "a", label: "观察眼前变化，确认最值得注意的线索" },
-          { id: "b", label: "主动接触在场的人，开口回应或询问" },
-          { id: "c", label: "谨慎行动，先确保自身处境安全" },
-          { id: "d", label: "按自己的想法行动或说话" },
-        ];
+  const latestChoices = story?.status === "completed" ? [] : ensureDistinctReadingStoryChoices(latestTurn?.choices || [], { narrative: latestTurn?.narrative, currentLocation: latestTurn?.currentLocation });
   const panelClass = "space-y-3 text-xs leading-6 text-white/70";
   const panels: ReadingStoryPanel[] = [
+    ...((story.bookId) ? [{ id: "original", label: "原著定位", icon: <ListChecks className="h-4 w-4" />, content: <ReadingStorySourcePanel userIdentityId={userIdentityId} bookId={(story.bookId)!} continuity={story.sourceContinuity} disabled={isGenerating} onApply={cursor => { try { refresh(updateReadingStoryMetadata({ scope: story, sourceCursor: cursor })); setMessage("原著位置已更新，已有穿书分支保留；未调用 API。"); } catch (error) { setMessage(error instanceof Error ? error.message : "定位失败"); } }} /> }] : []),
     {
       id: "status",
       label: "状态",
@@ -473,6 +459,7 @@ export default function ReadingStoryView({
   return (
     <>
     <ReadingStoryPlayShell
+      sourceStatus={(story.bookId) ? describeReadingStorySourceLocation(userIdentityId, (story.bookId)!, story.sourceContinuity) : undefined}
       title={story.title}
       subtitle={`${story.characterName} · 单人故事`}
       currentChapter={story.currentChapter}

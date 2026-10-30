@@ -1,3 +1,6 @@
+import { requireReadingStorySourceCursor } from "./readingStorySource";
+import type { ReadingSourceCursor } from "../../../domain/reading/sourceContinuity";
+import { normalizeReadingSourceContinuity, normalizeReadingSourceUpdate, type ReadingSourceContinuity, type ReadingSourceUpdate } from "../../../domain/reading/sourceContinuity";
 import {
   deleteReadingStoryScope,
   getReadingStory,
@@ -40,12 +43,13 @@ function persist<T>(result: { success: boolean; error?: string }, value: T): T {
   return value;
 }
 
-export function createReadingStory(input: { scope: ReadingStoryScope; title: string; bookId?: string; entryMode: ReadingStoryEntryMode; length: ReadingStoryLength; characterName: string; characterRole?: string; goals?: string[]; now?: number }): ReadingStoryState {
+export function createReadingStory(input: { scope: ReadingStoryScope; title: string; bookId?: string; sourceContinuity?: ReadingSourceContinuity; entryMode: ReadingStoryEntryMode; length: ReadingStoryLength; characterName: string; characterRole?: string; goals?: string[]; now?: number }): ReadingStoryState {
   if (!input.title.trim() || !input.characterName.trim()) throw new ReadingStoryError("故事标题和角色名不能为空", "invalid");
   const now = input.now ?? Date.now();
   const story: ReadingStoryState = {
     ...input.scope,
     bookId: input.bookId,
+    sourceContinuity: normalizeReadingSourceContinuity(input.sourceContinuity),
     title: text(input.title, 500),
     entryMode: input.entryMode,
     status: "active",
@@ -69,6 +73,7 @@ export function createReadingStory(input: { scope: ReadingStoryScope; title: str
 }
 
 export interface ReadingStoryTurnResult {
+  sourceUpdate?: ReadingSourceUpdate;
   narrative: string;
   dialogue: Array<{ speaker: string; text: string }>;
   choices: ReadingStoryChoice[];
@@ -114,6 +119,7 @@ export function validateReadingStoryTurnResult(raw: unknown): ReadingStoryTurnRe
     }).filter((entry) => entry.speaker && entry.text)
     : [];
   return {
+    sourceUpdate: normalizeReadingSourceUpdate(value.sourceUpdate),
     narrative,
     dialogue,
     choices,
@@ -128,7 +134,7 @@ export function validateReadingStoryTurnResult(raw: unknown): ReadingStoryTurnRe
   };
 }
 
-export function commitReadingStoryTurn(input: { scope: ReadingStoryScope; result: ReadingStoryTurnResult; userAction?: string; requestId?: string; expectedStoryUpdatedAt?: number; now?: number }): { story: ReadingStoryState; turn: ReadingStoryTurn } {
+export function commitReadingStoryTurn(input: { scope: ReadingStoryScope; result: ReadingStoryTurnResult; userAction?: string; requestId?: string; expectedStoryUpdatedAt?: number; sourceContinuity?: ReadingSourceContinuity; now?: number }): { story: ReadingStoryState; turn: ReadingStoryTurn } {
   const loaded = loadReadingStoryStore();
   const story = loaded.value.stories.find((candidate) => candidate.userIdentityId === input.scope.userIdentityId && candidate.storyId === input.scope.storyId);
   if (!story) throw new ReadingStoryError("故事不存在", "missing");
@@ -165,6 +171,7 @@ export function commitReadingStoryTurn(input: { scope: ReadingStoryScope; result
   const chapter = story.currentChapter + (advancesChapter ? 1 : 0);
   const next: ReadingStoryState = {
     ...story,
+    sourceContinuity: input.sourceContinuity || story.sourceContinuity,
     currentChapter: Math.min(story.targetChapters, chapter),
     currentLocation: input.result.currentLocation || story.currentLocation,
     currentTime: input.result.currentTime || story.currentTime,
@@ -224,11 +231,14 @@ export function loadReadingStorySave(input: { scope: ReadingStoryScope; saveId: 
   return persist(saveReadingStoryStore(nextStore), restoredState);
 }
 
-export function updateReadingStoryMetadata(input: { scope: ReadingStoryScope; title?: string; status?: "active" | "paused"; generationPreferences?: Partial<ReadingStoryGenerationPreferences>; now?: number }): ReadingStoryState {
+export function updateReadingStoryMetadata(input: { scope: ReadingStoryScope; title?: string; status?: "active" | "paused"; sourceCursor?: ReadingSourceCursor; generationPreferences?: Partial<ReadingStoryGenerationPreferences>; now?: number }): ReadingStoryState {
   const story = getReadingStory(input.scope);
   if (!story) throw new ReadingStoryError("故事不存在", "missing");
   if (story.status === "completed" && input.status === "active") throw new ReadingStoryError("已完成的故事不能恢复为进行中", "invalid");
-  const next = { ...story, title: input.title === undefined ? story.title : text(input.title, 500), status: input.status || story.status, generationPreferences: input.generationPreferences ? normalizeReadingStoryGenerationPreferences(input.generationPreferences) : story.generationPreferences, updatedAt: input.now ?? Date.now() };
+  const sourceBookId = story.bookId;
+  if (input.sourceCursor && !sourceBookId) throw new Error("当前故事没有关联原著");
+  const sourceContinuity = input.sourceCursor && sourceBookId ? { cursor: requireReadingStorySourceCursor(input.scope.userIdentityId, sourceBookId, input.sourceCursor), mode: story.sourceContinuity?.mode || "following" as const, summary: story.sourceContinuity?.summary || "", handledNodeIds: story.sourceContinuity?.handledNodeIds || [], changes: story.sourceContinuity?.changes || [] } : story.sourceContinuity;
+  const next = { ...story, sourceContinuity, title: input.title === undefined ? story.title : text(input.title, 500), status: input.status || story.status, generationPreferences: input.generationPreferences ? normalizeReadingStoryGenerationPreferences(input.generationPreferences) : story.generationPreferences, updatedAt: input.now ?? Date.now() };
   if (!next.title) throw new ReadingStoryError("故事名称不能为空", "invalid");
   return persist(saveReadingStory(next), next);
 }

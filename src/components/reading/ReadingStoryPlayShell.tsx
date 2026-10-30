@@ -20,6 +20,7 @@ export interface ReadingStoryPanel {
 interface ReadingStoryPlayShellProps {
   title: string;
   subtitle: string;
+  sourceStatus?: string;
   currentChapter: number;
   targetChapters: number;
   chapterProgress?: number;
@@ -128,6 +129,7 @@ export default function ReadingStoryPlayShell(
               {props.statusLabel}
             </span>
           </div>
+          {props.sourceStatus && <p className="mb-4 text-xs leading-5 text-amber-100/60">{props.sourceStatus} · 可在“功能 → 原著定位”调整</p>}
           {props.notice && (
             <div
               role="status"
@@ -173,16 +175,16 @@ export default function ReadingStoryPlayShell(
 
       <section
         aria-label="故事行动区"
-        className="relative z-30 shrink-0 border-t border-white/10 bg-[#12100e]/97 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_35px_rgba(0,0,0,0.4)] backdrop-blur"
+        className="relative z-30 shrink-0 border-t border-white/10 bg-[#12100e]/97 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_35px_rgba(0,0,0,0.4)] backdrop-blur"
       >
         <div className="mx-auto max-w-2xl">
           {props.choices.length > 0 && (
-            <div className="mb-3">
+            <div className="mb-2">
               <button
                 type="button"
                 onClick={() => setChoicesExpanded((value) => !value)}
                 aria-expanded={choicesExpanded}
-                className="flex h-10 w-full items-center justify-between rounded-xl border border-amber-400/30 bg-amber-500/5 px-3 text-left text-xs font-bold text-amber-100"
+                className="flex h-8 w-full items-center justify-between rounded-xl border border-amber-400/30 bg-amber-500/5 px-3 text-left text-xs font-bold text-amber-100"
               >
                 <span>我选择…</span>
                 {choicesExpanded ? (
@@ -198,7 +200,7 @@ export default function ReadingStoryPlayShell(
                       key={choice.id}
                       type="button"
                       onClick={() => {
-                        props.onActionChange(choice.label);
+                        props.onActionChange(choice.id === "free-action" ? "" : choice.label);
                         setChoicesExpanded(false);
                       }}
                       className={`w-full rounded-2xl border px-4 py-3 text-left text-xs leading-5 transition ${props.action === choice.label ? "border-amber-300 bg-amber-400/15" : "border-amber-500/25 bg-black/20"}`}
@@ -219,21 +221,24 @@ export default function ReadingStoryPlayShell(
               )}
             </div>
           )}
+          {props.choices.length === 1 && props.choices[0].id === "free-action" && <p className="mb-2 text-xs text-white/50">本段暂无可用推进选项，可以直接输入你的行动；不会自动补发请求。</p>}
           <div className="flex items-end gap-2">
             <textarea
+              id="reading-story-action"
+              aria-label="你的行动"
               value={props.action}
               onChange={(event) => props.onActionChange(event.target.value)}
               disabled={props.busy}
               rows={1}
               placeholder={props.actionPlaceholder}
-              className="h-12 max-h-20 min-h-12 flex-1 resize-none overflow-y-auto rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-5 text-[#eee8df] outline-none placeholder:text-white/25 focus:border-amber-300/50 disabled:opacity-50"
+              className="h-10 min-h-10 min-w-0 flex-1 resize-none overflow-y-auto rounded-xl border border-white/10 bg-white/5 px-3 py-[9px] text-sm leading-5 text-[#eee8df] outline-none placeholder:text-white/25 focus:border-amber-300/50 disabled:opacity-50"
             />
             <button
               type="button"
               onClick={props.onSubmit}
               disabled={props.submitDisabled || props.busy}
               aria-label={props.submitLabel}
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-600 text-amber-50 disabled:opacity-35"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-600 text-amber-50 disabled:opacity-35"
             >
               {props.busy ? (
                 <LoaderCircle className="h-5 w-5 animate-spin" />
@@ -242,9 +247,7 @@ export default function ReadingStoryPlayShell(
               )}
             </button>
           </div>
-          <p className="mt-1.5 px-1 text-[9px] text-white/30">
-            {props.busy ? "故事正在生成并保存，请稍候…" : props.submitLabel}
-          </p>
+          {props.busy && <p role="status" className="mt-1.5 px-1 text-[9px] text-white/30">故事正在生成并保存，请稍候…</p>}
         </div>
       </section>
 

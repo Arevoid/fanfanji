@@ -1,3 +1,5 @@
+import { ensureDistinctReadingStoryChoices } from "./readingStoryChoices";
+import { requireReadingStorySourceCursor, loadReadingStorySourceContext, describeReadingStorySourceContext, applyReadingStorySourceUpdate } from "./readingStorySource";
 import { apiChat } from "../../../utils/apiHelper";
 import type {
   ReadingStoryState,
@@ -32,7 +34,7 @@ export type ReadingStoryAiCall = (
   request: ReadingStoryAiRequest,
 ) => Promise<{ text: string }>;
 const defaultAiCall: ReadingStoryAiCall = (request) =>
-  apiChat({ ...request, history: [], purpose: "reading_generate" });
+  apiChat({ ...request, history: [], purpose: "reading_generate", singleAttempt: true, responseFormat: "json_object" });
 
 const parseJson = (raw: string): unknown => {
   const trimmed = raw
@@ -52,6 +54,7 @@ const parseJson = (raw: string): unknown => {
 };
 
 const resultFromTurn = (turn: ReadingStoryTurn): ReadingStoryTurnResult => ({
+  sourceUpdate: turn.sourceUpdate,
   narrative: turn.narrative,
   dialogue: turn.dialogue,
   choices: turn.choices,
@@ -105,59 +108,43 @@ export async function generateReadingStoryTurn(input: {
       };
     }
   }
+  const currentStory = getReadingStory(scope);
+  if (!currentStory || currentStory.updatedAt !== input.story.updatedAt) throw new Error("故事已变化，请刷新后重试");
+  const originalSource = await loadReadingStorySourceContext(input.story.userIdentityId, input.story.bookId, input.story.sourceContinuity);
+  if (input.story.bookId && originalSource.status !== "ready") throw new Error("请先在原著定位中选择有效章节和段落；原有剧情已保留，本次未调用 API。");
   const prompt = buildReadingStoryPrompt({
     story: input.story,
     recentTurns: turns,
     userAction: input.userAction,
     bookTitle: input.bookTitle,
     bookContext: input.bookContext,
+    originalContext: describeReadingStorySourceContext(originalSource, input.story.sourceContinuity),
   });
   const call = input.aiCall || defaultAiCall;
-  let lastError: unknown;
-  let attempts = 0;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    attempts += 1;
-    try {
-      const response = await call({
-        message: prompt.message,
-        systemInstruction:
-          attempt === 0
-            ? prompt.systemInstruction
-            : `${prompt.systemInstruction}\nThe previous response failed validation. Output only JSON matching the schema.`,
-        apiKey: input.settings.apiKey,
-        model: input.settings.selectedModel,
-        apiEndpoint: input.settings.apiEndpoint,
-        apiTemperature: input.settings.apiTemperature,
-        streamCompatible: input.settings.streamCompatible,
-      });
-      const result = validateReadingStoryTurnResult(parseJson(response.text));
-      // Do not retry commit errors: a conflict or storage failure needs to be
-      // surfaced to the UI, and retrying would risk producing a second branch.
-      const committed = commitReadingStoryTurn({
-        scope,
-        result,
-        userAction: input.userAction,
-        requestId,
-        expectedStoryUpdatedAt: input.story.updatedAt,
-        now: input.now,
-      });
-      return { story: committed.story, result, requestId, attempts };
-    } catch (error) {
-      // ReadingStoryError with a conflict/storage code is a persistence error,
-      // not an AI formatting error. Let it fail immediately.
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        ((error as { code?: string }).code === "conflict" ||
-          (error as { code?: string }).code === "storage" ||
-          (error as { code?: string }).code === "missing")
-      )
-        throw error;
-      lastError = error;
-    }
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Story turn generation failed");
+  const response = await call({
+    message: prompt.message,
+    systemInstruction: prompt.systemInstruction,
+    apiKey: input.settings.apiKey,
+    model: input.settings.selectedModel,
+    apiEndpoint: input.settings.apiEndpoint,
+    apiTemperature: input.settings.apiTemperature,
+    streamCompatible: input.settings.streamCompatible,
+  });
+  const result = validateReadingStoryTurnResult(parseJson(response.text));
+  // Do not retry commit errors: a conflict or storage failure needs to be
+  // surfaced to the UI, and retrying would risk producing a second branch.
+  result.choices = ensureDistinctReadingStoryChoices(result.choices, { previousChoices: turns.at(-1)?.choices.map(choice => choice.label) });
+  const nextContinuity = applyReadingStorySourceUpdate(input.story.sourceContinuity, originalSource, result.sourceUpdate);
+  if (nextContinuity === input.story.sourceContinuity) result.sourceUpdate = undefined;
+  if (input.story.bookId && input.story.sourceContinuity) requireReadingStorySourceCursor(input.story.userIdentityId, input.story.bookId, input.story.sourceContinuity.cursor);
+  const committed = commitReadingStoryTurn({
+    scope,
+    result,
+    userAction: input.userAction,
+    requestId,
+    expectedStoryUpdatedAt: input.story.updatedAt,
+    sourceContinuity: nextContinuity,
+    now: input.now,
+  });
+  return { story: committed.story, result, requestId, attempts: 1 };
 }

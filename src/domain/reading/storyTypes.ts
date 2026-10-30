@@ -1,3 +1,4 @@
+import type { ReadingSourceContinuity, ReadingSourceUpdate } from "./sourceContinuity";
 export const READING_STORY_STORE_VERSION = 1 as const;
 
 export type ReadingStoryLength = "short" | "medium" | "long";
@@ -26,6 +27,7 @@ export interface ReadingStoryGenerationPreferences {
 }
 
 export interface ReadingStoryState extends ReadingStoryScope {
+  sourceContinuity?: ReadingSourceContinuity;
   bookId?: string;
   title: string;
   entryMode: ReadingStoryEntryMode;
@@ -48,6 +50,7 @@ export interface ReadingStoryState extends ReadingStoryScope {
 }
 
 export interface ReadingStoryTurn extends ReadingStoryScope {
+  sourceUpdate?: ReadingSourceUpdate;
   id: string;
   /** Stable client request key used to make a generation submit idempotent. */
   requestId?: string;

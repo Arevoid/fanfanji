@@ -1,3 +1,4 @@
+import { requireReadingStorySourceCursor } from "../features/reading/story/readingStorySource";
 import { saveReadingStoryManualSource, describeReadingStorySource } from "../features/reading/analysis/readingStoryManualSource";
 import React, {
   useCallback,
@@ -645,13 +646,15 @@ export default function AppReading({
       userIdentityId,
       bookId: book.id,
     });
-    const preparedPremise = preparedBible?.premise?.trim();
     try {
+      if (!draft.sourceCursor) throw new Error("请先选择原著起点；现有小说资料不会改动。");
+      const sourceContinuity = { cursor: requireReadingStorySourceCursor(userIdentityId, book.id, draft.sourceCursor), mode: "following" as const, summary: "", changes: [] };
       if (draft.mode === "solo") {
         const story = createReadingStory({
           scope: { userIdentityId, storyId: makeId("story") },
           title: `穿书：《${book.title}》`,
           bookId: book.id,
+          sourceContinuity,
           entryMode: draft.user.entryMode,
           length: draft.length,
           characterName: draft.user.name,
@@ -661,14 +664,9 @@ export default function AppReading({
         commitReadingStoryTurn({
           scope: story,
           result: {
-            narrative: `${preparedPremise ? `${preparedPremise.slice(0, 600)}\n\n` : ""}当《${book.title}》的文字在眼前重新排列，你以“${draft.user.name}”的身份踏进了故事。原有情节已经开始运转，而你的第一个选择即将改变这条支线。`,
+            narrative: `已选择《${book.title}》的原著起点，你将以“${draft.user.name}”的身份进入。输入“开始”生成当前位置的第一幕，或先说明你想做的事。此处尚未发生原著事件。`,
             dialogue: [],
-            choices: [
-              { id: "a", label: "先观察周围，确认自己所在的位置与时间" },
-              { id: "b", label: "寻找一位原故事人物，试探剧情进展" },
-              { id: "c", label: "检查自己的身份、物品和当前目标" },
-              { id: "d", label: "按自己的想法行动或说话" },
-            ],
+            choices: [{ id: "start-original", label: "从已选原著位置开始第一幕" }],
             stateChanges: [identityDescription],
             discoveredIntel: [],
             taskChanges: draft.user.goal ? [draft.user.goal] : [],
@@ -698,6 +696,7 @@ export default function AppReading({
           },
           title: `共同穿书：《${book.title}》`,
           universeStoryId: book.id,
+          sourceContinuity,
           worldDefinition: preparedBible
             ? {
                 genre: "小说穿书",
@@ -735,13 +734,8 @@ export default function AppReading({
         });
         createReadingCoStoryOpening({
           scope: story,
-          narrative: `${preparedPremise ? `${preparedPremise.slice(0, 600)}\n\n` : ""}你和 ${friendOption.character.name} 同时穿过《${book.title}》的书页，却以各自选择的身份落在故事之中。你只知道自己眼前的情景；TA 会依据人设、关系、世界书与当前情境自主参与，不会替你作出重大决定。`,
-          choices: [
-            { id: "a", label: "先与 TA 确认彼此身份和已知信息" },
-            { id: "b", label: "分头观察环境，再交换发现" },
-            { id: "c", label: "沿着原故事线寻找关键人物" },
-            { id: "d", label: "提出一个完全不同的行动" },
-          ],
+          narrative: `已选择《${book.title}》的原著起点，你与 ${friendOption.character.name} 将以各自身份进入。点击开始或输入行动后才生成第一幕；尚未发生原著事件。`,
+          choices: [{ id: "start-original", label: "从已选原著位置开始第一幕" }],
         });
         setStorySetupBookId(null);
         setInitialCoStoryId(story.coStoryId);
@@ -809,12 +803,7 @@ export default function AppReading({
       createReadingCoStoryOpening({
         scope: story,
         narrative: `${draft.synopsis}\n\n${userName} 与 ${friendOption.character.name} 已经进入“${draft.title}”。这个世界遵循以下核心规则：${draft.worldView.slice(0, 500)}。眼前的第一幕正在展开，任何选择都可能让故事偏离原定结局。`,
-        choices: [
-          { id: "a", label: "先确认两人的身份和当前处境" },
-          { id: "b", label: "观察环境，寻找最迫近的矛盾" },
-          { id: "c", label: `询问 ${friendOption.character.name} 的判断` },
-          { id: "d", label: "按自己的想法开始行动" },
-        ],
+        choices: [{ id: "start-world", label: "开始第一幕" }],
       });
       const persisted = await flushReadingCoStoryStore();
       if (!persisted.success) throw new Error(persisted.error || "自建世界保存失败");

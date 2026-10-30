@@ -1,3 +1,5 @@
+import { ReadingStorySourcePanel } from "./ReadingStorySourcePosition";
+import { describeReadingStorySourceLocation } from "../../features/reading/story/readingStorySource";
 import React, { useEffect, useMemo, useState } from "react";
 import { createId } from "../../core/id/createId";
 import {
@@ -97,19 +99,7 @@ export default function ReadingCoStoryView({
     [story, stories],
   );
   const latestTurn = turns.at(-1);
-  const latestChoices = latestTurn?.choices.length
-    ? ensureDistinctReadingStoryChoices(latestTurn.choices, {
-        narrative: latestTurn.narrative,
-        currentLocation: latestTurn.currentLocation,
-      })
-    : story?.status === "completed"
-      ? []
-      : [
-          { id: "a", label: "观察眼前变化，确认最值得注意的线索" },
-          { id: "b", label: `和 ${story?.aiFriend.displayName || "TA"} 交换判断后行动` },
-          { id: "c", label: "主动回应在场的人，推动当前事件" },
-          { id: "d", label: "按自己的想法行动或说话" },
-        ];
+  const latestChoices = story?.status === "completed" ? [] : ensureDistinctReadingStoryChoices(latestTurn?.choices || [], { narrative: latestTurn?.narrative, currentLocation: latestTurn?.currentLocation });
   const selectedFriend = friends.find(
     (item) => item.relationship.id === friendId,
   );
@@ -123,15 +113,10 @@ export default function ReadingCoStoryView({
     try {
       createReadingCoStoryOpening({
         scope: story,
-        narrative: story.worldDefinition
+        narrative: story.origin !== "custom" ? "穿书身份已准备。先确认原著定位，再输入行动进入第一幕；此处不代表原著事件已经发生。" : story.worldDefinition
           ? `${story.worldDefinition.synopsis}\n\n你与 ${story.aiFriend.displayName} 已经置身于这个世界。第一幕正在眼前发生，TA 会读取自己的人设与世界规则自主参与。`
           : `书页在眼前化为真实场景。你与 ${story.aiFriend.displayName} 已分别进入故事身份，原本的剧情已在远处开始运转。`,
-        choices: [
-          { id: "a", label: "观察环境，确认当前位置与时间" },
-          { id: "b", label: `与 ${story.aiFriend.displayName} 交换眼前发现` },
-          { id: "c", label: "寻找故事中最先出现的关键人物" },
-          { id: "d", label: "按自己的想法行动或说话" },
-        ],
+        choices: [{ id: "start-original", label: "进入当前故事场景" }],
       });
       refresh(story);
     } catch (error) {
@@ -432,6 +417,7 @@ export default function ReadingCoStoryView({
 
   const panelClass = "space-y-3 text-xs leading-6 text-white/70";
   const panels: ReadingStoryPanel[] = [
+    ...((story.origin === "custom" ? undefined : story.universeStoryId) ? [{ id: "original", label: "原著定位", icon: <ListChecks className="h-4 w-4" />, content: <ReadingStorySourcePanel userIdentityId={userIdentityId} bookId={(story.origin === "custom" ? undefined : story.universeStoryId)!} continuity={story.sourceContinuity} disabled={busy} onApply={cursor => { try { refresh(updateReadingCoStoryMetadata({ scope: story, sourceCursor: cursor })); setMessage("原著位置已更新，已有穿书分支保留；未调用 API。"); } catch (error) { setMessage(error instanceof Error ? error.message : "定位失败"); } }} /> }] : []),
     {
       id: "status",
       label: "状态",
@@ -568,6 +554,7 @@ export default function ReadingCoStoryView({
   return (
     <>
     <ReadingStoryPlayShell
+      sourceStatus={(story.origin === "custom" ? undefined : story.universeStoryId) ? describeReadingStorySourceLocation(userIdentityId, (story.origin === "custom" ? undefined : story.universeStoryId)!, story.sourceContinuity) : undefined}
       title={story.title}
       subtitle={`${story.aiFriend.displayName} · ${story.origin === "custom" ? "自建世界" : "共同穿书"}`}
       currentChapter={story.currentChapter}
