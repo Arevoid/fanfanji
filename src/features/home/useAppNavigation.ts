@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { iconSurfaceTransform, type SurfaceRect } from "./appTransitionGeometry";
+import { iconSurfaceTransform, iconSurfaceClip, type SurfaceRect } from "./appTransitionGeometry";
 import { appTransitionFrames } from "./appTransitionFrames";
 
 /** Presentation only: app components and generation controllers keep their own lifetime. */
@@ -11,9 +11,13 @@ export function useAppNavigation() {
   const active = useRef<string | null>(null);
   const origin = useRef<{ app: string; element: HTMLElement; rect: SurfaceRect } | null>(null);
   const animations = useRef<Animation[]>([]);
+  const clearIconFlight = useRef<(() => void) | null>(null);
   const epoch = useRef(0);
   const closing = useRef(false);
-  const stopAnimations = () => { animations.current.forEach(animation => animation.cancel()); animations.current = []; };
+  const stopAnimations = () => {
+    animations.current.forEach(animation => animation.cancel()); animations.current = [];
+    clearIconFlight.current?.(); clearIconFlight.current = null;
+  };
   const surface = (id: string) => phoneScreenRef.current?.querySelector<HTMLElement>(`[data-app-surface="${id === "chat" ? "chat" : "other"}"]`);
   const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const animate = (element: HTMLElement, frames: Keyframe[], duration: number) => {
@@ -22,6 +26,32 @@ export function useAppNavigation() {
     animations.current.push(animation);
     // Completion must remain possible when an animation is cancelled or the page is suspended.
     return Promise.race([animation.finished.catch(() => undefined), new Promise(resolve => setTimeout(resolve, duration + 100))]);
+  };
+  const iconShape = (element: HTMLElement, node: HTMLElement) => {
+    const icon = element.getBoundingClientRect();
+    const bounds = node.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return { transform: iconSurfaceTransform(icon, bounds), clip: iconSurfaceClip(icon, bounds,
+      [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius]) };
+  };
+  const handoffIcon = (element: HTMLElement, direction: "open" | "close", duration: number) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const clone = element.cloneNode(true) as HTMLElement;
+    clone.setAttribute("aria-hidden", "true"); clone.inert = true;
+    clone.dataset.appIconFlight = "true";
+    Object.assign(clone.style, { position: "fixed", left: `${rect.left}px`, top: `${rect.top}px`,
+      width: `${rect.width}px`, height: `${rect.height}px`, margin: "0", zIndex: "2147483646",
+      pointerEvents: "none", visibility: "visible", transform: "none", opacity: direction === "open" ? "1" : "0",
+      background: style.background, borderRadius: style.borderRadius, boxShadow: style.boxShadow, color: style.color });
+    const visibility = element.style.visibility;
+    element.style.visibility = "hidden";
+    document.body.appendChild(clone);
+    clearIconFlight.current = () => { clone.remove(); element.style.visibility = visibility; };
+    // Only exchange icon/page content while the visible surface is already small.
+    void animate(clone, direction === "open"
+      ? [{ opacity: 1, offset: 0 }, { opacity: 0, offset: .22 }, { opacity: 0, offset: 1 }]
+      : [{ opacity: 0, offset: 0 }, { opacity: 0, offset: .78 }, { opacity: 1, offset: 1 }], duration);
   };
   const setActiveApp = (next: string | null) => {
     if (next === active.current || (next === null && closing.current)) return;
@@ -34,14 +64,14 @@ export function useAppNavigation() {
     const node = current && surface(current);
     const source = origin.current;
     const from = node ? getComputedStyle(node).transform : "none";
+    const fromClip = node ? getComputedStyle(node).clipPath : undefined;
     stopAnimations(); closing.current = true; setTransitioning(true);
-    const transform = node && source?.app === current && source.element.isConnected
-      ? iconSurfaceTransform(source.element.getBoundingClientRect(), node.getBoundingClientRect()) : null;
+    const shape = node && source?.app === current && source.element.isConnected
+      ? iconShape(source.element, node) : null;
     const minimal = reduced();
-    const { frames, duration } = appTransitionFrames({ direction: "close", iconTransform: transform, reduced: minimal, fromTransform: from });
+    const { frames, duration } = appTransitionFrames({ direction: "close", iconTransform: shape?.transform || null, iconClip: shape?.clip, reduced: minimal, fromTransform: from, fromClip: fromClip === "none" ? undefined : fromClip });
+    if (shape?.transform && !minimal && source) handoffIcon(source.element, "close", duration);
     const done = node ? animate(node, frames, duration) : Promise.resolve();
-    const home = phoneScreenRef.current?.querySelector<HTMLElement>("[data-home-surface]");
-    if (home && !minimal) void animate(home, [{ transform: "scale(.985)" }, {transform: "none"}], duration);
     void done.then(() => {
       if (epoch.current !== id) return;
       // Keep the filled end frame until React has hidden the outgoing surface.
@@ -67,12 +97,12 @@ export function useAppNavigation() {
     const id = epoch.current;
     const node = surface(activeApp);
     if (!node) { setTransitioning(false); return; }
-    const transform = origin.current?.app === activeApp ? iconSurfaceTransform(origin.current.rect, node.getBoundingClientRect()) : null;
+    const source = origin.current?.app === activeApp ? origin.current : null;
+    const shape = source?.element.isConnected ? iconShape(source.element, node) : null;
     const minimal = reduced();
-    const { frames, duration } = appTransitionFrames({ direction: "open", iconTransform: transform, reduced: minimal });
+    const { frames, duration } = appTransitionFrames({ direction: "open", iconTransform: shape?.transform || null, iconClip: shape?.clip, reduced: minimal });
+    if (shape?.transform && !minimal && source) handoffIcon(source.element, "open", duration);
     const done = animate(node, frames, duration);
-    const home = phoneScreenRef.current?.querySelector<HTMLElement>("[data-home-surface]");
-    if (home && !minimal) void animate(home, [{transform: "none"}, {transform: "scale(.985)"}], duration);
     void done.then(() => { if (epoch.current === id) { stopAnimations(); setTransitioning(false); } });
     // Navigation uses a synchronous ref so rapid consecutive events cannot race.
     // eslint-disable-next-line react-hooks/exhaustive-deps
