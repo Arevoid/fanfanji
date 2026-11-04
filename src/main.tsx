@@ -20,7 +20,7 @@ function MemoryWriterNotice() {
   </div>;
 }
 async function mountApplication() {
-applicationRoot.render(<div role="status" style={{ padding: 24, fontFamily: 'system-ui' }}>正在打开米饭机…</div>);
+applicationRoot.render(<div role="status" aria-label="准备米饭机" className="startup-desktop-placeholder"><div className="startup-desktop-card"/><div className="startup-desktop-icons">{Array.from({length:12},(_,index)=><span key={index}/>)}</div></div>);
 const memoryWriter = await initializeMemoryWriterCoordination();
 const memoryRecovery = await initializeMemoryContentStorage(memoryWriter === 'writer');
 if (memoryWriter === 'writer' && memoryRecovery.success) initializeMemoryAdmissionV2Promotion();

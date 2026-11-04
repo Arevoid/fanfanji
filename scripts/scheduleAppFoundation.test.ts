@@ -20,7 +20,7 @@ const scheduleSource = readFileSync(new URL("../src/components/AppSchedule.tsx",
 const dashboardSource = readFileSync(new URL("../src/components/schedule/ScheduleDashboard.tsx", import.meta.url), "utf8");
 const settingsSource = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 
-assert.match(appSource, /const loadAppSchedule = \(\) => import\("\.\/components\/AppSchedule"\)/);
+assert.match(appSource, /const loadAppSchedule = cachedModule\(\(\) => import\("\.\/components\/AppSchedule"\)/);
 assert.match(appSource, /activeApp === "schedule"/);
 assert.match(appSource, /id: "schedule",\s+name: "日程"/);
 assert.match(appSource, /seedFreshDesktopDefaults \|\| !FRESH_DESKTOP_DEFAULT_APP_IDS\.includes/, "new default apps are seeded only for untouched installs");

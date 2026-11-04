@@ -9,7 +9,7 @@ const storeSource = readFileSync(new URL("../src/components/AppStore.tsx", impor
 const settingsSource = readFileSync(new URL("../src/components/AppSettings.tsx", import.meta.url), "utf8");
 const readingSource = readFileSync(new URL("../src/components/AppReading.tsx", import.meta.url), "utf8");
 
-assert.match(appSource, /const loadAppReading = \(\) => import\("\.\/components\/AppReading"\)/);
+assert.match(appSource, /const loadAppReading = cachedModule\(\(\) => import\("\.\/components\/AppReading"\)/);
 assert.match(appSource, /reading:\s+withModuleRetry\(loadAppReading\)/);
 assert.match(appSource, /const AppReading = React\.lazy\(withModuleRetry\(loadAppReading\)\)/);
 assert.match(appSource, /reading: \(className = "w-6 h-6"\) => <BookOpenText/);

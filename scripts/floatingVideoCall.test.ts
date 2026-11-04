@@ -12,7 +12,7 @@ const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const chat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
 const video = readFileSync(new URL("../src/features/chat/components/VideoCallView.tsx", import.meta.url), "utf8");
 const mini = readFileSync(new URL("../src/features/chat/components/FloatingVideoCallPreview.tsx", import.meta.url), "utf8");
-assert.ok(app.indexOf("<AppChat") < app.indexOf('{activeApp === null ? ('), "chat runtime must be outside the desktop/app conditional");
+assert.ok(app.indexOf("<AppChat") < app.indexOf("data-home-surface"), "chat runtime must remain outside the inert desktop surface");
 assert.match(app, /data-call-overlay-host/);
 assert.ok(chat.indexOf("<VideoCallView") < chat.indexOf("Active Chat Windows Overlay"), "call must survive returning to the chat list");
 assert.match(chat, /callOverlayTarget && createPortal/);
@@ -27,5 +27,5 @@ assert.match(mini, /setPointerCapture/);
 assert.doesNotMatch(mini, /track.stop\(|onEnd|apiChat|fetch\(/, "mini window cannot own call termination or provider requests");
 console.log("PASS floating video bounds, retained runtime, scoped restore and drag/tap separation");
 
-assert.match(app, /display: activeApp === "chat" \? "none" : undefined/, "empty secondary-app viewport must not cover the retained chat shell");
+assert.match(app, /display: !activeApp \|\| activeApp === "chat" \? "none" : undefined/, "empty secondary-app viewport must not cover the retained chat shell");
 assert.match(mini, /border: 0/, "floating preview has no outer border");

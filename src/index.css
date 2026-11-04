@@ -569,3 +569,13 @@ button, input, textarea, select {
   text-overflow: ellipsis;
   color: #b5a78e !important;
 }
+
+/* Startup presentation never exposes unhydrated identities or editable fallback data. */
+.startup-desktop-placeholder { min-height:100dvh; max-width:375px; margin:auto; padding:12vh 24px 32px; color:#a8a29e; background:var(--desktop-default-bg,#f5f5f7); }
+.startup-desktop-card { height:96px; border-radius:24px; background:#a8a29e1a; margin-bottom:40px; }
+.startup-desktop-icons { display:grid; grid-template-columns:repeat(4,1fr); gap:32px 24px; }
+.startup-desktop-icons span { aspect-ratio:1; border-radius:18px; background:#a8a29e1a; }
+[data-app-surface] { transform-origin:0 0; isolation:isolate; }
+[data-app-surface][data-app-transitioning="true"] { background:var(--app-bg,#f7f7f5) !important; backdrop-filter:none !important; }
+[data-app-transitioning="true"] { pointer-events:none; will-change:transform,opacity; }
+@media (prefers-reduced-motion: reduce) { .app-opening-placeholder * { animation:none !important; } }

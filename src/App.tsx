@@ -1,3 +1,6 @@
+import { cachedModule, startAppPreloading, COMMON_APP_PRELOAD_ORDER } from "./features/home/appPreloading";
+import { useAppNavigation } from "./features/home/useAppNavigation";
+import { AppOpeningPlaceholder } from "./features/home/AppOpeningPlaceholder";
 import { canEditPendingMessage } from "./domain/chat/pendingMessageEdit";
 import { createPendingMessageMutationQueue } from "./features/chat/services/pendingMessageMutationQueue";
 import { resolveCharacterTextSettings } from "./domain/character/characterTextApiRouting";
@@ -206,24 +209,24 @@ import {
   X
 } from "lucide-react";
 
-const loadAppChat = () => import("./components/AppChat");
-const loadAppArchives = () => import("./components/AppArchives");
-const loadAppWorldBook = () => import("./components/AppWorldBook");
-const loadAppMusic = () => import("./components/AppMusic");
-const loadAppForum = () => import("./components/AppForum");
-const loadAppNotes = () => import("./components/AppNotes");
-const loadAppDiary = () => import("./components/AppDiary");
-const loadAppStore = () => import("./components/AppStore");
-const loadAppSettings = () => import("./components/AppSettings");
-const loadAppMemory = () => import("./components/AppMemory");
-const loadAppOffline = () => import("./components/AppOffline");
-const loadAppSchedule = () => import("./components/AppSchedule");
-const loadAppReading = () => import("./components/AppReading");
-const loadAppCinema = () => import("./components/AppCinema");
-const loadAppCharacterPhone = () => import("./components/AppCharacterPhone");
-const loadAppRelationshipNetwork = () => import("./components/AppRelationshipNetwork");
-const loadAppSms = () => import("./components/AppSms");
-const loadAppNow = () => import("./components/AppNow");
+const loadAppChat = cachedModule(() => import("./components/AppChat"));
+const loadAppArchives = cachedModule(() => import("./components/AppArchives"));
+const loadAppWorldBook = cachedModule(() => import("./components/AppWorldBook"));
+const loadAppMusic = cachedModule(() => import("./components/AppMusic"));
+const loadAppForum = cachedModule(() => import("./components/AppForum"));
+const loadAppNotes = cachedModule(() => import("./components/AppNotes"));
+const loadAppDiary = cachedModule(() => import("./components/AppDiary"));
+const loadAppStore = cachedModule(() => import("./components/AppStore"));
+const loadAppSettings = cachedModule(() => import("./components/AppSettings"));
+const loadAppMemory = cachedModule(() => import("./components/AppMemory"));
+const loadAppOffline = cachedModule(() => import("./components/AppOffline"));
+const loadAppSchedule = cachedModule(() => import("./components/AppSchedule"));
+const loadAppReading = cachedModule(() => import("./components/AppReading"));
+const loadAppCinema = cachedModule(() => import("./components/AppCinema"));
+const loadAppCharacterPhone = cachedModule(() => import("./components/AppCharacterPhone"));
+const loadAppRelationshipNetwork = cachedModule(() => import("./components/AppRelationshipNetwork"));
+const loadAppSms = cachedModule(() => import("./components/AppSms"));
+const loadAppNow = cachedModule(() => import("./components/AppNow"));
 
 // Vite can briefly return a failed module response while the dev server is
 // transforming the large chat module. Give the same navigation attempt one
@@ -285,9 +288,7 @@ const preloadApp = (appId: string) => {
   });
 };
 
-const IDLE_PRELOAD_APP_IDS = [
-  "chat",
-] as const;
+const IDLE_PRELOAD_APP_IDS = COMMON_APP_PRELOAD_ORDER;
 
 // Use the same bounded retry for the component that is actually rendered.
 // Preloading alone cannot recover a WebKit service-worker update that cancels
@@ -407,12 +408,7 @@ function LazyAppBoundary({
     >
       <LazyAppErrorBoundary visible={visible}>
       <React.Suspense
-      fallback={(
-        <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 bg-[var(--app-bg)] text-[var(--text-secondary)]" role="status" aria-live="polite">
-          <span className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" aria-hidden="true" />
-          <span className="text-xs font-semibold">正在打开…</span>
-        </div>
-      )}
+      fallback={<AppOpeningPlaceholder />}
       >
         {children}
       </React.Suspense>
@@ -744,22 +740,26 @@ export default function App() {
     });
   }, []);
 
+  const [settingsOverlaysReady, setSettingsOverlaysReady] = useState(false);
+
   useEffect(() => {
-    const preloadIdleApps = () => {
-      IDLE_PRELOAD_APP_IDS.forEach((appId) => preloadApp(appId));
-      // Other apps and authenticated libraries load on explicit navigation.
-    };
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-      cancelIdleCallback?: (handle: number) => void;
-    };
-    if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(preloadIdleApps, { timeout: 4000 });
-      return () => idleWindow.cancelIdleCallback?.(handle);
-    }
-    const handle = window.setTimeout(preloadIdleApps, 1500);
-    return () => window.clearTimeout(handle);
-  }, []);
+    if (!settingsOverlaysReady) return;
+    const connection = (navigator as Navigator & { connection?: EventTarget & { saveData?: boolean; effectiveType?: string } }).connection;
+    const idleWindow = window as Window & { requestIdleCallback?: (work: () => void, options: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+    const preloader = startAppPreloading({
+      order: IDLE_PRELOAD_APP_IDS,
+      load: id => APP_LOADERS[id]?.() || Promise.resolve(),
+      allowed: () => document.visibilityState !== "hidden" && navigator.onLine !== false && !connection?.saveData && !/^(slow-2g|2g|3g)$/.test(connection?.effectiveType || ""),
+      schedule: work => {
+        if (idleWindow.requestIdleCallback) { const id = idleWindow.requestIdleCallback(work, {timeout:4000}); return () => idleWindow.cancelIdleCallback?.(id); }
+        const id = window.setTimeout(work, 600); return () => window.clearTimeout(id);
+      },
+    });
+    document.addEventListener("visibilitychange", preloader.wake);
+    window.addEventListener("online", preloader.wake);
+    connection?.addEventListener("change", preloader.wake);
+    return () => { preloader.stop(); document.removeEventListener("visibilitychange",preloader.wake); window.removeEventListener("online",preloader.wake); connection?.removeEventListener("change",preloader.wake); };
+  }, [settingsOverlaysReady]);
 
   const seedFreshDesktopDefaults = useRef(
     typeof window !== "undefined" && shouldSeedFreshDesktopDefaults(window.localStorage),
@@ -872,7 +872,7 @@ export default function App() {
   useGlobalTypography(settings);
   const settingsRef = useRef<UserSettings>(settings);
   useEffect(() => installCharacterTextApiContext(() => ({ settings: settingsRef.current, characters: charactersRef.current })), []);
-  const [settingsOverlaysReady, setSettingsOverlaysReady] = useState(false);
+
 
   // Hydrate reference fallbacks before large IndexedDB-backed image assets.
   // When localStorage is over quota, an asset's stable ID can exist only in
@@ -1125,7 +1125,12 @@ export default function App() {
   const [worldBookEntries, setWorldBookEntries] = useState<WorldBookEntry[]>(() => loadWorldBookEntries(DEFAULT_WORLDBOOK_ENTRIES).value);
 
   // Navigation State
-  const [activeApp, setActiveApp] = useState<string | null>(null);
+  const { activeApp, setActiveApp, openFromIcon, phoneScreenRef, transitioning } = useAppNavigation();
+  useEffect(() => {
+    const close = () => setActiveApp(null);
+    window.addEventListener("app-opening-cancel", close);
+    return () => window.removeEventListener("app-opening-cancel",close);
+  });
   const [memoryDiagnosticsRequestId, setMemoryDiagnosticsRequestId] = useState(0);
   const [mountedAppIds, setMountedAppIds] = useState<Set<string>>(() => new Set());
   const isAppMounted = (appId: string) => activeApp === appId || mountedAppIds.has(appId);
@@ -1708,7 +1713,6 @@ export default function App() {
     }
   }, [messages, activeApp, activeChatCharId, activeChatRelationId, characters]);
 
-  const phoneScreenRef = useRef<HTMLDivElement>(null);
 
   const [installedAppIds, setInstalledAppIds] = useState<string[]>(() => {
     const raw = readString("phone_installed_apps").value;
@@ -2969,12 +2973,11 @@ export default function App() {
     }
   };
 
-  const handleItemClick = (item: HomeScreenItem) => {
+  const handleItemClick = (item: HomeScreenItem, element: HTMLElement) => {
     if (isEditingHomeScreen || suppressNextItemClickRef.current) return;
     if (item.type === "app") {
       preloadApp(item.id);
-      if (item.id === "character-phone") openCharacterPhoneApp();
-      else setActiveApp(item.id);
+      openFromIcon(item.id, element);
     }
   };
   useEffect(() => {
@@ -4400,13 +4403,8 @@ export default function App() {
       }}
     >
       {!settingsOverlaysReady && (
-        <div
-          className="absolute inset-0 z-[1000] flex items-center justify-center bg-[#f5f5f7]"
-          data-settings-hydration-splash
-          role="status"
-          aria-live="polite"
-        >
-          <span className="h-7 w-7 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" aria-label="正在载入" />
+        <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-[var(--desktop-default-bg,#f5f5f7)]" data-settings-hydration-splash role="status" aria-label="准备桌面">
+          <div className="w-full max-w-[375px] px-6"><div className="mb-10 h-24 rounded-3xl bg-stone-400/10"/><div className="grid grid-cols-4 gap-x-6 gap-y-8">{Array.from({length:12},(_,index)=><span key={index} className="aspect-square rounded-2xl bg-stone-400/10"/>)}</div><div className="mt-12 h-20 rounded-3xl bg-stone-400/10"/></div>
         </div>
       )}
       {memoryEvidenceDevBuild && (
@@ -5080,7 +5078,7 @@ export default function App() {
         {/* Home Screen Icons Layout or Active Application Render */}
         <div className="flex-1 relative overflow-hidden flex flex-col">
                 {(activeApp === "chat" || chatModuleActivated) && (
-                  <div style={{ display: activeApp === "chat" ? "block" : "none", paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)", paddingBottom: "env(safe-area-inset-bottom, 0px)" }} className="w-full h-full absolute inset-0 z-30">
+                  <div style={{ display: activeApp === "chat" ? "block" : "none", paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)", paddingBottom: "env(safe-area-inset-bottom, 0px)" }} className="w-full h-full absolute inset-0 z-30 overflow-hidden" data-app-surface="chat" data-app-transitioning={transitioning || undefined}>
                   <div className="relative h-full w-full">
                   <LazyAppBoundary>
                     <AppChat
@@ -5159,10 +5157,13 @@ export default function App() {
                 )}
 
           <div className="pointer-events-none absolute inset-0 z-[90]" data-call-overlay-host />
-          {activeApp === null ? (
+          {
             <div 
+              data-home-surface aria-hidden={activeApp !== null} inert={activeApp !== null}
               className="home-screen-drag-surface flex-1 min-h-0 overflow-hidden flex flex-col p-4 select-none touch-none"
               style={{
+                pointerEvents: activeApp ? "none" : undefined,
+                opacity: 1,
                  paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 40px)",
                 paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 24px)"
               }}
@@ -5279,6 +5280,8 @@ export default function App() {
                                         key={item.id}
                                         data-id={item.id}
                                         data-page={pageIdx}
+                                        role="button" tabIndex={0} aria-label={app.name}
+                                        onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); handleItemClick(item,event.currentTarget); } }}
                                         className={`grid-item col-span-1 row-span-1 flex flex-col ${alignClass} justify-start relative group transition-opacity duration-200 min-w-0 ${
                                           isDragged ? "z-30 opacity-30 scale-95 cursor-grabbing" : "cursor-pointer"
                                         }`}
@@ -5287,7 +5290,7 @@ export default function App() {
                                           if (isEditingHomeScreen) e.preventDefault();
                                           handleItemPointerDown(e, item);
                                         }}
-                                        onClick={() => handleItemClick(item)}
+                                        onClick={(event) => handleItemClick(item, event.currentTarget)}
                                       >
                                         <div className={`w-full flex flex-col ${alignClass} ${
                                           isEditingHomeScreen && !isDragged 
@@ -5488,9 +5491,8 @@ export default function App() {
                         <div key={appId} className="flex items-center justify-center w-full h-full">
                           <button
                             onPointerDown={() => preloadApp(appId)}
-                            onClick={() => {
-                              if (appId === "character-phone") openCharacterPhoneApp();
-                              else setActiveApp(appId);
+                            onClick={(event) => {
+                              openFromIcon(appId, event.currentTarget);
                             }}
                             className={`app-icon-surface flex items-center justify-center active:scale-90 transition-all overflow-hidden shrink-0 ${
                               isTransparentIcon
@@ -5546,12 +5548,14 @@ export default function App() {
               )}
 
             </div>
-          ) : (
+          }
+          {
             // Full screen app view ports with transitions
             <div 
-              className={`absolute inset-0 z-30 ${activeApp === "character-phone" ? "bg-transparent" : "bg-slate-50/92 backdrop-blur-md"} flex flex-col h-full`}
+              data-app-surface="other" data-app-transitioning={transitioning || undefined}
+              className={`absolute inset-0 z-30 overflow-hidden ${activeApp === "character-phone" ? "bg-transparent" : "bg-slate-50/92 backdrop-blur-md"} flex flex-col h-full`}
               style={{
-                display: activeApp === "chat" ? "none" : undefined,
+                display: !activeApp || activeApp === "chat" ? "none" : undefined,
                  paddingTop: settings.hideStatusBar || activeApp === "character-phone" ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)",
                 paddingBottom: "env(safe-area-inset-bottom, 0px)"
               }}
@@ -5931,7 +5935,7 @@ export default function App() {
                 )}
               </div>
             </div>
-          )}
+          }
 
           {/* Real-time Status Bar (Wi-Fi, Battery, Cellular) - Overlaid absolutely on top of everything */}
           {(() => {

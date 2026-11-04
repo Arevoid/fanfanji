@@ -30,15 +30,15 @@ assert.match(appSource, /cannot access \.\*uninitialized variable/);
 assert.match(appSource, /_result\\\.default/);
 assert.match(appSource, /Lazy module default export unavailable/);
 assert.match(appSource, /fanfan-stale-module-recovery-v2-at/);
-assert.match(appSource, /requestIdleCallback\(preloadIdleApps, \{ timeout: 4000 \}\)/);
+assert.match(appSource, /startAppPreloading\(/);
 assert.match(appSource, /preloadApp\(item\.id\)/);
-assert.match(appSource, /const IDLE_PRELOAD_APP_IDS = \[[^\]]+\]/);
-assert.match(appSource, /IDLE_PRELOAD_APP_IDS = \[[^\]]*"chat"/);
+assert.match(appSource, /const IDLE_PRELOAD_APP_IDS = COMMON_APP_PRELOAD_ORDER/);
+assert.match(appSource, /order: IDLE_PRELOAD_APP_IDS/);
 assert.match(appSource, /activeApp === "chat" \|\| chatModuleActivated/);
 assert.match(appSource, /if \(activeApp === "chat"\) setChatModuleActivated\(true\)/);
 assert.doesNotMatch(appSource, /setChatModuleActivated\(false\)/,
   "returning home must not unmount the activated chat runtime during a reply");
-assert.match(appSource, /正在打开/);
+assert.match(appSource, /fallback=\{<AppOpeningPlaceholder \/>\}/);
 assert.doesNotMatch(appSource, /import AppChat(?:,\s*\{[^}]+\})? from "\.\/components\/AppChat"/);
 assert.match(appSource, /import \{ resolveActiveChatStylePreset \} from "\.\/features\/chat\/styles\/chatStylePreset"/);
 
