@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { iconSurfaceTransform, iconSurfaceClip, type SurfaceRect } from "./appTransitionGeometry";
+import { iconSurfaceTransform, iconSurfaceClip, iconHandoffFrames, type SurfaceRect } from "./appTransitionGeometry";
 import { appTransitionFrames } from "./appTransitionFrames";
 
 /** Presentation only: app components and generation controllers keep their own lifetime. */
@@ -34,7 +34,7 @@ export function useAppNavigation() {
     return { transform: iconSurfaceTransform(icon, bounds), clip: iconSurfaceClip(icon, bounds,
       [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius]) };
   };
-  const handoffIcon = (element: HTMLElement, direction: "open" | "close", duration: number) => {
+  const handoffIcon = (element: HTMLElement, node: HTMLElement, direction: "open" | "close", duration: number) => {
     const rect = element.getBoundingClientRect();
     const style = getComputedStyle(element);
     const clone = element.cloneNode(true) as HTMLElement;
@@ -42,16 +42,13 @@ export function useAppNavigation() {
     clone.dataset.appIconFlight = "true";
     Object.assign(clone.style, { position: "fixed", left: `${rect.left}px`, top: `${rect.top}px`,
       width: `${rect.width}px`, height: `${rect.height}px`, margin: "0", zIndex: "2147483646",
-      pointerEvents: "none", visibility: "visible", transform: "none", opacity: direction === "open" ? "1" : "0",
+      pointerEvents: "none", visibility: "visible", transform: "none", transformOrigin: "0 0", transition: "none", opacity: direction === "open" ? "1" : "0",
       background: style.background, borderRadius: style.borderRadius, boxShadow: style.boxShadow, color: style.color });
     const visibility = element.style.visibility;
     element.style.visibility = "hidden";
     document.body.appendChild(clone);
     clearIconFlight.current = () => { clone.remove(); element.style.visibility = visibility; };
-    // Only exchange icon/page content while the visible surface is already small.
-    void animate(clone, direction === "open"
-      ? [{ opacity: 1, offset: 0 }, { opacity: 0, offset: .22 }, { opacity: 0, offset: 1 }]
-      : [{ opacity: 0, offset: 0 }, { opacity: 0, offset: .78 }, { opacity: 1, offset: 1 }], duration);
+    void animate(clone, iconHandoffFrames(rect, node.getBoundingClientRect(), direction), duration);
   };
   const setActiveApp = (next: string | null) => {
     if (next === active.current || (next === null && closing.current)) return;
@@ -70,7 +67,7 @@ export function useAppNavigation() {
       ? iconShape(source.element, node) : null;
     const minimal = reduced();
     const { frames, duration } = appTransitionFrames({ direction: "close", iconTransform: shape?.transform || null, iconClip: shape?.clip, reduced: minimal, fromTransform: from, fromClip: fromClip === "none" ? undefined : fromClip });
-    if (shape?.transform && !minimal && source) handoffIcon(source.element, "close", duration);
+    if (shape?.transform && !minimal && source && node) handoffIcon(source.element, node, "close", duration);
     const done = node ? animate(node, frames, duration) : Promise.resolve();
     void done.then(() => {
       if (epoch.current !== id) return;
@@ -101,7 +98,7 @@ export function useAppNavigation() {
     const shape = source?.element.isConnected ? iconShape(source.element, node) : null;
     const minimal = reduced();
     const { frames, duration } = appTransitionFrames({ direction: "open", iconTransform: shape?.transform || null, iconClip: shape?.clip, reduced: minimal });
-    if (shape?.transform && !minimal && source) handoffIcon(source.element, "open", duration);
+    if (shape?.transform && !minimal && source) handoffIcon(source.element, node, "open", duration);
     const done = animate(node, frames, duration);
     void done.then(() => { if (epoch.current === id) { stopAnimations(); setTransitioning(false); } });
     // Navigation uses a synchronous ref so rapid consecutive events cannot race.

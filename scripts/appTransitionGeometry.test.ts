@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { iconSurfaceTransform, iconSurfaceClip } from "../src/features/home/appTransitionGeometry";
+import { iconSurfaceTransform, iconSurfaceClip, iconHandoffFrames } from "../src/features/home/appTransitionGeometry";
 assert.equal(iconSurfaceTransform({left:120,top:240,width:60,height:60},{left:100,top:200,width:375,height:750}),"translate(20px, 40px) scale(0.16)");
 assert.equal(iconSurfaceClip({left:0,top:0,width:60,height:60},{left:0,top:0,width:375,height:750},["15px","15px","15px","15px"]),
   "inset(0px 0px 375px 0px round 93.75px 93.75px 93.75px 93.75px / 93.75px 93.75px 93.75px 93.75px)", "scaled mask ends at the real 15px icon radius");
@@ -8,3 +8,14 @@ assert.equal(iconSurfaceTransform(undefined,{left:0,top:0,width:375,height:750})
 assert.equal(iconSurfaceTransform({left:-100,top:10,width:60,height:60},{left:0,top:0,width:375,height:750}),null,"removed/offscreen icons use the fade fallback");
 assert.equal(iconSurfaceTransform({left:0,top:0,width:60,height:60},{left:0,top:0,width:0,height:750}),null);
 console.log("PASS icon transitions use viewport offsets and reject invalid/offscreen origins");
+const icon={left:120,top:240,width:60,height:60};
+const surface={left:0,top:0,width:375,height:750};
+const flight=iconHandoffFrames(icon,surface,"open");
+const reverse=iconHandoffFrames(icon,surface,"close");
+assert.equal(flight[0].transform,"translate(0px, 0px) scale(1)");
+assert.equal(reverse.at(-1)!.transform,flight[0].transform);
+assert.equal(flight[0].opacity,1); assert.equal(reverse.at(-1)!.opacity,1);
+assert.equal(flight.at(-1)!.opacity,0); assert.equal(reverse[0].opacity,0);
+const blended=flight.find(frame=>frame.offset===.16)!;
+assert.ok(Number(blended.opacity)>0&&Number(blended.opacity)<1,"moving icon overlaps page during the handoff");
+assert.notEqual(blended.transform,flight[0].transform,"icon moves and grows instead of remaining stationary");

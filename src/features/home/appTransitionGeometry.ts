@@ -1,4 +1,19 @@
 export interface SurfaceRect { left: number; top: number; width: number; height: number }
+/** Icon and page share the same moving window, rather than fading a stationary icon. */
+export function iconHandoffFrames(icon: SurfaceRect, surface: SurfaceRect, direction: "open" | "close"): Keyframe[] {
+  const collapsedScale = Math.min(1, Math.max(icon.width / surface.width, icon.height / surface.height));
+  return [0, .08, .16, .24, .32, .5, .68, .76, .84, .92, 1].map(offset => {
+    const progress = direction === "open" ? offset : 1 - offset;
+    const scale = collapsedScale + (1 - collapsedScale) * progress;
+    const width = scale * (icon.width / collapsedScale + (surface.width - icon.width / collapsedScale) * progress);
+    const height = scale * (icon.height / collapsedScale + (surface.height - icon.height / collapsedScale) * progress);
+    const zoom = Math.min(4, width / icon.width, height / icon.height);
+    const left = icon.left + (surface.left - icon.left) * progress + (width - icon.width * zoom) / 2;
+    const top = icon.top + (surface.top - icon.top) * progress + (height - icon.height * zoom) / 2;
+    return { offset, transform: `translate(${left - icon.left}px, ${top - icon.top}px) scale(${zoom})`,
+      opacity: Math.max(0, Math.min(1, (0.32 - progress) / .24)) };
+  });
+}
 export function iconSurfaceTransform(icon: SurfaceRect | undefined, surface: SurfaceRect): string | null {
   if (!icon || surface.width <= 0 || surface.height <= 0 || icon.width <= 0 || icon.height <= 0) return null;
   if (icon.left + icon.width <= surface.left || icon.top + icon.height <= surface.top || icon.left >= surface.left + surface.width || icon.top >= surface.top + surface.height) return null;
