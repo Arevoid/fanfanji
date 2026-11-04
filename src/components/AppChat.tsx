@@ -1,3 +1,4 @@
+import { canEditPendingMessage } from "../domain/chat/pendingMessageEdit";
 import { requestOfflineArchive, readOfflineArchiveStory } from "../features/offline/services/offlineArchiveQueue";
 import {CharacterApiSettings} from "../features/chat/components/CharacterApiSettings";
 import {resolveCharacterApiSettings} from "../domain/character/characterApiSettings";
@@ -454,6 +455,8 @@ interface AppChatProps {
   onToggleBookmark: (messageId: string, scope?: MessageMutationScope) => void;
   onDeleteMessage?: (messageId: string, scope?: MessageMutationScope) => void | boolean | Promise<void | boolean>;
   onReplaceMessages?: (targets: Message[], replacements: Message[]) => Promise<boolean>;
+  onPreparePendingReply?: (history: Message[]) => Promise<Message[]>;
+  onEditPendingMessage?: (target: Message, content: string) => Promise<boolean>;
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>, scope?: MessageMutationScope) => void;
   onClose: () => void;
   /** Returns false when the settings payload could not be persisted. */
@@ -569,6 +572,8 @@ export default function AppChat({
   onDeleteMessage,
   onReplaceMessages,
   onUpdateMessage,
+  onPreparePendingReply,
+  onEditPendingMessage,
   onClose,
   onSaveSettings,
   onSwitchIdentity,
@@ -1092,6 +1097,9 @@ export default function AppChat({
     }
     showToast(status === "accepted" ? "已同意好友申请，关系已恢复" : "已拒绝好友申请");
   };
+  const [editingPendingMessage, setEditingPendingMessage] = useState<Message | null>(null);
+  const [pendingEditText, setPendingEditText] = useState("");
+  const [savingPendingEdit, setSavingPendingEdit] = useState(false);
   const onSendMessageRaw = (message: Message) => {
     const relation = message.relationId
       ? relationships.find((candidate) => candidate.id === message.relationId)
@@ -4193,7 +4201,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     signal?: AbortSignal,
     imageDataUrlOverride?: string,
     ephemeralImage?: boolean,
-  ) => chatReplyController.generate({ userMsg, customHistoryOverride, signal, imageDataUrlOverride, ephemeralImage });
+  ) => {
+    const requestedHistory = customHistoryOverride || [...currentChatMessages, ...(userMsg && !currentChatMessages.some(message=>message.id===userMsg.id) ? [userMsg] : [])];
+    let history=customHistoryOverride;
+    try { if(!isOfflineModeActive && onPreparePendingReply) history=await onPreparePendingReply(requestedHistory); }
+    catch(error) { showToast(error instanceof Error ? error.message : "消息状态保存失败，本次未触发回复"); return; }
+    const latestUserMsg=userMsg && history ? history.find(message=>message.id===userMsg.id) || userMsg : userMsg;
+    return chatReplyController.generate({ userMsg:latestUserMsg, customHistoryOverride:history, signal, imageDataUrlOverride, ephemeralImage });
+  };
 
   const clearVoiceCallTranscriptLongPress = () => {
     if (voiceCallTranscriptLongPressRef.current) clearTimeout(voiceCallTranscriptLongPressRef.current.timer);
@@ -4628,6 +4643,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     onSendMessage,
     canSendMessage: () => !isBlockedDeliveryDirection(latestActiveRelationshipRef.current, "user_to_character"),
     onMessagePersistenceComplete: confirmMessageDurability,
+    onPendingMessagesConsumed: onPreparePendingReply,
     generateResponseForUserMessage,
     generateAndSendCharacterImage,
     offlineStories,
@@ -13528,6 +13544,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         </div>
       )}
 
+      {editingPendingMessage && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 p-5 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="编辑消息">
+        <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-stone-800 shadow-xl">
+          <h3 className="text-sm font-bold">编辑消息</h3>
+          <textarea aria-label="消息内容" value={pendingEditText} onChange={event=>setPendingEditText(event.target.value)} disabled={savingPendingEdit} className="mt-4 min-h-28 max-h-60 w-full resize-none rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm outline-none"/>
+          <div className="mt-4 flex gap-3"><button disabled={savingPendingEdit} onClick={()=>setEditingPendingMessage(null)} className="flex-1 rounded-xl border border-stone-200 py-2 text-xs">取消</button><button disabled={savingPendingEdit || !pendingEditText.trim() || isTyping || isReplyInFlight} onClick={async()=>{setSavingPendingEdit(true);try{const saved=await onEditPendingMessage?.(editingPendingMessage,pendingEditText);if(saved){setEditingPendingMessage(null);showToast("消息已修改");}else showToast("消息已触发回复或状态已变化，无法编辑");}catch{showToast("修改未保存，请重试");}finally{setSavingPendingEdit(false);}}} className="flex-1 rounded-xl bg-stone-800 py-2 text-xs text-white disabled:opacity-40">{savingPendingEdit?"保存中…":"保存"}</button></div>
+        </div>
+      </div>}
+
       {/* Long Press Bubble Context Menu */}
       {activeMenuMsg && (() => {
         const visualViewport = window.visualViewport;
@@ -13584,6 +13608,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               <Copy className="w-3.5 h-3.5 text-stone-500" />
               <span>复制</span>
             </button>
+
+            {onEditPendingMessage && !isTyping && !isReplyInFlight && !isOfflineModeActive && activeAttachModal !== "calling" && canEditPendingMessage(activeMenuMsg,currentChatMessages) && activeMenuMsg.authorIdentityId===activeIdentityId && (
+              <button onClick={()=>{setEditingPendingMessage(activeMenuMsg);setPendingEditText(activeMenuMsg.content);setActiveMenuMsg(null);}} className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"><Edit3 className="w-3.5 h-3.5 text-stone-500"/><span>编辑</span></button>
+            )}
 
             {activeMenuMsg.sender !== "user" && (
               <button
@@ -13717,9 +13745,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   });
                   setActiveMenuMsg(null);
                 }}
-                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-indigo-600 transition-colors"
+                className="w-full text-left px-2.5 py-1.5 text-xs font-bold hover:bg-stone-100 rounded-lg flex items-center gap-2 text-stone-700 transition-colors"
               >
-                <Languages className="w-3.5 h-3.5 text-indigo-500" />
+                <Languages className="w-3.5 h-3.5 text-stone-500" />
                 <span>{voiceTranscribed[activeMenuMsg.id] ? "收起文字" : "语音转文字"}</span>
               </button>
             )}

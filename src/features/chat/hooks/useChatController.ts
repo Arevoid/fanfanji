@@ -1,3 +1,4 @@
+import { isPlainPendingText } from "../../../domain/chat/pendingMessageEdit";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Character, Message, OfflineStory } from "../../../types";
 import type { ChatRuntimeContext } from "../context/chatRuntimeContext";
@@ -37,6 +38,7 @@ export interface UseChatControllerOptions {
   onUserMessageCreated?: (message: Message, context: ChatRuntimeContext) => void;
   /** Allows a host surface to route an explicit incoming callback to its real call UI. */
   onExplicitIncomingCallRequest?: (message: Message, context: ChatRuntimeContext) => boolean;
+  onPendingMessagesConsumed?: (history: Message[]) => Promise<unknown>;
   onMessagePersistenceComplete?: () => boolean | Promise<boolean>;
   generateResponseForUserMessage: ChatResponseHandler;
   generateAndSendCharacterImage: CharacterImageHandler;
@@ -66,6 +68,7 @@ export function useChatController({
   onUserMessageCreated,
   onExplicitIncomingCallRequest,
   onMessagePersistenceComplete,
+  onPendingMessagesConsumed,
   generateResponseForUserMessage,
   generateAndSendCharacterImage,
   offlineStories,
@@ -147,6 +150,7 @@ export function useChatController({
       authorNameSnapshot: activeIdentityName,
       authorAvatarSnapshot: activeIdentityAvatar,
     });
+    userMessage.pendingReplyEditable = !isOfflineModeActive && isPlainPendingText(userMessage);
     onSendMessage(userMessage);
     if (canSendMessage?.() === false) {
       await confirmMessagePersistence();
@@ -155,6 +159,7 @@ export function useChatController({
     onUserMessageCreated?.(userMessage, runtimeContext);
     const callStarted = routeExplicitIncomingCallRequest(userMessage);
     if (callStarted) {
+      await onPendingMessagesConsumed?.([...currentChatMessages,userMessage]);
       await confirmMessagePersistence();
       appendChatUserMessageToOfflineStory({
         userMessage,
@@ -233,6 +238,7 @@ export function useChatController({
       // existing call lifecycle. Outgoing calls are intentionally not routed
       // from text; the user starts those from the call controls.
       if (routeExplicitIncomingCallRequest(userMessage)) {
+        await onPendingMessagesConsumed?.([...currentChatMessages,userMessage]);
         await confirmMessagePersistence();
         return;
       }
@@ -240,6 +246,7 @@ export function useChatController({
       // An explicit image request is an image-only turn: the real image must be
       // persisted before any character text is allowed.
       if (shouldGenerateExplicitImage) {
+        await onPendingMessagesConsumed?.([...currentChatMessages,userMessage]);
         await generateAndSendCharacterImage("explicit-user-text", pendingImageRequest!, abortController.signal);
         await confirmMessagePersistence();
         return;

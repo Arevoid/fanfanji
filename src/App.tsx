@@ -1,3 +1,5 @@
+import { canEditPendingMessage } from "./domain/chat/pendingMessageEdit";
+import { createPendingMessageMutationQueue } from "./features/chat/services/pendingMessageMutationQueue";
 import { resolveCharacterTextSettings } from "./domain/character/characterTextApiRouting";
 import { selectOfflineExtractionSettings } from "./domain/memory/offlineExtractionSettings";
 import type { MemoryExtractionApiResult } from "./domain/memory/memoryTypes";
@@ -3483,6 +3485,31 @@ export default function App() {
     // is enabled in chat settings.
   };
 
+  const pendingMessageQueue = useRef(createPendingMessageMutationQueue());
+  const handlePreparePendingReply = (history: Message[]) => pendingMessageQueue.current(async () => {
+    const ids = new Set(history.map(message => message.id));
+    const latest = messagesRef.current;
+    const next = latest.map(message => ids.has(message.id) && message.pendingReplyEditable ? {...message, pendingReplyEditable:false} : message);
+    if (next.some((message,index) => message !== latest[index])) {
+      const saved=saveMessages(next);
+      if(!saved.success) throw new Error("消息状态保存失败，本次未触发回复");
+      messagesRef.current=next;setMessages(next);
+    }
+    const byId=new Map<string, Message>(next.map((message:Message)=>[message.id,message] as [string,Message]));
+    return history.map(message => {const current=byId.get(message.id);return current && messageMatchesMutationScope(current,message) ? current : {...message,pendingReplyEditable:false};});
+  });
+  const handleEditPendingMessage = (target:Message, content:string) => pendingMessageQueue.current(async () => {
+    const latest=messagesRef.current;
+    const original=latest.find(message=>message.id===target.id && messageMatchesMutationScope(message,target));
+    const owner=settingsRef.current.activeIdentityId || DEFAULT_IDENTITY_ID;
+    if(!original || original.authorIdentityId!==owner || !canEditPendingMessage(original,latest) || !content.trim() || /^\[|^data:/i.test(content.trim())) return false;
+    if(content===original.content)return true;
+    if(!await mutateSourceMessages([original],[{...original,content:content.trim(),translation:undefined}])) return false;
+    messagesRef.current=loadMessages([]).value;setMessages(messagesRef.current);setMemories(loadMemories([]).value);
+    if(original.relationId)setRelationships(previous=>previous.map(relation=>relation.id===original.relationId?{...relation,lastImmediateSummaryMsgId:undefined,updatedAt:Date.now()}:relation));
+    return true;
+  });
+
   const handleToggleBookmark = (id: string, scope?: MessageMutationScope) => {
     setMessages((prev) =>
       prev.map((m) => (m.id === id && messageMatchesMutationScope(m, scope) ? { ...m, isBookmarked: !m.isBookmarked } : m))
@@ -5083,6 +5110,8 @@ export default function App() {
                     onDeleteMessage={handleDeleteMessage}
                     onReplaceMessages={handleReplaceMessages}
                     onUpdateMessage={handleUpdateMessage}
+                    onPreparePendingReply={handlePreparePendingReply}
+                    onEditPendingMessage={handleEditPendingMessage}
                     onClose={() => setActiveApp(null)}
                     onSaveSettings={setSettings}
                     onSwitchIdentity={handleSwitchIdentity}

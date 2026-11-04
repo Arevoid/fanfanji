@@ -125,6 +125,8 @@ export interface Message {
   sender: "user" | "character";
   /** Groups character bubbles created by one model turn for turn-level actions. */
   replyBatchId?: string;
+  /** Only newly sent, unconsumed plain-text user messages may be edited. */
+  pendingReplyEditable?: boolean;
   /** Stable call session metadata for voice/video records. Legacy messages omit it. */
   callId?: string;
   callMedia?: "voice" | "video";
