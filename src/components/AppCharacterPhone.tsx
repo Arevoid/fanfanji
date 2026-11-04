@@ -111,6 +111,7 @@ import {
   appendCharacterPhoneThreadMessage,
   listCharacterPhoneThreadMessages,
 } from "../features/characterPhone/characterPhoneThreadService";
+import { enqueuePhoneReply, isPhoneUserContact, mergePhoneDiscovery, PHONE_REPLY_UPDATED } from "../features/characterPhone/characterPhoneReplyTask";
 import { generateCharacterPhoneContactReply } from "../features/characterPhone/characterPhoneConversation";
 import { isCharacterBlockReactionMessage } from "../features/characterPhone/characterPhoneBlockReaction";
 import {
@@ -1137,7 +1138,6 @@ export default function AppCharacterPhone({
   const [generationSelection, setGenerationSelection] = useState<CharacterPhoneGenerationSelection>(DEFAULT_CHARACTER_PHONE_GENERATION_SELECTION);
   const [selectedThreadMessageId, setSelectedThreadMessageId] = useState<string | null>(null);
   const generationRequestRef = useRef(0);
-  const phoneReplyQueuesRef = useRef<Record<string, Promise<void>>>({});
   const initialGenerationPhoneIdRef = useRef<string | null>(null);
   const publishingPostRef = useRef(false);
   const threadMessagePressTimerRef = useRef<number | null>(null);
@@ -1535,6 +1535,18 @@ export default function AppCharacterPhone({
     visiblePhoneContacts.find(
       (contact) => contact.id === selectedContactId,
     ) || visiblePhoneContacts[0];
+  useEffect(() => {
+    setPhoneNotice("");
+    const receive = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerIdentityId: string; characterId: string; contactId: string; notice: string }>).detail;
+      if (!detail || detail.ownerIdentityId !== userIdentityId || detail.characterId !== selectedCharacterId) return;
+      const saved = getCharacterPhone(userIdentityId, selectedCharacterId);
+      if (saved) setPhone(saved);
+      if (detail.contactId === selectedContactId) setPhoneNotice(detail.notice);
+    };
+    window.addEventListener(PHONE_REPLY_UPDATED, receive);
+    return () => window.removeEventListener(PHONE_REPLY_UPDATED, receive);
+  }, [userIdentityId, selectedCharacterId, selectedContactId]);
   const persistPhone = (next: CharacterPhoneRecord) => {
     const result = saveCharacterPhone(next);
     if (!result.success) {
@@ -1737,71 +1749,27 @@ export default function AppCharacterPhone({
     character: Character;
     outgoingMessageId: string;
   }) => {
-    const queueKey = `${input.phone.id}:${input.contact.id}`;
-    const previous = phoneReplyQueuesRef.current[queueKey] || Promise.resolve();
-    const task = previous.catch(() => undefined).then(async () => {
-      const isCurrentPhone = () => mountedRef.current
-        && phoneScopeRef.current.ownerIdentityId === input.phone.ownerIdentityId
-        && phoneScopeRef.current.characterId === input.phone.characterId;
-      if (!isCurrentPhone()) return;
-      const latestPhone = getCharacterPhone(input.phone.ownerIdentityId, input.phone.characterId) || input.phone;
-      const latestContact = latestPhone.contacts.find((contact) => contact.id === input.contact.id && !contact.removedAt);
-      if (!latestContact) return;
-      if ((!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) && !input.character.characterApi?.enabled) {
-        setPhoneNotice("消息已发出；联系人会在看到后回复（请先配置 API）");
-        return;
-      }
-      setPhoneNotice(`${latestContact.remark || latestContact.name}正在回复…`);
-      const contactCharacter = latestContact.linkedCharacterId
-        ? characters.find((character) => character.id === latestContact.linkedCharacterId)
-        : characters.find((character) => character.id !== input.character.id && character.name === latestContact.name);
-      const reply = await generateCharacterPhoneContactReply({
-        phone: latestPhone,
-        contact: latestContact,
-        character: input.character,
-        contactCharacter,
-        settings,
-      });
-      if (!isCurrentPhone()) return;
-      if (!reply) {
-        setPhoneNotice("消息已发出，对方现在可能正忙，稍后再看看。");
-        return;
-      }
-      // Leave a small, consistent pause after the provider response so the
-      // contact does not feel like an always-online system bot.
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 700));
-      if (!isCurrentPhone()) return;
-      const savedPhone = getCharacterPhone(input.phone.ownerIdentityId, input.phone.characterId) || latestPhone;
-      const replySourceId = `phone-contact-reply-for-${input.outgoingMessageId}`;
-      if (savedPhone.threadMessages.some((message) => message.sourceMessageId === replySourceId)) return;
-      const repliedPhone = appendCharacterPhoneThreadMessage({
-        phone: savedPhone,
-        contactId: latestContact.id,
-        content: reply,
-        sender: "contact",
-        sourceMessageId: replySourceId,
-        recordActivity: false,
-        now: Date.now(),
-      });
-      const result = saveCharacterPhone(repliedPhone);
-      if (!result.success) {
-        setPhoneNotice("联系人回复生成了，但暂时无法保存聊天记录。");
-        return;
-      }
-      if (isCurrentPhone()) {
-        setPhone(repliedPhone);
-        setPhoneNotice("联系人已回复");
-      }
+    void enqueuePhoneReply({
+      phone: input.phone,
+      contactId: input.contact.id,
+      outgoingMessageId: input.outgoingMessageId,
+      read: () => getCharacterPhone(input.phone.ownerIdentityId, input.phone.characterId),
+      save: async (phone) => {
+        const saved = saveCharacterPhone(phone);
+        return saved.success ? await flushCharacterPhoneRepository() : saved;
+      },
+      generate: (phone, contact) => generateCharacterPhoneContactReply({
+        phone, contact, character: input.character, settings,
+        contactCharacter: contact.linkedCharacterId && contact.linkedCharacterId !== input.character.id
+          ? characters.find(character => character.id === contact.linkedCharacterId) : undefined,
+        contactNpc: contact.relationshipNetworkNpcId
+          ? relationshipNetworkNpcs.find(npc => npc.id === contact.relationshipNetworkNpcId && npc.ownerIdentityId === phone.ownerIdentityId) : undefined,
+      }),
+      notify: (notice) => window.dispatchEvent(new CustomEvent(PHONE_REPLY_UPDATED, { detail: {
+        ownerIdentityId: input.phone.ownerIdentityId, characterId: input.phone.characterId,
+        contactId: input.contact.id, notice,
+      } })),
     });
-    phoneReplyQueuesRef.current[queueKey] = task;
-    void task.then(
-      () => {
-        if (phoneReplyQueuesRef.current[queueKey] === task) delete phoneReplyQueuesRef.current[queueKey];
-      },
-      () => {
-        if (phoneReplyQueuesRef.current[queueKey] === task) delete phoneReplyQueuesRef.current[queueKey];
-      },
-    );
   };
 
   const sendAsCharacter = () => {
@@ -1813,17 +1781,22 @@ export default function AppCharacterPhone({
       !selectedCharacter
     )
       return;
+    const latestPhone = getCharacterPhone(currentPhone.ownerIdentityId, currentPhone.characterId);
+    if (!latestPhone || latestPhone.id !== currentPhone.id) { setPhoneNotice("手机资料已变更，请重新打开后发送"); return; }
     const now = Date.now();
-    const relation = (selectedContact.kind === "user" || selectedContact.source === "user") && selectedContact.relationId
+    const relation = isPhoneUserContact(selectedContact) && selectedContact.relationId
       ? relationships.find((item) => item.id === selectedContact.relationId
-        && (!selectedContact.userIdentityId || item.userIdentityId === selectedContact.userIdentityId)
+        && item.userIdentityId === selectedContact.userIdentityId
         && item.characterId === selectedCharacter.id)
       : undefined;
-    const sourceMessageId = (selectedContact.kind === "user" || selectedContact.source === "user") && relation && onSendMessage
+    const sourceMessageId = isPhoneUserContact(selectedContact) && relation && onSendMessage
       ? `phone-user-thread-${now}`
       : undefined;
+    if (isPhoneUserContact(selectedContact) && (!relation || !onSendMessage)) {
+      setPhoneNotice("该用户联系人的关系来源不完整，未发送消息"); return;
+    }
     const next = appendCharacterPhoneThreadMessage({
-      phone: currentPhone,
+      phone: latestPhone,
       contactId: selectedContact.id,
       content: draft,
       operatedByUser: true,
@@ -1843,7 +1816,7 @@ export default function AppCharacterPhone({
       discoveryAfterMs: 12 * 60 * 60 * 1000,
       discoveryAfterOpens: 3,
     }, now);
-    persistPhone(loggedNext);
+    if (!persistPhone(loggedNext)) return;
     if (sourceMessageId && relation && onSendMessage) {
       onSendMessage(createCharacterTextMessage({
         id: sourceMessageId,
@@ -1859,8 +1832,12 @@ export default function AppCharacterPhone({
     }
     void discoverPhoneActions(loggedNext, now).then((discoveredNext) => {
       if (discoveredNext !== loggedNext) {
-        persistPhone(discoveredNext);
-        setPhone(discoveredNext);
+        const latest = getCharacterPhone(loggedNext.ownerIdentityId, loggedNext.characterId);
+        if (!latest || latest.id !== loggedNext.id) return;
+        const merged = mergePhoneDiscovery(latest, loggedNext, discoveredNext);
+        saveCharacterPhone(merged);
+        if (mountedRef.current && phoneScopeRef.current.ownerIdentityId === merged.ownerIdentityId
+          && phoneScopeRef.current.characterId === merged.characterId) setPhone(merged);
       }
     });
     if (!sourceMessageId) {

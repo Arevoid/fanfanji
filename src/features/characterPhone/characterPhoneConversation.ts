@@ -1,5 +1,6 @@
 import { resolveCharacterTextSettings } from "../../domain/character/characterTextApiRouting";
 import { apiChat } from "../../utils/apiHelper";
+import type { RelationshipNetworkNpc } from "../../domain/relationshipNetwork/relationshipNetworkTypes";
 import type { Character, UserSettings } from "../../types";
 import type {
   CharacterPhoneContact,
@@ -13,6 +14,7 @@ export interface CharacterPhoneContactReplyInput {
   character: Character;
   /** A linked character gives the contact a real persona instead of a generic NPC voice. */
   contactCharacter?: Character;
+  contactNpc?: RelationshipNetworkNpc;
   settings?: UserSettings;
   now?: number;
 }
@@ -46,10 +48,12 @@ export function buildCharacterPhoneContactReplyPrompt(
     .filter((message) => message.contactId === input.contact.id && trim(message.content))
     .sort((left, right) => left.timestamp - right.timestamp)
     .slice(-12);
-  const contactName = input.contact.remark || input.contact.name;
-  const contactProfile = input.contactCharacter
+  const contactName = input.contact.name;
+  const contactProfile = input.contactCharacter && input.contactCharacter.id === input.contact.linkedCharacterId && input.contactCharacter.id !== input.character.id
     ? `联系人资料：姓名“${input.contactCharacter.name}”；人设：${trim(input.contactCharacter.personality, 1200)}；背景：${trim(input.contactCharacter.backstory, 1200)}`
-    : `联系人资料：姓名“${contactName}”；关系：${trim(input.contact.relation, 120)}。`;
+    : input.contactNpc && input.contactNpc.id === input.contact.relationshipNetworkNpcId && input.contactNpc.ownerIdentityId === input.phone.ownerIdentityId
+      ? `联系人资料：姓名“${input.contactNpc.name}”；人物简介：${trim(input.contactNpc.summary, 1600)}；性格：${trim(input.contactNpc.personality, 1200)}。`
+      : `联系人资料：姓名“${contactName}”；关系：${trim(input.contact.relation, 120)}。`;
   const transcript = recentMessages.length > 0
     ? recentMessages.map((message) => `- ${formatThreadMessage(message, input.character, input.contact)}`).join("\n")
     : "（这是刚建立的对话，还没有历史消息。）";
@@ -62,7 +66,7 @@ export function buildCharacterPhoneContactReplyPrompt(
     : "这是双方私聊；只生成联系人这一条回复。";
   return {
     message: `请生成角色手机聊天中联系人“${contactName}”看到新消息后的下一条短信。\n${contactProfile}\n发送消息的角色：${input.character.name}。\n关系：${trim(input.contact.relation, 120)}。\n当前时间戳：${now}。\n最近对话：\n${transcript}\n刚刚由角色发出的新消息：${latestMessage}\n${groupRule}`,
-    systemInstruction: `你正在模拟真实的人“${contactName}”，回复${input.character.name}手机里的聊天。${groupRule}
+    systemInstruction: `本轮唯一回复者是联系人“${contactName}”，不是手机主人“${input.character.name}”。你正在模拟真实的人“${contactName}”，回复${input.character.name}手机里的聊天。${groupRule}
 只输出一条可以直接显示在聊天气泡里的纯文字回复，控制在 1—3 句、400 字以内。根据联系人资料、关系和上下文自然回应，可以简短、延迟感、说自己正在忙或稍后再聊，但这一次必须给出回复。
 重要边界：这是角色与其好友的手机私聊，不是用户与${input.character.name}的主聊天。不要提及用户、模型、提示词、系统、马甲、代发、有人操作手机、账号异常或“下一次生活生成”；不要替${input.character.name}解释，也不要因为消息是由用户在角色手机里输入就立刻识破来源。把它当成${input.character.name}本人正常发来的消息。不要添加“联系人：”“回复：”等前缀，不要使用 Markdown 或 JSON。`,
     history: [],
@@ -91,10 +95,9 @@ export async function generateCharacterPhoneContactReply(
 ): Promise<string | null> {
   input = { ...input, settings: resolveCharacterTextSettings(input.settings, input.character) };
   const settings = input.settings;
-  if (!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) return null;
+  if (!settings?.apiKey?.trim() || !settings.selectedModel?.trim()) throw new Error("请先配置角色使用的文本 API");
   const prompt = buildCharacterPhoneContactReplyPrompt(input);
-  try {
-    const response = await apiChat({
+  const response = await apiChat({
       message: prompt.message,
       history: prompt.history,
       systemInstruction: prompt.systemInstruction,
@@ -103,11 +106,11 @@ export async function generateCharacterPhoneContactReply(
       apiEndpoint: settings.apiEndpoint,
       apiTemperature: settings.apiTemperature ?? 0.78,
       streamCompatible: settings.streamCompatible,
+      singleAttempt: true,
       purpose: "character_phone_generate",
       characterId: input.character.id,
     });
-    return normalizeCharacterPhoneContactReply(response.text);
-  } catch {
-    return null;
-  }
+  const reply = normalizeCharacterPhoneContactReply(response.text);
+  if (!reply) throw new Error("模型未返回有效的联系人回复");
+  return reply;
 }
