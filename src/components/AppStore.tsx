@@ -17,13 +17,13 @@ const APPS_LIST: AppItem[] = [
   {
     id: "now",
     name: "此刻",
-    category: "闈欐€佽绐楀拰瑙掕壊鐢熸椿瑙傚療",
-    icon: "馃懁",
+    category: "角色生活与旁观视角",
+    icon: "👁️",
     iconBg: "bg-rose-400",
     rating: 5.0,
-    reviews: "鍏ㄦ柊",
+    reviews: "全新",
     size: "5.2 MB",
-    description: "閫夋嫨涓€涓鑹诧紝浠ョ櫧瑙傝瑙掑伓鐒剁湅瑙佷粬鐢熸椿涓殑涓€灏忔銆傚彧灞曠ず褰撲笅鏄剧幇鐨勮涓庢兂娉曪紝淇濈暀鏈煡锛屼笉棰勬祴鏈潵銆?",
+    description: "选择一个角色，以旁观视角偶然看见他生活中的一小段。只展示当下显现的行为与想法，保留未知，不预测未来。",
   },
   {
     id: "character-phone",
