@@ -579,3 +579,6 @@ button, input, textarea, select {
 [data-app-surface][data-app-transitioning="true"] { background:var(--app-bg,#f7f7f5) !important; backdrop-filter:none !important; }
 [data-app-transitioning="true"] { pointer-events:none; will-change:transform,opacity; }
 @media (prefers-reduced-motion: reduce) { .app-opening-placeholder * { animation:none !important; } }
+
+[data-desktop-page-track] { backface-visibility:hidden; }
+[data-desktop-page-track][data-swiping="true"] { will-change:transform; }

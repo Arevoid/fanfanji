@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import { createSwipeFrameWriter, desktopSwipeOffset, desktopSwipePage } from "../src/features/home/desktopSwipe";
+const input={page:1,count:3,width:375,dx:-100,dy:10,velocity:0};
+assert.equal(desktopSwipePage(input),2);
+assert.equal(desktopSwipePage({...input,dx:-20,velocity:-.8}),2,"short deliberate flick advances");
+assert.equal(desktopSwipePage({...input,dx:-20,velocity:0}),1,"short slow drag snaps back");
+assert.equal(desktopSwipePage({...input,dx:12,dy:120,velocity:2}),1,"vertical gestures do not switch pages");
+assert.equal(desktopSwipePage({...input,velocity:1}),1,"reversing the finger cancels the advance");
+assert.equal(desktopSwipePage({...input,page:2}),2);
+assert.equal(desktopSwipePage({...input,page:0,dx:100}),0);
+assert.ok(desktopSwipeOffset(500,0,3,375)<=375*.22,"edge resistance is bounded");
+assert.equal(desktopSwipeOffset(-50,0,3,375),-50);
+let scheduled:(()=>void)|undefined;let frames=0;let writes:number[]=[];
+const motion=createSwipeFrameWriter(value=>writes.push(value),work=>{frames++;scheduled=work;return frames;},()=>{scheduled=undefined;});
+for(let i=0;i<100;i++)motion.move(i);
+assert.equal(frames,1,"100 pointer events schedule one frame, not 100 app renders");scheduled!();assert.deepEqual(writes,[99]);
+motion.move(123);motion.cancel();assert.equal(scheduled,undefined);assert.deepEqual(writes,[99],"release cancels stale drag frames before snapping");
+console.log("PASS desktop frame coalescing, flick thresholds, reversal, vertical gestures and edge bounds");

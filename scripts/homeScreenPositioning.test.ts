@@ -299,7 +299,7 @@ assert.match(appSource, /useLayoutEffect\(\(\) => \{[\s\S]*pageViewportRef\.curr
 assert.match(appSource, /if \(viewport && viewport !== grid\) observer\.observe\(viewport\)/);
 assert.match(appSource, /setPointerCapture\(pending\.pointerId\)/);
 assert.match(appSource, /placeItemWithDisplacement/);
-assert.match(appSource, /distance > 24/);
+assert.match(appSource, /!pending\.longPressed && distance > 10/, "moving a pressed icon hands over to swiping without the old 24px dead zone");
 assert.match(appSource, /DEFAULT_HOME_SCREEN_ITEMS/);
 assert.match(appSource, /id: HOME_WELCOME_WIDGET_ID, type: "widget", widgetType: "welcome", size: "1x4"/);
 assert.match(appSource, /widgetOpacity=\{settings\.widgetOpacity\}/, "widget opacity must be scoped inside each widget surface");

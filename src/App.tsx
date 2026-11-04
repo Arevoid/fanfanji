@@ -1,3 +1,4 @@
+import { useDesktopSwipeMotion } from "./features/home/useDesktopSwipeMotion";
 import { cachedModule, startAppPreloading, COMMON_APP_PRELOAD_ORDER } from "./features/home/appPreloading";
 import { useAppNavigation } from "./features/home/useAppNavigation";
 import { AppOpeningPlaceholder } from "./features/home/AppOpeningPlaceholder";
@@ -741,6 +742,7 @@ export default function App() {
   }, []);
 
   const [settingsOverlaysReady, setSettingsOverlaysReady] = useState(false);
+  const desktopInteractionRef = useRef(false);
 
   useEffect(() => {
     if (!settingsOverlaysReady) return;
@@ -749,7 +751,7 @@ export default function App() {
     const preloader = startAppPreloading({
       order: IDLE_PRELOAD_APP_IDS,
       load: id => APP_LOADERS[id]?.() || Promise.resolve(),
-      allowed: () => document.visibilityState !== "hidden" && navigator.onLine !== false && !connection?.saveData && !/^(slow-2g|2g|3g)$/.test(connection?.effectiveType || ""),
+      allowed: () => !desktopInteractionRef.current && document.visibilityState !== "hidden" && navigator.onLine !== false && !connection?.saveData && !/^(slow-2g|2g|3g)$/.test(connection?.effectiveType || ""),
       schedule: work => {
         if (idleWindow.requestIdleCallback) { const id = idleWindow.requestIdleCallback(work, {timeout:4000}); return () => idleWindow.cancelIdleCallback?.(id); }
         const id = window.setTimeout(work, 600); return () => window.clearTimeout(id);
@@ -757,8 +759,9 @@ export default function App() {
     });
     document.addEventListener("visibilitychange", preloader.wake);
     window.addEventListener("online", preloader.wake);
+    window.addEventListener("desktop-swipe-idle", preloader.wake);
     connection?.addEventListener("change", preloader.wake);
-    return () => { preloader.stop(); document.removeEventListener("visibilitychange",preloader.wake); window.removeEventListener("online",preloader.wake); connection?.removeEventListener("change",preloader.wake); };
+    return () => { preloader.stop(); document.removeEventListener("visibilitychange",preloader.wake); window.removeEventListener("online",preloader.wake); window.removeEventListener("desktop-swipe-idle",preloader.wake); connection?.removeEventListener("change",preloader.wake); };
   }, [settingsOverlaysReady]);
 
   const seedFreshDesktopDefaults = useRef(
@@ -2398,14 +2401,13 @@ export default function App() {
   };
 
   const [currentPage, setCurrentPage] = useState(0);
-  const [swipeOffset, setSwipeOffset] = useState(0);
   const [isEditingHomeScreen, setIsEditingHomeScreen] = useState(false);
   const [dragSession, setDragSession] = useState<DragSession | null>(null);
   const dragSessionRef = useRef<DragSession | null>(null);
   const [dragCurrent, setDragCurrent] = useState({ x: 0, y: 0 });
   const [homeLayoutError, setHomeLayoutError] = useState<string | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const swipeStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const pendingItemPressRef = useRef<{
     item: HomeScreenItem;
     startX: number;
@@ -2453,6 +2455,8 @@ export default function App() {
     ? homeScreenItems.find((item) => item.id === dragSession.itemId) || null
     : null;
   const visibleHomePageCount = getVisibleHomePageCount(homeScreenItems, isEditingHomeScreen);
+  const desktopSwipe = useDesktopSwipeMotion(currentPage, visibleHomePageCount, pageViewportRef, setCurrentPage);
+  const finishDesktopInteraction = () => { desktopInteractionRef.current = false; window.dispatchEvent(new Event("desktop-swipe-idle")); };
 
   useEffect(() => {
     writeJson("phone_homescreen_items", homeScreenItems);
@@ -2533,7 +2537,7 @@ export default function App() {
     e: React.PointerEvent<HTMLDivElement>,
     item: HomeScreenItem,
   ) => {
-    if ((e.target as HTMLElement).closest("[data-home-delete]")) return;
+    if ((e.target as HTMLElement).closest("[data-home-delete]") || (swipeStartRef.current && swipeStartRef.current.pointerId !== e.pointerId)) return;
     e.stopPropagation();
     const itemRect = e.currentTarget.getBoundingClientRect();
     pendingItemPressRef.current = {
@@ -2546,8 +2550,9 @@ export default function App() {
       pointerId: e.pointerId,
       targetElement: e.currentTarget,
     };
-    setDragCurrent({ x: e.clientX, y: e.clientY });
-    swipeStartRef.current = { x: e.clientX, y: e.clientY };
+    if (isEditingHomeScreen) setDragCurrent({ x: e.clientX, y: e.clientY });
+    desktopSwipe.begin(); desktopInteractionRef.current = true;
+    swipeStartRef.current = { x: e.clientX, y: e.clientY, pointerId:e.pointerId };
 
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
     if (!isEditingHomeScreen) {
@@ -2556,6 +2561,8 @@ export default function App() {
         const pending = pendingItemPressRef.current;
         if (pending?.item.id === item.id && pending.item.position) {
           pending.longPressed = true;
+          desktopSwipe.cancel();
+          setDragCurrent({x:pending.startX,y:pending.startY});
           try {
             pending.targetElement.setPointerCapture(pending.pointerId);
           } catch {
@@ -2677,7 +2684,7 @@ export default function App() {
     const activeSession = dragSessionRef.current;
     if (!activeSession && pending) {
       const distance = Math.hypot(e.clientX - pending.startX, e.clientY - pending.startY);
-      if (!pending.longPressed && distance > 24) {
+      if (!pending.longPressed && distance > 10) {
         if (longPressTimerRef.current) {
           clearTimeout(longPressTimerRef.current);
           longPressTimerRef.current = null;
@@ -2767,9 +2774,10 @@ export default function App() {
 
   useEffect(() => {
     const handleGlobalPointerMove = (e: PointerEvent) => {
+      if (swipeStartRef.current && swipeStartRef.current.pointerId !== e.pointerId) return;
       if (dragSessionRef.current || pendingItemPressRef.current) {
         handlePointerMove(e);
-        return;
+        if (dragSessionRef.current || pendingItemPressRef.current) return;
       }
 
       if (swipeStartRef.current) {
@@ -2778,6 +2786,7 @@ export default function App() {
         const distance = Math.hypot(dx, dy);
 
         if (distance > 10) {
+          suppressNextItemClickRef.current = true;
           // User is moving! Cancel any active long press timers
           if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
@@ -2785,14 +2794,12 @@ export default function App() {
           }
         }
 
-        // Update swipeOffset in real-time for physical feedback
-        if (Math.abs(dx) > 10) {
-          setSwipeOffset(dx);
-        }
+        if (desktopSwipe.move(dx,dy)) suppressNextItemClickRef.current = true;
       }
     };
 
     const handleGlobalPointerUp = (e: PointerEvent) => {
+      if (swipeStartRef.current && swipeStartRef.current.pointerId !== e.pointerId) return;
       if (longPressTimerRef.current) {
         clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = null;
@@ -2804,39 +2811,36 @@ export default function App() {
       if (swipeStartRef.current && !wasDragging) {
         const dx = e.clientX - swipeStartRef.current.x;
         const dy = e.clientY - swipeStartRef.current.y;
-
-        if (Math.abs(dx) > 50 && Math.abs(dy) < 100) {
-          const totalPages = getHighestOccupiedPage(homeScreenItems) + 1;
-          if (dx < -50 && currentPage < totalPages - 1) {
-            setCurrentPage(prev => prev + 1);
-          } else if (dx > 50 && currentPage > 0) {
-            setCurrentPage(prev => prev - 1);
-          }
-        }
-      }
+        desktopSwipe.end(dx,dy);
+      } else desktopSwipe.cancel();
       swipeStartRef.current = null;
-      setSwipeOffset(0);
+      finishDesktopInteraction();
+      setTimeout(() => { suppressNextItemClickRef.current = false; },0);
     };
     const handleGlobalPointerCancel = () => {
       if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
       pendingItemPressRef.current = null;
       swipeStartRef.current = null;
-      setSwipeOffset(0);
+      desktopSwipe.cancel();
+      finishDesktopInteraction();
       if (dragSessionRef.current) finishDrag(true);
     };
 
     window.addEventListener("pointermove", handleGlobalPointerMove);
     window.addEventListener("pointerup", handleGlobalPointerUp, { passive: true });
     window.addEventListener("pointercancel", handleGlobalPointerCancel, { passive: true });
+    window.addEventListener("blur", handleGlobalPointerCancel);
 
     return () => {
       window.removeEventListener("pointermove", handleGlobalPointerMove);
       window.removeEventListener("pointerup", handleGlobalPointerUp);
       window.removeEventListener("pointercancel", handleGlobalPointerCancel);
+      window.removeEventListener("blur", handleGlobalPointerCancel);
     };
   }, [dragSession, currentPage, homeScreenItems, homeGridRows, isEditingHomeScreen]);
 
   const handleDesktopPointerDown = (e: React.PointerEvent) => {
+    if (swipeStartRef.current && swipeStartRef.current.pointerId !== e.pointerId) return;
     if (
       (e.target as HTMLElement).closest(".grid-item") || 
       (e.target as HTMLElement).closest(".dock-container") ||
@@ -2850,7 +2854,8 @@ export default function App() {
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
 
     // Track swipe start on empty desktop as well
-    swipeStartRef.current = { x: e.clientX, y: e.clientY };
+    desktopSwipe.begin(); desktopInteractionRef.current = true;
+    swipeStartRef.current = { x: e.clientX, y: e.clientY, pointerId:e.pointerId };
 
     longPressTimerRef.current = setTimeout(() => {
       setIsEditingHomeScreen(true);
@@ -2866,6 +2871,7 @@ export default function App() {
   };
 
   const handleDesktopClick = (e: React.MouseEvent) => {
+    if (suppressNextItemClickRef.current) return;
     if (
       isEditingHomeScreen &&
       !(e.target as HTMLElement).closest(".grid-item") &&
@@ -5178,22 +5184,15 @@ export default function App() {
               {/* Multiple Pages Grid Section */}
               {(() => {
                 const totalPages = visibleHomePageCount;
-                let activeOffset = swipeOffset;
-                if (currentPage === 0 && activeOffset > 0) {
-                  activeOffset = Math.pow(activeOffset, 0.82); // elastic boundary feel
-                } else if (currentPage === totalPages - 1 && activeOffset < 0) {
-                  activeOffset = -Math.pow(-activeOffset, 0.82); // elastic boundary feel
-                }
                 return (
                   <div className="flex-1 min-h-0 overflow-hidden flex flex-col relative py-2 select-none">
                     <div ref={pageViewportRef} className="flex-1 min-h-0 overflow-hidden relative">
                       {/* Sliding track for page push effect */}
-                      <div 
+                      <div
+                        ref={desktopSwipe.trackRef}
+                        data-desktop-page-track
                         className="flex h-full w-full"
-                        style={{
-                          transform: `translateX(calc(-${currentPage * 100}% + ${activeOffset}px))`,
-                          transition: swipeOffset === 0 ? "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)" : "none"
-                        }}
+                        style={{ transition: "transform 240ms cubic-bezier(.2,.7,.2,1)" }}
                       >
                         {Array.from({ length: totalPages }).map((_, pageIdx) => {
                           const isHiddenNames = !!settings.hideAppNames;
@@ -5446,7 +5445,9 @@ export default function App() {
                         {Array.from({ length: totalPages }).map((_, i) => (
                           <button
                             key={i}
-                            onClick={() => setCurrentPage(i)}
+                            aria-label={`第${i+1}页桌面`}
+                            aria-current={i === currentPage ? "page" : undefined}
+                            onClick={(event) => { event.stopPropagation(); setCurrentPage(i); }}
                             className={`w-1.5 h-1.5 rounded-full transition-all duration-200 ${
                               i === currentPage 
                                 ? "bg-stone-800 scale-125" 
