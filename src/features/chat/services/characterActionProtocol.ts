@@ -10,6 +10,7 @@ export type CharacterActionType =
   | "change_avatar"
   | "send_image"
   | "send_voice"
+  | "send_red_packet"
   | "call"
   | "video_call"
   | "friend_request";
@@ -26,6 +27,10 @@ export interface CharacterActionDirective {
   reason?: string;
   /** Natural-language content hint for an executor such as Moments. */
   contentHint?: string;
+  /** Total amount in yuan for a character-authored red packet. */
+  amount?: number;
+  /** Greeting shown on a character-authored red packet. */
+  greeting?: string;
   /** Optional reference to a message/image/sticker in the current scope. */
   sourceMessageId?: string;
   /** Client sticker ID; the executor must validate it against the catalog. */
@@ -66,6 +71,7 @@ const ACTION_TYPES = new Set<CharacterActionType>([
   "change_avatar",
   "send_image",
   "send_voice",
+  "send_red_packet",
   "call",
   "video_call",
   "friend_request",
@@ -81,6 +87,16 @@ function optionalString(value: unknown, maxLength: number): string | undefined {
   return normalized && normalized.length <= maxLength ? normalized : undefined;
 }
 
+function optionalAmount(value: unknown): number | undefined {
+  const amount = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(value.trim())
+      : NaN;
+  if (!Number.isFinite(amount) || amount < 0.01 || amount > 10000) return undefined;
+  return Number(amount.toFixed(2));
+}
+
 function validateDirective(value: unknown): CharacterActionDirective | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
@@ -94,12 +110,17 @@ function validateDirective(value: unknown): CharacterActionDirective | undefined
   const id = optionalString(raw.id, 120);
   const reason = optionalString(raw.reason, 240);
   const contentHint = optionalString(raw.contentHint, 500);
+  const amount = optionalAmount(raw.amount);
+  const greeting = optionalString(raw.greeting, 120);
+  if (raw.type === "send_red_packet" && amount === undefined) return undefined;
   const sourceMessageId = optionalString(raw.sourceMessageId, 160);
   const stickerId = optionalString(raw.stickerId, 160);
   const stickerName = optionalString(raw.stickerName, 120);
   if (id) directive.id = id;
   if (reason) directive.reason = reason;
   if (contentHint) directive.contentHint = contentHint;
+  if (amount !== undefined) directive.amount = amount;
+  if (greeting) directive.greeting = greeting;
   if (sourceMessageId) directive.sourceMessageId = sourceMessageId;
   if (stickerId) directive.stickerId = stickerId;
   if (stickerName) directive.stickerName = stickerName;
@@ -232,6 +253,9 @@ export function formatCharacterActionPrompt(capabilities: readonly CharacterActi
       : "",
     allowed.includes("send_voice")
       ? "send_voice 只在用户明确要求语音/录音时使用；contentHint 必须是实际要发送的语音内容，动作会在本轮生成语音气泡。"
+      : "",
+    allowed.includes("send_red_packet")
+      ? "send_red_packet 只在用户明确要求你发红包时使用；必须同时提供 amount（0.01 到 10000 元）和 greeting。动作成功后才会生成真正的红包卡片，不要只发送“已经发了”等普通文字来冒充成功。"
       : "",
     allowed.includes("friend_request")
       ? "friend_request 只在用户明确要求重新添加/发送好友申请，或当前关系修复语境明确且角色决定主动申请时使用；contentHint 应是自然的申请备注。"

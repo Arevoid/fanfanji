@@ -399,6 +399,7 @@ Please read the feedback carefully and rewrite your response to perfectly match 
             ...(activeCharacter && !activeCharacter.isGroupChat ? ["change_avatar" as const] : []),
             ...(activeCharacter && !activeCharacter.isGroupChat && settings.enableProactiveImageGeneration === true && activeCharacter.enableProactiveImageGeneration === true && settings.enableImageGeneration === true && activeCharacter.enableImageGeneration === true ? ["send_image" as const] : []),
             "send_voice",
+            ...(activeCharacter && !activeCharacter.isGroupChat ? ["send_red_packet" as const] : []),
             ...(activeCharacter && !activeCharacter.isGroupChat ? ["friend_request" as const, "call" as const, "video_call" as const] : []),
           ])
           : undefined,

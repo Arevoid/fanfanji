@@ -70,4 +70,23 @@ for (const action of ["change_avatar", "send_image", "send_voice", "friend_reque
 }
 assert.match(extendedPrompt, /同一轮|本轮回复送达后/u);
 
+const redPacket = parseCharacterActionDirective({
+  text: `Take this. ${CHARACTER_ACTION_START}{"type":"send_red_packet","actor":"character","amount":"8.88","greeting":"for you"}${CHARACTER_ACTION_END}`,
+});
+assert.equal(redPacket.visibleText, "Take this.");
+assert.equal(redPacket.directive?.type, "send_red_packet");
+assert.equal(redPacket.directive?.amount, 8.88);
+assert.equal(redPacket.directive?.greeting, "for you");
+
+const missingRedPacketAmount = parseCharacterActionDirective({
+  text: `${CHARACTER_ACTION_START}{"type":"send_red_packet","actor":"character","greeting":"for you"}${CHARACTER_ACTION_END}`,
+});
+assert.equal(missingRedPacketAmount.directive, undefined);
+assert.equal(missingRedPacketAmount.error, "invalid_directive");
+
+const redPacketPrompt = formatCharacterActionPrompt(["send_red_packet"]);
+assert.match(redPacketPrompt, /send_red_packet/u);
+assert.match(redPacketPrompt, /amount/u);
+assert.match(redPacketPrompt, /greeting/u);
+
 console.log("PASS character action protocol");

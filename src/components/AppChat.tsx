@@ -3499,6 +3499,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             ...(activeCharacter && !activeCharacter.isGroupChat ? ["change_avatar" as const] : []),
             ...(activeCharacter && !activeCharacter.isGroupChat && isProactiveImageGenerationEnabled(settings, activeCharacter) ? ["send_image" as const] : []),
             "send_voice",
+            ...(activeCharacter && !activeCharacter.isGroupChat ? ["send_red_packet" as const] : []),
             ...(activeCharacter && !activeCharacter.isGroupChat ? ["friend_request" as const, "call" as const, "video_call" as const] : []),
           ])
           : undefined,
@@ -5227,6 +5228,24 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     const characterDeliveryBlocked = input.relationship
       ? isBlockedDeliveryDirection(input.relationship, "character_to_user")
       : false;
+    if (directive.type === "send_red_packet") {
+      const character = input.character || activeCharacter;
+      if (characterDeliveryBlocked || !input.relationship || !character || character.isGroupChat) {
+        return { status: "rejected" };
+      }
+      const amount = directive.amount;
+      if (!Number.isFinite(amount) || amount === undefined || amount < 0.01 || amount > 10000) {
+        return { status: "failed" };
+      }
+      const greeting = (directive.greeting || "\u606d\u559c\u53d1\u8d22\uff0c\u4e07\u4e8b\u5982\u610f")
+        .replace(/[|\r\n]+/gu, " ")
+        .trim()
+        .slice(0, 120) || "\u606d\u559c\u53d1\u8d22\uff0c\u4e07\u4e8b\u5982\u610f";
+      return {
+        status: "success",
+        messageMarkup: `[\u7ea2\u5305]|${amount.toFixed(2)}|${greeting}`,
+      };
+    }
     if (directive.type === "send_sticker") {
       if (characterDeliveryBlocked) return { status: "rejected" };
       const allStickers = stickerGroups.flatMap((group) => group.stickers);
