@@ -5561,7 +5561,11 @@ export default function App() {
               style={{
                 display: !activeApp || activeApp === "chat" ? "none" : undefined,
                  paddingTop: settings.hideStatusBar || activeApp === "character-phone" ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)",
-                paddingBottom: "env(safe-area-inset-bottom, 0px)"
+                // CharacterPhone renders its own status/navigation surfaces and
+                // must own the safe-area background too. Leaving the outer
+                // surface's bottom padding here exposes the desktop dock
+                // behind the unlock screen on iOS/WebKit.
+                paddingBottom: activeApp === "character-phone" ? "0px" : "env(safe-area-inset-bottom, 0px)"
               }}
             >
               <div className="w-full flex-1 min-h-0 relative">

@@ -282,6 +282,7 @@ assert.equal(inferCharacterPhoneLocation(["居住地：东京"], "未知").label
 assert.equal(inferCharacterPhoneLocation(["所在地：深圳"], "未知").timeZone, "Asia/Shanghai");
 assert.match(app, /get\("characterPhoneTest"\) === "1"/);
 assert.match(app, /setActiveApp\("character-phone"\)/);
+assert.match(app, /paddingBottom: activeApp === "character-phone" \? "0px" : "env\(safe-area-inset-bottom, 0px\)"/);
 assert.match(app, /resolveCharacterPhoneOwnerIdentityId\(\s*input\.ownerIdentityId/);
 assert.doesNotMatch(store, /name: "角色手机"/);
 
