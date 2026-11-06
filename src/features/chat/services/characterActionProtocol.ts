@@ -11,6 +11,10 @@ export type CharacterActionType =
   | "send_image"
   | "send_voice"
   | "send_red_packet"
+  | "send_location"
+  | "send_file"
+  | "send_music"
+  | "send_transfer"
   | "call"
   | "video_call"
   | "friend_request";
@@ -31,6 +35,17 @@ export interface CharacterActionDirective {
   amount?: number;
   /** Greeting shown on a character-authored red packet. */
   greeting?: string;
+  /** Location label for a character-authored location share. */
+  location?: string;
+  /** File title and optional note body for a character-authored file share. */
+  fileName?: string;
+  fileContent?: string;
+  /** Track metadata for a character-authored music share. */
+  musicTitle?: string;
+  musicArtist?: string;
+  /** Memo and settlement state for a character-authored transfer. */
+  memo?: string;
+  confirmed?: boolean;
   /** Optional reference to a message/image/sticker in the current scope. */
   sourceMessageId?: string;
   /** Client sticker ID; the executor must validate it against the catalog. */
@@ -72,6 +87,10 @@ const ACTION_TYPES = new Set<CharacterActionType>([
   "send_image",
   "send_voice",
   "send_red_packet",
+  "send_location",
+  "send_file",
+  "send_music",
+  "send_transfer",
   "call",
   "video_call",
   "friend_request",
@@ -112,7 +131,17 @@ function validateDirective(value: unknown): CharacterActionDirective | undefined
   const contentHint = optionalString(raw.contentHint, 500);
   const amount = optionalAmount(raw.amount);
   const greeting = optionalString(raw.greeting, 120);
-  if (raw.type === "send_red_packet" && amount === undefined) return undefined;
+  const location = optionalString(raw.location, 240);
+  const fileName = optionalString(raw.fileName, 160);
+  const fileContent = optionalString(raw.fileContent, 6000);
+  const musicTitle = optionalString(raw.musicTitle, 160);
+  const musicArtist = optionalString(raw.musicArtist, 160);
+  const memo = optionalString(raw.memo, 120);
+  const confirmed = typeof raw.confirmed === "boolean" ? raw.confirmed : undefined;
+  if ((raw.type === "send_red_packet" || raw.type === "send_transfer") && amount === undefined) return undefined;
+  if (raw.type === "send_location" && !location) return undefined;
+  if (raw.type === "send_file" && !fileName) return undefined;
+  if (raw.type === "send_music" && !musicTitle) return undefined;
   const sourceMessageId = optionalString(raw.sourceMessageId, 160);
   const stickerId = optionalString(raw.stickerId, 160);
   const stickerName = optionalString(raw.stickerName, 120);
@@ -121,6 +150,13 @@ function validateDirective(value: unknown): CharacterActionDirective | undefined
   if (contentHint) directive.contentHint = contentHint;
   if (amount !== undefined) directive.amount = amount;
   if (greeting) directive.greeting = greeting;
+  if (location) directive.location = location;
+  if (fileName) directive.fileName = fileName;
+  if (fileContent) directive.fileContent = fileContent;
+  if (musicTitle) directive.musicTitle = musicTitle;
+  if (musicArtist) directive.musicArtist = musicArtist;
+  if (memo) directive.memo = memo;
+  if (confirmed !== undefined) directive.confirmed = confirmed;
   if (sourceMessageId) directive.sourceMessageId = sourceMessageId;
   if (stickerId) directive.stickerId = stickerId;
   if (stickerName) directive.stickerName = stickerName;
@@ -256,6 +292,18 @@ export function formatCharacterActionPrompt(capabilities: readonly CharacterActi
       : "",
     allowed.includes("send_red_packet")
       ? "send_red_packet 只在用户明确要求你发红包时使用；必须同时提供 amount（0.01 到 10000 元）和 greeting。动作成功后才会生成真正的红包卡片，不要只发送“已经发了”等普通文字来冒充成功。"
+      : "",
+    allowed.includes("send_location")
+      ? "send_location 只在用户明确要求分享位置时使用；必须提供 location，不能凭空声称已经发送位置。"
+      : "",
+    allowed.includes("send_file")
+      ? "send_file 只在用户明确要求分享文件/笔记时使用；必须提供 fileName，可选 fileContent。"
+      : "",
+    allowed.includes("send_music")
+      ? "send_music 只在用户明确要求分享歌曲/音乐时使用；必须提供 musicTitle，可选 musicArtist；不得凭空编造本地音乐库 ID。"
+      : "",
+    allowed.includes("send_transfer")
+      ? "send_transfer 只在用户明确要求你转账时使用；必须提供 amount，可选 memo 和 confirmed。动作成功后才会生成真正的转账卡片，不要只发送“已经转了”等普通文字来冒充成功。"
       : "",
     allowed.includes("friend_request")
       ? "friend_request 只在用户明确要求重新添加/发送好友申请，或当前关系修复语境明确且角色决定主动申请时使用；contentHint 应是自然的申请备注。"

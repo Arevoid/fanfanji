@@ -3500,6 +3500,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             ...(activeCharacter && !activeCharacter.isGroupChat && isProactiveImageGenerationEnabled(settings, activeCharacter) ? ["send_image" as const] : []),
             "send_voice",
             ...(activeCharacter && !activeCharacter.isGroupChat ? ["send_red_packet" as const] : []),
+            ...(activeCharacter && !activeCharacter.isGroupChat ? ["send_location" as const, "send_file" as const, "send_music" as const, "send_transfer" as const] : []),
             ...(activeCharacter && !activeCharacter.isGroupChat ? ["friend_request" as const, "call" as const, "video_call" as const] : []),
           ])
           : undefined,
@@ -5244,6 +5245,47 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       return {
         status: "success",
         messageMarkup: `[\u7ea2\u5305]|${amount.toFixed(2)}|${greeting}`,
+      };
+    }
+    if (directive.type === "send_location" || directive.type === "send_file"
+      || directive.type === "send_music" || directive.type === "send_transfer") {
+      const character = input.character || activeCharacter;
+      if (characterDeliveryBlocked || !input.relationship || !character || character.isGroupChat) {
+        return { status: "rejected" };
+      }
+      const sanitizeLabel = (value: string | undefined, fallback: string, maxLength: number) => (value || fallback)
+        .replace(/[|\r\n]+/gu, " ")
+        .trim()
+        .slice(0, maxLength) || fallback;
+      if (directive.type === "send_location") {
+        const location = sanitizeLabel(directive.location, "\u672a\u547d\u540d\u4f4d\u7f6e", 240);
+        if (!directive.location?.trim()) return { status: "failed" };
+        return { status: "success", messageMarkup: `[\u4f4d\u7f6e]|${location}` };
+      }
+      if (directive.type === "send_file") {
+        const fileName = sanitizeLabel(directive.fileName, "\u672a\u547d\u540d\u6587\u4ef6", 160);
+        if (!directive.fileName?.trim()) return { status: "failed" };
+        const fileContent = directive.fileContent?.trim().slice(0, 6000) || "";
+        return {
+          status: "success",
+          messageMarkup: `[\u6587\u4ef6]|${fileName}|${encodeURIComponent(fileContent)}`,
+        };
+      }
+      if (directive.type === "send_music") {
+        const title = sanitizeLabel(directive.musicTitle, "\u672a\u77e5\u66f2\u76ee", 160);
+        if (!directive.musicTitle?.trim()) return { status: "failed" };
+        const artist = sanitizeLabel(directive.musicArtist, "\u672a\u77e5\u6b4c\u624b", 160);
+        return { status: "success", messageMarkup: `[\u97f3\u4e50]|${title}|${artist}` };
+      }
+      const amount = directive.amount;
+      if (!Number.isFinite(amount) || amount === undefined || amount < 0.01 || amount > 10000) {
+        return { status: "failed" };
+      }
+      const memo = sanitizeLabel(directive.memo, "\u8f6c\u8d26", 120);
+      const confirmed = directive.confirmed !== false;
+      return {
+        status: "success",
+        messageMarkup: `[\u8f6c\u8d26]|${amount.toFixed(2)}|${memo}|${confirmed ? "true" : "false"}`,
       };
     }
     if (directive.type === "send_sticker") {

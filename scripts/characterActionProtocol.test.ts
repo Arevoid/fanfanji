@@ -89,4 +89,26 @@ assert.match(redPacketPrompt, /send_red_packet/u);
 assert.match(redPacketPrompt, /amount/u);
 assert.match(redPacketPrompt, /greeting/u);
 
+const attachmentActions = [
+  { type: "send_location", location: "Home" },
+  { type: "send_file", fileName: "notes.txt", fileContent: "hello" },
+  { type: "send_music", musicTitle: "Song", musicArtist: "Artist" },
+  { type: "send_transfer", amount: 12.34, memo: "Dinner", confirmed: true },
+] as const;
+for (const action of attachmentActions) {
+  const parsed = parseCharacterActionDirective({
+    text: `${CHARACTER_ACTION_START}${JSON.stringify({ ...action, actor: "character" })}${CHARACTER_ACTION_END}`,
+  });
+  assert.equal(parsed.directive?.type, action.type);
+}
+const attachmentPrompt = formatCharacterActionPrompt([
+  "send_location",
+  "send_file",
+  "send_music",
+  "send_transfer",
+]);
+for (const action of ["send_location", "send_file", "send_music", "send_transfer"]) {
+  assert.match(attachmentPrompt, new RegExp(action, "u"));
+}
+
 console.log("PASS character action protocol");
