@@ -582,3 +582,8 @@ button, input, textarea, select {
 
 [data-desktop-page-track] { backface-visibility:hidden; }
 [data-desktop-page-track][data-swiping="true"] { will-change:transform; }
+/* CSS API v2 compatibility primitives. They expose richer structure without
+   changing the built-in composer layout or attachment-menu behavior. */
+.chat-composer__input-shell { display: contents; }
+.chat-tools[data-tools-open="false"] { display: none; }
+.chat-tool--more { display: none; }

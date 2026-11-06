@@ -68,10 +68,11 @@ const checks: Array<[string, boolean]> = [
   ["transfer CSS variables", ["--transfer-bg", "--transfer-title-color", "--transfer-money-color", "--transfer-status-color", "--transfer-note-color"].every((name) => css.includes(name))],
   ["payment font protection", css.includes("RedPacketPayFont")],
   ["semantic hooks preserve default layout", css.includes("display: contents") && css.includes("wechat-redpacket__icon") && css.includes("wechat-transfer__icon")],
-  ["red packet custom layer opt-in", css.includes("user-custom-redpacket-css") && css.includes("redpacket-card__wechat-layer")],
+  ["red packet custom layer is explicit only", css.includes("redpacket-card__default-layer { display: contents; }") && css.includes("redpacket-card__wechat-layer { display: none; }") && !css.includes("user-custom-redpacket-css")],
   ["quote semantic color hooks", [".message-quote__header", "--quote-header", ".message-quote__prefix { color: var(--quote-prefix", ".message-quote__author { color: var(--quote-author", ".message-quote__content", ".message-quote__reply-body"].every((name) => css.includes(name)) && css.includes(".message-quote__separator { display: none; }")],
   ["system notice and offline timeline hooks", css.includes(".chat-system-notice__text") && css.includes(".chat-offline-timeline-event__label")],
-  ["fixed payment dimensions", ["--payment-card-width: 240px", "--payment-card-height: 112px", "calc(100vw - 120px)"].every((name) => css.includes(name))],
+  ["tokenized payment dimensions", ["--payment-card-width: var(--chat-payment-width, 240px)", "--payment-card-height: var(--chat-payment-height, 112px)", "calc(100vw - 120px)"].every((name) => css.includes(name))],
+  ["transfer and red packet API tokens", ["--chat-transfer-bg", "--chat-transfer-amount-size", "--chat-redpacket-bg", "--chat-redpacket-amount-size"].every((name) => css.includes(name))],
   ["quote reply keeps sender bubble variants", ["message-quote-reply-wrapper--self", "message-quote-reply-wrapper--other", "message-quote__header"].every((name) => css.includes(name))],
 ];
 

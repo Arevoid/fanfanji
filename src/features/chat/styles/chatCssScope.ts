@@ -4,13 +4,27 @@ const NON_SELECTOR_AT_RULES = /^(?:@(?:-\w+-)?keyframes|@font-face|@page|@proper
 // this scope active while the sheet animates in prevents the underlying chat
 // from briefly falling back to the built-in theme.
 const SCOPE_SELECTOR = "#conv-screen.user-custom-chat-css #api-chat-screen > .chat-content-scope";
+export const CSS_API_V2_SCOPE_SELECTOR = "#conv-screen.user-custom-chat-css[data-chat-css-api=\"2\"]";
 const ROOT_CLASS_SELECTOR = /^(?:\.chat-page|\.chat-theme|\.style-liquid-glass|\.user-custom-chat-css)(?=[.#:\[\s]|$)/i;
 const RED_PACKET_CUSTOMIZATION_SELECTOR = /(?:\.(?:redpacket-card|chat-message--red-packet|wechat-redpacket|special-payment-card)(?:[-_][a-z0-9_-]+)?(?:[.#:\[\s>+~,(]|$)|--redpacket-[a-z0-9_-]+)/i;
 
 /**
- * Returns true only when a user stylesheet explicitly references the red
- * packet surface.  Generic chat CSS should leave the built-in red packet
- * card untouched; semantic red-packet markup is enabled on this signal.
+ * User chat CSS is a component theme, not a document stylesheet.  Imports and
+ * @page rules would escape the chat root (and can load arbitrary global CSS),
+ * so they are removed before selector scoping.  The remaining at-rules are
+ * intentionally preserved for responsive/component themes.
+ */
+export function sanitizeChatCssAtRules(css: string): string {
+  return css
+    .replace(/@import\s+(?:url\([^)]*\)|[^;])+\s*;/gi, "")
+    .replace(/@page(?:\s+[^\{]*)?\{[^{}]*\}/gi, "");
+}
+
+/**
+ * Returns true when a user stylesheet explicitly references the red-packet
+ * surface.  This is kept as a small API helper for diagnostics and future
+ * opt-in controls; it must not switch the built-in card's DOM layer by
+ * itself.
  */
 export function hasExplicitRedPacketChatCss(css: string | undefined): boolean {
   if (!css?.trim()) return false;
@@ -56,7 +70,7 @@ function splitCssSelectorList(value: string): string[] {
   return selectors;
 }
 
-function prefixSelectors(prelude: string): string {
+function prefixSelectors(prelude: string, scopeSelector = SCOPE_SELECTOR): string {
   const { leading, body } = splitLeadingCssTrivia(prelude);
   const trimmed = body.trim();
   if (!trimmed || trimmed.startsWith("@")) return prelude;
@@ -64,22 +78,22 @@ function prefixSelectors(prelude: string): string {
   const trailing = body.slice(selectorBody.length);
   const prefixed = splitCssSelectorList(selectorBody).map((selector) => {
     const current = selector.trim();
-    if (!current || current.startsWith(SCOPE_SELECTOR)) return selector;
-    if (current.startsWith("#conv-screen")) return selector.replace("#conv-screen", SCOPE_SELECTOR);
-    if (ROOT_CLASS_SELECTOR.test(current)) return selector.replace(current, `${SCOPE_SELECTOR}${current}`);
-    if (current === ":root") return selector.replace(current, SCOPE_SELECTOR);
-    if (current.startsWith(":root")) return selector.replace(current, `${SCOPE_SELECTOR}${current.slice(5)}`);
+    if (!current || current.startsWith(scopeSelector)) return selector;
+    if (current.startsWith("#conv-screen")) return selector.replace("#conv-screen", scopeSelector);
+    if (ROOT_CLASS_SELECTOR.test(current)) return selector.replace(current, `${scopeSelector}${current}`);
+    if (current === ":root") return selector.replace(current, scopeSelector);
+    if (current.startsWith(":root")) return selector.replace(current, `${scopeSelector}${current.slice(5)}`);
     if (/^(?:html|body)(?:\b|\s|[.#:\[])/i.test(current)) {
-      return selector.replace(current, `${SCOPE_SELECTOR}${current.slice(current.match(/^(?:html|body)/i)?.[0].length || 0)}`);
+      return selector.replace(current, `${scopeSelector}${current.slice(current.match(/^(?:html|body)/i)?.[0].length || 0)}`);
     }
-    return selector.replace(current, `${SCOPE_SELECTOR} ${current}`);
+    return selector.replace(current, `${scopeSelector} ${current}`);
   }).join(",");
   return `${leading}${prefixed}${trailing}`;
 }
 
 /** Prefixes user selectors while preserving declarations, comments and keyframes. */
-export function scopeUserChatCss(input: string): string {
-  const css = normalizeChatCssSyntax(input);
+function scopeChatCss(input: string, scopeSelector: string): string {
+  const css = sanitizeChatCssAtRules(normalizeChatCssSyntax(input));
   const output: string[] = [];
   const stack: Array<{ prefixRules: boolean; segmentStart: number }> = [{ prefixRules: true, segmentStart: 0 }];
   let emittedUntil = 0, comment = false, quote = "";
@@ -95,7 +109,7 @@ export function scopeUserChatCss(input: string): string {
       const prelude = css.slice(current.segmentStart, index);
       const atRule = splitLeadingCssTrivia(prelude).body.trim();
       const nested = NESTED_AT_RULES.test(atRule), nonSelector = NON_SELECTOR_AT_RULES.test(atRule);
-      output.push(css.slice(emittedUntil, current.segmentStart), current.prefixRules && !atRule.startsWith("@") && !nonSelector ? prefixSelectors(prelude) : prelude, "{", "");
+      output.push(css.slice(emittedUntil, current.segmentStart), current.prefixRules && !atRule.startsWith("@") && !nonSelector ? prefixSelectors(prelude, scopeSelector) : prelude, "{", "");
       stack.push({ prefixRules: current.prefixRules && (nested || !atRule.startsWith("@")) && !nonSelector, segmentStart: index + 1 });
       emittedUntil = index + 1;
       continue;
@@ -119,6 +133,16 @@ export function scopeUserChatCss(input: string): string {
   }
   output.push(css.slice(emittedUntil));
   return output.join("");
+}
+
+/** Legacy v1 scoping retained byte-for-byte for existing themes. */
+export function scopeUserChatCss(input: string): string {
+  return scopeChatCss(input, SCOPE_SELECTOR);
+}
+
+/** CSS API v2 scopes against the stable chat root so header, messages and composer are all reachable. */
+export function scopeUserChatCssV2(input: string): string {
+  return scopeChatCss(input, CSS_API_V2_SCOPE_SELECTOR);
 }
 
 function appendImportant(segment: string): string {

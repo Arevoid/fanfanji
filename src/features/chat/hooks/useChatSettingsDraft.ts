@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { sanitizeChatIcons, type Character, type ChatIconOverrides } from "../../../types";
+import { sanitizeChatIcons, type Character, type ChatIconOverrides, type ChatThemeEntry } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { isProactiveOfflineEnabled } from "../../../domain/schedule/proactiveOfflinePreference";
 import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from "../services/chatMemoryRetrievalSettings";
@@ -18,6 +18,8 @@ export function useChatSettingsDraft() {
   const [draftChatBg, setDraftChatBg] = useState<string | undefined>();
   const [draftCustomCss, setDraftCustomCss] = useState("");
   const [draftChatIcons, setDraftChatIcons] = useState<ChatIconOverrides>({});
+  const [draftChatThemes, setDraftChatThemes] = useState<ChatThemeEntry[]>([]);
+  const [draftSelectedChatThemeId, setDraftSelectedChatThemeId] = useState<string | null>(null);
   const [draftChatStylePreset, setDraftChatStylePreset] = useState<"default" | "floating-cute" | "liquid-glass">("default");
   const [draftEnableProactiveChat, setDraftEnableProactiveChat] = useState(false);
   const [draftEnableProactiveOffline, setDraftEnableProactiveOffline] = useState(false);
@@ -58,6 +60,10 @@ export function useChatSettingsDraft() {
     setDraftChatBg(character.chatBg);
     setDraftCustomCss(character.customChatCSS || character.customCss || "");
     setDraftChatIcons(sanitizeChatIcons(character.customChatIcons));
+    setDraftChatThemes(Array.isArray(character.chatThemes)
+      ? character.chatThemes.filter((theme): theme is ChatThemeEntry => Boolean(theme && typeof theme === "object" && typeof theme.id === "string" && typeof theme.name === "string" && typeof theme.css === "string"))
+      : []);
+    setDraftSelectedChatThemeId(null);
     setDraftChatStylePreset(character.chatStylePreset || "default");
     setDraftEnableProactiveChat(character.enableProactiveChat || false);
     setDraftEnableProactiveOffline(isProactiveOfflineEnabled(relationship));
@@ -98,6 +104,7 @@ export function useChatSettingsDraft() {
     draftGroupMemorySyncEnabled, setDraftGroupMemorySyncEnabled,
     draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
+    draftChatThemes, setDraftChatThemes, draftSelectedChatThemeId, setDraftSelectedChatThemeId,
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
     draftEnableProactiveCall, setDraftEnableProactiveCall,
     draftEnableStickerAssociation, setDraftEnableStickerAssociation,

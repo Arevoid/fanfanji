@@ -1,6 +1,6 @@
 import {resolveCharacterApiSettings} from "../../../domain/character/characterApiSettings";
 import type { Dispatch, SetStateAction } from "react";
-import type { Character, Message, UserSettings } from "../../../types";
+import type { Character, Message, UserSettings, ChatThemeEntry } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
 import { apiTranslate } from "../../../utils/apiHelper";
 import { containsNonChineseText } from "../../../utils/textLanguage";
@@ -34,6 +34,7 @@ interface UseChatSaveSettingsOptions {
   draftChatBg: any;
   draftCustomCss: any;
   draftChatIcons: any;
+  draftChatThemes: ChatThemeEntry[];
   draftChatStylePreset: any;
   draftEnableProactiveCall: any;
   draftEnableStickerAssociation: any;
@@ -77,7 +78,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
   const {
     draftCharacterApi,draftEnableAutoTranslate, draftEnableProactiveChat, draftProactiveStartTime, draftProactiveEndTime,
     draftEnableProactiveOffline, draftRemark, draftAvatar, draftIsPinned, draftGroupMemorySyncEnabled, draftChatBg, draftCustomCss,
-    draftChatIcons, draftChatStylePreset, draftEnableProactiveCall, draftEnableStickerAssociation, draftEnableMomentGeneration, draftProactiveChatInterval,
+    draftChatIcons, draftChatThemes, draftChatStylePreset, draftEnableProactiveCall, draftEnableStickerAssociation, draftEnableMomentGeneration, draftProactiveChatInterval,
     draftDisableBracketActions, draftHistoryMemoryLimit, draftChatHistoryPageSize, draftContextMemoryLimit, draftRetrievalHistoryLimit,
     draftArchiveTemplateType, draftEnableTimeAwareness,
     draftMinimaxVoiceId, draftMosslandVoiceId, draftElevenlabsVoiceId, draftMinimaxSpeed, draftVoiceFrequency,
@@ -126,6 +127,7 @@ export function useChatSaveSettings(options: UseChatSaveSettingsOptions) {
       customCss: draftCustomCss,
       customChatCSS: draftCustomCss,
       customChatIcons: draftChatIcons,
+      chatThemes: draftChatThemes,
       chatStylePreset: draftChatStylePreset,
       ...(activeCharacter.isGroupChat ? {} : {
         enableProactiveChat: draftEnableProactiveChat,

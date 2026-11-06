@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { MEMORY_BACKUP_KEYS } from "../features/settings/systemBackup";
 import { createPortal } from "react-dom";
-import { UserSettings, StylePreset, type ChatIconKey, type ChatIconOverrides, type OfflineStory, type UserSettingsUpdate } from "../types";
+import { UserSettings, StylePreset, type ChatIconOverrides, type OfflineStory, type UserSettingsUpdate } from "../types";
 import {
   ChevronLeft,
   ChevronRight,
@@ -66,6 +66,7 @@ import { useSettingsProfileDraftState } from "../features/settings/hooks/useSett
 import { useSettingsStyleDraftState } from "../features/settings/hooks/useSettingsStyleDraftState";
 import { useSettingsTransientUiState } from "../features/settings/hooks/useSettingsTransientUiState";
 import { useSettingsChatIconState } from "../features/settings/hooks/useSettingsChatIconState";
+import { useSettingsChatIconActions } from "../features/settings/hooks/useSettingsChatIconActions";
 import { useSettingsBackupUiState } from "../features/settings/hooks/useSettingsBackupUiState";
 import { useSystemBackupActions } from "../features/settings/hooks/useSystemBackupActions";
 import { useSettingsTransferActions } from "../features/settings/hooks/useSettingsTransferActions";
@@ -80,8 +81,8 @@ import { useSettingsIdentityActions } from "../features/settings/hooks/useSettin
 import { useSettingsClearDataActions } from "../features/settings/hooks/useSettingsClearDataActions";
 import { useSettingsGlobalFontActions } from "../features/settings/hooks/useSettingsGlobalFontActions";
 import { useSettingsScopedSave } from "../features/settings/hooks/useSettingsScopedSave";
-import { useSettingsChatIconActions } from "../features/settings/hooks/useSettingsChatIconActions";
 import { useSettingsCssTemplateCopy } from "../features/settings/hooks/useSettingsCssTemplateCopy";
+import { CHAT_CSS_API_V2_TEMPLATE } from "../features/chat/styles/chatCssApiV2Template";
 import { getSettingsPreviewBubbleBackground, getSettingsPreviewBubbleStyle } from "../features/settings/settingsPreviewStyle";
 import { McpSettingsPanel } from "../features/mcp/components/McpSettingsPanel";
 import { StorageCachePanel } from "../features/settings/components/StorageCachePanel";
@@ -123,13 +124,6 @@ const DEFAULT_PRESETS: StylePreset[] = [
     themeColor: "#3b82f6"
   },
   BERRY_GRID_PRESET,
-];
-
-const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
-  { key: "image", label: "图片" }, { key: "textImage", label: "文字图" }, { key: "voice", label: "语音" },
-  { key: "sticker", label: "表情" }, { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" },
-  { key: "location", label: "位置" }, { key: "call", label: "通话" }, { key: "plus", label: "加号" },
-  { key: "sendOnly", label: "发送1（仅发送）" }, { key: "sendReply", label: "发送2（发送并回复）" }, { key: "stop", label: "停止" },
 ];
 
 const GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页面；设置页和其他应用不会应用本样式。 */
@@ -366,6 +360,7 @@ export default function AppSettings({
   const [iconUploadMessage, setIconUploadMessage] = React.useState("");
   const [chatEnterKeyNewline, setChatEnterKeyNewline] = React.useState(settings.chatEnterKeyNewline === true);
   const [globalCssTemplateCopied, setGlobalCssTemplateCopied] = React.useState(false);
+  const chatThemeFileInputRef = React.useRef<HTMLInputElement>(null);
 
   const { isPwaInstallable, isStandalone, handlePwaInstall } = usePwaInstall();
 
@@ -529,6 +524,9 @@ export default function AppSettings({
   const ttsEmotionCapability = getTtsEmotionCapability(ttsProvider, ttsProvider === "minimax" ? minimaxModel : ttsProvider === "mossland" ? mosslandModel : elevenlabsModel);
 
   const { handleSave, handleSaveAsync } = useSettingsScopedSave({ onSaveSettings, onSaveSettingsAsync });
+  // Keep the legacy action hook wired for imported settings compatibility.
+  // The chat icon override editor itself is intentionally not rendered here.
+  useSettingsChatIconActions({ chatIcons, setChatIcons, handleSave });
 
   const {
     handleExportChatTheme,
@@ -552,10 +550,8 @@ export default function AppSettings({
     handleSave,
   });
 
-  const { updateChatIcon } = useSettingsChatIconActions({ chatIcons, setChatIcons, handleSave });
-
   const { copyGlobalChatCssTemplate } = useSettingsCssTemplateCopy({
-    template: GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE,
+    template: CHAT_CSS_API_V2_TEMPLATE,
     setCopied: setGlobalChatCssTemplateCopied,
   });
   const { copyGlobalChatCssTemplate: copyGlobalCssTemplate } = useSettingsCssTemplateCopy({
@@ -2424,20 +2420,38 @@ export default function AppSettings({
                         {globalChatCssTemplateCopied ? "已复制" : "复制模板"}
                       </button>
                     </div>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">用于修改所有聊天页面视觉效果，包括背景、导航、气泡、消息、输入区域等。</p>
-                    <textarea rows={5} value={chatGlobalCSS} onChange={(e) => { setChatGlobalCSS(e.target.value); handleSave({ chatGlobalCSS: e.target.value }); }} placeholder={GLOBAL_CHAT_CSS_EXAMPLE_TEMPLATE} className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed" />
+                    <p className="text-[10px] text-slate-400 leading-relaxed">用于修改所有聊天页面视觉效果，包括背景、导航、气泡、消息、输入区域等。CSS API 采用统一兼容模式，旧版主题导入后会自动按当前规则处理。</p>
+                    <textarea rows={8} value={chatGlobalCSS} onChange={(e) => { setChatGlobalCSS(e.target.value); handleSave({ chatGlobalCSS: e.target.value, chatCssApiVersion: 2 }); }} placeholder={CHAT_CSS_API_V2_TEMPLATE} className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-y leading-relaxed" />
                   </div>
 
                   <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <div><span className="text-xs font-bold text-slate-700">聊天功能图标</span><p className="text-[10px] text-slate-400 leading-relaxed mt-1">填写图片 URL 后替换默认图标；角色覆盖优先于这里的全局配置。底部工具栏可在 CSS 中分别调整外框大小（--chat-attachment-icon-size）和内部图片大小（--chat-attachment-glyph-size）。</p></div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {CHAT_ICON_FIELDS.map(({ key, label }) => <label key={key} className="space-y-1"><span className="text-[10px] font-semibold text-slate-500">{label}图标</span><input value={chatIcons[key] || ""} onChange={(e) => updateChatIcon(key, e.target.value)} placeholder="图片 URL（留空用默认）" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" /></label>)}
+                    <div>
+                      <span className="text-xs font-bold text-slate-700">聊天主题</span>
+                      <p className="text-[10px] text-slate-400 leading-relaxed mt-1">导入兼容 TXT、DOCX 与旧版 JSON；导出默认 DOCX。</p>
                     </div>
-                  </div>
-
-                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
-                    <div><span className="text-xs font-bold text-slate-700">导入 / 导出聊天主题</span><p className="text-[10px] text-slate-400 leading-relaxed mt-1">主题文件仅包含全局聊天 CSS 与全局聊天图标配置。</p></div>
-                    <div className="flex gap-2"><button type="button" onClick={handleExportChatTheme} className="flex-1 py-2 rounded-lg bg-slate-900 text-white text-[10px] font-bold">导出 JSON</button><label className="flex-1 py-2 rounded-lg bg-slate-100 text-slate-700 text-[10px] font-bold text-center cursor-pointer">导入 JSON<input type="file" accept="application/json,.json" onChange={handleImportChatTheme} className="hidden" /></label></div>
+                    <input
+                      ref={chatThemeFileInputRef}
+                      type="file"
+                      accept=".txt,.docx,.json,.css,text/plain,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/css"
+                      onChange={handleImportChatTheme}
+                      className="hidden"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => chatThemeFileInputRef.current?.click()}
+                        className="min-w-0 rounded-lg bg-slate-800 px-3 py-2 text-[10px] font-semibold text-white transition-colors hover:bg-slate-700"
+                      >
+                        导入主题
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { void handleExportChatTheme(); }}
+                        className="min-w-0 rounded-lg bg-white px-3 py-2 text-[10px] font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
+                      >
+                        导出主题
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

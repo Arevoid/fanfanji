@@ -1,18 +1,18 @@
-import { useState, type ReactNode } from "react";
+import { useState, type HTMLAttributes, type ReactNode } from "react";
 import type { FormEvent } from "react";
 import { ArrowUp, Plus, Send, Square } from "lucide-react";
 import ChatIcon from "../../../components/ChatIcon";
 import type { Sticker, StickerGroup } from "../../../types";
 import { getStickerRecommendations } from "../services/stickerAssociation";
 
-interface ChatComposerProps {
+interface ChatComposerProps extends HTMLAttributes<HTMLDivElement> {
   className: string;
   quotePreview?: ReactNode;
   children: ReactNode;
 }
 
-export function ChatComposer({ className, quotePreview, children }: ChatComposerProps) {
-  return <div className={className}>{quotePreview}{children}</div>;
+export function ChatComposer({ className, quotePreview, children, ...props }: ChatComposerProps) {
+  return <div className={`${className} chat-composer`} {...props}>{quotePreview}{children}</div>;
 }
 
 interface ChatInputBarProps {
@@ -88,7 +88,11 @@ export function ChatInputBar({
   };
 
   return (
-    <div className="w-full min-w-0">
+    <div
+      className="w-full min-w-0 chat-composer__interactive"
+      data-has-text={hasText ? "true" : "false"}
+      data-reply-state={isReplyInFlight ? "generating" : isTyping ? "busy" : "idle"}
+    >
       {stickerRecommendations.length > 0 && (
         <div
           className="chat-composer__sticker-recommendations flex w-full min-w-0 gap-2 overflow-x-auto py-2.5 scrollbar-none animate-slide-up"
@@ -126,49 +130,56 @@ export function ChatInputBar({
           submitOnly(event);
         }}
         className="w-full min-w-0 max-w-full box-border px-3 py-2 flex items-center gap-2 chat-composer__form"
+        data-has-text={hasText ? "true" : "false"}
       >
       <button
         type="button"
         onClick={onToggleAttach}
         className={`w-10 h-10 transition-all shrink-0 flex items-center justify-center cv-func-btn toggle-tools-btn chat-action-btn chat-composer__button chat-composer__attach-button ${showAttachPanel ? "chat-composer__button--open rotate-45" : "chat-composer__button--idle"}`}
         title="附加菜单"
+        aria-label={showAttachPanel ? "关闭附加功能" : "打开附加功能"}
+        aria-controls="chat-composer-tools"
+        aria-expanded={showAttachPanel}
       >
         <span className="cv-plus-icon flex items-center justify-center w-full h-full">
           <ChatIcon src={getChatIcon("plus")} className="w-3.5 h-3.5"><Plus className="w-3.5 h-3.5" /></ChatIcon>
         </span>
       </button>
 
-      <textarea
-        value={inputText}
-        onChange={(event) => setInputText(event.target.value)}
-        onKeyDown={(event) => {
-          if (!shouldSendChatInputOnEnter({
-            key: event.key,
-            shiftKey: event.shiftKey,
-            chatEnterKeyNewline,
-            hasText,
-            isTyping,
-          })) return;
-          event.preventDefault();
-          submitOnly();
-        }}
-        placeholder={placeholder}
-        rows={1}
-        className="min-w-0 w-0 flex-1 h-10 min-h-10 max-h-24 resize-none overflow-y-auto px-4 text-xs chat-input chat-composer__input"
-      />
+      <div className="chat-composer__input-shell" data-has-text={hasText ? "true" : "false"}>
+        <textarea
+          value={inputText}
+          onChange={(event) => setInputText(event.target.value)}
+          onKeyDown={(event) => {
+            if (!shouldSendChatInputOnEnter({
+              key: event.key,
+              shiftKey: event.shiftKey,
+              chatEnterKeyNewline,
+              hasText,
+              isTyping,
+            })) return;
+            event.preventDefault();
+            submitOnly();
+          }}
+          placeholder={placeholder}
+          rows={1}
+          className="min-w-0 w-0 flex-1 h-10 min-h-10 max-h-24 resize-none overflow-y-auto px-4 text-xs chat-input chat-composer__input"
+        />
 
-      <button
-        type="button"
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => submitOnly()}
-        disabled={!hasText || isTyping}
-        className="w-10 h-10 transition-all flex items-center justify-center shrink-0 cv-send-only-btn chat-composer__button chat-composer__send-only-button chat-composer__send-button"
-        title="仅发送消息 (不立即得到回复)"
-      >
-        <span className="cv-send-only-icon flex items-center justify-center w-full h-full">
-          <ChatIcon src={getChatIcon("sendOnly")} className="w-4 h-4"><ArrowUp className="w-4 h-4 stroke-[2.5]" /></ChatIcon>
-        </span>
-      </button>
+        <button
+          type="button"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => submitOnly()}
+          disabled={!hasText || isTyping}
+          className="w-10 h-10 transition-all flex items-center justify-center shrink-0 cv-send-only-btn chat-composer__button chat-composer__send-only-button chat-composer__send-button"
+          title="仅发送消息 (不立即得到回复)"
+          aria-label="仅发送消息，不立即获取回复"
+        >
+          <span className="cv-send-only-icon flex items-center justify-center w-full h-full chat-composer__button-icon">
+            <ChatIcon src={getChatIcon("sendOnly")} className="w-4 h-4"><ArrowUp className="w-4 h-4 stroke-[2.5]" /></ChatIcon>
+          </span>
+        </button>
+      </div>
 
       <button
         type="button"
@@ -176,6 +187,8 @@ export function ChatInputBar({
         disabled={!isReplyInFlight && isTyping}
         className={`w-10 h-10 transition-all flex items-center justify-center shrink-0 send-button chat-composer__button chat-composer__send-reply-button chat-composer__send-button ${isReplyInFlight ? "chat-composer__stop-reply-button" : ""}`}
         title={isReplyInFlight ? "停止生成回复" : "发送消息并获取回复"}
+        aria-label={isReplyInFlight ? "停止生成回复" : "发送消息并获取回复"}
+        data-action={isReplyInFlight ? "stop-reply" : "send-and-reply"}
       >
         <span className="cv-send-reply-icon flex items-center justify-center w-full h-full">
           {isReplyInFlight

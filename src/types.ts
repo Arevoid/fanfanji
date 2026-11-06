@@ -6,9 +6,21 @@ export interface CharacterReference {
   content: string;
 }
 
-export const CHAT_ICON_KEYS = ["image", "textImage", "voice", "sticker", "redPacket", "transfer", "location", "call", "plus", "send", "sendOnly", "sendReply", "stop"] as const;
+export const CHAT_ICON_KEYS = [
+  "image", "textImage", "camera", "voice", "sticker", "redPacket", "transfer",
+  "location", "call", "video", "file", "favorite", "screenShare", "plus", "more",
+  "close", "back", "menu", "profile", "send", "sendOnly", "sendReply", "stop",
+] as const;
 export type ChatIconKey = typeof CHAT_ICON_KEYS[number];
 export type ChatIconOverrides = Partial<Record<ChatIconKey, string>>;
+
+/** A user-imported chat theme stored with the character profile. */
+export interface ChatThemeEntry {
+  id: string;
+  name: string;
+  css: string;
+  createdAt: number;
+}
 
 /** Keeps persisted/imported icon configuration safe for direct image rendering. */
 export function sanitizeChatIcons(value: unknown): ChatIconOverrides {
@@ -67,6 +79,8 @@ export interface Character {
   scheduledProactiveTime?: number;
   /** CSS scoped to this character's active chat conversation. */
   customChatCSS?: string;
+  /** Imported, reusable CSS themes for this character's chat page. */
+  chatThemes?: ChatThemeEntry[];
   /** Per-character overrides for chat function icon resources. */
   customChatIcons?: ChatIconOverrides;
   /** @deprecated Use customChatCSS for chat-only styling. */
@@ -786,6 +800,8 @@ export interface UserSettings {
   globalCss: string; // Custom global CSS
   /** CSS scoped to active chat conversation screens only. */
   chatGlobalCSS?: string;
+  /** Selects the selector contract used to scope custom chat CSS. Legacy data defaults to v1. */
+  chatCssApiVersion?: 1 | 2;
   /** Globally configured chat function icon resources. */
   chatIcons?: ChatIconOverrides;
   globalChatStylePreset?: "default" | "floating-cute" | "liquid-glass";

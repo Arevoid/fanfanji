@@ -15,10 +15,19 @@
   --quote-separator: var(--quote-header);
   --quote-content: var(--text-secondary);
   --quote-reply-text: var(--chat-text, var(--text-primary));
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding-right: 2.25rem;
 }
 
 .message-quote__content {
   display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   background: transparent;
   border: 2px solid var(--quote-border);
   border-radius: 1.35rem;
@@ -29,6 +38,31 @@
   color: var(--quote-header, #64748b);
   font-size: 0.7rem;
   font-weight: 700;
+}
+
+.message-quote__jump {
+  position: absolute;
+  z-index: 1;
+  top: 0.1rem;
+  right: 0;
+  display: inline-flex;
+  width: 1.75rem;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  min-height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--quote-header, #64748b);
+}
+
+.message-quote__jump svg {
+  width: 1rem;
+  height: 1rem;
 }
 .message-quote__prefix { color: var(--quote-prefix, inherit); }
 .message-quote__author { color: var(--quote-author, inherit); }
@@ -47,6 +81,17 @@
 .message-quote__reply-body {
   margin-top: 0.75rem;
   color: var(--quote-reply-text, var(--chat-text, var(--text-primary)));
+}
+
+.chat-message--quote-highlight {
+  outline: 2px solid var(--chat-quote-highlight-color, var(--accent, #3b82f6));
+  outline-offset: 3px;
+  animation: chat-quote-highlight 1.2s ease-out;
+}
+
+@keyframes chat-quote-highlight {
+  from { outline-color: var(--chat-quote-highlight-color, var(--accent, #3b82f6)); }
+  to { outline-color: transparent; }
 }
 
 .message-quote-reply-wrapper {
@@ -70,8 +115,8 @@
 }
 
 .special-payment-card {
-  --payment-card-width: 240px;
-  --payment-card-height: 112px;
+  --payment-card-width: var(--chat-payment-width, 240px);
+  --payment-card-height: var(--chat-payment-height, 112px);
   position: relative;
   box-sizing: border-box;
   display: grid;
@@ -84,8 +129,8 @@
   max-height: var(--payment-card-height);
   flex: 0 0 auto;
   overflow: hidden;
-  padding: 14px 16px 12px;
-  border-radius: 18px;
+  padding: var(--chat-payment-content-padding, 14px 16px 12px);
+  border-radius: var(--chat-payment-radius, 18px);
   box-shadow: 0 10px 24px var(--shadow-color);
   cursor: pointer;
   transition: transform 150ms ease, filter 150ms ease;
@@ -95,7 +140,7 @@
 .special-payment-card:active { transform: scale(0.99); }
 
 .redpacket-card {
-  --redpacket-bg: linear-gradient(135deg, #0d1b1e, #101d20 72%, #17292c);
+  --redpacket-bg: var(--chat-redpacket-bg, linear-gradient(135deg, #0d1b1e, #101d20 72%, #17292c));
   --redpacket-title-color: #f8fafc;
   --redpacket-money-color: #ffffff;
   --redpacket-status-color: #d7dde0;
@@ -110,15 +155,15 @@
  * these dimensions scoped to red packets so transfer cards retain their
  * existing, smaller presentation. */
 .redpacket-card {
-  --payment-card-width: 175px;
-  --payment-card-height: 92px;
+  --payment-card-width: var(--chat-redpacket-width, 175px);
+  --payment-card-height: var(--chat-redpacket-height, 92px);
   width: min(var(--payment-card-width), calc(100vw - 48px));
-  min-width: min(175px, calc(100vw - 48px));
+  min-width: min(var(--payment-card-width), calc(100vw - 48px));
   height: var(--payment-card-height);
   min-height: var(--payment-card-height);
   max-height: var(--payment-card-height);
   padding: 11px 12px 9px;
-  border-radius: 12px;
+  border-radius: var(--chat-redpacket-radius, 12px);
   grid-template-rows: auto auto auto;
   gap: 0;
   background: var(--redpacket-bg);
@@ -132,19 +177,12 @@
 }
 
 /* The built-in card remains the default.  A semantic layer is mounted beside
- * it so a user can opt into a custom red-packet layout without changing the
- * familiar card for unrelated chat CSS. */
+ * it so a user can opt into a custom red-packet layout explicitly.  Merely
+ * styling .redpacket-card must never replace this layer. */
 .redpacket-card__default-layer { display: contents; }
 .redpacket-card__wechat-layer { display: none; }
 
-#conv-screen.user-custom-redpacket-css .redpacket-card__default-layer {
-  display: none !important;
-}
-#conv-screen.user-custom-redpacket-css .redpacket-card__wechat-layer {
-  display: contents !important;
-}
-
-/* Theme hooks are inert until the semantic layer is explicitly enabled. */
+/* Theme hooks stay inert until a user explicitly enables the semantic layer. */
 .wechat-redpacket__icon,
 .wechat-transfer__icon { display: none; }
 .wechat-redpacket__content,
@@ -341,17 +379,115 @@
 }
 
 .transfer-card {
-  --transfer-bg: linear-gradient(135deg, #0f766e, #0891b2);
-  --transfer-title-color: #ecfeff;
+  --payment-card-width: var(--chat-transfer-width, var(--chat-redpacket-width, 175px));
+  --payment-card-height: var(--chat-transfer-height, var(--chat-redpacket-height, 92px));
+  --transfer-bg: var(--chat-transfer-bg, linear-gradient(135deg, #0d1b1e, #101d20 72%, #17292c));
+  --transfer-title-color: #f8fafc;
   --transfer-money-color: #ffffff;
-  --transfer-status-color: #a5f3fc;
-  --transfer-note-color: rgba(236, 254, 255, 0.78);
+  --transfer-status-color: #d7dde0;
+  --transfer-note-color: rgba(241, 245, 249, 0.88);
+  --transfer-status-bg: #f5f7f4;
+  --transfer-status-text: #102124;
+  width: min(var(--payment-card-width), calc(100vw - 48px));
+  min-width: min(var(--payment-card-width), calc(100vw - 48px));
+  height: var(--payment-card-height);
+  min-height: var(--payment-card-height);
+  max-height: var(--payment-card-height);
+  padding: 11px 12px 9px;
+  border-radius: var(--chat-redpacket-radius, 12px);
+  grid-template-rows: auto auto auto;
+  gap: 0;
   background: var(--transfer-bg);
   color: var(--transfer-title-color);
+  text-align: left;
 }
 
-.transfer-card[data-status="confirmed"] { filter: saturate(0.55) opacity(0.78); }
-.transfer-card[data-status="refunded"] { --transfer-bg: linear-gradient(135deg, #475569, #64748b); filter: grayscale(0.45); }
+.transfer-card__default-layer { display: contents; }
+
+.transfer-card .special-payment-card__top {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+
+.transfer-card .special-payment-card__title {
+  color: var(--transfer-title-color);
+  font-size: 0.66rem;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.transfer-card .special-payment-card__status {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--transfer-status-bg);
+  color: var(--transfer-status-text);
+  font-size: 0.46rem;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.transfer-card .special-payment-card__money {
+  align-self: start;
+  justify-self: start;
+  width: 100%;
+  margin-top: 9px;
+  color: var(--transfer-money-color);
+  font-size: 1.3rem;
+  line-height: 0.95;
+  letter-spacing: 0.01em;
+  text-align: left;
+}
+
+.transfer-card .special-payment-card__note {
+  align-self: start;
+  justify-self: start;
+  width: 100%;
+  margin-top: 4px;
+  color: var(--transfer-note-color);
+  font-size: 0.58rem;
+  line-height: 1.2;
+  text-align: left;
+  white-space: normal;
+}
+
+.transfer-card .wechat-transfer__footer {
+  top: 3px;
+  right: 9px;
+  bottom: auto;
+  color: #c7d0cf;
+  font-family: "RedPacketPayFont", "Aidian SignatureTi Marker pen -Medium", "Segoe Script", "Bradley Hand", cursive !important;
+  font-size: 1.75rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1;
+  opacity: 0.72;
+  transform: rotate(-8deg);
+  transform-origin: right top;
+}
+
+.transfer-card[data-status="confirmed"] {
+  --transfer-bg: linear-gradient(135deg, #4b5757, #687170 72%, #7b8582);
+  --transfer-title-color: #e8eeee;
+  --transfer-money-color: #f5f8f7;
+  --transfer-status-color: #59615f;
+  --transfer-note-color: rgba(232, 238, 238, 0.86);
+  --transfer-status-bg: #d7ddda;
+  --transfer-status-text: #59615f;
+  filter: saturate(0.55) opacity(0.75);
+}
+
+.transfer-card[data-status="refunded"] {
+  --transfer-bg: linear-gradient(135deg, #475569, #64748b);
+  --transfer-title-color: #f1f5f9;
+  --transfer-money-color: #ffffff;
+  --transfer-status-color: #e2e8f0;
+  --transfer-note-color: rgba(241, 245, 249, 0.86);
+  --transfer-status-bg: #e2e8f0;
+  --transfer-status-text: #475569;
+  filter: grayscale(0.45);
+}
 
 .special-payment-card__top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; min-width: 0; padding: 0; }
 .special-payment-card__title { color: var(--redpacket-title-color, var(--transfer-title-color)); font-size: 0.75rem; font-weight: 700; }
@@ -359,3 +495,16 @@
 .special-payment-card__money { align-self: center; color: var(--redpacket-money-color, var(--transfer-money-color)); font-size: 1.4rem; font-weight: 800; line-height: 1; padding: 0; }
 .special-payment-card__note { color: var(--redpacket-note-color, var(--transfer-note-color)); font-size: 0.72rem; min-width: 0; overflow: hidden; padding: 0; text-overflow: ellipsis; white-space: nowrap; }
 .special-payment-card__brand { position: absolute; right: 16px; bottom: 12px; color: var(--redpacket-status-color, var(--transfer-status-color)); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; opacity: 0.52; }
+.transfer-card .wechat-transfer__icon {
+  display: var(--chat-transfer-icon-display, none);
+  width: var(--chat-transfer-icon-size, 2rem);
+  height: var(--chat-transfer-icon-size, 2rem);
+  flex: 0 0 auto;
+}
+.transfer-card .wechat-transfer__amount { font-size: var(--chat-transfer-amount-size, 1.3rem); }
+.transfer-card .wechat-transfer__footer {
+  min-height: var(--chat-transfer-footer-height, 1.25rem);
+  border-top: var(--chat-transfer-footer-border, 1px solid transparent);
+}
+.redpacket-card .special-payment-card__money { font-size: var(--chat-redpacket-amount-size, 1.3rem); }
+.redpacket-card__default-layer .redpacket-card__brand { min-height: var(--chat-redpacket-footer-height, 1.25rem); }

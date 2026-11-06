@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { hasExplicitRedPacketChatCss, normalizeChatCssSyntax, prioritizeUserChatCss, scopeUserChatCss } from "../src/features/chat/styles/chatCssScope";
+import { hasExplicitRedPacketChatCss, normalizeChatCssSyntax, prioritizeUserChatCss, sanitizeChatCssAtRules, scopeUserChatCss, scopeUserChatCssV2 } from "../src/features/chat/styles/chatCssScope";
 
 const scope = '#conv-screen.user-custom-chat-css #api-chat-screen > .chat-content-scope';
 assert.doesNotMatch(scopeUserChatCss(".chat-bubble-self { color: red; }"), /data-chat-settings-open/);
@@ -12,6 +12,10 @@ assert.equal(nested.includes(`${scope} .message`), true);
 const keyframes = scopeUserChatCss("@keyframes pulse { from { opacity: 0; } to { opacity: 1; } }");
 assert.equal(keyframes.includes(`${scope} from`), false);
 assert.equal(keyframes.includes("from { opacity: 0; }"), true);
+const sanitizedAtRules = sanitizeChatCssAtRules('@import url("https://example.test/theme.css"); @page { margin: 0; } .chat-bubble-self { color: red; }');
+assert.equal(sanitizedAtRules.includes("@import"), false);
+assert.equal(sanitizedAtRules.includes("@page"), false);
+assert.equal(scopeUserChatCss('@import url("theme.css"); .chat-bubble-self { color: red; }').includes(`${scope} .chat-bubble-self`), true);
 const prioritized = prioritizeUserChatCss('.message { color: red; background: url("x;y"); border: 0 !important; }');
 assert.equal(prioritized.includes("color: red !important;"), true);
 assert.equal(prioritized.includes('background: url("x;y") !important;'), true);
@@ -34,5 +38,6 @@ assert.equal(hasExplicitRedPacketChatCss(".redpacket-card__brand { opacity: 1; }
 assert.equal(hasExplicitRedPacketChatCss(".wechat-redpacket__title { color: pink; }"), true);
 assert.equal(hasExplicitRedPacketChatCss("/* .redpacket-card { background: pink; } */ .chat-bubble-self { color: red; }"), false);
 assert.equal(hasExplicitRedPacketChatCss(":root { --redpacket-bg: pink; }"), true);
+assert.equal(scopeUserChatCssV2(".chat-header { color: red; }").includes('#conv-screen.user-custom-chat-css[data-chat-css-api="2"] .chat-header'), true);
 
-console.log("Chat CSS scope: 22 acceptance checks passed");
+console.log("Chat CSS scope: acceptance checks passed");

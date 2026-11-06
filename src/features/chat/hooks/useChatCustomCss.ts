@@ -1,11 +1,17 @@
 import { useEffect, useMemo } from "react";
-import { prioritizeUserChatCss, scopeUserChatCss } from "../styles/chatCssScope";
+import { prioritizeUserChatCss, scopeUserChatCss, scopeUserChatCssV2 } from "../styles/chatCssScope";
+import type { ChatCssApiVersion } from "../styles/chatThemePackage";
 
-export function useChatCustomCss(sources: readonly (string | undefined)[], protectedWallpaper?: string): void {
+export function useChatCustomCss(
+  sources: readonly (string | undefined)[],
+  protectedWallpaper?: string,
+  cssApiVersion: ChatCssApiVersion = 2,
+): void {
   const scopedCss = useMemo(() => {
     const combined = sources.filter((css): css is string => Boolean(css && css.trim())).join("\n");
-    return combined.trim() ? prioritizeUserChatCss(scopeUserChatCss(combined)) : "";
-  }, [sources]);
+    if (!combined.trim()) return "";
+    return prioritizeUserChatCss(cssApiVersion === 2 ? scopeUserChatCssV2(combined) : scopeUserChatCss(combined));
+  }, [sources, cssApiVersion]);
 
   useEffect(() => {
     const styleId = "app-chat-user-custom-css";

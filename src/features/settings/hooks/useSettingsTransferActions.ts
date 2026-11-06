@@ -1,6 +1,13 @@
 import type { ChangeEvent, Dispatch, SetStateAction } from "react";
 import type { ChatIconOverrides, UserSettings } from "../../../types";
 import { sanitizeChatIcons } from "../../../types";
+import { buildChatThemePackage, parseChatThemePackage } from "../../chat/styles/chatThemePackage";
+import {
+  buildChatThemeDocx,
+  downloadChatThemeBlob,
+  parseChatThemeDocx,
+  sanitizeChatThemeFilename,
+} from "../../chat/styles/chatThemeDocuments";
 import { applyDesktopModuleBackup, buildDesktopModuleBackup, parseDesktopModuleBackup } from "../../home/desktopModuleBackup";
 
 interface UseSettingsTransferActionsOptions {
@@ -21,37 +28,49 @@ export function useSettingsTransferActions({
   setChatIcons,
   handleSave,
 }: UseSettingsTransferActionsOptions) {
-  const handleExportChatTheme = () => {
-    const data = JSON.stringify({ version: 1, chatGlobalCSS, chatIcons }, null, 2);
-    const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "fanfanji-chat-theme.json";
-    link.click();
-    URL.revokeObjectURL(url);
+  const handleExportChatTheme = async () => {
+    if (!chatGlobalCSS.trim()) {
+      alert("当前没有可导出的 CSS 主题。");
+      return;
+    }
+    try {
+      const filename = `${sanitizeChatThemeFilename("饭饭机聊天主题")}.docx`;
+      downloadChatThemeBlob(await buildChatThemeDocx(chatGlobalCSS), filename);
+    } catch (error: unknown) {
+      alert("导出聊天主题失败：" + (error instanceof Error ? error.message : "未知错误"));
+    }
   };
 
-  const handleImportChatTheme = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleImportChatTheme = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const imported = JSON.parse(String(reader.result));
-        if (!imported || typeof imported !== "object") throw new Error("invalid theme");
-        const nextCss = typeof imported.chatGlobalCSS === "string" ? imported.chatGlobalCSS : "";
-        const nextIcons = sanitizeChatIcons(imported.chatIcons);
-        setChatGlobalCSS(nextCss);
-        setChatIcons(nextIcons);
-        handleSave({ chatGlobalCSS: nextCss, chatIcons: nextIcons });
-        alert("聊天美化主题已导入。");
-      } catch {
-        alert("无法导入该主题文件，请选择有效的聊天主题 JSON。");
-      } finally {
-        event.target.value = "";
+    try {
+      const extension = file.name.toLowerCase().split(".").pop() || "";
+      let nextCss = "";
+      let nextIcons = chatIcons;
+      if (extension === "docx") {
+        nextCss = await parseChatThemeDocx(await file.arrayBuffer());
+      } else if (extension === "json") {
+        const imported = JSON.parse(await file.text());
+        const parsed = parseChatThemePackage(imported);
+        nextCss = parsed.css;
+        nextIcons = sanitizeChatIcons(parsed.icons);
+      } else {
+        nextCss = await file.text();
       }
-    };
-    reader.readAsText(file);
+      nextCss = nextCss.replace(/^\uFEFF/, "");
+      if (!nextCss.trim()) throw new Error("主题文件中没有 CSS 内容");
+      setChatGlobalCSS(nextCss);
+      setChatIcons(nextIcons);
+      // Imported v1/v2 files are normalized onto the single compatible CSS
+      // pipeline; the version is intentionally no longer user-selectable.
+      handleSave({ chatGlobalCSS: nextCss, chatIcons: nextIcons, chatCssApiVersion: 2 });
+      alert("聊天美化主题已导入。");
+    } catch (error: unknown) {
+      alert(error instanceof Error ? `无法导入该主题文件：${error.message}` : "无法导入该主题文件，请检查格式。");
+    } finally {
+      event.target.value = "";
+    }
   };
 
   const downloadDesktopModuleBackup = () => {

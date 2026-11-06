@@ -4,7 +4,7 @@ import type { RedPacketMode } from "../../../types";
 import { parseCallRecord, type CallTranscriptItem } from "../services/messageParser";
 import type { VideoCallSceneEntry } from "../services/videoCallProtocol";
 
-export type ChatAttachmentModal = "redpacket" | "music" | "location" | "file" | "calling" | "voice" | null;
+export type ChatAttachmentModal = "redpacket" | "transfer" | "music" | "location" | "file" | "calling" | "voice" | null;
 export type ChatCallMode = "voice" | "video";
 export type VideoCallInputMode = "speech" | "scene";
 
@@ -13,6 +13,7 @@ export function useChatAttachmentState() {
   const [imageRequestText, setImageRequestText] = useState("");
   const [imageGenerationError, setImageGenerationError] = useState<string | null>(null);
   const [showAttachPanel, setShowAttachPanel] = useState(false);
+  const [showMoreTools, setShowMoreTools] = useState(false);
   const [activeAttachModal, setActiveAttachModal] = useState<ChatAttachmentModal>(null);
   const [voiceText, setVoiceText] = useState("");
   const [callingStatus, setCallingStatus] = useState<"ringing" | "connected" | "ended">("ringing");
@@ -35,6 +36,8 @@ export function useChatAttachmentState() {
   const [redPacketMode, setRedPacketMode] = useState<RedPacketMode>("lucky");
   const [redPacketCount, setRedPacketCount] = useState("1");
   const [redPacketRecipientId, setRedPacketRecipientId] = useState("");
+  const [transferAmount, setTransferAmount] = useState("5.21");
+  const [transferMemo, setTransferMemo] = useState("转账");
   const [showRedPacketOpenModal, setShowRedPacketOpenModal] = useState(false);
   const [openRedPacketDetail, setOpenRedPacketDetail] = useState<{
     id: string; amount: string; greeting: string; senderName: string; senderAvatar: string;
@@ -42,15 +45,15 @@ export function useChatAttachmentState() {
     count: number; recipientId?: string; recipientName?: string;
   } | null>(null);
   const [isOpeningRedPacket, setIsOpeningRedPacket] = useState(false);
-  const [, setOpenTransferDetail] = useState<{ amount: string; memo: string; isConfirmed: boolean } | null>(null);
-  const [, setShowTransferDetailModal] = useState(false);
+  const [openTransferDetail, setOpenTransferDetail] = useState<{ amount: string; memo: string; isConfirmed: boolean; timestamp?: number } | null>(null);
+  const [showTransferDetailModal, setShowTransferDetailModal] = useState(false);
   const [, setOpenVoiceId] = useState<string | null>(null);
   const [voiceTimer, setVoiceTimer] = useState<ReturnType<typeof setInterval> | null>(null);
 
   return {
     showImageGenerator, setShowImageGenerator, imageRequestText, setImageRequestText,
     imageGenerationError, setImageGenerationError,
-    showAttachPanel, setShowAttachPanel, activeAttachModal, setActiveAttachModal,
+    showAttachPanel, setShowAttachPanel, showMoreTools, setShowMoreTools, activeAttachModal, setActiveAttachModal,
     voiceText, setVoiceText, callingStatus, setCallingStatus, callingDuration, setCallingDuration,
     isIncomingCall, setIsIncomingCall, setCallStartTime, callingInputText, setCallingInputText,
     callMode, setCallMode, videoCallInputMode, setVideoCallInputMode,
@@ -58,8 +61,10 @@ export function useChatAttachmentState() {
     videoCallSceneHistory, setVideoCallSceneHistory, voiceCallRelationId, setVoiceCallRelationId, callTranscriptEndRef,
     callRecordDetail, setCallRecordDetail, redPacketAmount, setRedPacketAmount,
     redPacketGreeting, setRedPacketGreeting, redPacketMode, setRedPacketMode, redPacketCount, setRedPacketCount,
-    redPacketRecipientId, setRedPacketRecipientId, showRedPacketOpenModal, setShowRedPacketOpenModal,
+    redPacketRecipientId, setRedPacketRecipientId, transferAmount, setTransferAmount, transferMemo, setTransferMemo,
+    showRedPacketOpenModal, setShowRedPacketOpenModal,
     openRedPacketDetail, setOpenRedPacketDetail, isOpeningRedPacket, setIsOpeningRedPacket,
-    setOpenTransferDetail, setShowTransferDetailModal, setOpenVoiceId, voiceTimer, setVoiceTimer,
+    openTransferDetail, setOpenTransferDetail, showTransferDetailModal, setShowTransferDetailModal,
+    setOpenVoiceId, voiceTimer, setVoiceTimer,
   };
 }

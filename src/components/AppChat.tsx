@@ -18,7 +18,7 @@ import { readArray } from "../core/storage/repositories/repositoryUtils";
 import { isMcpEnabledForScope, setCharacterMcpEnabled } from "../features/mcp/mcpPolicyRuntime";
 import { createId } from "../core/id/createId";
 import { getLatestWorldBookEntries, getVisibleWorldBookEntries, buildWorldBookSystemBlocks } from "../utils/worldBook";
-import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, MomentVisibility, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type InnerVoiceRecord, type ChatIconKey, type MusicTrack, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "../types";
+import { Character, Message, Moment, RedPacketPayload, UserSettings, MomentComment, MomentVisibility, WorldBookEntry, MemoryItem, MemoryVaultSettings, OfflineStory, Sticker, StickerGroup, sanitizeChatIcons, type InnerVoiceRecord, type ChatIconKey, type ChatThemeEntry, type MusicTrack, type IdentityMusicState, type RelationshipMusicState, type UserSettingsUpdate } from "../types";
 import { createProactiveOfflinePreferencePatch } from "../domain/schedule/proactiveOfflinePreference";
 import { evaluateProactiveOfflineEligibility } from "../domain/schedule/proactiveOfflineEligibility";
 import { createProactiveAppointment } from "../domain/schedule/proactiveAppointmentFactory";
@@ -163,7 +163,6 @@ import { formatCharacterActionPrompt, parseCharacterActionDirective, sanitizeCha
 import { resolveRecentUserImageForTurn } from "../features/chat/services/recentUserImageContext";
 import { resolveChatMessageAvatar } from "../features/chat/services/messageAvatarResolver";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
-import { hasExplicitRedPacketChatCss } from "../features/chat/styles/chatCssScope";
 import { generateGroupChatTurn, generateProactiveChatTurn, generateRegeneratedChatTurn, requestDirectChatTurn } from "../features/chat/controllers/chatGenerationController";
 import { ensureDirectReplyTranslation } from "../features/chat/services/directReplyTranslation";
 import { resolveChatRoutine, resolveChatTurnSettings } from "../features/chat/services/chatTurnSettings";
@@ -199,6 +198,7 @@ import { useChatStartOfflineFromMessage } from "../features/chat/hooks/useChatSt
 import { useChatMessageTranslation } from "../features/chat/hooks/useChatMessageTranslation";
 import { useChatBackgroundDraftUpload } from "../features/chat/hooks/useChatBackgroundDraftUpload";
 import { useChatSaveSettings } from "../features/chat/hooks/useChatSaveSettings";
+import { useChatDraftChatIcon } from "../features/chat/hooks/useChatDraftChatIcon";
 import { scheduleNextProactiveMessage } from "../features/chat/services/proactiveScheduleService";
 import { useChatGreeting } from "../features/chat/hooks/useChatGreeting";
 import { estimateChatRequestTokens, estimateChatTokens, type ChatTokenEstimate } from "../features/chat/services/chatTokenEstimate";
@@ -206,12 +206,13 @@ import { resolveChatContextMemoryLimit, resolveChatLongTermMemoryLimit } from ".
 import { recoverPendingOfflineHandoff } from "../features/chat/services/offlineHandoffRecoveryService";
 import { runBackgroundProactivePass, runProactiveCatchupPass } from "../features/chat/services/proactiveChatPassService";
 import { useChatMemoryExtraction } from "../features/chat/hooks/useChatMemoryExtraction";
-import { useChatDraftChatIcon } from "../features/chat/hooks/useChatDraftChatIcon";
 import { useChatRegenerationAction } from "../features/chat/hooks/useChatRegenerationAction";
 import { useVoiceCallTimers } from "../features/chat/hooks/useVoiceCallTimers";
 import { resolveActiveChatStylePreset } from "../features/chat/styles/chatStylePreset";
 import { CLASSIC_BUBBLE_OPACITY, CLASSIC_OTHER_BUBBLE_BACKGROUND, CLASSIC_OTHER_BUBBLE_TEXT, CLASSIC_SELF_BUBBLE_BACKGROUND, CLASSIC_SELF_BUBBLE_TEXT } from "../features/chat/styles/chatBubbleDefaults";
 import { COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE } from "../features/chat/styles/chatThemeTemplate";
+import { buildChatThemePackage, parseChatThemePackage } from "../features/chat/styles/chatThemePackage";
+import { buildChatThemeDocx, downloadChatThemeBlob, parseChatThemeDocx, sanitizeChatThemeFilename } from "../features/chat/styles/chatThemeDocuments";
 import { ChatSettingsSwitch as SettingsSwitch } from "../features/chat/components/ChatSettingsSwitch";
 import { ChatAvatar as RenderAvatar } from "../features/chat/components/ChatAvatar";
 import { StoredChatImage } from "../features/chat/components/StoredChatImage";
@@ -426,12 +427,6 @@ registerDevModuleTrace({
   mode: currentDevDiagnosticMode(),
   reason: "module_loaded",
 });
-
-const CHAT_ICON_FIELDS: Array<{ key: ChatIconKey; label: string }> = [
-  { key: "image", label: "图片" }, { key: "textImage", label: "文字图" }, { key: "voice", label: "语音" }, { key: "sticker", label: "表情" },
-  { key: "redPacket", label: "红包" }, { key: "transfer", label: "转账" }, { key: "location", label: "位置" },
-  { key: "call", label: "通话" }, { key: "plus", label: "加号" }, { key: "sendOnly", label: "发送1（仅发送）" }, { key: "sendReply", label: "发送2（发送并回复）" }, { key: "stop", label: "停止" },
-];
 
 interface AppChatProps {
   characters: Character[];
@@ -1129,12 +1124,17 @@ export default function AppChat({
         && (appointment.status === "awaiting_user" || appointment.status === "negotiating"))
       .sort((left, right) => right.updatedAt - left.updatedAt)[0];
   }, [activeRelationship, appointments]);
+  // Keep both global and per-chat CSS sources active. The chat-settings
+  // “美化样式” entry is still the character-level override surface; only the
+  // separate icon-editor card is intentionally hidden from the UI.
   const characterCustomChatCss = activeCharacter?.customChatCSS || activeCharacter?.customCss || "";
-  // bubbleCss remains a scoped legacy compatibility source.
-  const userCustomChatCssSources = [settings.bubbleCss, settings.chatGlobalCSS, characterCustomChatCss];
+  // Keep the global stylesheet last so a newly imported theme cannot be
+  // silently overridden by an older per-character draft left in storage.
+  // Character CSS still remains active when no global theme is configured.
+  const userCustomChatCssSources = [settings.bubbleCss, characterCustomChatCss, settings.chatGlobalCSS];
   const hasUserCustomChatCss = userCustomChatCssSources.some((css) => Boolean(css && css.trim()));
-  const hasUserRedPacketCss = userCustomChatCssSources.some((css) => hasExplicitRedPacketChatCss(css));
-  useChatCustomCss(userCustomChatCssSources, activeCharacter?.chatBg);
+  const chatCssApiVersion = 2 as const;
+  useChatCustomCss(userCustomChatCssSources, activeCharacter?.chatBg, chatCssApiVersion);
 
   // Long-lived callbacks can outlive the render in which they were created.
   // Keep the latest character/settings available at the actual send boundary.
@@ -1312,11 +1312,9 @@ export default function AppChat({
   const activeBubbleTailEnabled = isLiquidGlass
     ? settings.liquidGlassBubbleTailEnabled === true
     : settings.bubbleTailEnabled === true;
-  const characterChatIcons = sanitizeChatIcons(activeCharacter?.customChatIcons);
   const globalChatIcons = sanitizeChatIcons(settings.chatIcons);
-  const getChatIcon = (key: ChatIconKey): string | undefined => characterChatIcons[key]
-    || globalChatIcons[key]
-    || ((key === "sendOnly" || key === "sendReply") ? characterChatIcons.send || globalChatIcons.send : undefined);
+  const getChatIcon = (key: ChatIconKey): string | undefined => globalChatIcons[key]
+    || ((key === "sendOnly" || key === "sendReply") ? globalChatIcons.send : undefined);
   const belongsToActiveIdentity = (ownerIdentityId?: string) =>
     (ownerIdentityId || "identity-1") === activeIdentityId;
 
@@ -1935,6 +1933,7 @@ export default function AppChat({
     draftCharacterApi,setDraftCharacterApi,
     draftChatBg, setDraftChatBg, draftCustomCss, setDraftCustomCss,
     draftChatIcons, setDraftChatIcons, draftChatStylePreset, setDraftChatStylePreset,
+    draftChatThemes, setDraftChatThemes, draftSelectedChatThemeId, setDraftSelectedChatThemeId,
     draftEnableProactiveChat, setDraftEnableProactiveChat, draftEnableProactiveOffline, setDraftEnableProactiveOffline,
     draftEnableProactiveCall, setDraftEnableProactiveCall,
     draftEnableStickerAssociation, setDraftEnableStickerAssociation,
@@ -1953,11 +1952,15 @@ export default function AppChat({
     draftImageReferenceAssetId, setDraftImageReferenceAssetId, draftImageReferenceMimeType, setDraftImageReferenceMimeType,
     loadCharacterDraft,
   } = useChatSettingsDraft();
+  const chatThemeFileInputRef = useRef<HTMLInputElement>(null);
+  // Keep the draft-update logic isolated for backwards-compatible state
+  // migrations; character-level icon overrides are no longer exposed in UI.
+  useChatDraftChatIcon(setDraftChatIcons);
   const { handleDraftChatBgUpload } = useChatBackgroundDraftUpload({ setDraftChatBg });
   const {
     showImageGenerator, setShowImageGenerator, imageRequestText, setImageRequestText,
     imageGenerationError, setImageGenerationError,
-    showAttachPanel, setShowAttachPanel, activeAttachModal, setActiveAttachModal,
+    showAttachPanel, setShowAttachPanel, showMoreTools, setShowMoreTools, activeAttachModal, setActiveAttachModal,
     voiceText, setVoiceText, callingStatus, setCallingStatus, callingDuration, setCallingDuration,
     isIncomingCall, setIsIncomingCall, setCallStartTime, callingInputText, setCallingInputText,
     callMode, setCallMode, videoCallInputMode, setVideoCallInputMode,
@@ -1965,9 +1968,11 @@ export default function AppChat({
     videoCallSceneHistory, setVideoCallSceneHistory, voiceCallRelationId, setVoiceCallRelationId, callTranscriptEndRef,
     callRecordDetail, setCallRecordDetail, redPacketAmount, setRedPacketAmount,
     redPacketGreeting, setRedPacketGreeting, redPacketMode, setRedPacketMode, redPacketCount, setRedPacketCount,
-    redPacketRecipientId, setRedPacketRecipientId, showRedPacketOpenModal, setShowRedPacketOpenModal,
+    redPacketRecipientId, setRedPacketRecipientId, transferAmount, setTransferAmount, transferMemo, setTransferMemo,
+    showRedPacketOpenModal, setShowRedPacketOpenModal,
     openRedPacketDetail, setOpenRedPacketDetail, isOpeningRedPacket, setIsOpeningRedPacket,
-    setOpenTransferDetail, setShowTransferDetailModal, setOpenVoiceId, voiceTimer, setVoiceTimer,
+    openTransferDetail, setOpenTransferDetail, showTransferDetailModal, setShowTransferDetailModal,
+    setOpenVoiceId, voiceTimer, setVoiceTimer,
   } = useChatAttachmentState();
   // Call controls can transition from ringing to connected in the same user
   // gesture that starts a reply. Keep a synchronous snapshot for generation
@@ -2194,6 +2199,7 @@ export default function AppChat({
     setOpenTransferDetail(null);
     setShowTransferDetailModal(false);
     setShowAttachPanel(false);
+    setShowMoreTools(false);
     setActiveAttachModal(null);
     setIsMultiSelectDeleteMode(false);
     setSelectedMessageIds(new Set());
@@ -2219,6 +2225,7 @@ export default function AppChat({
   // Close attachment panel when switching chats
   useEffect(() => {
     setShowAttachPanel(false);
+    setShowMoreTools(false);
   }, [activeChatCharId]);
 
   // Relationship activity is persisted by the message boundary; never write it
@@ -4929,6 +4936,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     draftChatBg,
     draftCustomCss,
     draftChatIcons,
+    draftChatThemes,
     draftChatStylePreset,
     draftEnableProactiveCall,
     draftEnableStickerAssociation,
@@ -4965,6 +4973,98 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
       showToast("设置保存失败，请重试。");
     } finally {
       setIsSavingSettings(false);
+    }
+  };
+
+  const persistChatThemeState = (css: string, themes: ChatThemeEntry[], icons = draftChatIcons) => {
+    if (!activeCharacter) return;
+    void Promise.resolve(onSaveCharacter({
+      ...activeCharacter,
+      customCss: css,
+      customChatCSS: css,
+      customChatIcons: icons,
+      chatThemes: themes,
+    })).then((persisted) => {
+      if (persisted === false) showToast("主题保存失败，请稍后重试。");
+    }).catch(() => showToast("主题保存失败，请稍后重试。"));
+  };
+
+  const applyChatTheme = (theme: ChatThemeEntry) => {
+    setDraftSelectedChatThemeId(theme.id);
+    setDraftCustomCss(theme.css);
+    persistChatThemeState(theme.css, draftChatThemes);
+    showToast(`已应用主题：${theme.name}`);
+  };
+
+  const deleteChatTheme = (theme: ChatThemeEntry) => {
+    const nextThemes = draftChatThemes.filter((item) => item.id !== theme.id);
+    setDraftChatThemes(nextThemes);
+    if (draftSelectedChatThemeId === theme.id) setDraftSelectedChatThemeId(null);
+    persistChatThemeState(draftCustomCss, nextThemes);
+    showToast(`已删除主题：${theme.name}`);
+  };
+
+  const handleImportChatTheme = async (file?: File) => {
+    if (!file) return;
+    try {
+      const extension = file.name.toLowerCase().split(".").pop() || "";
+      const fallbackName = file.name.replace(/\.[^.]+$/, "").trim() || "导入主题";
+      let css = "";
+      let themeName = fallbackName;
+      let importedIcons = draftChatIcons;
+      if (extension === "docx") {
+        css = await parseChatThemeDocx(await file.arrayBuffer());
+      } else if (extension === "json") {
+        const raw = JSON.parse(await file.text()) as Record<string, unknown>;
+        const parsed = parseChatThemePackage(raw);
+        css = parsed.css;
+        importedIcons = parsed.icons;
+        const meta = raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
+          ? raw.meta as Record<string, unknown>
+          : undefined;
+        if (typeof meta?.name === "string" && meta.name.trim()) themeName = meta.name.trim();
+      } else {
+        css = await file.text();
+      }
+      css = css.replace(/^\uFEFF/, "");
+      if (!css.trim()) throw new Error("主题文件中没有 CSS 内容");
+      const entry: ChatThemeEntry = { id: createId("chat-theme"), name: themeName, css, createdAt: Date.now() };
+      const nextThemes = [...draftChatThemes, entry];
+      setDraftChatThemes(nextThemes);
+      setDraftSelectedChatThemeId(entry.id);
+      setDraftCustomCss(css);
+      setDraftChatIcons(importedIcons);
+      persistChatThemeState(css, nextThemes, importedIcons);
+      showToast(`已导入主题：${themeName}`);
+    } catch (error) {
+      console.error("Failed to import chat theme:", error);
+      showToast(error instanceof Error ? `主题导入失败：${error.message}` : "主题导入失败，请检查文件格式。");
+    } finally {
+      if (chatThemeFileInputRef.current) chatThemeFileInputRef.current.value = "";
+    }
+  };
+
+  const exportChatTheme = async (format: "docx" | "txt" | "json") => {
+    const css = draftCustomCss;
+    if (!css.trim()) {
+      showToast("当前没有可导出的 CSS 主题。");
+      return;
+    }
+    const selectedTheme = draftChatThemes.find((theme) => theme.id === draftSelectedChatThemeId);
+    const baseName = sanitizeChatThemeFilename(selectedTheme?.name || `${activeCharacter?.name || "饭饭机"}-聊天主题`);
+    try {
+      if (format === "docx") {
+        downloadChatThemeBlob(await buildChatThemeDocx(css), `${baseName}.docx`);
+      } else if (format === "txt") {
+        downloadChatThemeBlob(new Blob([css], { type: "text/plain;charset=utf-8" }), `${baseName}.txt`);
+      } else {
+        const payload = buildChatThemePackage({ cssApiVersion: 2, css, icons: draftChatIcons, name: selectedTheme?.name || baseName });
+        downloadChatThemeBlob(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }), `${baseName}.json`);
+      }
+      showToast(`已导出 ${format.toUpperCase()} 主题文件`);
+    } catch (error) {
+      console.error("Failed to export chat theme:", error);
+      showToast("主题导出失败，请重试。");
     }
   };
 
@@ -5098,7 +5198,6 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     handleExtractMemories,
     getLastMemoryExtractionRunDiagnostics,
   ]);
-  const { updateDraftChatIcon } = useChatDraftChatIcon(setDraftChatIcons);
   type CharacterActionExecutionResult = {
     status: "success" | "rejected" | "failed";
     stickerMarkup?: string;
@@ -7301,7 +7400,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
       {/* Active Chat Windows Overlay (QQ/WeChat Screen) */}
       {activeChatCharId && activeCharacter && isActiveChatScopeValid && !conversationHiddenForCall ? (
-        <div className={`absolute inset-0 z-40 bg-[var(--app-bg)] flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""} ${hasUserRedPacketCss ? "user-custom-redpacket-css" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"} data-user-chat-css={hasUserCustomChatCss ? "active" : "inactive"} data-chat-settings-open={isShowingCardModal ? "true" : "false"}>
+        <div className={`absolute inset-0 z-40 bg-[var(--app-bg)] flex flex-col h-full animate-slide-up chat-page chat-theme ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`} id="conv-screen" data-chat-id={activeChatCharId} data-chat-mode={activeCharacter.isGroupChat ? "group" : "direct"} data-chat-css-api={String(chatCssApiVersion)} data-user-chat-css={hasUserCustomChatCss ? "active" : "inactive"} data-chat-settings-open={isShowingCardModal ? "true" : "false"}>
             <div
               id="api-chat-screen"
               className={`flex flex-col h-full w-full relative app-content chat-page chat-theme chat-page__background ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`}
@@ -8127,7 +8226,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             )}
             {/* Chat Window Header with standard classes and compact size */}
             <div className={`chat-content-scope chat-page chat-theme chat-page__background shrink-0 ${activeStylePreset === "liquid-glass" ? "style-liquid-glass" : ""} ${hasUserCustomChatCss ? "user-custom-chat-css" : ""}`}>
-            <div className={`flex items-center justify-between z-10 shrink-0 relative cv-header chat-header header app-top-container default-controls selection-controls ${
+            <header className={`flex items-center justify-between z-10 shrink-0 relative cv-header chat-header header app-top-container default-controls selection-controls ${
               isFloatingCute
                 ? "mx-3.5 mt-3.5 mb-1 bg-white/70 backdrop-blur-md rounded-[28px] border border-slate-200/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06)] px-4 py-2"
                 : "px-4 py-1.5 bg-transparent"
@@ -8140,25 +8239,26 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   setAdvancedSettingsSection(null);
                 }}
                 className="app-nav-icon-button w-8 h-8 flex items-center justify-center hover:opacity-70 active:opacity-50 transition-opacity z-10 shrink-0 cv-icon-btn back-btn chat-header__back-button chat-header-control--plain"
+                aria-label="返回聊天列表"
               >
                 <span className="cv-back-icon flex items-center justify-center w-full h-full">
                   <ChevronLeft className="w-4 h-4 text-[var(--text-primary)]" />
                 </span>
               </button>
 
-              <div className="flex items-center gap-1.5 w-max max-w-[200px] header-title">
+              <div className="flex items-center gap-1.5 w-max max-w-[200px] header-title chat-header__identity">
                 {activeCharacter.isGroupChat ? (
-                  <div className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] shrink-0 header-title-avatar">
+                  <div className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] shrink-0 header-title-avatar chat-header__avatar">
                     👥
                   </div>
                 ) : (
                   <img
                     src={activeCharacter.avatar}
                     alt=""
-                    className="w-5 h-5 rounded-full object-cover shrink-0 border border-white/50 header-title-avatar"
+                    className="w-5 h-5 rounded-full object-cover shrink-0 border border-white/50 header-title-avatar chat-header__avatar"
                   />
                 )}
-                <h2 className="text-[13px] font-bold text-slate-800 tracking-tight truncate header-title-name chat-header__name">
+                <h2 className="text-[13px] font-bold text-slate-800 tracking-tight truncate header-title-name chat-header__name chat-header__title">
                   {activeCharacterDisplayName}
                   {activeCharacter.isGroupChat && (
                     <span className="text-slate-400 font-normal ml-0.5">
@@ -8186,7 +8286,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   <MoreHorizontal className="w-4 h-4 text-[var(--text-primary)]" />
                 </span>
               </button>
-            </div>
+            </header>
             </div>
 
 
@@ -8798,14 +8898,62 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         placeholder={COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE}
                         className="w-full bg-slate-50 p-4 text-[10px] text-slate-700 rounded-[8px] border border-slate-200 focus:outline-none focus:ring-1 focus:ring-neutral-950 font-mono leading-relaxed h-48"
                       />
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                        <div>
+                          <p className="text-[11px] font-bold text-slate-700">聊天主题</p>
+                          <p className="text-[9px] text-slate-400">导入兼容 TXT、DOCX 与旧版 JSON；导出默认 DOCX。</p>
+                        </div>
+                        <input
+                          ref={chatThemeFileInputRef}
+                          type="file"
+                          accept=".txt,.docx,.json,text/plain,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          className="hidden"
+                          onChange={(event) => { void handleImportChatTheme(event.target.files?.[0]); }}
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => chatThemeFileInputRef.current?.click()}
+                            className="min-w-0 rounded-lg bg-slate-800 px-3 py-2 text-[10px] font-semibold text-white transition-colors hover:bg-slate-700"
+                          >
+                            导入主题
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { void exportChatTheme("docx"); }}
+                            className="min-w-0 rounded-lg bg-white px-3 py-2 text-[10px] font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
+                          >
+                            导出主题
+                          </button>
+                        </div>
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] font-semibold text-slate-500">已导入主题</p>
+                          {draftChatThemes.length === 0 ? (
+                            <p className="rounded-lg bg-white px-3 py-2 text-[10px] text-slate-400">暂无导入主题</p>
+                          ) : draftChatThemes.map((theme) => (
+                            <div
+                              key={theme.id}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => applyChatTheme(theme)}
+                              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); applyChatTheme(theme); } }}
+                              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-[10px] transition-colors ${draftSelectedChatThemeId === theme.id ? "border-slate-800 bg-white text-slate-800 shadow-sm" : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"}`}
+                            >
+                              <span className="min-w-0 flex-1 truncate font-semibold">{theme.name}</span>
+                              <button
+                                type="button"
+                                onClick={(event) => { event.stopPropagation(); deleteChatTheme(theme); }}
+                                className="shrink-0 rounded-md px-1.5 py-1 text-[9px] font-semibold text-rose-500 hover:bg-rose-50"
+                                aria-label={`删除主题 ${theme.name}`}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
 
-                     <div className="bg-white p-4 rounded-[16px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-xs">
-                      <div className="flex items-center justify-between"><span className="text-slate-800 font-bold text-sm">聊天图标覆盖</span><span className="text-[9px] text-slate-400">留空继承全局或默认图标</span></div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {CHAT_ICON_FIELDS.map(({ key, label }) => <label key={key} className="space-y-1"><span className="block text-[10px] text-slate-500 font-medium">{label}图标</span><input value={draftChatIcons[key] || ""} onChange={(e) => updateDraftChatIcon(key, e.target.value)} placeholder="图片 URL" className="w-full px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-neutral-950" /></label>)}
-                      </div>
-                     </div>
                      </>
                      )}
 
@@ -8816,8 +8964,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         { key: "roleApi", label: "角色API" },
                         { key: "voiceImage", label: "语音图片" },
                         { key: "memory", label: "记忆设置" },
-                        { key: "appearance", label: "美化样式" },
                         { key: "history", label: "查找聊天记录" },
+                        { key: "appearance", label: "美化样式" },
                       ].map(({ key, label }) => (
                         <button
                           key={key}
@@ -9217,7 +9365,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             jumpToMessage={chatHistoryJump}
             onJumpHandled={() => setChatHistoryJump(undefined)}
             renderWindowSize={resolveChatPageSize(activeCharacter.chatHistoryPageSize)}
-            className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-0 cv-messages-list chat-message-list"
+            className="relative z-0 min-h-0 flex-1 overflow-y-auto overflow-x-visible p-4 space-y-0 cv-messages-list chat-message-list chat-messages"
             style={{
               background: activeCharacter.chatBg
                 ? `url(${activeCharacter.chatBg}) center/cover no-repeat`
@@ -9233,6 +9381,34 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               if (msg.sender === "character" && isLegacyMcpMediaFragment(msg.content)) return null;
               const systemNoticeType = getSystemNoticeType(msg);
               const translationText = normalizeVoiceTranslation(msg.translation);
+              const messageKind = msg.diaryShareId
+                ? "diary-share"
+                : msg.forumShareId
+                  ? "forum-share"
+                  : msg.imageAssetId || msg.content.startsWith("data:image/")
+                    ? "image"
+                    : parseTextImageDescription(msg.content)
+                      ? "text-image"
+                      : msg.content.startsWith("[琛ㄦ儏]|")
+                        ? "sticker"
+                        : isCallRecordMarkup(msg.content)
+                          ? "call"
+                          : isRedPacketMarkup(msg.content)
+                            ? "redpacket"
+                            : isTransferMarkup(msg.content)
+                              ? "transfer"
+                              : msg.content.startsWith("[浣嶇疆]")
+                                ? "location"
+                                : msg.content.startsWith("[璇煶") || msg.isVoiceMessage === true || Boolean(msg.audioUrl)
+                                  ? "voice"
+                                  : parseQuoteReply(msg.content)
+                                    ? "quote"
+                                    : "text";
+              const messageState = msg.recalledAt
+                ? "recalled"
+                : msg.pendingReplyEditable
+                  ? "pending"
+                  : "normal";
               const previousVisibleMessage = idx > 0 ? visibleChatMessages[idx - 1] : undefined;
               const interveningOfflineStories = getOfflineTimelineStoriesBetween(previousVisibleMessage?.timestamp, msg.timestamp);
               // Calculate WeChat timestamp divider
@@ -9688,7 +9864,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         const [, amount, memo, isConfirmedStr] = msg.content.split("|");
                         const isConfirmed = isConfirmedStr === "true";
                         return <TransferCard amount={amount || "100.00"} memo={memo || "转账"} status={isConfirmed ? "confirmed" : "pending"} onClick={() => {
-                          setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed });
+                          setOpenTransferDetail({ amount: amount || "100.00", memo: memo || "转账", isConfirmed, timestamp: msg.timestamp });
                           setShowTransferDetailModal(true);
                         }} />;
                       })() : msg.content.startsWith("[位置]") ? (() => {
@@ -9842,6 +10018,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                         } ${messageGroupClass}`}>
                           {(() => {
                             const quoteReply = parseQuoteReply(msg.content);
+                            const quotedSourceMessage = quoteReply
+                              ? [...currentChatMessages].reverse().find((candidate) =>
+                                candidate.id !== msg.id
+                                && candidate.content === quoteReply.content
+                                && candidate.sender !== msg.sender,
+                              )
+                              : undefined;
                             const quoteAuthor = quoteReply && activeCharacter.isGroupChat
                               ? (() => {
                                 const quotedSource = currentChatMessages.find((candidate) =>
@@ -9866,6 +10049,26 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                                   <span className="message-quote__author">{quoteAuthor}</span>
                                   <span className="message-quote__separator" aria-hidden="true">：</span>
                                   <span className="message-quote__content px-3 py-2">{formatMessageContentForQuote(quoteReply.content)}</span>
+                                  <button
+                                    type="button"
+                                    className="message-quote__jump"
+                                    data-quote-target={quotedSourceMessage ? "available" : "missing"}
+                                    aria-label="跳转到原引用消息"
+                                    title="跳转到原引用消息"
+                                    disabled={!quotedSourceMessage}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      if (!quotedSourceMessage) return;
+                                      const sourceNode = Array.from(document.querySelectorAll<HTMLElement>("[data-message-id]"))
+                                        .find((node) => node.dataset.messageId === quotedSourceMessage.id);
+                                      if (!sourceNode) return;
+                                      sourceNode.scrollIntoView({ behavior: "smooth", block: "center" });
+                                      sourceNode.classList.add("chat-message--quote-highlight");
+                                      window.setTimeout(() => sourceNode.classList.remove("chat-message--quote-highlight"), 1200);
+                                    }}
+                                  >
+                                    <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
+                                  </button>
                                 </div>
                               </>
                             ) : <div className="text-left" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}><ChatTextWithLinks text={msg.content} /></div>;
@@ -9902,11 +10105,20 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 return wrapMessageWithDivider(
                   <div
                     key={msg.id}
+                    data-message-id={msg.id}
+                    data-message-side={isSelf ? "self" : "other"}
+                    data-message-kind={messageKind}
+                    data-message-state={messageState}
+                    data-group-position={messageGroupPosition}
+                    data-avatar-visible={isAvatarCollapsed ? "false" : "true"}
+                    data-has-translation={translationText ? "true" : "false"}
+                    data-selected={activeMenuMsg?.id === msg.id ? "true" : "false"}
+                    data-recalled={msg.recalledAt ? "true" : "false"}
                     className={`w-full flex flex-col ${
                       isSelf ? "items-end" : "items-start"
                     } ${
                       (isConsecutivePrev && shouldCollapse) ? "chat-row-gap-consecutive" : "chat-row-gap-separated"
-                    } ${messageGroupClass} cv-msg-row message message-container`}
+                    } ${messageGroupClass} cv-msg-row message message-container chat-message-row chat-message__row`}
                   >
                     {/* Avatar + Meta Header */}
                     <div
@@ -9939,7 +10151,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                       </div>
 
                     {/* Message Bubble Block */}
-                    <div className="max-w-[85%]">
+                    <div className="max-w-[85%] chat-message__content">
                       {renderBubbleInner()}
                     </div>
                   </div>
@@ -9948,16 +10160,25 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                 return wrapMessageWithDivider(
                   <div
                     key={msg.id}
+                    data-message-id={msg.id}
+                    data-message-side={isSelf ? "self" : "other"}
+                    data-message-kind={messageKind}
+                    data-message-state={messageState}
+                    data-group-position={messageGroupPosition}
+                    data-avatar-visible={isAvatarCollapsed ? "false" : "true"}
+                    data-has-translation={translationText ? "true" : "false"}
+                    data-selected={activeMenuMsg?.id === msg.id ? "true" : "false"}
+                    data-recalled={msg.recalledAt ? "true" : "false"}
                     className={`w-full flex gap-2.5 ${
                       isSelf ? "flex-row-reverse items-start justify-start" : "flex-row items-start justify-start"
                     } ${
                       (isConsecutivePrev && shouldCollapse) ? "chat-row-gap-consecutive" : "chat-row-gap-separated"
-                    } ${messageGroupClass} cv-msg-row message message-container`}
+                    } ${messageGroupClass} cv-msg-row message message-container chat-message-row chat-message__row`}
                   >
                     {/* Avatar. Keep a stable slot and node for every message;
                         the collapsed marker is intentionally CSS-overridable. */}
                     <div
-                      className={`cv-avatar-slot w-9 h-9 shrink-0 ${isAvatarCollapsed ? "cv-avatar-slot--collapsed" : "cv-avatar-slot--visible"}`}
+                      className={`cv-avatar-slot chat-message__avatar-slot w-9 h-9 shrink-0 ${isAvatarCollapsed ? "cv-avatar-slot--collapsed" : "cv-avatar-slot--visible"}`}
                       data-avatar-collapsed={avatarCollapseState}
                     >
                       <RenderAvatar
@@ -9976,7 +10197,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     </div>
 
                     {/* Meta Header + Message Bubble Column */}
-                    <div className={`flex flex-col max-w-[80%] ${isSelf ? "items-end" : "items-start"}`}>
+                    <div className={`flex flex-col max-w-[80%] chat-message__content ${isSelf ? "items-end" : "items-start"}`}>
                       {!isAvatarCollapsed && !settings.hideNicknames && (
                         <div className={`flex flex-col ${isSelf ? "items-end" : "items-start"} text-[10px] text-slate-500/80 mb-1 space-y-0.5 msg-meta-header`}>
                           {!isSelf && (
@@ -10128,7 +10349,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           )}
 
            {/* Active Chat Footer Input form */}
-           <ChatComposer className={`${
+           <ChatComposer data-tools-open={showAttachPanel ? "true" : "false"} data-tools-expanded={showMoreTools ? "true" : "false"} className={`${
              isFloatingCute
                ? "mx-3.5 mb-3.5 mt-1 overflow-hidden shrink-0 flex flex-col cv-footer chat-input-area chat-composer--floating"
                : activeStylePreset === "liquid-glass"
@@ -10155,6 +10376,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               showAttachPanel={showAttachPanel}
               onToggleAttach={() => {
                 setShowAttachPanel(!showAttachPanel);
+                if (showAttachPanel) setShowMoreTools(false);
                 setShowStickerSelector(false);
               }}
               onSendOnly={handleSendOnly}
@@ -10167,18 +10389,17 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             />
 
             {/* Attach Panel */}
-            {showAttachPanel && (
-              <AttachmentMenu className={`py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto chat-composer__attachment-panel ${
+              <AttachmentMenu id="chat-composer-tools" role="toolbar" data-tools-open={showAttachPanel ? "true" : "false"} data-tools-expanded={showMoreTools ? "true" : "false"} aria-label="聊天附加功能" className={`py-2.5 px-3 flex items-center justify-between gap-1 animate-slide-up select-none shrink-0 overflow-x-auto chat-composer__attachment-panel ${
                 activeStylePreset === "liquid-glass"
                   ? "bg-white/60 backdrop-blur-md border-t border-white/40"
                   : "bg-slate-50 border-t border-slate-100"
               }`}>
                 {/* 1. 相册 (Album) */}
-                <label className="chat-attachment-item chat-attachment-item--album flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
-                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                <label data-tool-key="album" data-tool-tier="primary" data-tool-order="2" className="chat-attachment-item chat-attachment-item--album chat-tool flex-1 flex flex-col items-center justify-center cursor-pointer group min-w-10">
+                  <div className="chat-attachment-icon chat-tool__icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("image")} className="w-4 h-4"><ImageIcon className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">相册</span>
+                  <span className="chat-attachment-label chat-tool__label text-[10px] text-slate-500 mt-1 font-semibold scale-90">相册</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -10203,9 +10424,9 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   />
                 </label>
 
-                <button type="button" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="chat-attachment-item chat-attachment-item--text-image flex-1 flex flex-col items-center justify-center group min-w-10" title="发送文字图">
-                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><ChatIcon src={getChatIcon("textImage")} className="w-4 h-4"><Camera className="w-4 h-4 text-slate-700" /></ChatIcon></div>
-                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">文字图</span>
+                <button type="button" data-tool-key="text-image" data-tool-tier="primary" data-tool-order="3" onClick={() => { setImageRequestText(""); setShowImageGenerator(true); setShowAttachPanel(false); }} className="chat-attachment-item chat-attachment-item--text-image chat-tool flex-1 flex flex-col items-center justify-center group min-w-10" title="发送文字图">
+                  <div className="chat-attachment-icon chat-tool__icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><ChatIcon src={getChatIcon("textImage")} className="w-4 h-4"><Camera className="w-4 h-4 text-slate-700" /></ChatIcon></div>
+                  <span className="chat-attachment-label chat-tool__label text-[10px] text-slate-500 mt-1 font-semibold scale-90">文字图</span>
                 </button>
 
                 {/* 2. 红包 (Red Packet) */}
@@ -10220,12 +10441,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     setActiveAttachModal("redpacket");
                     setShowAttachPanel(false);
                   }}
-                  className="chat-attachment-item chat-attachment-item--red-packet flex-1 flex flex-col items-center justify-center group min-w-10"
+                  data-tool-key="red-packet" data-tool-tier="primary" data-tool-order="4"
+                  className="chat-attachment-item chat-attachment-item--red-packet chat-tool flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon chat-tool__icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("redPacket")} className="w-4 h-4"><Gift className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">红包</span>
+                  <span className="chat-attachment-label chat-tool__label text-[10px] text-slate-500 mt-1 font-semibold scale-90">红包</span>
                 </button>
 
                 {/* 3. 语音 (Voice) */}
@@ -10236,12 +10458,13 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     setActiveAttachModal("voice");
                     setShowAttachPanel(false);
                   }}
-                  className="chat-attachment-item chat-attachment-item--voice flex-1 flex flex-col items-center justify-center group min-w-10"
+                  data-tool-key="voice" data-tool-tier="primary" data-tool-order="1"
+                  className="chat-attachment-item chat-attachment-item--voice chat-tool flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon chat-tool__icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("voice")} className="w-4 h-4"><Mic className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
+                  <span className="chat-attachment-label chat-tool__label text-[10px] text-slate-500 mt-1 font-semibold scale-90">语音</span>
                 </button>
 
                 {/* 5. 电话 (Phone) */}
@@ -10250,24 +10473,26 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   onClick={() => {
                     beginVoiceCall(false);
                   }}
-                  className="chat-attachment-item chat-attachment-item--call flex-1 flex flex-col items-center justify-center group min-w-10"
+                  data-tool-key="call" data-tool-tier="secondary" data-tool-order="6"
+                  className="chat-attachment-item chat-attachment-item--call chat-tool flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon chat-tool__icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("call")} className="w-4 h-4"><Phone className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
+                  <span className="chat-attachment-label chat-tool__label text-[10px] text-slate-500 mt-1 font-semibold scale-90">电话</span>
                 </button>
 
                 {/* 6. 视频 (Video) */}
                 <button
                   type="button"
                   onClick={() => beginVideoCall(false)}
-                  className="chat-attachment-item chat-attachment-item--video flex-1 flex flex-col items-center justify-center group min-w-10"
+                  data-tool-key="video" data-tool-tier="secondary" data-tool-order="7"
+                  className="chat-attachment-item chat-attachment-item--video chat-tool flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
-                    <ChatIcon src={getChatIcon("call")} className="w-4 h-4"><Video className="w-4 h-4 text-slate-700" /></ChatIcon>
+                  <div className="chat-attachment-icon chat-tool__icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                    <ChatIcon src={getChatIcon("video")} className="w-4 h-4"><Video className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">视频</span>
+                  <span className="chat-attachment-label chat-tool__label text-[10px] text-slate-500 mt-1 font-semibold scale-90">视频</span>
                 </button>
 
                 {/* 7. 位置 (Location) */}
@@ -10277,12 +10502,18 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     setActiveAttachModal("location");
                     setShowAttachPanel(false);
                   }}
-                  className="chat-attachment-item chat-attachment-item--location flex-1 flex flex-col items-center justify-center group min-w-10"
+                  data-tool-key="location" data-tool-tier="secondary" data-tool-order="8"
+                  className="chat-attachment-item chat-attachment-item--location chat-tool flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon chat-tool__icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("location")} className="w-4 h-4"><MapPin className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
+                  <span className="chat-attachment-label chat-tool__label text-[10px] text-slate-500 mt-1 font-semibold scale-90">位置</span>
+                </button>
+
+                <button type="button" data-tool-key="transfer" data-tool-tier="secondary" data-tool-order="11" onClick={() => { setTransferAmount("5.21"); setTransferMemo("转账"); setActiveAttachModal("transfer"); setShowAttachPanel(false); }} className="chat-attachment-item chat-attachment-item--transfer chat-tool flex-1 flex flex-col items-center justify-center group min-w-10">
+                  <div className="chat-attachment-icon chat-tool__icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors"><ChatIcon src={getChatIcon("transfer")} className="w-4 h-4"><CreditCard className="w-4 h-4 text-slate-700" /></ChatIcon></div>
+                  <span className="chat-attachment-label chat-tool__label text-[10px] text-slate-500 mt-1 font-semibold scale-90">转账</span>
                 </button>
 
                 {/* 8. 表情 (Emoji) */}
@@ -10292,15 +10523,30 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                     setShowStickerSelector(true);
                     setShowAttachPanel(false);
                   }}
-                  className="chat-attachment-item chat-attachment-item--sticker flex-1 flex flex-col items-center justify-center group min-w-10"
+                  data-tool-key="sticker" data-tool-tier="primary" data-tool-order="5"
+                  className="chat-attachment-item chat-attachment-item--sticker chat-tool flex-1 flex flex-col items-center justify-center group min-w-10"
                 >
-                  <div className="chat-attachment-icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
+                  <div className="chat-attachment-icon chat-tool__icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100 group-hover:bg-slate-100 transition-colors">
                     <ChatIcon src={getChatIcon("sticker")} className="w-4 h-4"><Smile className="w-4 h-4 text-slate-700" /></ChatIcon>
                   </div>
-                  <span className="chat-attachment-label text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
+                  <span className="chat-attachment-label chat-tool__label text-[10px] text-slate-500 mt-1 font-semibold scale-90">表情</span>
+                </button>
+                <button
+                  type="button"
+                  data-tool-key="more"
+                  data-tool-tier="trigger"
+                  data-tool-order="6"
+                  className="chat-attachment-item chat-tool chat-tool--more flex-1 flex-col items-center justify-center group min-w-10"
+                  aria-controls="chat-composer-tools"
+                  aria-expanded={showMoreTools}
+                  onClick={() => setShowMoreTools((current) => !current)}
+                >
+                  <div className="chat-attachment-icon chat-tool__icon bg-white rounded-xl flex items-center justify-center shadow-sm border border-slate-100">
+                    <ChatIcon src={getChatIcon(showMoreTools ? "close" : "more")} className="w-4 h-4"><Plus className={`w-4 h-4 text-slate-700 ${showMoreTools ? "rotate-45" : ""}`} /></ChatIcon>
+                  </div>
+                  <span className="chat-attachment-label chat-tool__label text-[10px] text-slate-500 mt-1 font-semibold scale-90">更多</span>
                 </button>
               </AttachmentMenu>
-            )}
 
             {/* Sticker Selector Panel */}
             {showStickerSelector && (
@@ -10617,6 +10863,33 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             </div>
           )}
 
+          {activeAttachModal === "transfer" && (
+            <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 animate-fade-in text-slate-800">
+              <div className="bg-white rounded-[28px] w-full max-w-xs overflow-hidden shadow-2xl border border-slate-100 animate-scale-up">
+                <div className="px-5 py-4 bg-stone-50 border-b border-stone-100 flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-stone-800">发起转账</h3>
+                  <button type="button" onClick={() => setActiveAttachModal(null)} className="p-1 rounded-full text-stone-500"><X className="w-4 h-4" /></button>
+                </div>
+                <div className="p-5 space-y-4">
+                  <label className="block rounded-2xl bg-slate-50 border border-slate-200/60 p-3">
+                    <span className="block text-[9px] font-extrabold uppercase tracking-wider text-stone-400 mb-1.5">转账金额</span>
+                    <span className="flex items-center"><b className="text-lg mr-1.5 text-[#4298ef]">¥</b><input type="number" min="0.01" step="0.01" value={transferAmount} onChange={(event) => setTransferAmount(event.target.value)} className="w-full bg-transparent text-base font-bold outline-none" /></span>
+                  </label>
+                  <label className="block rounded-2xl bg-slate-50 border border-slate-200/60 p-3">
+                    <span className="block text-[9px] font-extrabold uppercase tracking-wider text-stone-400 mb-1.5">转账留言</span>
+                    <input type="text" value={transferMemo} onChange={(event) => setTransferMemo(event.target.value)} className="w-full bg-transparent text-xs font-bold outline-none" placeholder="转账" />
+                  </label>
+                  <button type="button" onClick={() => {
+                    const amount = Math.max(0.01, Number(transferAmount) || 5.21).toFixed(2);
+                    const memo = transferMemo.trim() || "转账";
+                    sendCustomMessage(`[转账]|${amount}|${memo}|true`, activeRuntimeContext);
+                    setActiveAttachModal(null);
+                  }} className="w-full py-2.5 rounded-xl bg-[#4298ef] text-white text-xs font-extrabold">转账</button>
+                </div>
+              </div>
+            </div>
+          )}
+
            {/* Red Envelope Opened Modal Overlay */}
           {showRedPacketOpenModal && openRedPacketDetail && (() => {
             const status = getRedPacketActualStatus(openRedPacketDetail.message);
@@ -10800,6 +11073,25 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
               </div>
             );
           })()}
+
+          {showTransferDetailModal && openTransferDetail && (
+            <div className="transfer-detail absolute inset-0 z-[100] bg-white text-[#111] animate-fade-in">
+              <header className="transfer-detail__header relative h-16 flex items-center justify-center border-b border-slate-100">
+                <button type="button" aria-label="返回聊天" onClick={() => setShowTransferDetailModal(false)} className="transfer-detail__back absolute left-4 top-1/2 -translate-y-1/2 p-2"><ChevronLeft className="w-7 h-7" /></button>
+                <h3 className="transfer-detail__title text-lg font-medium">交易详情</h3>
+              </header>
+              <main className="transfer-detail__body px-5 pt-32 text-center">
+                <div className="transfer-detail__success mx-auto flex h-16 w-16 items-center justify-center rounded-full border-[5px] border-[#4298ef] text-[#4298ef]"><Check className="w-10 h-10 stroke-[3]" /></div>
+                <p className="transfer-detail__summary mt-7 text-base font-semibold">你已收款，资金已存入钱包余额</p>
+                <p className="transfer-detail__amount mt-5 text-5xl font-bold">¥ {Number(openTransferDetail.amount || 0).toFixed(2)}</p>
+                <p className="transfer-detail__balance mt-5 text-base text-[#3f86dc]">查看余额</p>
+                <dl className="transfer-detail__meta mt-20 border-t border-slate-200 pt-5 text-sm">
+                  <div className="flex justify-between gap-4 py-2"><dt className="text-slate-400">转账留言</dt><dd>{openTransferDetail.memo || "转账"}</dd></div>
+                  <div className="flex justify-between gap-4 py-2"><dt className="text-slate-400">转账时间</dt><dd>{new Date(openTransferDetail.timestamp || Date.now()).toLocaleString("zh-CN", { hour12: false })}</dd></div>
+                </dl>
+              </main>
+            </div>
+          )}
 
           {/* Music Selector Modal Overlay */}
           {activeAttachModal === "music" && (

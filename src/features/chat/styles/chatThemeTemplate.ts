@@ -64,6 +64,16 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
   --chat-header-control-border: transparent;
   --chat-header-control-radius: 0px;
   --chat-header-control-shadow: none;
+  --chat-header-control-size: 2.5rem;
+  --chat-header-icon-size: 1.5rem;
+  --chat-header-identity-gap: 0.25rem;
+  --chat-header-status-gap: 0.125rem;
+  --chat-header-status-dot-size: 0.375rem;
+  --chat-viewport-height: 100dvh;
+  --chat-safe-top: env(safe-area-inset-top, 0px);
+  --chat-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --chat-scroll-padding-bottom: 0px;
+  --chat-content-max-width: none;
   /* 展开工具栏 */
   --chat-attachment-panel-bg: var(--surface-muted);
   --chat-attachment-panel-border: var(--divider);
@@ -75,11 +85,20 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
   --chat-attachment-label-text: var(--text-secondary);
   --chat-attachment-panel-display: flex;
   --chat-attachment-label-display: block;
+  --chat-voice-min-width: 5.9375rem;
+  --chat-voice-max-width: min(220px, calc(100vw - 92px));
+  --chat-voice-height: 2.5rem;
+  --chat-voice-wave-overflow: hidden;
+  --chat-more-icon-box-size: 1.375rem;
+  --chat-more-icon-size: 0.875rem;
 }
 
 /* ==================== 页面与壁纸 ==================== */
 /* .chat-page 是实际聊天容器，不要写成 #conv-screen .chat-page。 */
 .chat-page {
+  min-height: var(--chat-viewport-height);
+  max-width: var(--chat-content-max-width);
+  padding-top: var(--chat-safe-top);
   background: var(--chat-page-bg);
   background-size: cover;
   background-position: center;
@@ -108,6 +127,16 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 }
 .cv-back-icon,
 .cv-menu-icon { color: currentColor; }
+.chat-header__back-button,
+.chat-header__more-button {
+  width: var(--chat-header-control-size);
+  height: var(--chat-header-control-size);
+}
+.chat-header__back-button svg,
+.chat-header__more-button svg { width: var(--chat-header-icon-size); height: var(--chat-header-icon-size); }
+.chat-header__identity { gap: var(--chat-header-identity-gap); }
+.chat-header__status { gap: var(--chat-header-status-gap); }
+.chat-header__status > .status-indicator { width: var(--chat-header-status-dot-size); height: var(--chat-header-status-dot-size); }
 
 /* ==================== 消息区域 ==================== */
 .cv-messages-list { background: var(--chat-message-list-bg); color: var(--chat-text); }
@@ -147,13 +176,20 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 
 /* 语音：保持独立胶囊尺寸，宽度仍由语音时长决定。 */
 .chat-message--voice {
-  min-width: 95px;
+  box-sizing: border-box;
+  width: var(--chat-voice-max-width);
+  min-width: var(--chat-voice-min-width);
+  max-width: var(--chat-voice-max-width);
   min-height: 40px;
   padding: 6px 12px;
   border-radius: 14px;
+  overflow: hidden;
+  min-height: var(--chat-voice-height);
 }
 .chat-message--voice-wave,
 .chat-message--voice-duration { color: currentColor; }
+.chat-message--voice-wave { min-width: 0; overflow: var(--chat-voice-wave-overflow); }
+.chat-message--voice-duration { flex: 0 0 auto; white-space: nowrap; }
 
 /* 通话记录：不依赖 :has() 或内部 SVG。 */
 .chat-message--call {
@@ -239,6 +275,14 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
 .message-quote__author { color: var(--quote-author, inherit); }
 .message-quote__separator { color: var(--quote-separator, inherit); }
 .message-quote__content { color: var(--quote-content, inherit); }
+.message-quote__jump { cursor: pointer; }
+.message-quote__jump { min-width: 2.75rem; min-height: 2.75rem; }
+
+/* Stable message state hooks. The app supplies these data attributes so
+   themes do not need to infer message kinds from serialized content. */
+.chat-message-row[data-message-state="selected"] { box-shadow: 0 0 0 3px var(--focus-ring); }
+.chat-message__content { min-width: 0; }
+.chat-message__text { overflow-wrap: anywhere; word-break: break-word; }
 
 /* ==================== 系统提示与线下时间线 ==================== */
 .chat-system-notice { --chat-system-notice-text: var(--chat-muted-text); }
@@ -273,6 +317,10 @@ export const COMPACT_CHARACTER_CSS_EXAMPLE_TEMPLATE = `/* 仅作用于聊天页�
   background: var(--chat-attachment-panel-bg);
   border-color: var(--chat-attachment-panel-border);
   border-radius: var(--chat-attachment-panel-radius);
+}
+.chat-tools {
+  grid-template-columns: repeat(var(--chat-tools-columns, 5), minmax(0, 1fr));
+  scroll-padding-bottom: var(--chat-scroll-padding-bottom);
 }
 .chat-attachment-item { color: var(--chat-text); }
 .chat-attachment-icon {
