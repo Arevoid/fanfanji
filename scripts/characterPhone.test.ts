@@ -269,9 +269,10 @@ assert.match(component, /activeApp === "schedule" \? "character-phone-schedule-m
 assert.match(css, /character-phone-schedule-main\.px-5/);
 assert.match(css, /\.phone-screen-container \{[\s\S]*touch-action: pan-x pan-y/);
 assert.match(css, /\.phone-social-nav \{[\s\S]*min-height: 56px[\s\S]*padding-bottom: max\(8px, env\(safe-area-inset-bottom, 0px\)\)/);
-assert.match(css, /\[data-app-surface="chat"\] \.phone-social-nav \{[\s\S]*padding-bottom: 8px/);
+assert.match(css, /\[data-app-surface="chat"\] \.phone-social-nav \{[\s\S]*padding-bottom: max\(8px, env\(safe-area-inset-bottom, 0px\)\)/);
 assert.match(css, /\.phone-screen-container \.overflow-y-auto,[\s\S]*overscroll-behavior: contain/);
 assert.match(callApp, /nav className="box-border grid h-16 min-h-16 max-h-16/);
+assert.match(app, /paddingBottom: "0px" }} className="w-full h-full absolute inset-0 z-30 overflow-hidden" data-app-surface="chat"/);
 assert.doesNotMatch(component, /CharacterPhoneLifeEventTag|renderLifeEventTag|同一生活事件/);
 assert.doesNotMatch(callApp, /CharacterPhoneLifeEventTag|同一生活事件/);
 assert.doesNotMatch(component, /暂无角色日程|没有明确的课程、约定或待办时间/);

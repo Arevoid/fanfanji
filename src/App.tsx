@@ -5087,7 +5087,7 @@ export default function App() {
         {/* Home Screen Icons Layout or Active Application Render */}
         <div className="flex-1 relative min-h-0 overflow-hidden flex flex-col">
                 {(activeApp === "chat" || chatModuleActivated) && (
-                  <div style={{ display: activeApp === "chat" ? "block" : "none", paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)", paddingBottom: "env(safe-area-inset-bottom, 0px)" }} className="w-full h-full absolute inset-0 z-30 overflow-hidden" data-app-surface="chat" data-app-transitioning={transitioning || undefined}>
+                  <div style={{ display: activeApp === "chat" ? "block" : "none", paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)", paddingBottom: "0px" }} className="w-full h-full absolute inset-0 z-30 overflow-hidden" data-app-surface="chat" data-app-transitioning={transitioning || undefined}>
                   <div className="relative h-full w-full">
                   <LazyAppBoundary>
                     <AppChat

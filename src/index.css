@@ -275,9 +275,8 @@ button, input, textarea, select {
 /* Bottom navigation is shared by the standalone chat app and the role-phone
    chat/contact pages. Keep it as a real flex item (rather than relying on
    viewport-fixed positioning), so browsers with collapsing address bars do
-   not clip or float it away from the phone surface. The role-phone pages own
-   the safe-area inset here; the full chat app already reserves that inset on
-   its app surface wrapper. */
+   not clip or float it away from the phone surface. Each navigation bar owns
+   its safe-area inset so the app surface remains fully opaque behind it. */
 .phone-social-nav {
   box-sizing: border-box;
   flex: 0 0 auto;
@@ -295,10 +294,9 @@ button, input, textarea, select {
   flex: 1 1 0;
 }
 
-/* AppChat's outer surface already includes env(safe-area-inset-bottom), so
-   do not reserve the same inset twice on browsers that expose it. */
+/* Keep the selector explicit for custom themes and older generated CSS. */
 [data-app-surface="chat"] .phone-social-nav {
-  padding-bottom: 8px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
 }
 
 @media (max-width: 767px) {
