@@ -5005,7 +5005,7 @@ export default function App() {
       <div
         id="phone_glass_screen"
         ref={phoneScreenRef}
-        className="w-full md:h-[812px] md:w-[375px] md:rounded-[40px] md:shadow-2xl overflow-hidden relative flex flex-col bg-slate-100 border-none phone-screen-container"
+        className="w-full md:h-[812px] md:w-[375px] md:rounded-[40px] md:shadow-2xl min-h-0 overflow-hidden relative flex flex-col bg-slate-100 border-none phone-screen-container"
         style={{
           // Keep the first paint from showing placeholder wallpaper/icons and
           // then visibly jumping when IndexedDB-backed settings are restored.
@@ -5020,7 +5020,10 @@ export default function App() {
           backgroundColor: "var(--desktop-default-bg)",
           position: "relative",
           height: typeof window !== "undefined"
-            ? window.innerWidth < 768 ? "100%" : "min(812px, 100dvh)"
+            ? window.innerWidth < 768 ? "var(--app-viewport-height, 100dvh)" : "min(812px, 100dvh)"
+            : undefined,
+          maxHeight: typeof window !== "undefined" && window.innerWidth < 768
+            ? "var(--app-viewport-height, 100dvh)"
             : undefined,
           transition: "width 0.3s ease",
         }}
@@ -5082,7 +5085,7 @@ export default function App() {
         )}
 
         {/* Home Screen Icons Layout or Active Application Render */}
-        <div className="flex-1 relative overflow-hidden flex flex-col">
+        <div className="flex-1 relative min-h-0 overflow-hidden flex flex-col">
                 {(activeApp === "chat" || chatModuleActivated) && (
                   <div style={{ display: activeApp === "chat" ? "block" : "none", paddingTop: settings.hideStatusBar ? "0px" : "calc(env(safe-area-inset-top, 0px) + 36px)", paddingBottom: "env(safe-area-inset-bottom, 0px)" }} className="w-full h-full absolute inset-0 z-30 overflow-hidden" data-app-surface="chat" data-app-transitioning={transitioning || undefined}>
                   <div className="relative h-full w-full">

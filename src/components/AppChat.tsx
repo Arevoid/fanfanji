@@ -7353,7 +7353,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
   const callOverlayTarget = typeof document !== "undefined" ? document.querySelector<HTMLElement>("[data-call-overlay-host]") : null;
 
   return (
-    <div className="flex flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans select-none overflow-hidden relative" data-chat-shell>
+    <div className="flex min-h-0 flex-col h-full bg-[var(--app-bg)] text-[var(--text-primary)] font-sans select-none overflow-hidden relative" data-chat-shell>
       <InnerVoiceModal
         character={innerVoiceController.character}
         mode={innerVoiceController.mode}
@@ -12985,10 +12985,10 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         </div>
 
         {/* BOTTOM NAVIGATION BAR FOR CHAT APP (聊天、通讯录、朋友圈、我) */}
-        <div className="chat-tab-nav bg-slate-50 border-t border-slate-200/60 py-2 shrink-0 flex justify-around items-center text-[10px] font-bold text-slate-400 z-10">
+        <nav className="phone-social-nav chat-tab-nav bg-slate-50 border-t border-slate-200/60 px-1 py-2 shrink-0 flex justify-around items-center text-[10px] font-bold text-slate-400 z-10" data-phone-social-nav>
           <button
             onClick={() => setActiveTab("chats")}
-            className={`chat-tab-nav-item flex flex-col items-center space-y-1 ${
+            className={`phone-social-nav-item chat-tab-nav-item flex min-h-10 min-w-0 flex-1 flex-col items-center justify-center space-y-1 ${
               activeTab === "chats" ? "chat-tab-nav-item--active text-neutral-950" : "chat-tab-nav-item--inactive text-neutral-400 hover:text-neutral-650"
             }`}
           >
@@ -13008,7 +13008,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           
           <button
             onClick={() => setActiveTab("contacts")}
-            className={`chat-tab-nav-item flex flex-col items-center space-y-1 ${
+            className={`phone-social-nav-item chat-tab-nav-item flex min-h-10 min-w-0 flex-1 flex-col items-center justify-center space-y-1 ${
               activeTab === "contacts" ? "chat-tab-nav-item--active text-neutral-950" : "chat-tab-nav-item--inactive text-neutral-400 hover:text-neutral-650"
             }`}
           >
@@ -13018,7 +13018,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
           <button
             onClick={() => setActiveTab("moments")}
-            className={`chat-tab-nav-item flex flex-col items-center space-y-1 ${
+            className={`phone-social-nav-item chat-tab-nav-item flex min-h-10 min-w-0 flex-1 flex-col items-center justify-center space-y-1 ${
               activeTab === "moments" ? "chat-tab-nav-item--active text-neutral-950" : "chat-tab-nav-item--inactive text-neutral-400 hover:text-neutral-650"
             }`}
           >
@@ -13035,14 +13035,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
 
           <button
             onClick={() => setActiveTab("me")}
-            className={`chat-tab-nav-item flex flex-col items-center space-y-1 ${
+            className={`phone-social-nav-item chat-tab-nav-item flex min-h-10 min-w-0 flex-1 flex-col items-center justify-center space-y-1 ${
               activeTab === "me" ? "chat-tab-nav-item--active text-neutral-950" : "chat-tab-nav-item--inactive text-neutral-400 hover:text-neutral-650"
             }`}
           >
             <User className="w-5 h-5" />
             <span>我</span>
           </button>
-        </div>
+        </nav>
 
       </div>
 

@@ -3059,7 +3059,7 @@ export default function AppCharacterPhone({
     });
   };
   const phoneSocialNav = (
-    <div className="chat-tab-nav z-10 box-border flex h-14 min-h-14 max-h-14 shrink-0 items-center justify-around border-t border-slate-200/60 bg-slate-50 py-2 text-[10px] font-bold text-slate-400" aria-label="聊天应用导航">
+    <nav className="phone-social-nav chat-tab-nav z-10 box-border flex shrink-0 items-center justify-around border-t border-slate-200/60 bg-slate-50 px-1 py-2 text-[10px] font-bold text-slate-400" data-phone-social-nav aria-label="聊天应用导航">
       {[
         { id: "chats" as const, label: "聊天", icon: MessageSquare },
         { id: "contacts" as const, label: "通讯录", icon: Users },
@@ -3074,7 +3074,7 @@ export default function AppCharacterPhone({
             setPhoneChatMode("inbox");
             setContactMenuOpen(false);
           }}
-          className={`chat-tab-nav-item flex flex-col items-center space-y-1 ${phoneSocialTab === id ? "chat-tab-nav-item--active text-neutral-950" : "chat-tab-nav-item--inactive text-neutral-400 hover:text-neutral-650"}`}
+          className={`phone-social-nav-item chat-tab-nav-item flex min-h-10 min-w-0 flex-1 flex-col items-center justify-center space-y-1 ${phoneSocialTab === id ? "chat-tab-nav-item--active text-neutral-950" : "chat-tab-nav-item--inactive text-neutral-400 hover:text-neutral-650"}`}
           aria-label={label}
           aria-current={phoneSocialTab === id ? "page" : undefined}
         >
@@ -3085,7 +3085,7 @@ export default function AppCharacterPhone({
           <span>{label}</span>
         </button>
       ))}
-    </div>
+    </nav>
   );
   const roleAudienceContacts = visiblePhoneContacts.filter((contact) => Boolean(contact.linkedCharacterId));
   const roleAudienceOptions = roleAudienceContacts.map((contact) => ({
