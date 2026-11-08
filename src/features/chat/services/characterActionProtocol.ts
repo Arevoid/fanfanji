@@ -74,6 +74,13 @@ export interface ParsedCharacterAction {
   error?: CharacterActionParseError;
 }
 
+export interface ExplicitCharacterActionIntentInput {
+  /** The latest user-authored message in the active chat. */
+  userText: string;
+  /** The character's visible reply, used to avoid turning a refusal into an action. */
+  characterReply?: string;
+}
+
 export const CHARACTER_ACTION_START = "[[CHAR_ACTION]]";
 export const CHARACTER_ACTION_END = "[[/CHAR_ACTION]]";
 
@@ -121,6 +128,120 @@ function optionalAmount(value: unknown): number | undefined {
       : NaN;
   if (!Number.isFinite(amount) || amount < 0.01 || amount > 10000) return undefined;
   return Number(amount.toFixed(2));
+}
+
+function extractExplicitAmount(text: string): number | undefined {
+  const currency = text.match(/(?:¥|￥)\s*(\d+(?:\.\d{1,2})?)/u);
+  if (currency) return Number(Number(currency[1]).toFixed(2));
+  const split = text.match(/(\d+)\s*块\s*(\d{1,2})(?:分)?/u);
+  if (split) return Number((Number(split[1]) + Number(split[2]) / (split[2].length === 1 ? 10 : 100)).toFixed(2));
+  const yuan = text.match(/(\d+(?:\.\d{1,2})?)\s*(?:元|块钱|块)/u);
+  return yuan ? Number(Number(yuan[1]).toFixed(2)) : undefined;
+}
+
+function extractTail(text: string, patterns: readonly RegExp[]): string | undefined {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const value = match?.[1]?.trim().replace(/[。！!，,；;。]+$/gu, "");
+    if (value) return value.slice(0, 500);
+  }
+  return undefined;
+}
+
+function hasExplicitActionRefusal(reply: string): boolean {
+  return /(?:不发|不转|不给|不能|不行|拒绝|不想|不愿|没钱|算了|别想|无法|不可以|不方便|不支持)/u.test(reply);
+}
+
+/**
+ * Recover an explicit action request when a provider returns ordinary prose
+ * instead of the private action marker. This is intentionally conservative:
+ * it only accepts direct imperatives from the latest user turn and refuses to
+ * infer actions from quoted text, role narration, or a character refusal.
+ */
+export function parseExplicitCharacterActionIntent(
+  input: ExplicitCharacterActionIntentInput,
+): CharacterActionDirective | undefined {
+  const userText = input.userText.trim();
+  if (!userText || /(?:["“”「」『』]|引用|转述|截图|示例)/u.test(userText)) return undefined;
+  if (input.characterReply && hasExplicitActionRefusal(input.characterReply)) return undefined;
+
+  if (/(?:发|来|给)(?:个|一个|一份)?(?:微信)?红包|给我红包|红包发我/u.test(userText)) {
+    return {
+      type: "send_red_packet",
+      actor: "character",
+      amount: extractExplicitAmount(userText) ?? 8.88,
+      greeting: extractTail(userText, [/(?:备注|祝福|说|写)[：:]?(.+)$/u]) || "恭喜发财，万事如意",
+      reason: "用户明确要求角色发红包",
+    };
+  }
+
+  if (/(?:视频通话|视频电话|打(?:个)?视频|视频聊|开视频)/u.test(userText)) {
+    return { type: "video_call", actor: "character", reason: "用户明确要求视频通话" };
+  }
+  if (/(?:语音通话|语音电话|打电话|打语音|语音聊)/u.test(userText)) {
+    return { type: "call", actor: "character", reason: "用户明确要求语音通话" };
+  }
+  if (/(?:发|发送)(?:个|一条|一段)?(?:语音|录音|语音消息)/u.test(userText)) {
+    return {
+      type: "send_voice",
+      actor: "character",
+      contentHint: extractTail(userText, [/(?:说|内容|告诉我)[：:]?(.+)$/u]) || "我在这儿，听得到吗？",
+      reason: "用户明确要求角色发送语音",
+    };
+  }
+  if (/(?:发|发送|分享)(?:个|一份|一下)?(?:位置|定位)|(?:位置|定位)发给我|共享位置/u.test(userText)) {
+    return { type: "send_location", actor: "character", location: "当前位置", reason: "用户明确要求角色分享位置" };
+  }
+  if (/(?:发|发送|分享)(?:个|一份|一下)?文件|发笔记/u.test(userText)) {
+    const fileName = userText.match(/[\w\-\u4e00-\u9fff]+\.(?:txt|docx?|pdf|zip|md|jpg|png|mp3|mp4)/iu)?.[0] || "文件";
+    return { type: "send_file", actor: "character", fileName, reason: "用户明确要求角色发送文件" };
+  }
+  if (/(?:发|发送|分享)(?:首|个|一首)?(?:歌|歌曲|音乐)/u.test(userText)) {
+    const title = userText.match(/[《「“]([^》」”]+)[》」”]/u)?.[1]?.trim()
+      || extractTail(userText, [/(?:歌曲|音乐|歌)[：:]?(.+)$/u]);
+    return { type: "send_music", actor: "character", musicTitle: title || "分享一首歌", reason: "用户明确要求角色分享音乐" };
+  }
+  if (/(?:发|发送|分享)(?:张|个|一张)?(?:图片|照片|图)/u.test(userText)) {
+    return {
+      type: "send_image",
+      actor: "character",
+      contentHint: extractTail(userText, [/(?:内容|画|生成|图片|照片)[：:]?(.+)$/u]) || "根据刚才的对话生成一张图片",
+      reason: "用户明确要求角色发送图片",
+    };
+  }
+  if (/(?:改|换|更换)(?:一下)?头像|情侣头像/u.test(userText)) {
+    return { type: "change_avatar", actor: "character", reason: "用户明确要求角色修改头像" };
+  }
+  if (/(?:加我好友|加好友|加回好友|发好友申请|重新添加|重新加回)/u.test(userText)) {
+    return {
+      type: "friend_request",
+      actor: "character",
+      contentHint: extractTail(userText, [/(?:备注|留言|说)[：:]?(.+)$/u]) || "想重新和你联系",
+      reason: "用户明确要求角色发送好友申请",
+    };
+  }
+  if (/(?:转账|转给我|给我转|打钱|发钱)/u.test(userText)) {
+    const amount = extractExplicitAmount(userText);
+    if (amount === undefined) return undefined;
+    return {
+      type: "send_transfer",
+      actor: "character",
+      amount,
+      memo: extractTail(userText, [/(?:备注|说明|说)[：:]?(.+)$/u]) || "转账",
+      confirmed: true,
+      reason: "用户明确要求角色转账",
+    };
+  }
+  if (/(?:发朋友圈|发动态|发条动态|发布动态)/u.test(userText)) {
+    return {
+      type: "publish_moment",
+      actor: "character",
+      contentHint: extractTail(userText, [/(?:内容|写|说)[：:]?(.+)$/u]) || "记录一下刚刚的心情",
+      visibility: "friends",
+      reason: "用户明确要求角色发布动态",
+    };
+  }
+  return undefined;
 }
 
 function validateDirective(value: unknown): CharacterActionDirective | undefined {

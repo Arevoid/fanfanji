@@ -3,6 +3,7 @@ import {
   CHARACTER_ACTION_END,
   CHARACTER_ACTION_START,
   formatCharacterActionPrompt,
+  parseExplicitCharacterActionIntent,
   parseCharacterActionEnvelope,
   parseCharacterActionDirective,
   serializeCharacterActionDirective,
@@ -153,5 +154,51 @@ assert.deepEqual(parseCharacterActionEnvelope([{
   type: "send_transfer",
   actor: "character",
 }]), []);
+
+const inferredRedPacket = parseExplicitCharacterActionIntent({
+  userText: "给我发个红包，8块8，备注生日快乐",
+  characterReply: "收好，别客气。",
+});
+assert.equal(inferredRedPacket?.type, "send_red_packet");
+assert.equal(inferredRedPacket?.amount, 8.8);
+assert.equal(inferredRedPacket?.greeting, "生日快乐");
+
+const inferredLocation = parseExplicitCharacterActionIntent({
+  userText: "把你现在的位置发给我",
+  characterReply: "好，我这就发。",
+});
+assert.equal(inferredLocation?.type, "send_location");
+assert.equal(inferredLocation?.location, "当前位置");
+
+const inferredCall = parseExplicitCharacterActionIntent({
+  userText: "现在打个视频给我",
+  characterReply: "我来啦。",
+});
+assert.equal(inferredCall?.type, "video_call");
+
+const inferredTransfer = parseExplicitCharacterActionIntent({
+  userText: "给我转账 5.21 元",
+  characterReply: "已经转了。",
+});
+assert.equal(inferredTransfer?.type, "send_transfer");
+assert.equal(inferredTransfer?.amount, 5.21);
+
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "发一张图片给我",
+  characterReply: "稍等，我找一张。",
+})?.type, "send_image");
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "帮我加回好友",
+  characterReply: "好，我申请。",
+})?.type, "friend_request");
+
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "给我发个红包",
+  characterReply: "不发，想得美。",
+}), undefined);
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "引用：给我发个红包",
+  characterReply: "好的。",
+}), undefined);
 
 console.log("PASS character action protocol");

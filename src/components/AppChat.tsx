@@ -159,7 +159,7 @@ import type { ImageGenerationTrigger } from "../features/chat/services/imageGene
 import { checkProactiveImageGenerationPolicy, isProactiveImageGenerationEnabled } from "../features/chat/services/proactiveImageGenerationPolicy";
 import { imageDataUrlToBlob, parseCharacterSaveUserImageDirective } from "../features/chat/services/userImageMemoryService";
 import { characterAvatarReplyRefusesChange, isExplicitCharacterAvatarChangeRequest, resolveCharacterAvatarChangeTiming, type CharacterAvatarChangeTiming } from "../features/chat/services/characterAvatarChangeIntent";
-import { formatCharacterActionPrompt, parseCharacterActionDirective, sanitizeCharacterActionText, type CharacterActionDirective } from "../features/chat/services/characterActionProtocol";
+import { formatCharacterActionPrompt, parseCharacterActionDirective, parseExplicitCharacterActionIntent, sanitizeCharacterActionText, type CharacterActionDirective } from "../features/chat/services/characterActionProtocol";
 import { evaluateCharacterActionCapability } from "../features/chat/services/characterActionCapabilities";
 import { resolveRecentUserImageForTurn } from "../features/chat/services/recentUserImageContext";
 import { resolveChatMessageAvatar } from "../features/chat/services/messageAvatarResolver";
@@ -3637,7 +3637,8 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
         let proactiveOfflineParse: PreparedDirectReplyResponse["proactiveOfflineParse"];
         let callAction: PreparedDirectReplyResponse["callAction"];
         let characterAction: PreparedDirectReplyResponse["characterAction"];
-        if (data.text) {
+        if (data.text || userMsg?.sender === "user") {
+          data.text = data.text || "";
           data.text = applyCharacterPhonePasswordAction(data.text);
           // Persistence requires either a validated action marker or an
           // explicit natural-language acceptance. Refusals stay in the
@@ -3695,14 +3696,33 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
           });
           data.text = proactiveOfflineParse.visibleText;
           characterAction = parseCharacterActionDirective({ text: data.text });
+          // Some providers follow the natural-language reply instructions but
+          // omit the private action envelope. Recover only a high-confidence
+          // explicit request from the latest user turn; ordinary prose and
+          // refusals remain untouched.
+          if (!characterAction.directive && userMsg?.sender === "user") {
+            const inferredAction = parseExplicitCharacterActionIntent({
+              userText: userMsg.content,
+              characterReply: data.text,
+            });
+            if (inferredAction) {
+              characterAction = { visibleText: characterAction.visibleText, directive: inferredAction };
+            }
+          }
           data.text = characterAction.visibleText;
           const inlineStickerReferences = extractStickerMarkupReferences(data.text);
           if (characterAction.directive && !isOfflineModeActive) {
+            const actionRelationship = turnRelationship || relationships.find((candidate) =>
+              candidate.userIdentityId === replyContext.userIdentityId
+              && (candidate.id === replyContext.relationId
+                || (replyContext.conversationId && candidate.conversationId === replyContext.conversationId))
+              && resolveCanonicalCharacterId(candidate.characterId, characters) === resolveCanonicalCharacterId(turnCharacter.id, characters),
+            );
             const actionResult = await executeCharacterActionForRuntime(characterAction.directive, {
-              relationship: turnRelationship,
-              character: activeCharacter,
+              relationship: actionRelationship,
+              character: turnCharacter,
               userIdentityId: replyContext.userIdentityId,
-              actionKey: `${replyContext.userIdentityId}:${turnRelationship?.id || replyContext.relationId || replyContext.conversationId || "chat"}:${characterAction.directive.id || replyBatchId}:${characterAction.directive.type}`,
+              actionKey: `${replyContext.userIdentityId}:${actionRelationship?.id || replyContext.relationId || replyContext.conversationId || "chat"}:${characterAction.directive.id || replyBatchId}:${characterAction.directive.type}`,
             });
             if (actionResult.status === "success" && actionResult.stickerMarkup && inlineStickerReferences.length === 0) {
               data.text = `${data.text}\n\n${actionResult.stickerMarkup}`.trim();
@@ -3710,6 +3730,24 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
             if (actionResult.status === "success" && actionResult.messageMarkup
               && !data.text.includes(actionResult.messageMarkup.split("|")[0])) {
               data.text = `${data.text}\n\n${actionResult.messageMarkup}`.trim();
+            }
+            if (actionResult.status !== "success") {
+              const actionLabel: Record<CharacterActionDirective["type"], string> = {
+                publish_moment: "发布动态",
+                send_sticker: "发送表情",
+                change_avatar: "修改头像",
+                send_image: "发送图片",
+                send_voice: "发送语音",
+                send_red_packet: "发送红包",
+                send_location: "发送位置",
+                send_file: "发送文件",
+                send_music: "发送音乐",
+                send_transfer: "转账",
+                call: "语音通话",
+                video_call: "视频通话",
+                friend_request: "发送好友申请",
+              };
+              publishReplyError(`⚠️ [动作未执行]：${actionLabel[characterAction.directive.type]}未成功，请检查当前关系、权限或动作内容。`);
             }
           }
           callAction = parseCallActionDirective({ text: data.text });

@@ -9,10 +9,20 @@ import { splitModelDirectBubbles } from "./modelDirectBubbles";
 
 export function createDirectReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
   const replyText = sanitizeCharacterActionText(ensureExplicitStickerDelivery(context.rawText, context.requestedStickerMessage));
-  const cleanedText = normalizePaymentMarkup(suppressCharacterEmoji(
-    stripSimulatedUserTurns(stripOuterDialogueQuotes(cleanAiReplyText(replyText, context.disableBracketActions, context.preserveProse)), context),
+  // Attachment cards are executable message metadata, not dialogue. Keep
+  // their complete lines out of quote/narration cleanup so a Chinese-quoted
+  // reply cannot accidentally erase an already validated red packet,
+  // transfer, location, voice, file, music, or sticker card.
+  const attachmentLinePattern = /^\[(?:红包|微信红包|转账|微信转账|位置|文件|音乐|语音|表情)\]\|.+$/u;
+  const attachmentLines = replyText.split(/\r?\n/u).map((line) => line.trim())
+    .filter((line) => attachmentLinePattern.test(line))
+    .map(normalizePaymentMarkup);
+  const dialogueText = replyText.split(/\r?\n/u).filter((line) => !attachmentLinePattern.test(line.trim())).join("\n");
+  const cleanedDialogue = normalizePaymentMarkup(suppressCharacterEmoji(
+    stripSimulatedUserTurns(stripOuterDialogueQuotes(cleanAiReplyText(dialogueText, context.disableBracketActions, context.preserveProse)), context),
     context.allowEmoji,
   ));
+  const cleanedText = [cleanedDialogue, ...attachmentLines].filter(Boolean).join("\n\n");
   // Never fall back to rawText here: it may consist solely of a model's fake
   // “sent a photo” claim that the parser intentionally removed.
   let bubbles = cleanedText

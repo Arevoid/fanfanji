@@ -68,6 +68,11 @@ assert.deepEqual(
   ["好，我发过去了", "[表情]|兔兔|sticker://sticker-local-1|语义"],
   "the sticker event survives quoted-dialogue normalization",
 );
+assert.deepEqual(
+  createDirectReplyCandidates(candidateContext("“收好，别客气。”\n[红包]|8.88|恭喜发财，万事如意")).messages.map((message) => message.content),
+  ["收好，别客气。", "[红包]|8.88|恭喜发财，万事如意"],
+  "validated payment cards survive quoted-dialogue normalization",
+);
 
 // M-R: regeneration retains its legacy parse path and only returns candidates for AppChat to send/save.
 const regenerated = createRegeneratedReplyCandidates(candidateContext("第一句。第二句。"));
