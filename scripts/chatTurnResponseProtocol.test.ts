@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { CHARACTER_ACTION_END, CHARACTER_ACTION_START, parseCharacterActionDirective } from "../src/features/chat/services/characterActionProtocol";
 import { parseChatTurnResponse, parseInnerVoiceResponse } from "../src/features/chat/services/chatTurnResponseProtocol";
 
 assert.deepEqual(
@@ -59,4 +60,58 @@ assert.equal(
   parseChatTurnResponse("普通文本 {不是结构化回复}").reply,
   "普通文本 {不是结构化回复}",
 );
-console.log("PASS chat turn response protocol normalizes reply arrays and blocks leaked structured JSON");
+
+const transfer = parseChatTurnResponse(JSON.stringify({
+  reply: "我给你转今天的。",
+  translation: "I transferred today's amount.",
+  actions: [{
+    type: "send_transfer",
+    actor: "character",
+    amount: 5.21,
+    memo: "今天的",
+    confirmed: true,
+  }],
+}));
+assert.equal(transfer.actions?.[0]?.type, "send_transfer");
+assert.equal(transfer.actions?.[0]?.amount, 5.21);
+assert.ok(transfer.reply.includes(CHARACTER_ACTION_START));
+assert.ok(transfer.reply.includes("send_transfer"));
+assert.ok(transfer.reply.includes(CHARACTER_ACTION_END));
+assert.equal(transfer.translation, "I transferred today's amount.");
+assert.equal(parseCharacterActionDirective({ text: transfer.reply }).directive?.type, "send_transfer");
+assert.equal(parseCharacterActionDirective({ text: transfer.reply }).directive?.amount, 5.21);
+
+const nested = parseChatTurnResponse(JSON.stringify({
+  data: {
+    reply: "给你发个红包。",
+    actions: [{ type: "send_red_packet", actor: "character", amount: 8.88, greeting: "收下" }],
+  },
+}));
+assert.equal(nested.actions?.[0]?.type, "send_red_packet");
+assert.match(nested.reply, /send_red_packet/u);
+
+const wrappedAction = parseChatTurnResponse(JSON.stringify({
+  actions: [{ type: "send_location", actor: "character", location: "公司" }],
+  data: { reply: "我把位置发给你。" },
+}));
+assert.equal(wrappedAction.actions?.[0]?.type, "send_location");
+assert.match(wrappedAction.reply, /send_location/u);
+
+const invalid = parseChatTurnResponse(JSON.stringify({
+  reply: "我已经转账了。",
+  actions: [{ type: "send_transfer", actor: "character" }],
+}));
+assert.equal(invalid.actions, undefined);
+assert.doesNotMatch(invalid.reply, /CHAR_ACTION/u);
+
+const multiple = parseChatTurnResponse(JSON.stringify({
+  reply: "我处理好了。",
+  actions: [
+    { type: "send_transfer", actor: "character", amount: 1 },
+    { type: "send_red_packet", actor: "character", amount: 2 },
+  ],
+}));
+assert.equal(multiple.actions, undefined);
+assert.doesNotMatch(multiple.reply, /CHAR_ACTION/u);
+
+console.log("PASS chat turn response protocol normalizes structured actions and preserves legacy parsing");

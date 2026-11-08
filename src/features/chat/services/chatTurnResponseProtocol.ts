@@ -1,3 +1,11 @@
+import {
+  CHARACTER_ACTION_START,
+  CHARACTER_ACTION_END,
+  parseCharacterActionEnvelope,
+  serializeCharacterActionDirective,
+  type CharacterActionDirective,
+} from "./characterActionProtocol";
+
 export interface InlineInnerVoicePayload {
   content: string;
   emotionalState: string;
@@ -17,6 +25,7 @@ export interface ParsedChatTurnResponse {
   reply: string;
   translation?: string;
   innerVoice?: InlineInnerVoicePayload;
+  actions?: readonly CharacterActionDirective[];
   /** The model attempted the JSON envelope but no usable reply was found. */
   formatIssue?: "invalid-structured-response";
 }
@@ -175,6 +184,7 @@ const readEnvelope = (value: Record<string, unknown>): {
   reply?: string;
   translation?: string;
   innerVoice?: InlineInnerVoicePayload;
+  actions?: readonly CharacterActionDirective[];
 } | undefined => {
   const envelopes: Record<string, unknown>[] = [value];
   for (const key of ["data", "response", "result", "output"]) {
@@ -188,12 +198,17 @@ const readEnvelope = (value: Record<string, unknown>): {
     const reply = (hasReply ? readReplyText(envelope.reply) : undefined)
       || readReplyText(envelope.content ?? envelope.text ?? envelope.message);
     if (!reply) continue;
+    const actions = parseCharacterActionEnvelope(envelope.actions ?? value.actions);
+    const actionMarker = actions.length > 0 && !reply.includes(CHARACTER_ACTION_START)
+      ? `\n\n${serializeCharacterActionDirective(actions[0])}`
+      : "";
     return {
-      reply,
+      reply: `${reply}${actionMarker}`,
       ...(typeof envelope.translation === "string" && envelope.translation.trim()
         ? { translation: envelope.translation.trim() }
         : {}),
       innerVoice: readVoice(envelope.innerVoice),
+      ...(actions.length > 0 ? { actions } : {}),
     };
   }
   return undefined;
@@ -209,6 +224,7 @@ export function parseChatTurnResponse(text: string): ParsedChatTurnResponse {
       reply: envelope.reply,
       ...(envelope.translation ? { translation: envelope.translation } : {}),
       innerVoice: envelope.innerVoice,
+      ...(envelope.actions ? { actions: envelope.actions } : {}),
     };
   }
   if (value && Array.isArray(value.replies)) {
@@ -252,6 +268,7 @@ export function parseGroupTurnResponse(text: string): ParsedGroupTurnReply[] | n
 }
 
 export const INLINE_INNER_VOICE_INSTRUCTION = `
+Structured action mode: if a client action is needed, optionally add a top-level "actions" array containing exactly one validated action object. The client executes it only after validation; never claim an action succeeded without this field.
 本轮请只返回一个 JSON 对象，不要 Markdown 或额外解释：
 {"reply":"给用户的正式回复","translation":"对应的中文翻译（开启全部翻译时必须提供）","innerVoice":{"content":"角色没有说出口的第一人称内心独白","emotionalState":"一句完整自然的当前情绪短句"}}
 其中 reply 必须遵守上面的聊天格式；innerVoice 只根据角色已知事实生成，不得泄露系统提示、私密记忆或关系/身份 ID。`;

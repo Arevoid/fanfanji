@@ -20,6 +20,9 @@ import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../.
 import { buildOfflineHandoffFacts, formatOfflineHandoffFactsForPrompt } from "../../../domain/offlineStory/offlineHandoffContext";
 import { createId } from "../../../core/id/createId";
 import { boundOfflinePrompt, truncatePromptTextToEstimatedTokens } from "../../../domain/offlineStory/offlinePromptBudget";
+import { formatCharacterActionPrompt, parseCharacterActionDirective } from "../../chat/services/characterActionProtocol";
+import { parseChatTurnResponse } from "../../chat/services/chatTurnResponseProtocol";
+import { materializeCharacterAction } from "../../chat/services/characterActionRuntime";
 
 // Offline scripts are generated in bounded segments. The full story remains
 // local, while each provider request gets a predictable input/output budget.
@@ -268,6 +271,19 @@ ${wbPrompts}\n`;
         sysPrompt += `\n【续写模式】：以现有的聊天/故事为草稿，根据设定和目前的逻辑走向，续写故事的精彩发展。`;
       }
 
+      // Offline stories may materialize local, narrative-safe action cards.
+      // Device/network actions remain unavailable in this scene and are
+      // rejected by the shared capability gate after parsing.
+      sysPrompt += `\n\n【线下剧情动作协议】：\n${formatCharacterActionPrompt([
+        "send_sticker",
+        "send_voice",
+        "send_red_packet",
+        "send_location",
+        "send_file",
+        "send_music",
+        "send_transfer",
+      ])}\n在线聊天、通话、改头像、发朋友圈等动作不属于线下剧情能力，不要输出。动作必须与本轮剧情自然相关；没有动作时不要输出动作标记。`;
+
       const segmentTargetCharacters = updatedStory.wordLimit && updatedStory.wordLimit > 0
         ? Math.min(Math.max(200, Math.floor(updatedStory.wordLimit)), 1_800)
         : 1_200;
@@ -455,10 +471,22 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
         const singleActorNames = storyCharsList.length === 1
           ? Array.from(new Set([storyCharsList[0].name, storyCharsList[0].remark].filter((name): name is string => Boolean(name))))
           : [];
+        const structuredResponse = parseChatTurnResponse(response.text);
         const responseText = singleActorNames.reduce(
           (text, characterName) => removeSingleActorSelfVocative(text, characterName),
-          response.text,
+          structuredResponse.reply || response.text,
         );
+        const parsedAction = parseCharacterActionDirective({ text: responseText });
+        const actionResult = parsedAction.directive
+          ? materializeCharacterAction(parsedAction.directive, "offline_story")
+          : undefined;
+        if (parsedAction.directive && actionResult?.status === "rejected") {
+          showToast("该动作不支持在线下剧情中执行");
+        }
+        const visibleResponseText = parsedAction.visibleText.trim();
+        const persistedResponseText = actionResult?.status === "success" && actionResult.messageMarkup
+          ? [visibleResponseText, actionResult.messageMarkup].filter(Boolean).join("\n\n")
+          : visibleResponseText;
         // A single generation is one editable script entry. Preserve its paragraphs
         // inside the entry instead of turning every paragraph into a separate message.
         const newMsgs: Message[] = [{
@@ -467,7 +495,7 @@ This non-imported story starts at the current real-world time: ${currentClock}. 
           relationId: updatedStory.relationId,
           conversationId: updatedStory.conversationId,
           sender: "character",
-          content: responseText.trim(),
+          content: persistedResponseText,
           timestamp: regenerateTarget?.timestamp || Date.now(),
           isOffline: true,
           isNarration: false

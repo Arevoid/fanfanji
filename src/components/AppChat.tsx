@@ -160,6 +160,7 @@ import { checkProactiveImageGenerationPolicy, isProactiveImageGenerationEnabled 
 import { imageDataUrlToBlob, parseCharacterSaveUserImageDirective } from "../features/chat/services/userImageMemoryService";
 import { characterAvatarReplyRefusesChange, isExplicitCharacterAvatarChangeRequest, resolveCharacterAvatarChangeTiming, type CharacterAvatarChangeTiming } from "../features/chat/services/characterAvatarChangeIntent";
 import { formatCharacterActionPrompt, parseCharacterActionDirective, sanitizeCharacterActionText, type CharacterActionDirective } from "../features/chat/services/characterActionProtocol";
+import { evaluateCharacterActionCapability } from "../features/chat/services/characterActionCapabilities";
 import { resolveRecentUserImageForTurn } from "../features/chat/services/recentUserImageContext";
 import { resolveChatMessageAvatar } from "../features/chat/services/messageAvatarResolver";
 import { createChatReplyController } from "../features/chat/controllers/chatReplyController";
@@ -5221,6 +5222,14 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
     },
   ): Promise<CharacterActionExecutionResult> => {
     if (directive.actor !== "character") return { status: "rejected" };
+    const capability = evaluateCharacterActionCapability(directive, "online_chat");
+    if (!capability.allowed) {
+      return {
+        status: capability.reason === "missing_payload" || capability.reason === "unsafe_payload"
+          ? "failed"
+          : "rejected",
+      };
+    }
     if (directive.type === "call" || directive.type === "video_call") {
       // The call surface must open after the visible reply has been delivered.
       // The post-reply coordinator consumes this media hint in the same turn.

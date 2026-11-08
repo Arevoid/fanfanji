@@ -3,7 +3,9 @@ import {
   CHARACTER_ACTION_END,
   CHARACTER_ACTION_START,
   formatCharacterActionPrompt,
+  parseCharacterActionEnvelope,
   parseCharacterActionDirective,
+  serializeCharacterActionDirective,
   sanitizeCharacterActionText,
 } from "../src/features/chat/services/characterActionProtocol";
 
@@ -110,5 +112,46 @@ const attachmentPrompt = formatCharacterActionPrompt([
 for (const action of ["send_location", "send_file", "send_music", "send_transfer"]) {
   assert.match(attachmentPrompt, new RegExp(action, "u"));
 }
+
+const everySupportedAction = [
+  { type: "publish_moment", actor: "character", contentHint: "分享今天的动态" },
+  { type: "send_sticker", actor: "character", stickerId: "sticker-1", stickerName: "开心" },
+  { type: "change_avatar", actor: "character" },
+  { type: "send_image", actor: "character", contentHint: "一张窗边的照片" },
+  { type: "send_voice", actor: "character", contentHint: "我想和你说句话" },
+  { type: "send_red_packet", actor: "character", amount: 8.88, greeting: "收下" },
+  { type: "send_location", actor: "character", location: "公司" },
+  { type: "send_file", actor: "character", fileName: "notes.txt" },
+  { type: "send_music", actor: "character", musicTitle: "Song" },
+  { type: "send_transfer", actor: "character", amount: 5.21 },
+  { type: "call", actor: "character", reason: "想听听你的声音" },
+  { type: "video_call", actor: "character", reason: "想见你" },
+  { type: "friend_request", actor: "character", reason: "重新联系" },
+] as const;
+for (const action of everySupportedAction) {
+  const parsed = parseCharacterActionDirective({
+    text: `${CHARACTER_ACTION_START}${JSON.stringify(action)}${CHARACTER_ACTION_END}`,
+  });
+  assert.equal(parsed.directive?.type, action.type);
+  assert.equal(parsed.directive?.actor, "character");
+}
+
+const structuredEnvelope = parseCharacterActionEnvelope([{
+  type: "send_transfer",
+  actor: "character",
+  amount: 5.21,
+  memo: "今天的",
+}]);
+assert.equal(structuredEnvelope.length, 1);
+assert.equal(structuredEnvelope[0]?.amount, 5.21);
+assert.match(serializeCharacterActionDirective(structuredEnvelope[0]!), /\[\[CHAR_ACTION\]\]/u);
+assert.deepEqual(parseCharacterActionEnvelope([
+  { type: "send_transfer", actor: "character", amount: 5.21 },
+  { type: "send_red_packet", actor: "character", amount: 8.88 },
+]), []);
+assert.deepEqual(parseCharacterActionEnvelope([{
+  type: "send_transfer",
+  actor: "character",
+}]), []);
 
 console.log("PASS character action protocol");

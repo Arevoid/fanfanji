@@ -117,13 +117,13 @@ export function buildComposedAiChatRequest(prompt: PromptInput, settings: UserSe
 type NormalizedDirectChatResponse = ParsedAiChatResponse & { formatIssue?: "invalid-structured-response" };
 
 const normalizeDirectChatResponse = (raw: ParsedAiChatResponse, includeInnerVoice: boolean): NormalizedDirectChatResponse => {
-  if (!includeInnerVoice) return raw;
   const parsed = parseChatTurnResponse(raw.text);
+  if (!includeInnerVoice && parsed.reply === raw.text && !parsed.actions && !parsed.formatIssue) return raw;
   return {
     ...raw,
     text: parsed.reply,
-    translation: parsed.translation,
-    innerVoice: parsed.innerVoice,
+    translation: parsed.translation ?? raw.translation,
+    ...(includeInnerVoice ? { innerVoice: parsed.innerVoice } : {}),
     formatIssue: parsed.formatIssue,
   };
 };

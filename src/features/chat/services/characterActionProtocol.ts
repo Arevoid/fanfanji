@@ -56,6 +56,13 @@ export interface CharacterActionDirective {
   media?: "voice" | "video";
 }
 
+/**
+ * Structured actions are intentionally limited to one directive per turn.
+ * The existing runtime has one action execution slot, so rejecting batches
+ * here prevents partial execution and duplicate side effects.
+ */
+export type CharacterActionEnvelope = readonly CharacterActionDirective[];
+
 export type CharacterActionParseError =
   | "multiple_directives"
   | "malformed_json"
@@ -165,6 +172,16 @@ function validateDirective(value: unknown): CharacterActionDirective | undefined
   }
   if (raw.media === "voice" || raw.media === "video") directive.media = raw.media;
   return directive;
+}
+
+export function parseCharacterActionEnvelope(value: unknown): CharacterActionEnvelope {
+  if (!Array.isArray(value) || value.length !== 1) return [];
+  const directive = validateDirective(value[0]);
+  return directive ? [directive] : [];
+}
+
+export function serializeCharacterActionDirective(directive: CharacterActionDirective): string {
+  return `${CHARACTER_ACTION_START}${JSON.stringify(directive)}${CHARACTER_ACTION_END}`;
 }
 
 /**
@@ -311,6 +328,7 @@ export function formatCharacterActionPrompt(capabilities: readonly CharacterActi
     allowed.includes("call") || allowed.includes("video_call")
       ? "call/video_call 只在用户明确要求角色主动打来，或角色根据已开启的主动来电能力决定联系时使用；reason 用一句自然原因。动作会在本轮回复送达后打开来电界面。"
       : "",
+    "Structured action mode: when returning a JSON chat envelope, put at most one validated directive in top-level actions as an array; the client converts it to the private action marker. Do not claim an action succeeded without a directive.",
   ].filter(Boolean).join("\n");
   return `[角色动作协议]
 你可以根据当前用户最新一句话、最近对话、人设和关系，判断是否需要执行一个真实客户端动作。
