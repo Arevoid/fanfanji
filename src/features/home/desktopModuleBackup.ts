@@ -27,7 +27,46 @@ export interface DesktopModuleBackup {
   storage: Record<string, string>;
 }
 
-type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
+export type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
+
+export const DESKTOP_THEME_LIBRARY_STORAGE_KEY = "phone_desktop_theme_library";
+
+export interface DesktopThemeEntry {
+  id: string;
+  name: string;
+  createdAt: number;
+  backup: DesktopModuleBackup;
+}
+
+export const loadDesktopThemeLibrary = (storage: Pick<Storage, "getItem">): DesktopThemeEntry[] => {
+  const raw = storage.getItem(DESKTOP_THEME_LIBRARY_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item: unknown) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const source = item as Record<string, unknown>;
+      if (typeof source.id !== "string" || typeof source.name !== "string" || !source.backup) return [];
+      try {
+        return [{
+          id: source.id,
+          name: source.name.trim() || "未命名桌面主题",
+          createdAt: typeof source.createdAt === "number" ? source.createdAt : 0,
+          backup: parseDesktopModuleBackup(source.backup),
+        } satisfies DesktopThemeEntry];
+      } catch {
+        return [];
+      }
+    });
+  } catch {
+    return [];
+  }
+};
+
+export const saveDesktopThemeLibrary = (entries: DesktopThemeEntry[], storage: Pick<Storage, "setItem">) => {
+  storage.setItem(DESKTOP_THEME_LIBRARY_STORAGE_KEY, JSON.stringify(entries));
+};
 
 const isDesktopStorageKey = (key: string) =>
   DESKTOP_STORAGE_KEYS.has(key) || WIDGET_STORAGE_PREFIXES.some((prefix) => key.startsWith(prefix));

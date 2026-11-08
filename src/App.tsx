@@ -228,6 +228,7 @@ const loadAppCharacterPhone = cachedModule(() => import("./components/AppCharact
 const loadAppRelationshipNetwork = cachedModule(() => import("./components/AppRelationshipNetwork"));
 const loadAppSms = cachedModule(() => import("./components/AppSms"));
 const loadAppNow = cachedModule(() => import("./components/AppNow"));
+const loadAppX = cachedModule(() => import("./features/x/components/XStandaloneApp"));
 
 // Vite can briefly return a failed module response while the dev server is
 // transforming the large chat module. Give the same navigation attempt one
@@ -280,6 +281,7 @@ const APP_LOADERS: Record<string, () => Promise<unknown>> = {
   "character-phone": withModuleRetry(loadAppCharacterPhone),
   "relationship-network": withModuleRetry(loadAppRelationshipNetwork),
   sms: withModuleRetry(loadAppSms),
+  x: withModuleRetry(loadAppX),
 };
 
 const preloadApp = (appId: string) => {
@@ -313,6 +315,7 @@ const AppCharacterPhone = React.lazy(withModuleRetry(loadAppCharacterPhone));
 const AppRelationshipNetwork = React.lazy(withModuleRetry(loadAppRelationshipNetwork));
 const AppSms = React.lazy(withModuleRetry(loadAppSms));
 const AppNow = React.lazy(withModuleRetry(loadAppNow));
+const AppX = React.lazy(withModuleRetry(loadAppX));
 class LazyAppErrorBoundary extends React.Component<
   React.PropsWithChildren<{ visible?: boolean }>,
   { error: Error | null }
@@ -437,6 +440,7 @@ const AppIcons = {
   "relationship-network": (className = "w-6 h-6") => <Network className={className} strokeWidth={1.5} />,
   sms: (className = "w-6 h-6") => <MessagesSquare className={className} strokeWidth={1.5} />,
   now: (className = "w-6 h-6") => <Eye className={className} strokeWidth={1.5} />,
+  x: (className = "w-6 h-6") => <span className={`${className} inline-flex items-center justify-center font-black leading-none`}>𝕏</span>,
   timeline: (className = "w-6 h-6") => <CalendarDays className={className} strokeWidth={1.5} />,
   theme: (className = "w-6 h-6") => <Palette className={className} strokeWidth={1.5} />,
   activities: (className = "w-6 h-6") => <PartyPopper className={className} strokeWidth={1.5} />,
@@ -3994,6 +3998,11 @@ export default function App() {
       icon: AppIcons.now(HOME_APP_ICON_GLYPH_CLASS),
     },
     {
+      id: "x",
+      name: "X",
+      icon: AppIcons.x(HOME_APP_ICON_GLYPH_CLASS),
+    },
+    {
       id: "settings",
       name: "设置",
       icon: AppIcons.settings(HOME_APP_ICON_GLYPH_CLASS),
@@ -5794,6 +5803,16 @@ export default function App() {
                       worldBookEntries={worldBookEntries}
                       settings={settings}
                       visible={activeApp === "now"}
+                      onClose={() => setActiveApp(null)}
+                    />
+                  </LazyAppBoundary>
+                )}
+
+                {isAppMounted("x") && (
+                  <LazyAppBoundary visible={activeApp === "x"}>
+                    <AppX
+                      activeIdentity={activeIdentity}
+                      relationships={relationships}
                       onClose={() => setActiveApp(null)}
                     />
                   </LazyAppBoundary>

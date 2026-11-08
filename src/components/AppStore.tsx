@@ -178,6 +178,17 @@ const APPS_LIST: AppItem[] = [
     reviews: "4.8万",
     size: "9.2 MB",
     description: "支持新建线下剧本或根据聊天续写故事。支持「导演」指令走向、常规「续写」和「IF线」假想推演，与线上对话保持记忆互通，并提供客观旁白叙事能力。"
+  },
+  {
+    id: "x",
+    name: "X",
+    category: "社交与角色公共时间线",
+    icon: "𝕏",
+    iconBg: "bg-slate-950",
+    rating: 5.0,
+    reviews: "全新",
+    size: "9.8 MB",
+    description: "在独立的 X 时间线里发布内容、查看热搜、互动、分享媒体，并让角色相关的公开互动按关系范围回到角色记忆。"
   }
 ];
 

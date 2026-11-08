@@ -15,6 +15,7 @@ export interface ChatThemePackageV2 {
 
 export interface ParsedChatTheme {
   cssApiVersion: ChatCssApiVersion;
+  name?: string;
   css: string;
   icons: ChatIconOverrides;
 }
@@ -53,8 +54,12 @@ export function parseChatThemePackage(value: unknown): ParsedChatTheme {
     const assets = source.assets && typeof source.assets === "object" && !Array.isArray(source.assets)
       ? source.assets as Record<string, unknown>
       : {};
+    const importedName = source.meta && typeof source.meta === "object" && !Array.isArray(source.meta) && typeof (source.meta as Record<string, unknown>).name === "string"
+      ? (source.meta as Record<string, unknown>).name as string
+      : undefined;
     return {
       cssApiVersion: sanitizeChatCssApiVersion(source.cssApiVersion),
+      ...(importedName !== undefined ? { name: importedName } : {}),
       css: typeof source.css === "string" ? source.css : "",
       icons: sanitizeChatIcons(assets.icons),
     };

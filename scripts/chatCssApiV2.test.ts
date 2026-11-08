@@ -20,6 +20,7 @@ assert.equal(exported.assets.icons.more, "https://example.test/more.svg");
 assert.equal(exported.assets.icons.video, undefined);
 assert.deepEqual(parseChatThemePackage(exported), {
   cssApiVersion: 2,
+  name: "饭饭机聊天主题",
   css: ".chat-header { color: red; }",
   icons: { more: "https://example.test/more.svg" },
 });
@@ -51,5 +52,12 @@ assert.doesNotMatch(chat, /\{showAttachPanel\s*&&\s*\(\s*<AttachmentMenu/, "tool
 assert.match(css, /\.chat-composer__input-shell\s*\{\s*display:\s*contents/);
 assert.match(css, /\.chat-tools\[data-tools-open="false"\]\s*\{\s*display:\s*none/);
 assert.match(css, /\.chat-tool--more\s*\{\s*display:\s*none/);
+assert.match(css, /\.chat-tools\[data-tools-open="true"\]\s+\.chat-tool--more\s*\{\s*display:\s*flex/);
+assert.match(css, /data-tools-expanded="false"\]\s+\.chat-tool\[data-tool-tier="secondary"\]\s*\{\s*display:\s*none/);
+assert.match(css, /data-tools-expanded="true"\]\s+\.chat-tool\[data-tool-tier="secondary"\]\s*\{\s*display:\s*flex/);
+
+assert.match(chat, /chat-composer__attachment-panel\[data-tools-open="true"\]/);
+assert.match(chat, /chat-composer__attachment-panel\[data-tools-open="false"\][\s\S]*display: none !important/);
+assert.match(chat, /chat-composer__attachment-panel\[data-tools-open="true"\]\s+\.chat-tool--more[\s\S]*display: flex !important/);
 
 console.log("Chat CSS API v2: scope, package migration, semantic hooks and default compatibility passed");

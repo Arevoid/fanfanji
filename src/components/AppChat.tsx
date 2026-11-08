@@ -8274,7 +8274,7 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   font-weight: 600 !important;
                   letter-spacing: 0.05em !important;
                 }
-                #conv-screen.style-liquid-glass .chat-composer__attachment-panel {
+                #conv-screen.style-liquid-glass .chat-composer__attachment-panel[data-tools-open="true"] {
                   width: 100% !important;
                   min-height: 84px !important;
                   max-height: 112px !important;
@@ -8293,6 +8293,22 @@ Your reply must contain third-person narrator descriptions of actions, backgroun
                   border: 1px solid rgba(255, 255, 255, 0.52) !important;
                   backdrop-filter: blur(20px) saturate(180%) !important;
                   -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+                }
+                /* The attachment menu is mounted all the time for CSS API
+                 * stability, but its visibility is controlled by React state.
+                 * Keep liquid-glass visuals from forcing it open on first
+                 * render, and preserve the primary/secondary tool tiers. */
+                #conv-screen.style-liquid-glass .chat-composer__attachment-panel[data-tools-open="false"] {
+                  display: none !important;
+                }
+                #conv-screen.style-liquid-glass .chat-composer__attachment-panel[data-tools-open="true"] .chat-tool--more {
+                  display: flex !important;
+                }
+                #conv-screen.style-liquid-glass .chat-composer__attachment-panel[data-tools-open="true"][data-tools-expanded="false"] .chat-tool[data-tool-tier="secondary"] {
+                  display: none !important;
+                }
+                #conv-screen.style-liquid-glass .chat-composer__attachment-panel[data-tools-open="true"][data-tools-expanded="true"] .chat-tool[data-tool-tier="secondary"] {
+                  display: flex !important;
                 }
                 #conv-screen.style-liquid-glass .chat-composer__attachment-panel > * {
                   flex: 1 1 0 !important;

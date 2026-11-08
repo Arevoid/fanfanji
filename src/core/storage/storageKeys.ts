@@ -51,6 +51,7 @@ export const storageKeys = {
   /** Idempotent cursors for group-to-member memory projections. */
   groupMemorySync: "phone_group_memory_sync_v1",
   characterPhones: "phone_character_phones_v1",
+  xState: (ownerIdentityId: string, characterId: string) => `phone_x_state_v1_${encodeURIComponent(ownerIdentityId)}_${encodeURIComponent(characterId)}`,
   characterPhonesIndexV2: "phone_character_phone_index_v2",
   characterPhoneV2: (phoneId: string) => `phone_character_phone_v2_${encodeURIComponent(phoneId)}`,
   /** One-time repair marker for the role-phone storage reset and hydration fix. */

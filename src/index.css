@@ -623,3 +623,6 @@ button, input, textarea, select {
 .chat-composer__input-shell { display: contents; }
 .chat-tools[data-tools-open="false"] { display: none; }
 .chat-tool--more { display: none; }
+.chat-tools[data-tools-open="true"] .chat-tool--more { display: flex; }
+.chat-tools[data-tools-open="true"][data-tools-expanded="false"] .chat-tool[data-tool-tier="secondary"] { display: none; }
+.chat-tools[data-tools-open="true"][data-tools-expanded="true"] .chat-tool[data-tool-tier="secondary"] { display: flex; }

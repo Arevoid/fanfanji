@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { MEMORY_BACKUP_KEYS } from "../features/settings/systemBackup";
 import { createPortal } from "react-dom";
-import { UserSettings, StylePreset, type ChatIconOverrides, type OfflineStory, type UserSettingsUpdate } from "../types";
+import { UserSettings, StylePreset, type ChatIconOverrides, type ChatThemeEntry, type OfflineStory, type UserSettingsUpdate } from "../types";
 import {
   ChevronLeft,
   ChevronRight,
@@ -11,12 +11,10 @@ import {
   RefreshCw,
   Sliders,
   Check,
-  Save,
   Trash2,
   Plus,
   Eye,
   EyeOff,
-  Download,
   Database,
   Upload,
   Volume2,
@@ -32,7 +30,7 @@ import { compressImagePreservingTransparency, isTransparencyPreservedImage } fro
 import { useTheme } from "../features/theme/ThemeProvider";
 import { type ThemeMode } from "../features/theme/theme";
 import { hasUserDesktopWallpaper } from "../features/theme/desktopBackground";
-import { resolveThemePreset, BERRY_GRID_PRESET } from "../features/theme/themePresetLibrary";
+import { BERRY_GRID_PRESET } from "../features/theme/themePresetLibrary";
 import {
   DEFAULT_GLOBAL_FONT_SIZE,
   MAX_GLOBAL_FONT_SIZE,
@@ -69,13 +67,12 @@ import { useSettingsChatIconState } from "../features/settings/hooks/useSettings
 import { useSettingsChatIconActions } from "../features/settings/hooks/useSettingsChatIconActions";
 import { useSettingsBackupUiState } from "../features/settings/hooks/useSettingsBackupUiState";
 import { useSystemBackupActions } from "../features/settings/hooks/useSystemBackupActions";
-import { useSettingsTransferActions } from "../features/settings/hooks/useSettingsTransferActions";
+import { loadChatThemeLibrary, useSettingsTransferActions } from "../features/settings/hooks/useSettingsTransferActions";
 import { useSettingsImageApiActions } from "../features/settings/hooks/useSettingsImageApiActions";
 import { useSettingsTextApiActions } from "../features/settings/hooks/useSettingsTextApiActions";
 import { useSettingsVoiceActions } from "../features/settings/hooks/useSettingsVoiceActions";
 import { useSettingsApiConnectionActions } from "../features/settings/hooks/useSettingsApiConnectionActions";
 import { useSettingsAssetActions } from "../features/settings/hooks/useSettingsAssetActions";
-import { useSettingsPresetActions } from "../features/settings/hooks/useSettingsPresetActions";
 import { useSettingsApplyPresetAction } from "../features/settings/hooks/useSettingsApplyPresetAction";
 import { useSettingsIdentityActions } from "../features/settings/hooks/useSettingsIdentityActions";
 import { useSettingsClearDataActions } from "../features/settings/hooks/useSettingsClearDataActions";
@@ -89,6 +86,10 @@ import { StorageCachePanel } from "../features/settings/components/StorageCacheP
 import { DetectionLogsPanel } from "../features/settings/components/DetectionLogsPanel";
 import { sortIdentitiesForDisplay } from "../domain/relationship/characterRelationship";
 import { getTtsEmotionCapability } from "../utils/ttsEmotion";
+import {
+  loadDesktopThemeLibrary,
+  type DesktopThemeEntry,
+} from "../features/home/desktopModuleBackup";
 import {
   WELCOME_WIDGET_ID,
   ensureWelcomeWidgetProfile,
@@ -209,6 +210,10 @@ const GLOBAL_CSS_EXAMPLE_TEMPLATE = `/* 全局主题 CSS：作用于手机桌面
 .phone-screen-container .desktop-app-label {
   color: var(--desktop-app-text-color);
 }`;
+
+const THEME_TRANSFER_CARD_CLASS = "bg-[var(--surface)] p-5 rounded-[24px] border border-[var(--border)] shadow-sm space-y-3";
+const THEME_TRANSFER_BUTTON_CLASS = "min-w-0 rounded-lg px-3 py-2 text-[10px] font-semibold transition-colors";
+const THEME_LIBRARY_ITEM_CLASS = "flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2";
 
 const BACKUP_KEYS = [
   ...MEMORY_BACKUP_KEYS,
@@ -349,7 +354,6 @@ export default function AppSettings({
   presets,
   onSaveSettings,
   onSaveSettingsAsync,
-  onSavePreset,
   onDeletePreset,
   onSwitchIdentity,
   onClose,
@@ -361,6 +365,19 @@ export default function AppSettings({
   const [chatEnterKeyNewline, setChatEnterKeyNewline] = React.useState(settings.chatEnterKeyNewline === true);
   const [globalCssTemplateCopied, setGlobalCssTemplateCopied] = React.useState(false);
   const chatThemeFileInputRef = React.useRef<HTMLInputElement>(null);
+  const desktopThemeFileInputRef = React.useRef<HTMLInputElement>(null);
+  const [chatThemes, setChatThemes] = React.useState<ChatThemeEntry[]>(() => {
+    const stored = typeof localStorage === "undefined" ? [] : loadChatThemeLibrary(localStorage);
+    return stored.length > 0 ? stored : (settings.chatThemes ?? []);
+  });
+  const [desktopThemes, setDesktopThemes] = React.useState<DesktopThemeEntry[]>(() => (
+    typeof localStorage === "undefined" ? [] : loadDesktopThemeLibrary(localStorage)
+  ));
+
+  useEffect(() => {
+    const fromSettings = settings.chatThemes ?? [];
+    if (fromSettings.length > 0) setChatThemes(fromSettings);
+  }, [settings.chatThemes]);
 
   const { isPwaInstallable, isStandalone, handlePwaInstall } = usePwaInstall();
 
@@ -471,7 +488,7 @@ export default function AppSettings({
     });
   };
 
-  const { isTesting, setIsTesting, testResult, setTestResult, newPresetName, setNewPresetName } = useSettingsTransientUiState();
+  const { isTesting, setIsTesting, testResult, setTestResult } = useSettingsTransientUiState();
 
   const {
     apiPresets, activeApiPresetId, presetName, setPresetName,
@@ -531,14 +548,22 @@ export default function AppSettings({
   const {
     handleExportChatTheme,
     handleImportChatTheme,
+    applyChatTheme,
+    deleteChatTheme,
     downloadDesktopModuleBackup,
     importDesktopModuleBackup,
+    applyDesktopTheme,
+    deleteDesktopTheme,
   } = useSettingsTransferActions({
     settings,
     chatGlobalCSS,
     chatIcons,
     setChatGlobalCSS,
     setChatIcons,
+    chatThemes,
+    setChatThemes,
+    desktopThemes,
+    setDesktopThemes,
     handleSave,
   });
 
@@ -594,18 +619,6 @@ export default function AppSettings({
     onIconStatusChange: setIconUploadMessage,
   });
 
-  const activeThemePreset = resolveThemePreset(settings.activePreset, presets);
-
-  const { handleSaveCurrentAsPreset } = useSettingsPresetActions({
-    newPresetName,
-    setNewPresetName,
-    bubbleCss,
-    globalCss,
-    wallpaper,
-    themeTokens: activeThemePreset?.themeTokens,
-    previewColors: activeThemePreset?.previewColors,
-    onSavePreset,
-  });
   const { applyPreset } = useSettingsApplyPresetAction({
     onSaveSettings,
     appearanceState: appearanceDraftState,
@@ -630,6 +643,7 @@ export default function AppSettings({
     { key: "notes", label: "备忘录" },
     { key: "memory", label: "记忆书" },
     { key: "offline", label: "线下" },
+    { key: "now", label: "此刻" },
     { key: "store", label: "应用商店" },
     { key: "settings", label: "设置" }
   ];
@@ -911,27 +925,6 @@ export default function AppSettings({
                 onImport={handleSystemBackupImport}
                 onInspect={handleSystemBackupInspect}
               />
-
-              <div className="settings-section-header">桌面模块</div>
-              <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-4">
-                <div>
-                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">桌面模块备份</h3>
-                  <p className="mt-2 text-[10px] leading-relaxed text-slate-400">单独备份和恢复所有桌面美化，如壁纸、桌面布局、小组件设置与自定义应用图标等。</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <button type="button" onClick={downloadDesktopModuleBackup} className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group">
-                    <Download className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-bold text-slate-700">导出桌面模块</span>
-                    <span className="text-[8px] text-slate-400 mt-1">下载桌面 JSON</span>
-                  </button>
-                  <label className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-[16px] transition-all group cursor-pointer">
-                    <Upload className="w-5 h-5 text-slate-600 mb-1.5 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-bold text-slate-700">导入桌面模块</span>
-                    <span className="text-[8px] text-slate-400 mt-1">恢复桌面 JSON</span>
-                    <input type="file" accept="application/json" onChange={importDesktopModuleBackup} className="hidden" />
-                  </label>
-                </div>
-              </div>
 
               <StorageDiagnosticsCard
                 diagnostics={storageDiagnostics}
@@ -2413,7 +2406,7 @@ export default function AppSettings({
                     </div>
                   </div>
 
-                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                  <div className={THEME_TRANSFER_CARD_CLASS}>
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-xs font-bold text-slate-700">全局聊天样式 CSS</span>
                       <button type="button" onClick={copyGlobalChatCssTemplate} className="shrink-0 rounded-[8px] bg-slate-100 px-2 py-1 text-[9px] font-medium text-slate-500 transition-colors hover:bg-slate-200">
@@ -2424,7 +2417,7 @@ export default function AppSettings({
                     <textarea rows={8} value={chatGlobalCSS} onChange={(e) => { setChatGlobalCSS(e.target.value); handleSave({ chatGlobalCSS: e.target.value, chatCssApiVersion: 2 }); }} placeholder={CHAT_CSS_API_V2_TEMPLATE} className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-y leading-relaxed" />
                   </div>
 
-                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                  <div className={THEME_TRANSFER_CARD_CLASS}>
                     <div>
                       <span className="text-xs font-bold text-slate-700">聊天主题</span>
                       <p className="text-[10px] text-slate-400 leading-relaxed mt-1">导入兼容 TXT、DOCX 与旧版 JSON；导出默认 DOCX。</p>
@@ -2440,17 +2433,45 @@ export default function AppSettings({
                       <button
                         type="button"
                         onClick={() => chatThemeFileInputRef.current?.click()}
-                        className="min-w-0 rounded-lg bg-slate-800 px-3 py-2 text-[10px] font-semibold text-white transition-colors hover:bg-slate-700"
+                        className={`${THEME_TRANSFER_BUTTON_CLASS} bg-slate-800 text-white hover:bg-slate-700`}
                       >
                         导入主题
                       </button>
                       <button
                         type="button"
                         onClick={() => { void handleExportChatTheme(); }}
-                        className="min-w-0 rounded-lg bg-white px-3 py-2 text-[10px] font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
+                        className={`${THEME_TRANSFER_BUTTON_CLASS} bg-white text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100`}
                       >
                         导出主题
                       </button>
+                    </div>
+                    <div className="space-y-2 border-t border-slate-100 pt-3">
+                      <p className="text-[10px] font-semibold text-slate-500">已导入主题</p>
+                      {chatThemes.length === 0 ? (
+                        <p className="text-[10px] text-slate-400">暂无导入主题</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {chatThemes.map((theme) => (
+                            <div key={theme.id} className={THEME_LIBRARY_ITEM_CLASS}>
+                              <button
+                                type="button"
+                                onClick={() => applyChatTheme(theme)}
+                                className="min-w-0 flex-1 truncate text-left text-[10px] font-semibold text-[var(--text-primary)] hover:opacity-80"
+                                title="点击应用此聊天主题"
+                              >
+                                {theme.name}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteChatTheme(theme.id)}
+                                className="shrink-0 text-[10px] font-semibold text-rose-500 hover:text-rose-600"
+                              >
+                                删除
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2477,31 +2498,6 @@ export default function AppSettings({
                       })}
                     </div>
                   </div>
-                  {/* 保存预设 */}
-                  <div className="bg-[var(--surface)] p-5 rounded-[24px] border border-[var(--border)] shadow-sm space-y-4">
-                    <div>
-                      <span className="text-xs font-bold text-[var(--text-primary)]">保存当前样式为新预设</span>
-                      <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">当前已选主题色板会一起保存，之后可在模板库中恢复。</p>
-                    </div>
-                    <form onSubmit={handleSaveCurrentAsPreset} className="flex gap-2">
-                      <input
-                        type="text"
-                        required
-                        value={newPresetName}
-                        onChange={(e) => setNewPresetName(e.target.value)}
-                        placeholder="请输入预设名称..."
-                        className="flex-1 bg-[var(--input-bg)] rounded-[8px] px-4 py-2 text-xs text-[var(--text-primary)] border border-[var(--border)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                      />
-                      <button
-                        type="submit"
-                        className="px-4 py-2 bg-[var(--button-primary-bg)] hover:bg-[var(--button-primary-hover-bg)] text-[var(--button-primary-text)] font-bold rounded-[24px] text-xs transition-colors flex items-center gap-1 shrink-0 shadow-sm"
-                      >
-                        <Save className="w-3.5 h-3.5" />
-                        <span>保存</span>
-                      </button>
-                    </form>
-                  </div>
-
                   {/* 切换视觉预设 */}
                   <div className="bg-[var(--surface)] p-5 rounded-[24px] border border-[var(--border)] shadow-sm space-y-3">
                     <div>
@@ -2552,7 +2548,7 @@ export default function AppSettings({
                   </div>
 
                   {/* 全局 CSS 注入 */}
-                  <div className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm space-y-3">
+                  <div className={THEME_TRANSFER_CARD_CLASS}>
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-xs font-bold text-slate-700">全局主题 CSS 样式</span>
                       <button
@@ -2575,6 +2571,65 @@ export default function AppSettings({
                       placeholder={GLOBAL_CSS_EXAMPLE_TEMPLATE}
                       className="w-full px-4 py-3 rounded-[8px] bg-slate-900 text-emerald-400 border border-slate-800 focus:outline-none focus:ring-1 focus:ring-neutral-950 text-[10px] font-mono resize-none leading-relaxed"
                     />
+                  </div>
+
+                  {/* 桌面主题导入/导出 */}
+                  <div className={THEME_TRANSFER_CARD_CLASS}>
+                    <div>
+                      <span className="text-xs font-bold text-slate-700">桌面主题</span>
+                      <p className="text-[10px] text-slate-400 leading-relaxed mt-1">导入或导出壁纸、桌面布局、小组件设置与自定义应用图标等桌面美化配置。</p>
+                    </div>
+                    <input
+                      ref={desktopThemeFileInputRef}
+                      type="file"
+                      accept="application/json"
+                      onChange={importDesktopModuleBackup}
+                      className="hidden"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => desktopThemeFileInputRef.current?.click()}
+                        className={`${THEME_TRANSFER_BUTTON_CLASS} bg-slate-800 text-white hover:bg-slate-700`}
+                      >
+                        导入主题
+                      </button>
+                      <button
+                        type="button"
+                        onClick={downloadDesktopModuleBackup}
+                        className={`${THEME_TRANSFER_BUTTON_CLASS} bg-white text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100`}
+                      >
+                        导出主题
+                      </button>
+                    </div>
+                    <div className="space-y-2 border-t border-slate-100 pt-3">
+                      <p className="text-[10px] font-semibold text-slate-500">已导入主题</p>
+                      {desktopThemes.length === 0 ? (
+                        <p className="text-[10px] text-slate-400">暂无导入主题</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {desktopThemes.map((theme) => (
+                            <div key={theme.id} className={THEME_LIBRARY_ITEM_CLASS}>
+                              <button
+                                type="button"
+                                onClick={() => applyDesktopTheme(theme)}
+                                className="min-w-0 flex-1 truncate text-left text-[10px] font-semibold text-[var(--text-primary)] hover:opacity-80"
+                                title="点击应用此桌面主题"
+                              >
+                                {theme.name}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteDesktopTheme(theme.id)}
+                                className="shrink-0 text-[10px] font-semibold text-rose-500 hover:text-rose-600"
+                              >
+                                删除
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

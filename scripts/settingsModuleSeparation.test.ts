@@ -11,7 +11,6 @@ const textApiHook = readFileSync("src/features/settings/hooks/useSettingsTextApi
 const voiceActions = readFileSync("src/features/settings/hooks/useSettingsVoiceActions.ts", "utf8");
 const connectionActions = readFileSync("src/features/settings/hooks/useSettingsApiConnectionActions.ts", "utf8");
 const assetActions = readFileSync("src/features/settings/hooks/useSettingsAssetActions.ts", "utf8");
-const presetActions = readFileSync("src/features/settings/hooks/useSettingsPresetActions.ts", "utf8");
 const applyPresetAction = readFileSync("src/features/settings/hooks/useSettingsApplyPresetAction.ts", "utf8");
 const identityActions = readFileSync("src/features/settings/hooks/useSettingsIdentityActions.ts", "utf8");
 assert.match(settings, /SystemBackupPanel/);
@@ -58,9 +57,11 @@ assert.match(assetActions, /onIconStatusChange/);
 assert.match(assetActions, /wallpaperSource: "user"/);
 assert.match(assetActions, /handleRestoreAllIcons/);
 assert.doesNotMatch(settings, /const handleAvatarUpload =/);
-assert.match(settings, /useSettingsPresetActions/);
-assert.match(presetActions, /themeColor: "#3b82f6"/);
-assert.match(presetActions, /handleSaveCurrentAsPreset/);
+// Saving the current preset was intentionally removed from the Beautify > Theme Presets UI.
+// Keep the legacy hook file available for compatibility, but ensure AppSettings no longer
+// wires the removed flow back into the page.
+assert.doesNotMatch(settings, /useSettingsPresetActions/);
+assert.doesNotMatch(settings, /handleSaveCurrentAsPreset/);
 assert.doesNotMatch(settings, /const handleSaveCurrentAsPreset =/);
 assert.match(settings, /useSettingsApplyPresetAction/);
 assert.match(applyPresetAction, /CLASSIC_BUBBLE_STRUCTURED_STYLE/);

@@ -20,6 +20,8 @@ export interface ChatThemeEntry {
   name: string;
   css: string;
   createdAt: number;
+  /** Optional icon bundle captured with a global theme package. */
+  icons?: ChatIconOverrides;
 }
 
 /** Keeps persisted/imported icon configuration safe for direct image rendering. */
@@ -804,6 +806,8 @@ export interface UserSettings {
   chatCssApiVersion?: 1 | 2;
   /** Globally configured chat function icon resources. */
   chatIcons?: ChatIconOverrides;
+  /** Imported, reusable CSS themes for the global chat settings page. */
+  chatThemes?: ChatThemeEntry[];
   globalChatStylePreset?: "default" | "floating-cute" | "liquid-glass";
   /** Prevents the first-use liquid-glass defaults from overwriting later user colour choices. */
   liquidGlassTextDefaultsApplied?: boolean;

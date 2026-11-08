@@ -49,7 +49,6 @@ async function startServer() {
   app.get("/healthz", (_req, res) => {
     res.json({ status: "ok", service: "fanfanji", version: process.env.npm_package_version || "0.0.0" });
   });
-
   app.post("/api/mcp-proxy", async (req, res) => {
     try {
       const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
