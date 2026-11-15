@@ -1,4 +1,5 @@
 export const NETEASE_SESSION_COOKIE = "fanfanji_netease_session";
+export const NETEASE_UPSTREAM_COOKIE = "fanfanji_netease_upstream";
 
 const cookiePair = (name: string, value: string, options: { maxAge?: number; secure?: boolean } = {}) => [
   `${name}=${encodeURIComponent(value)}`,
@@ -34,3 +35,11 @@ export const clearNeteaseSessionCookie = (secure = false): string => cookiePair(
 
 export const getNeteaseUpstreamCookie = (cookieHeader: string | null | undefined): string | undefined =>
   getCookie(cookieHeader, NETEASE_SESSION_COOKIE);
+
+export const buildNeteaseUpstreamCookie = (upstreamId: string | undefined, secure = false): string | undefined =>
+  upstreamId?.trim() ? cookiePair(NETEASE_UPSTREAM_COOKIE, upstreamId.trim(), { maxAge: 60 * 60 * 24 * 30, secure }) : undefined;
+
+export const clearNeteaseUpstreamCookie = (secure = false): string => cookiePair(NETEASE_UPSTREAM_COOKIE, "", { maxAge: 0, secure });
+
+export const getNeteaseUpstreamId = (cookieHeader: string | null | undefined): string | undefined =>
+  getCookie(cookieHeader, NETEASE_UPSTREAM_COOKIE);

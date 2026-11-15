@@ -3,6 +3,7 @@ import type {
   NeteaseAccount,
   NeteasePlayableTrack,
   NeteasePlaylist,
+  NeteasePlaylistTracksPage,
   NeteaseQrSession,
   NeteaseTrack,
   NeteaseLyrics,
@@ -17,16 +18,33 @@ export interface NeteaseMusicLibrarySnapshot {
 
 let libraryCache: NeteaseMusicLibrarySnapshot | null = null;
 let libraryPromise: Promise<NeteaseMusicLibrarySnapshot> | null = null;
+let qrCreateInFlight: Promise<NeteaseQrSession> | null = null;
+let qrCreateCooldownUntil = 0;
+const playlistTracksCache = new Map<string, { tracks: NeteaseTrack[]; nextOffset: number; hasMore: boolean; loading?: Promise<NeteasePlaylistTracksPage> }>();
+
+const DEFAULT_QR_RATE_LIMIT_COOLDOWN_SECONDS = 15;
+
+const readRetryAfterSeconds = (response: Response): number | undefined => {
+  const value = response.headers.get("retry-after")?.trim();
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(300, Math.ceil(seconds));
+  const date = Date.parse(value);
+  if (!Number.isFinite(date)) return undefined;
+  return Math.min(300, Math.max(0, Math.ceil((date - Date.now()) / 1000)));
+};
 
 export class NeteaseMusicClientError extends Error {
   readonly code?: string;
   readonly status?: number;
+  readonly retryAfterSeconds?: number;
 
-  constructor(message: string, options: { code?: string; status?: number } = {}) {
+  constructor(message: string, options: { code?: string; status?: number; retryAfterSeconds?: number } = {}) {
     super(message);
     this.name = "NeteaseMusicClientError";
     this.code = options.code;
     this.status = options.status;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 
@@ -52,36 +70,61 @@ async function requestJson(path: string, init: RequestInit = {}): Promise<ApiPay
   } catch (error) {
     throw new NeteaseMusicClientError(describeApiRequestError(error, "网易云代理"));
   }
+  const retryAfterSeconds = response.status === 429 ? readRetryAfterSeconds(response) : undefined;
   let raw: string;
   try {
     raw = await readResponseTextWithTimeout(response, API_REQUEST_TIMEOUTS.modelList);
   } catch (error) {
-    throw new NeteaseMusicClientError(describeApiRequestError(error, "网易云代理响应"));
+    throw new NeteaseMusicClientError(describeApiRequestError(error, "网易云代理响应"), { status: response.status, retryAfterSeconds });
   }
   let payload: ApiPayload;
   try {
     const parsed: unknown = JSON.parse(raw);
     payload = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ApiPayload : {};
   } catch {
-    throw new NeteaseMusicClientError("网易云代理返回了无法解析的响应。", { status: response.status });
+    throw new NeteaseMusicClientError(
+      response.status === 429 ? "网易云兼容接口当前请求过于频繁，请稍后重试。" : "网易云代理返回了无法解析的响应。",
+      { status: response.status, code: response.status === 429 ? "netease_rate_limited" : undefined, retryAfterSeconds },
+    );
   }
   if (!response.ok || payload.success === false) {
-    throw new NeteaseMusicClientError(String(payload.error || "网易云服务请求失败。"), {
-      code: typeof payload.code === "string" ? payload.code : undefined,
+    const code = response.status === 429 ? "netease_rate_limited" : typeof payload.code === "string" ? payload.code : undefined;
+    throw new NeteaseMusicClientError(response.status === 429
+      ? (retryAfterSeconds === undefined ? "网易云兼容接口当前请求过于频繁，请稍后重试。" : `网易云兼容接口当前请求过于频繁，请在 ${retryAfterSeconds} 秒后重试。`)
+      : String(payload.error || "网易云服务请求失败。"), {
+      code,
       status: response.status,
+      retryAfterSeconds,
     });
   }
   return payload;
 }
 
 export const createNeteaseQrSession = async (): Promise<NeteaseQrSession> => {
-  const payload = await requestJson("/api/music/netease/qr/create", { method: "POST" });
-  return {
+  const remainingSeconds = Math.ceil((qrCreateCooldownUntil - Date.now()) / 1000);
+  if (remainingSeconds > 0) {
+    throw new NeteaseMusicClientError(`网易云兼容接口当前处于冷却期，请在 ${remainingSeconds} 秒后重试。`, {
+      code: "netease_rate_limited",
+      status: 429,
+      retryAfterSeconds: remainingSeconds,
+    });
+  }
+  if (qrCreateInFlight) return qrCreateInFlight;
+  qrCreateInFlight = requestJson("/api/music/netease/qr/create", { method: "POST" }).then((payload) => ({
     key: String(payload.key || ""),
     qrUrl: typeof payload.qrUrl === "string" ? payload.qrUrl : undefined,
     qrImage: typeof payload.qrImage === "string" ? payload.qrImage : undefined,
-    status: payload.status === "waiting" ? "waiting" : "unknown",
-  };
+    status: (payload.status === "waiting" ? "waiting" : "unknown") as NeteaseQrSession["status"],
+  })).catch((error: unknown) => {
+    if (error instanceof NeteaseMusicClientError && error.status === 429) {
+      const retryAfterSeconds = error.retryAfterSeconds || DEFAULT_QR_RATE_LIMIT_COOLDOWN_SECONDS;
+      qrCreateCooldownUntil = Date.now() + retryAfterSeconds * 1000;
+    }
+    throw error;
+  }).finally(() => {
+    qrCreateInFlight = null;
+  });
+  return qrCreateInFlight;
 };
 
 export const checkNeteaseQrSession = async (key: string): Promise<NeteaseQrSession> => {
@@ -106,9 +149,31 @@ export const getNeteasePlaylists = async (): Promise<{ account: NeteaseAccount; 
   return { account: payload.account as NeteaseAccount, playlists: Array.isArray(payload.playlists) ? payload.playlists as NeteasePlaylist[] : [] };
 };
 
+export const getNeteasePlaylistTracksPage = async (playlistId: string, options: { limit?: number; offset?: number; forceRefresh?: boolean } = {}): Promise<NeteasePlaylistTracksPage> => {
+  const normalizedId = playlistId.trim();
+  if (!normalizedId) return { tracks: [], nextOffset: 0, hasMore: false };
+  const limit = Math.min(200, Math.max(1, Math.floor(options.limit || 200)));
+  const offset = Math.max(0, Math.floor(options.offset || 0));
+  const cached = playlistTracksCache.get(normalizedId);
+  if (cached?.loading) return cached.loading;
+  if (offset === 0 && cached && !options.forceRefresh) return { tracks: cached.tracks, nextOffset: cached.nextOffset, hasMore: cached.hasMore };
+  const request = requestJson(`/api/music/netease/playlists/${encodeURIComponent(normalizedId)}/tracks?limit=${limit}&offset=${offset}`, { method: "GET" }).then((payload) => {
+    const tracks = Array.isArray(payload.tracks) ? payload.tracks as NeteaseTrack[] : [];
+    const nextOffset = typeof payload.nextOffset === "number" && Number.isFinite(payload.nextOffset) ? payload.nextOffset : offset + tracks.length;
+    const hasMore = payload.hasMore === true || tracks.length >= limit;
+    const mergedTracks = offset === 0 ? tracks : [...(cached?.tracks || []), ...tracks];
+    playlistTracksCache.set(normalizedId, { tracks: mergedTracks, nextOffset, hasMore });
+    return { tracks, nextOffset, hasMore };
+  }).finally(() => {
+    const current = playlistTracksCache.get(normalizedId);
+    if (current?.loading === request) playlistTracksCache.set(normalizedId, { tracks: current.tracks, nextOffset: current.nextOffset, hasMore: current.hasMore });
+  });
+  playlistTracksCache.set(normalizedId, { tracks: cached?.tracks || [], nextOffset: cached?.nextOffset || offset, hasMore: cached?.hasMore || false, loading: request });
+  return request;
+};
+
 export const getNeteasePlaylistTracks = async (playlistId: string): Promise<NeteaseTrack[]> => {
-  const payload = await requestJson(`/api/music/netease/playlists/${encodeURIComponent(playlistId)}/tracks`, { method: "GET" });
-  return Array.isArray(payload.tracks) ? payload.tracks as NeteaseTrack[] : [];
+  return (await getNeteasePlaylistTracksPage(playlistId)).tracks;
 };
 
 export const searchNeteaseTracks = async (keywords: string): Promise<NeteaseTrack[]> => {
@@ -166,6 +231,7 @@ export const getNeteaseMusicLibraryCache = (): NeteaseMusicLibrarySnapshot | nul
 export const clearNeteaseMusicLibraryCache = (): void => {
   libraryCache = null;
   libraryPromise = null;
+  playlistTracksCache.clear();
 };
 
 export const getNeteaseTrackUrl = async (trackId: string, level: "standard" | "higher" | "exhigh" = "standard"): Promise<NeteasePlayableTrack> => {

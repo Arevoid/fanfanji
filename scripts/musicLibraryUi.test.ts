@@ -18,6 +18,7 @@ assert.match(library, /getNeteasePlaylists/);
 assert.match(library, /isNeteaseAuthenticationError/);
 assert.match(library, /authState/);
 assert.match(library, /正在检查网易云登录状态/);
+assert.match(library, /直接扫码连接/);
 assert.match(library, /重试读取歌单/);
 assert.doesNotMatch(library, /Promise\.all\(\[getNeteaseAccount\(\), getNeteasePlaylists\(\)\]\)/);
 assert.match(library, /onOpenImport/);

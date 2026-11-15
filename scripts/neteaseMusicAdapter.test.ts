@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "../src/server/neteaseMusicAdapter";
 
-type MockResponse = { status?: number; body: unknown; ok?: boolean };
+type MockResponse = { status?: number; body: unknown; ok?: boolean; headers?: Record<string, string> };
 
 function createMockFetch(responses: MockResponse[]) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -11,7 +11,7 @@ function createMockFetch(responses: MockResponse[]) {
     if (!next) throw new Error("unexpected request");
     return new Response(JSON.stringify(next.body), {
       status: next.status || 200,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...(next.headers || {}) },
     });
   }) as typeof fetch;
   return { calls, fetchMock };
@@ -30,6 +30,7 @@ assert.deepEqual(created, {
   qrUrl: "https://music.163.com/qr/key-1",
   qrImage: "data:image/png;base64,qr",
   status: "waiting",
+  upstreamId: "https://ncm.example.test",
 });
 assert.equal((await adapter.checkQrSession("key-1")).status, "waiting");
 assert.equal((await adapter.checkQrSession("key-1")).status, "scanned");
@@ -39,7 +40,8 @@ assert.match(qr.calls[2].url, /\/login\/qr\/check\?key=key-1&timestamp=/);
 const library = createMockFetch([
   { body: { code: 200, account: { id: 42 }, profile: { nickname: "饭饭", avatarUrl: "http://img.test/avatar.jpg" } } },
   { body: { code: 200, playlist: [{ id: 7, name: "我喜欢的音乐", coverImgUrl: "http://img.test/playlist.jpg", trackCount: 1, subscribed: true, creator: { nickname: "饭饭" } }] } },
-  { body: { code: 200, songs: [{ id: 8, name: "一首歌", dt: 180000, ar: [{ name: "歌手" }], al: { name: "专辑", picUrl: "http://img.test/cover.jpg" } }] } },
+  { body: { code: 200, more: true, songs: [{ id: 8, name: "一首歌", dt: 180000, ar: [{ name: "歌手" }], al: { name: "专辑", picUrl: "http://img.test/cover.jpg" } }] } },
+  { body: { code: 200, more: false, songs: [{ id: 11, name: "下一页歌曲", ar: [{ name: "下一页歌手" }] }] } },
   { body: { code: 200, result: { songs: [{ id: 9, name: "搜索结果", ar: [{ name: "搜索歌手" }] }] } } },
   { body: { code: 200, data: { dailySongs: [{ id: 10, name: "每日歌曲", ar: [{ name: "每日歌手" }] }] } } },
   { body: { code: 200, lrc: { lyric: "[00:01.00]歌词第一行" }, tlyric: { lyric: "[00:01.00]Translated line" } } },
@@ -53,6 +55,14 @@ assert.deepEqual(await libraryAdapter.getPlaylists("42"), [{
 assert.deepEqual(await libraryAdapter.getPlaylistTracks("7"), [{
   id: "8", title: "一首歌", artists: ["歌手"], album: "专辑", coverUrl: "https://img.test/cover.jpg", durationMs: 180000,
 }]);
+assert.match(library.calls[2].url, /\/playlist\/track\/all\?id=7&limit=200&offset=0/);
+const nextPage = await libraryAdapter.getPlaylistTracksPage("7", { limit: 200, offset: 1 });
+assert.deepEqual(nextPage, {
+  tracks: [{ id: "11", title: "下一页歌曲", artists: ["下一页歌手"] }],
+  nextOffset: 2,
+  hasMore: false,
+});
+assert.match(library.calls[3].url, /\/playlist\/track\/all\?id=7&limit=200&offset=1/);
 assert.deepEqual(await libraryAdapter.searchTracks("搜索结果"), [{ id: "9", title: "搜索结果", artists: ["搜索歌手"] }]);
 assert.deepEqual(await libraryAdapter.getDailyRecommendations(), [{ id: "10", title: "每日歌曲", artists: ["每日歌手"] }]);
 assert.deepEqual(await libraryAdapter.getLyrics("8"), { lyric: "[00:01.00]歌词第一行", translatedLyric: "[00:01.00]Translated line" });
@@ -68,12 +78,36 @@ const failing = createNeteaseMusicAdapter({
 });
 await assert.rejects(() => failing.getAccount(), (error: unknown) => error instanceof NeteaseMusicApiError && error.code === 502 && error.message === "风控");
 
+const rateLimited = createNeteaseMusicAdapter({
+  baseUrl: "https://ncm.example.test",
+  fetchImpl: createMockFetch([{ status: 429, headers: { "retry-after": "12" }, body: { message: "Too Many Requests" } }]).fetchMock,
+});
+await assert.rejects(
+  () => rateLimited.getAccount(),
+  (error: unknown) => error instanceof NeteaseMusicApiError
+    && error.status === 429
+    && error.retryAfterSeconds === 12
+    && error.message.includes("12 秒"),
+);
+
 const expired = createNeteaseMusicAdapter({
   baseUrl: "https://ncm.example.test",
   fetchImpl: createMockFetch([{ body: { code: 301, msg: "需要登录" } }]).fetchMock,
 });
 await assert.rejects(() => expired.getAccount(), (error: unknown) => isNeteaseAuthenticationError(error));
 assert.equal(isNeteaseAuthenticationError(new NeteaseMusicApiError("网络错误")), false);
+
+const failover = createMockFetch([
+  { status: 503, body: { message: "上游暂时不可用" } },
+  { body: { code: 200, account: { id: 99 }, profile: { nickname: "备用上游" } } },
+]);
+const failoverAdapter = createNeteaseMusicAdapter({
+  baseUrls: ["https://primary.example.test", "https://backup.example.test"],
+  fetchImpl: failover.fetchMock,
+});
+assert.deepEqual(await failoverAdapter.getAccount(), { userId: "99", nickname: "备用上游", avatarUrl: undefined });
+assert.equal(failover.calls[0].url, "https://primary.example.test/user/account");
+assert.equal(failover.calls[1].url, "https://backup.example.test/user/account");
 
 const timeoutFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
   init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });

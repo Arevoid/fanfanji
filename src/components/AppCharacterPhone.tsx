@@ -149,7 +149,10 @@ import { isWorldBookEntryVisible } from "../domain/worldbook/worldBookVisibility
 import type { MessageMutationScope } from "../features/chat/context/directInteractionScope";
 import { getRootIdentityId } from "../domain/relationship/characterRelationship";
 import { resolveCanonicalCharacterId } from "../domain/character/characterIdentity";
-import { listCharacterPhoneSelectableCharacters } from "../features/characterPhone/characterPhoneSelection";
+import {
+  listCharacterPhoneSelectableCharacters,
+  listIdentityWorkspaceCharacterIds,
+} from "../features/characterPhone/characterPhoneSelection";
 import { mirrorGeneratedCharacterPhoneChat } from "../features/characterPhone/characterPhoneChatMirror";
 import {
   DEFAULT_CHARACTER_PHONE_GENERATION_SELECTION,
@@ -934,9 +937,20 @@ export default function AppCharacterPhone({
     });
     return new Map([...scopes.entries()].map(([characterId, identityScopes]) => [characterId, [...identityScopes]] as const));
   }, [characters, identities, relationships, userIdentityId, phoneStorageRevision]);
+  const relatedCharacterIds = useMemo(
+    () => [...listIdentityWorkspaceCharacterIds(characters, userIdentityId, identities, relationships)],
+    [characters, identities, relationships, userIdentityId],
+  );
   const selectableCharacters = useMemo(
-    () => listCharacterPhoneSelectableCharacters(characters, userIdentityId, identities, [], legacyCharacterScopes),
-    [characters, userIdentityId, identities, legacyCharacterScopes],
+    () => listCharacterPhoneSelectableCharacters(
+      characters,
+      userIdentityId,
+      identities,
+      [],
+      legacyCharacterScopes,
+      relatedCharacterIds,
+    ),
+    [characters, userIdentityId, identities, legacyCharacterScopes, relatedCharacterIds],
   );
   const [selectedCharacterId, setSelectedCharacterId] = useState(
     selectableCharacters[0]?.id || "",

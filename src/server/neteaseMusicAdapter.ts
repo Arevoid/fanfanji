@@ -1,17 +1,21 @@
 import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError, readResponseTextWithTimeout } from "../utils/fetchWithTimeout";
-import type { NeteaseAccount, NeteaseLyrics, NeteasePlayableTrack, NeteasePlaylist, NeteaseQrSession as PublicNeteaseQrSession, NeteaseQrStatus, NeteaseTrack } from "../features/music/neteaseTypes";
-export type { NeteaseAccount, NeteaseLyrics, NeteasePlayableTrack, NeteasePlaylist, NeteaseTrack } from "../features/music/neteaseTypes";
+import type { NeteaseAccount, NeteaseLyrics, NeteasePlayableTrack, NeteasePlaylist, NeteasePlaylistTracksPage, NeteaseQrSession as PublicNeteaseQrSession, NeteaseQrStatus, NeteaseTrack } from "../features/music/neteaseTypes";
+import { getNeteaseUpstreamPool, isNeteaseUpstreamRetryable, NeteaseUpstreamPool, parseNeteaseUpstreamUrls } from "./neteaseUpstreamPool";
+export type { NeteaseAccount, NeteaseLyrics, NeteasePlayableTrack, NeteasePlaylist, NeteasePlaylistTracksPage, NeteaseTrack } from "../features/music/neteaseTypes";
 export type NeteaseQrSession = PublicNeteaseQrSession & { /** Server-only upstream cookie captured after QR authorization. */ sessionCookie?: string };
+export type NeteaseServerQrSession = NeteaseQrSession & { /** Upstream that owns the QR key; QR checks must stay pinned to it. */ upstreamId?: string };
 
 export class NeteaseMusicApiError extends Error {
   readonly status?: number;
   readonly code?: number;
+  readonly retryAfterSeconds?: number;
 
-  constructor(message: string, options: { status?: number; code?: number } = {}) {
+  constructor(message: string, options: { status?: number; code?: number; retryAfterSeconds?: number } = {}) {
     super(message);
     this.name = "NeteaseMusicApiError";
     this.status = options.status;
     this.code = options.code;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 
@@ -22,7 +26,10 @@ export const isNeteaseAuthenticationError = (error: unknown): boolean => {
 };
 
 export interface NeteaseMusicAdapterOptions {
-  baseUrl: string;
+  baseUrl?: string;
+  baseUrls?: string[];
+  preferredUpstreamId?: string;
+  upstreamPool?: NeteaseUpstreamPool;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   cookie?: string;
@@ -39,6 +46,7 @@ type NeteaseResponse = {
   playlists?: unknown;
   songs?: unknown;
   dataUrl?: unknown;
+  more?: unknown;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -76,7 +84,20 @@ const normalizeQrStatus = (code: unknown): NeteaseQrStatus => {
   }
 };
 
-const normalizeBaseUrl = (baseUrl: string): string => baseUrl.trim().replace(/\/+$/, "");
+const readRetryAfterSeconds = (response: Response): number | undefined => {
+  const value = response.headers.get("retry-after")?.trim();
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(300, Math.ceil(seconds));
+  const date = Date.parse(value);
+  if (!Number.isFinite(date)) return undefined;
+  const remaining = Math.ceil((date - Date.now()) / 1000);
+  return Math.min(300, Math.max(0, remaining));
+};
+
+const rateLimitMessage = (retryAfterSeconds?: number): string => retryAfterSeconds === undefined
+  ? "网易云兼容 API 当前请求过于频繁（HTTP 429），请稍后重试。"
+  : `网易云兼容 API 当前请求过于频繁，请在 ${retryAfterSeconds} 秒后重试。`;
 
 const appendQuery = (path: string, query: Record<string, string | number | undefined>): string => {
   const params = new URLSearchParams();
@@ -88,25 +109,29 @@ const appendQuery = (path: string, query: Record<string, string | number | undef
 };
 
 const readJson = async (response: Response, timeoutMs: number): Promise<NeteaseResponse> => {
+  const retryAfterSeconds = response.status === 429 ? readRetryAfterSeconds(response) : undefined;
   const raw = await readResponseTextWithTimeout(response, timeoutMs);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new NeteaseMusicApiError(`网易云兼容 API 返回了无法解析的响应（HTTP ${response.status}）。`, { status: response.status });
+    throw new NeteaseMusicApiError(
+      response.status === 429 ? rateLimitMessage(retryAfterSeconds) : `网易云兼容 API 返回了无法解析的响应（HTTP ${response.status}）。`,
+      { status: response.status, retryAfterSeconds },
+    );
   }
   const payload = asRecord(parsed);
   if (!response.ok) {
     throw new NeteaseMusicApiError(
-      asString(payload.message) || asString(payload.msg) || `网易云兼容 API 请求失败（HTTP ${response.status}）。`,
-      { status: response.status, code: asNumber(payload.code) },
+      response.status === 429 ? rateLimitMessage(retryAfterSeconds) : asString(payload.message) || asString(payload.msg) || `网易云兼容 API 请求失败（HTTP ${response.status}）。`,
+      { status: response.status, code: asNumber(payload.code), retryAfterSeconds },
     );
   }
   const code = asNumber(payload.code);
   if (code !== undefined && code !== 200 && code !== 802 && code !== 801 && code !== 803) {
     throw new NeteaseMusicApiError(
-      asString(payload.message) || asString(payload.msg) || `网易云兼容 API 返回错误码 ${code}。`,
-      { status: response.status, code },
+      code === 429 ? rateLimitMessage(retryAfterSeconds) : asString(payload.message) || asString(payload.msg) || `网易云兼容 API 返回错误码 ${code}。`,
+      { status: code === 429 ? 429 : response.status, code, retryAfterSeconds },
     );
   }
   return payload as NeteaseResponse;
@@ -119,52 +144,66 @@ const getNested = (value: unknown, ...keys: string[]): unknown => {
 };
 
 export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
-  const baseUrl = normalizeBaseUrl(options.baseUrl);
+  const configuredUrls = parseNeteaseUpstreamUrls(options.baseUrl, options.baseUrls?.join("\n"));
+  const pool = options.upstreamPool || getNeteaseUpstreamPool(configuredUrls);
   const fetchImpl = options.fetchImpl || fetch;
   const timeoutMs = options.timeoutMs || API_REQUEST_TIMEOUTS.modelList;
   const cookie = options.cookie?.trim();
 
-  if (!baseUrl) throw new Error("网易云兼容 API 地址不能为空。");
+  if (!configuredUrls.length && !pool.targets.length) throw new Error("网易云兼容 API 地址不能为空。");
 
-  const request = async (path: string, init: RequestInit = {}): Promise<{ payload: NeteaseResponse; sessionCookie?: string }> => {
+  const request = async (path: string, init: RequestInit = {}, requestOptions: { allowFailover?: boolean; preferredUpstreamId?: string } = {}): Promise<{ payload: NeteaseResponse; sessionCookie?: string; upstreamId: string }> => {
     const endpoint = path.split("?", 1)[0];
-    try {
-      const response = await fetchWithTimeout(`${baseUrl}${path}`, { ...init, headers: {
-        Accept: "application/json",
-        ...(cookie ? { Cookie: cookie } : {}),
-        ...(init.headers || {}),
-      } }, timeoutMs, fetchImpl);
-      return { payload: await readJson(response, timeoutMs), sessionCookie: response.headers.get("set-cookie") || undefined };
-    } catch (error) {
-      if (error instanceof NeteaseMusicApiError) throw error;
-      const status = isApiRequestError(error, "timeout") ? 504 : isApiRequestError(error, "network") ? 502 : undefined;
-      throw new NeteaseMusicApiError(describeApiRequestError(error, `网易云接口 ${endpoint} `), { status });
+    const candidates = await pool.getCandidates(requestOptions.preferredUpstreamId || options.preferredUpstreamId);
+    let lastError: unknown;
+    for (const target of candidates) {
+      try {
+        const response = await fetchWithTimeout(`${target.baseUrl}${path}`, { ...init, headers: {
+          Accept: "application/json",
+          ...(cookie ? { Cookie: cookie } : {}),
+          ...(init.headers || {}),
+        } }, timeoutMs, fetchImpl);
+        const result = { payload: await readJson(response, timeoutMs), sessionCookie: response.headers.get("set-cookie") || undefined, upstreamId: target.id };
+        pool.markSuccess(target);
+        return result;
+      } catch (error) {
+        const typed = error instanceof NeteaseMusicApiError ? error : new NeteaseMusicApiError(describeApiRequestError(error, `网易云接口 ${endpoint} `), {
+          status: isApiRequestError(error, "timeout") ? 504 : isApiRequestError(error, "network") ? 502 : undefined,
+        });
+        lastError = typed;
+        if (!isNeteaseUpstreamRetryable(typed)) throw typed;
+        pool.markFailure(target);
+        if (requestOptions.allowFailover === false) throw typed;
+      }
     }
+    throw lastError instanceof Error ? lastError : new NeteaseMusicApiError(`网易云接口 ${endpoint} 暂时不可用。`);
   };
 
   return {
-    async createQrSession(): Promise<NeteaseQrSession> {
+    async createQrSession(): Promise<NeteaseServerQrSession> {
       const keyResponse = await request("/login/qr/key", { method: "POST" });
       const key = asString(getNested(keyResponse.payload, "data", "unikey"));
       if (!key) throw new NeteaseMusicApiError("网易云兼容 API 没有返回二维码 key。");
-      const qrResponse = await request(appendQuery("/login/qr/create", { key, qrimg: 1 }), { method: "POST" });
+      const qrResponse = await request(appendQuery("/login/qr/create", { key, qrimg: 1 }), { method: "POST" }, { allowFailover: false, preferredUpstreamId: keyResponse.upstreamId });
       const qrData = asRecord(qrResponse.payload.data);
       return {
         key,
         qrUrl: asString(qrData.qrurl),
         qrImage: asString(qrData.qrimg),
         status: "waiting",
+        upstreamId: qrResponse.upstreamId,
       };
     },
 
-    async checkQrSession(key: string): Promise<NeteaseQrSession> {
+    async checkQrSession(key: string, options: { upstreamId?: string } = {}): Promise<NeteaseServerQrSession> {
       if (!key.trim()) throw new Error("二维码 key 不能为空。");
-      const response = await request(appendQuery("/login/qr/check", { key, timestamp: Date.now() }), { method: "POST" });
+      const response = await request(appendQuery("/login/qr/check", { key, timestamp: Date.now() }), { method: "POST" }, { allowFailover: !options.upstreamId, preferredUpstreamId: options.upstreamId });
       const payload = response.payload;
       return {
         key,
         status: normalizeQrStatus(payload.code),
         ...(response.sessionCookie ? { sessionCookie: response.sessionCookie } : {}),
+        upstreamId: response.upstreamId,
       };
     },
 
@@ -201,11 +240,13 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
       }).filter((item): item is NeteasePlaylist => Boolean(item));
     },
 
-    async getPlaylistTracks(playlistId: string): Promise<NeteaseTrack[]> {
+    async getPlaylistTracksPage(playlistId: string, options: { limit?: number; offset?: number } = {}): Promise<NeteasePlaylistTracksPage> {
       if (!playlistId.trim()) throw new Error("网易云歌单 ID 不能为空。");
-      const payload = (await request(appendQuery("/playlist/track/all", { id: playlistId, limit: 1000, offset: 0 }), { method: "POST" })).payload;
+      const limit = Math.min(200, Math.max(1, Math.floor(options.limit || 200)));
+      const offset = Math.max(0, Math.floor(options.offset || 0));
+      const payload = (await request(appendQuery("/playlist/track/all", { id: playlistId, limit, offset }), { method: "POST" })).payload;
       const source = Array.isArray(payload.songs) ? payload.songs : Array.isArray(payload.data) ? payload.data : [];
-      return source.map((item): NeteaseTrack | null => {
+      const tracks = source.map((item): NeteaseTrack | null => {
         const song = asRecord(item);
         const id = asId(song.id);
         const title = asString(song.name);
@@ -220,6 +261,15 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
           ...(asNumber(song.dt) !== undefined ? { durationMs: asNumber(song.dt) } : {}),
         };
       }).filter((item): item is NeteaseTrack => Boolean(item));
+      return {
+        tracks,
+        nextOffset: offset + tracks.length,
+        hasMore: payload.more === true || source.length >= limit,
+      };
+    },
+
+    async getPlaylistTracks(playlistId: string): Promise<NeteaseTrack[]> {
+      return (await this.getPlaylistTracksPage(playlistId)).tracks;
     },
 
     async searchTracks(keywords: string): Promise<NeteaseTrack[]> {

@@ -5787,6 +5787,7 @@ export default function App() {
                   <LazyAppBoundary visible={activeApp === "now"}>
                     <AppNow
                       activeIdentity={activeIdentity}
+                      identities={settings.identities}
                       characters={characters}
                       relationships={relationships}
                       messages={messages}

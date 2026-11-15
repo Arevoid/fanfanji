@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { inferCharacterPhoneLocation } from "../src/features/characterPhone/characterPhoneLocation";
-import { listCharacterPhoneSelectableCharacters } from "../src/features/characterPhone/characterPhoneSelection";
+import {
+  listCharacterPhoneSelectableCharacters,
+  listIdentityWorkspaceCharacterIds,
+  listIdentityWorkspaceCharacters,
+} from "../src/features/characterPhone/characterPhoneSelection";
 import { normalizeCharacterPhoneContactName } from "../src/features/characterPhone/characterPhoneContactVisuals";
 import type { Character, UserIdentity } from "../src/types";
+import type { CharacterRelationship } from "../src/domain/relationship/characterRelationship";
 
 const component = readFileSync(new URL("../src/components/AppCharacterPhone.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("../src/index.css", import.meta.url), "utf8");
@@ -16,6 +21,7 @@ const browserDetails = readFileSync(new URL("../src/features/characterPhone/char
 const location = readFileSync(new URL("../src/features/characterPhone/characterPhoneLocation.ts", import.meta.url), "utf8");
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const chat = readFileSync(new URL("../src/components/AppChat.tsx", import.meta.url), "utf8");
+const now = readFileSync(new URL("../src/components/AppNow.tsx", import.meta.url), "utf8");
 const store = readFileSync(new URL("../src/components/AppStore.tsx", import.meta.url), "utf8");
 const callApp = readFileSync(new URL("../src/features/characterPhone/components/CharacterPhoneCallApp.tsx", import.meta.url), "utf8");
 const cameraApp = readFileSync(new URL("../src/features/characterPhone/components/CharacterPhoneCameraApp.tsx", import.meta.url), "utf8");
@@ -90,6 +96,9 @@ assert.match(app, /function resolveCharacterPhoneOwnerIdentityId/);
 assert.match(app, /const characterPhoneOwnerIdentityId = resolveCharacterPhoneOwnerIdentityId/);
 assert.match(app, /<AppCharacterPhone[\s\S]*userIdentityId=\{characterPhoneIdentity\.id\}/);
 assert.match(app, /relationshipNetworkNpcs=\{listRelationshipNetworkNpcsForIdentity\(characterPhoneIdentity\.id\)\}/);
+assert.match(now, /listIdentityWorkspaceCharacters/);
+assert.match(now, /identities\?: UserIdentity\[\]/);
+assert.match(app, /<AppNow[\s\S]*identities=\{settings\.identities\}/);
 const openCharacterPhoneAppBlock = app.slice(app.indexOf("const openCharacterPhoneApp"), app.indexOf("const linkRelationshipNetworkNpcToChat"));
 assert.doesNotMatch(openCharacterPhoneAppBlock, /handleSwitchIdentity/);
 assert.match(chat, /resolvedCharacterPhoneOwnerIdentityId/);
@@ -171,6 +180,56 @@ assert.deepEqual(
     .map((character) => character.id),
   ["legacy-primary-role"],
   "ownerless legacy records with ambiguous or foreign identity evidence stay out of the current picker",
+);
+const crossOwnerRelationship: CharacterRelationship = {
+  id: "cross-owner-relation",
+  characterId: "owned-role-a",
+  userIdentityId: pickerOtherPrimary.id,
+  conversationId: "direct:cross-owner-relation",
+  relationship: "friend",
+  createdAt: 1,
+  updatedAt: 1,
+};
+const crossOwnerVisibleIds = listIdentityWorkspaceCharacterIds(
+  [pickerCharacter("owned-role-a", "跨主号角色", pickerPrimary.id)],
+  pickerOtherPrimary.id,
+  [pickerPrimary, pickerOtherPrimary],
+  [crossOwnerRelationship],
+);
+assert.deepEqual([...crossOwnerVisibleIds], ["owned-role-a"], "an explicitly added cross-owner contact is visible in the current identity workspace");
+assert.deepEqual(
+  listIdentityWorkspaceCharacters(
+    [
+      pickerCharacter("owned-role-a", "跨主号角色", pickerPrimary.id),
+      pickerCharacter("unrelated-role", "未添加角色", pickerPrimary.id),
+    ],
+    pickerOtherPrimary.id,
+    [pickerPrimary, pickerOtherPrimary],
+    [crossOwnerRelationship],
+  ).map((character) => character.id),
+  ["owned-role-a"],
+  "Now picker uses the same relationship allow-list as the phone picker",
+);
+assert.deepEqual(
+  listCharacterPhoneSelectableCharacters(
+    [pickerCharacter("owned-role-a", "跨主号角色", pickerPrimary.id)],
+    pickerOtherPrimary.id,
+    [pickerPrimary, pickerOtherPrimary],
+    [],
+    new Map(),
+    [...crossOwnerVisibleIds],
+  ).map((character) => character.id),
+  ["owned-role-a"],
+  "phone picker admits a foreign-owned archive role after the current identity explicitly adds it",
+);
+assert.deepEqual(
+  listCharacterPhoneSelectableCharacters(
+    [pickerCharacter("owned-role-a", "未添加角色", pickerPrimary.id)],
+    pickerOtherPrimary.id,
+    [pickerPrimary, pickerOtherPrimary],
+  ).map((character) => character.id),
+  [],
+  "foreign-owned roles without a current-identity relationship remain isolated",
 );
 assert.equal(normalizeCharacterPhoneContactName("而不"), "", "sentence-fragment NPC names are discarded");
 assert.equal(normalizeCharacterPhoneContactName("若啊"), "", "particle-only NPC names are discarded");

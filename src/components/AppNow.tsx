@@ -35,10 +35,12 @@ import { enforceNowContinuity, getNowActionLabel, normalizeSingleMomentContent }
 import type { NowActionType, NowContinuityMode, NowObservationThread, NowScene } from "../domain/now/nowTypes";
 import { AppHeader } from "./ui/AppHeader";
 import { IconButton } from "./ui/IconButton";
+import { listIdentityWorkspaceCharacters } from "../features/characterPhone/characterPhoneSelection";
 import "./now.css";
 
 interface AppNowProps {
   activeIdentity: UserIdentity;
+  identities?: UserIdentity[];
   characters: Character[];
   relationships: CharacterRelationship[];
   messages: Message[];
@@ -218,6 +220,7 @@ const getRelevantWorldBook = (
 
 export default function AppNow({
   activeIdentity,
+  identities = [],
   characters,
   relationships,
   messages,
@@ -265,10 +268,14 @@ export default function AppNow({
     if (autoTimerRef.current !== null) window.clearTimeout(autoTimerRef.current);
   }, []);
 
-  const availableCharacters = useMemo(() => characters
-    .filter((character) => !character.isGroupChat && !character.isContactInstance)
-    .filter((character) => !character.ownerIdentityId || character.ownerIdentityId === activeIdentity.id)
-    .sort((left, right) => Number(Boolean(right.isPinned)) - Number(Boolean(left.isPinned))), [characters, activeIdentity.id]);
+  const availableCharacters = useMemo(() => listIdentityWorkspaceCharacters(
+    characters,
+    activeIdentity.id,
+    identities,
+    relationships,
+  )
+    .sort((left, right) => Number(Boolean(right.isPinned)) - Number(Boolean(left.isPinned))),
+  [activeIdentity.id, characters, identities, relationships]);
 
   const selectedCharacter = selectedCharacterId
     ? availableCharacters.find((character) => character.id === selectedCharacterId) || characters.find((character) => character.id === selectedCharacterId)

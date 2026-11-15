@@ -16,6 +16,7 @@ for (const source of [server, worker]) {
   assert.match(source, /tracks.*stream/);
   assert.match(source, /NETEASE_API_BASE_URL/);
   assert.match(source, /netease_not_authenticated/);
+  assert.match(source, /netease_rate_limited/);
 }
 
 assert.match(server, /buildNeteaseSessionCookie/);

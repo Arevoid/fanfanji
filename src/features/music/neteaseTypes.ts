@@ -32,6 +32,12 @@ export interface NeteaseTrack {
   durationMs?: number;
 }
 
+export interface NeteasePlaylistTracksPage {
+  tracks: NeteaseTrack[];
+  nextOffset: number;
+  hasMore: boolean;
+}
+
 export interface NeteasePlayableTrack {
   id: string;
   url: string;

@@ -7,13 +7,15 @@ import { buildTranslationPrompt, callTextProvider, callTextProviderWithDiagnosti
 import { API_REQUEST_TIMEOUTS, fetchWithTimeout } from "../utils/fetchWithTimeout";
 import { CONTENT_SECURITY_POLICY } from "../core/security/contentSecurityPolicy";
 import { createNeteaseMusicAdapter, isNeteaseAuthenticationError, NeteaseMusicApiError } from "../server/neteaseMusicAdapter";
-import { buildNeteaseSessionCookie, clearNeteaseSessionCookie, getNeteaseUpstreamCookie } from "../server/neteaseMusicSession";
+import { buildNeteaseSessionCookie, buildNeteaseUpstreamCookie, clearNeteaseSessionCookie, clearNeteaseUpstreamCookie, getNeteaseUpstreamCookie, getNeteaseUpstreamId } from "../server/neteaseMusicSession";
+import { getNeteaseUpstreamPool, parseNeteaseUpstreamUrls } from "../server/neteaseUpstreamPool";
 import { McpProxyError, proxyMcpRequest } from "../server/mcpProxy";
 import { handleHotSearchMcp } from "../server/hotSearchMcp";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   NETEASE_API_BASE_URL?: string;
+  NETEASE_API_BASE_URLS?: string;
 }
 
 function json(body: unknown, status = 200) {
@@ -22,6 +24,13 @@ function json(body: unknown, status = 200) {
 
 function jsonWithHeaders(body: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store", "Content-Security-Policy": CONTENT_SECURITY_POLICY, ...extraHeaders } });
+}
+
+function jsonWithCookies(body: unknown, status: number, cookies: string[]) {
+  const response = jsonWithHeaders(body, status);
+  const headers = new Headers(response.headers);
+  cookies.forEach((cookie) => headers.append("Set-Cookie", cookie));
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 function withSecurityHeaders(response: Response): Response {
@@ -59,7 +68,9 @@ function neteaseErrorResponse(error: unknown, fallbackMessage: string) {
   }
   const typed = error instanceof NeteaseMusicApiError ? error : null;
   const status = typed?.status && typed.status >= 400 && typed.status < 600 ? typed.status : 502;
-  return json({ success: false, code: typed?.code || "netease-provider", error: error instanceof Error ? error.message : fallbackMessage }, status);
+  const code = status === 429 ? "netease_rate_limited" : typed?.code || "netease-provider";
+  const headers = typed?.retryAfterSeconds !== undefined ? { "Retry-After": String(typed.retryAfterSeconds) } : {};
+  return jsonWithHeaders({ success: false, code, error: error instanceof Error ? error.message : fallbackMessage }, status, headers);
 }
 
 const textInput = (body: Record<string, unknown>, message: string, systemInstruction?: string, temperature?: number) => ({
@@ -124,28 +135,32 @@ export default {
     if (!isNeteaseRoute && request.method !== "POST") return json({ success: false, error: "代理接口只接受 POST 请求。" }, 405);
 
     if (isNeteaseRoute) {
-      const baseUrl = env.NETEASE_API_BASE_URL?.trim();
-      if (!baseUrl) return json({ success: false, code: "netease_provider_not_configured", error: "网易云连接服务尚未配置。管理员需要设置 NETEASE_API_BASE_URL（网易云兼容 API 地址）后才能扫码登录和读取云端内容。" }, 503);
+      const baseUrls = parseNeteaseUpstreamUrls(env.NETEASE_API_BASE_URL, env.NETEASE_API_BASE_URLS);
+      if (!baseUrls.length) return json({ success: false, code: "netease_provider_not_configured", error: "网易云连接服务尚未配置。管理员需要设置 NETEASE_API_BASE_URL 或 NETEASE_API_BASE_URLS（逗号/换行分隔的网易云兼容 API 地址）后才能扫码登录和读取云端内容。" }, 503);
+      const upstreamPool = getNeteaseUpstreamPool(baseUrls);
       const secureCookies = url.protocol === "https:";
       const upstreamCookie = getNeteaseUpstreamCookie(request.headers.get("Cookie"));
+      const preferredUpstreamId = getNeteaseUpstreamId(request.headers.get("Cookie"));
       try {
         if (url.pathname === "/api/music/netease/qr/create" && request.method === "POST") {
-          const session = await createNeteaseMusicAdapter({ baseUrl }).createQrSession();
-          return json({ success: true, key: session.key, qrUrl: session.qrUrl, qrImage: session.qrImage, status: session.status });
+          const session = await createNeteaseMusicAdapter({ baseUrls, upstreamPool }).createQrSession();
+          const providerCookie = buildNeteaseUpstreamCookie(session.upstreamId, secureCookies);
+          return jsonWithCookies({ success: true, key: session.key, qrUrl: session.qrUrl, qrImage: session.qrImage, status: session.status }, 200, providerCookie ? [providerCookie] : []);
         }
         if (url.pathname === "/api/music/netease/qr/check" && request.method === "POST") {
           const body = await requestBody(request);
           const key = typeof body?.key === "string" ? body.key.trim() : "";
           if (!key) return json({ success: false, code: "invalid_qr_key", error: "二维码 key 不能为空。" }, 400);
-          const session = await createNeteaseMusicAdapter({ baseUrl }).checkQrSession(key);
-          const cookie = session.status === "authorized" ? buildNeteaseSessionCookie(session.sessionCookie, secureCookies) : undefined;
-          return jsonWithHeaders({ success: true, key: session.key, status: session.status }, 200, cookie ? { "Set-Cookie": cookie } : {});
+          const session = await createNeteaseMusicAdapter({ baseUrls, upstreamPool, preferredUpstreamId }).checkQrSession(key, { upstreamId: preferredUpstreamId });
+          const cookies = [buildNeteaseUpstreamCookie(session.upstreamId, secureCookies)];
+          if (session.status === "authorized") cookies.push(buildNeteaseSessionCookie(session.sessionCookie, secureCookies));
+          return jsonWithCookies({ success: true, key: session.key, status: session.status }, 200, cookies.filter((cookie): cookie is string => Boolean(cookie)));
         }
         if (url.pathname === "/api/music/netease/logout" && request.method === "POST") {
-          return jsonWithHeaders({ success: true }, 200, { "Set-Cookie": clearNeteaseSessionCookie(secureCookies) });
+          return jsonWithCookies({ success: true }, 200, [clearNeteaseSessionCookie(secureCookies), clearNeteaseUpstreamCookie(secureCookies)]);
         }
         if (!upstreamCookie) return json({ success: false, code: "netease_not_authenticated", error: "请先连接网易云账号。" }, 401);
-        const adapter = createNeteaseMusicAdapter({ baseUrl, cookie: upstreamCookie });
+        const adapter = createNeteaseMusicAdapter({ baseUrls, upstreamPool, preferredUpstreamId, cookie: upstreamCookie });
         if (url.pathname === "/api/music/netease/account" && request.method === "GET") {
           return json({ success: true, account: await adapter.getAccount() });
         }
@@ -155,7 +170,10 @@ export default {
         }
         const playlistMatch = url.pathname.match(/^\/api\/music\/netease\/playlists\/([^/]+)\/tracks$/);
         if (playlistMatch && request.method === "GET") {
-          return json({ success: true, tracks: await adapter.getPlaylistTracks(decodeURIComponent(playlistMatch[1])) });
+          const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") || 200) || 200));
+          const offset = Math.max(0, Number(url.searchParams.get("offset") || 0) || 0);
+          const page = await adapter.getPlaylistTracksPage(decodeURIComponent(playlistMatch[1]), { limit, offset });
+          return json({ success: true, tracks: page.tracks, nextOffset: page.nextOffset, hasMore: page.hasMore });
         }
         if (url.pathname === "/api/music/netease/search" && request.method === "GET") {
           const keywords = url.searchParams.get("keywords")?.trim() || "";

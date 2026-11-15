@@ -23,11 +23,12 @@ import type { MusicPlaybackHistoryItem, MusicTrack } from "../../types";
 import {
   checkNeteaseQrSession,
   createNeteaseQrSession,
-  getNeteasePlaylistTracks,
+  getNeteasePlaylistTracksPage,
   getNeteasePlaylists,
   clearNeteaseMusicLibraryCache,
   getNeteaseMusicLibraryCache,
   isNeteaseAuthenticationError,
+  NeteaseMusicClientError,
   logoutNetease,
   preloadNeteaseMusicLibrary,
   searchNeteaseTracks,
@@ -73,6 +74,9 @@ export default function MusicLibraryPanel({
   const [playlists, setPlaylists] = useState<NeteasePlaylist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<NeteasePlaylist | null>(null);
   const [playlistTracks, setPlaylistTracks] = useState<NeteaseTrack[]>([]);
+  const [playlistOffset, setPlaylistOffset] = useState(0);
+  const [playlistHasMore, setPlaylistHasMore] = useState(false);
+  const [playlistLoadingMore, setPlaylistLoadingMore] = useState(false);
   const [dailyRemoteTracks, setDailyRemoteTracks] = useState<NeteaseTrack[]>([]);
   const [qrSession, setQrSession] = useState<NeteaseQrSession | null>(null);
   const [loading, setLoading] = useState(false);
@@ -94,6 +98,9 @@ export default function MusicLibraryPanel({
     setPlaylists([]);
     setSelectedPlaylist(null);
     setPlaylistTracks([]);
+    setPlaylistOffset(0);
+    setPlaylistHasMore(false);
+    setPlaylistLoadingMore(false);
     setDailyRemoteTracks([]);
     setLibraryError(null);
   };
@@ -171,18 +178,28 @@ export default function MusicLibraryPanel({
   useEffect(() => {
     if (!qrSession || qrSession.status === "authorized" || qrSession.status === "expired") return;
     let cancelled = false;
-    const timer = window.setInterval(() => {
-      void checkNeteaseQrSession(qrSession.key).then((next) => {
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const next = await checkNeteaseQrSession(qrSession.key);
         if (cancelled) return;
         setQrSession({ ...next, qrUrl: next.qrUrl || qrSession.qrUrl, qrImage: next.qrImage || qrSession.qrImage });
-        if (next.status === "authorized") void loadAccount();
-      }).catch((nextError) => {
-        if (!cancelled) setError(nextError instanceof Error ? nextError.message : "二维码状态查询失败。");
-      });
-    }, 2200);
+        if (next.status === "authorized") {
+          void loadAccount();
+          return;
+        }
+        timer = window.setTimeout(() => void poll(), 2200);
+      } catch (nextError) {
+        if (cancelled) return;
+        setError(nextError instanceof Error ? nextError.message : "二维码状态查询失败。");
+        const retryAfterSeconds = nextError instanceof NeteaseMusicClientError ? nextError.retryAfterSeconds : undefined;
+        timer = window.setTimeout(() => void poll(), Math.max(5000, (retryAfterSeconds || 0) * 1000));
+      }
+    };
+    timer = window.setTimeout(() => void poll(), 2200);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [qrSession?.key, qrSession?.status]);
 
@@ -215,10 +232,16 @@ export default function MusicLibraryPanel({
   const handleSelectPlaylist = async (playlist: NeteasePlaylist) => {
     setSelectedPlaylist(playlist);
     setTab("netease");
+    setPlaylistTracks([]);
+    setPlaylistOffset(0);
+    setPlaylistHasMore(false);
     setLoading(true);
     setError(null);
     try {
-      setPlaylistTracks(await getNeteasePlaylistTracks(playlist.id));
+      const page = await getNeteasePlaylistTracksPage(playlist.id);
+      setPlaylistTracks(page.tracks);
+      setPlaylistOffset(page.nextOffset);
+      setPlaylistHasMore(page.hasMore);
     } catch (nextError) {
       if (isNeteaseAuthenticationError(nextError)) {
         markUnauthenticated();
@@ -229,6 +252,22 @@ export default function MusicLibraryPanel({
       setError(nextError instanceof Error ? nextError.message : "歌单歌曲读取失败。");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLoadMorePlaylistTracks = async () => {
+    if (!selectedPlaylist || playlistLoadingMore || !playlistHasMore) return;
+    setPlaylistLoadingMore(true);
+    setError(null);
+    try {
+      const page = await getNeteasePlaylistTracksPage(selectedPlaylist.id, { offset: playlistOffset });
+      setPlaylistTracks((current) => [...current, ...page.tracks]);
+      setPlaylistOffset(page.nextOffset);
+      setPlaylistHasMore(page.hasMore);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "网易云歌单剩余歌曲读取失败，请稍后重试。");
+    } finally {
+      setPlaylistLoadingMore(false);
     }
   };
 
@@ -294,9 +333,14 @@ export default function MusicLibraryPanel({
             <Cloud className="mx-auto h-6 w-6" />
             <p className="mt-3 text-xs font-bold">暂时无法确认网易云登录状态</p>
             <p className="mt-1 text-[11px] leading-5">这通常是网络或服务暂时不可用，已有会话不会被清除。</p>
-            <button type="button" onClick={() => void loadAccount()} disabled={loading} className="mt-4 rounded-2xl bg-amber-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
-              {loading ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : "重试检查"}
-            </button>
+            <div className="mt-4 flex justify-center gap-2">
+              <button type="button" onClick={() => void loadAccount()} disabled={loading} className="rounded-2xl bg-amber-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+                {loading ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : "重试检查"}
+              </button>
+              <button type="button" onClick={() => void handleStartLogin()} disabled={loading} className="rounded-2xl border border-amber-700 px-4 py-2 text-xs font-bold text-amber-800 disabled:opacity-50">
+                直接扫码连接
+              </button>
+            </div>
           </div>
         );
       }
@@ -332,7 +376,7 @@ export default function MusicLibraryPanel({
           <button type="button" onClick={() => void handleLogout()} className="rounded-xl p-2 text-[var(--text-tertiary)] hover:bg-[var(--surface-muted)] hover:text-red-500" title="退出网易云"><LogOut className="h-4 w-4" /></button>
         </div>}
         {selectedPlaylist ? (
-          <div className="space-y-3"><h2 className="text-base font-extrabold text-[var(--text-primary)]">{selectedPlaylist.name}</h2>{loading ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : playlistTracks.length ? playlistTracks.map((track, index) => renderTrack(createNeteaseMusicTrack({ accountUserId: account.userId, track }), index, true)) : <p className="py-10 text-center text-xs text-[var(--text-secondary)]">这个歌单暂时没有可读取的歌曲。</p>}</div>
+          <div className="space-y-3"><h2 className="text-base font-extrabold text-[var(--text-primary)]">{selectedPlaylist.name}</h2>{loading ? <Loader2 className="mx-auto h-5 w-5 animate-spin" /> : playlistTracks.length ? <>{playlistTracks.map((track, index) => renderTrack(createNeteaseMusicTrack({ accountUserId: account.userId, track }), index, true))}{playlistHasMore && <button type="button" onClick={() => void handleLoadMorePlaylistTracks()} disabled={playlistLoadingMore} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] px-4 py-3 text-xs font-bold text-[var(--text-secondary)] disabled:opacity-50">{playlistLoadingMore && <Loader2 className="h-3.5 w-3.5 animate-spin" />} {playlistLoadingMore ? "加载中…" : `加载更多（已加载 ${playlistTracks.length} 首）`}</button>}</> : <p className="py-10 text-center text-xs text-[var(--text-secondary)]">这个歌单暂时没有可读取的歌曲。</p>}</div>
         ) : (
           <>
             {libraryError && <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-[11px] text-amber-800"><p>{libraryError}</p><button type="button" onClick={() => void loadPlaylists()} disabled={libraryLoading} className="mt-2 font-bold underline disabled:opacity-50">{libraryLoading ? "读取中…" : "重试读取歌单"}</button></div>}
@@ -384,7 +428,7 @@ export default function MusicLibraryPanel({
         <div className="relative flex h-9 items-center justify-between"><button type="button" onClick={() => selectedPlaylist ? setSelectedPlaylist(null) : onClose()} className="app-nav-icon-button flex h-8 w-8 items-center justify-center" title={selectedPlaylist ? "返回歌单" : "返回主页"} aria-label={selectedPlaylist ? "返回歌单" : "返回主页"}><ChevronLeft className="h-4 w-4" /></button><h1 className="absolute left-1/2 -translate-x-1/2 text-base font-bold text-[var(--text-primary)]">音乐库</h1><span className="h-8 w-8" /></div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">
-        {error && <div className={`mb-3 flex items-start gap-2 rounded-2xl border px-3 py-2 text-[11px] ${error.includes("NETEASE_API_BASE_URL") ? "border-amber-200 bg-amber-50 text-amber-700" : "border-red-200 bg-red-50 text-red-600"}`}><span className="flex-1">{error}</span><button type="button" onClick={() => setError(null)} aria-label="关闭提示"><X className="h-3.5 w-3.5" /></button></div>}
+        {error && <div className={`mb-3 flex items-start gap-2 rounded-2xl border px-3 py-2 text-[11px] ${error.includes("NETEASE_API_BASE_URL") || error.includes("网络连接失败") || error.includes("请求过于频繁") || error.includes("冷却期") ? "border-amber-200 bg-amber-50 text-amber-700" : "border-red-200 bg-red-50 text-red-600"}`}><span className="flex-1">{error}</span><button type="button" onClick={() => setError(null)} aria-label="关闭提示"><X className="h-3.5 w-3.5" /></button></div>}
         {tab === "home-reference" && renderHomeSearch()}
         {tab === "home-reference" && renderReferenceHome()}
         {tab === "home" && <div className="space-y-4"><button type="button" onClick={onOpenPlayer} className="w-full rounded-3xl bg-gradient-to-br from-neutral-950 to-stone-700 p-5 text-left text-white shadow-lg"><div className="flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/60">Now playing</span><Play className="h-4 w-4" /></div><p className="mt-8 truncate text-lg font-black">{currentTrack?.title || "还没有开始播放"}</p><p className="mt-1 truncate text-xs text-white/65">{currentTrack?.artist || "从本地音乐或网易云歌单开始"}</p><div className="mt-5 h-1 rounded-full bg-white/20"><div className="h-full w-1/3 rounded-full bg-white/80" /></div></button><div className="grid grid-cols-2 gap-3"><button type="button" onClick={() => setTab("local")} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-left"><Upload className="h-5 w-5 text-[var(--text-secondary)]" /><p className="mt-5 text-xs font-extrabold text-[var(--text-primary)]">本地音乐</p><p className="mt-1 text-[10px] text-[var(--text-secondary)]">{formatCount(localTracks.length)}</p></button><button type="button" onClick={() => setTab("netease")} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-left"><Heart className="h-5 w-5 text-red-400" /><p className="mt-5 text-xs font-extrabold text-[var(--text-primary)]">网易云收藏</p><p className="mt-1 text-[10px] text-[var(--text-secondary)]">{account ? `${playlists.length} 个歌单` : "未连接"}</p></button></div>{playbackHistory.length > 0 && <div><div className="mb-2 flex items-center gap-1.5 text-xs font-extrabold text-[var(--text-primary)]"><ListMusic className="h-3.5 w-3.5" />最近播放</div><div className="space-y-1.5">{playbackHistory.slice(0, 5).map((item) => <div key={item.id} className="flex items-center gap-2 rounded-xl bg-[var(--surface-raised)] px-3 py-2"><span className="min-w-0 flex-1 truncate text-[11px] font-bold text-[var(--text-primary)]">{item.title}<span className="ml-1 font-normal text-[var(--text-secondary)]">· {item.artist}</span></span><span className="text-[9px] text-[var(--text-tertiary)]">{item.source === "netease" ? "网易云" : "本地"}</span></div>)}</div></div>}</div>}
