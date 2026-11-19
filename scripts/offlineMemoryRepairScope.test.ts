@@ -19,5 +19,10 @@ assert.throws(()=>resolveOfflineMemoryRepairScope(legacy,characters,[relationshi
 const group={...legacy,characterId:"group",characterIds:["c","other"],relationId:undefined,conversationId:"group:group"};
 const second={...relationship,id:"r-other",characterId:"other",conversationId:"other-conv"};
 assert.equal(resolveOfflineMemoryRepairScope(group,characters,[relationship,second],"identity-1").participants.length,2);
+const staleDirectGroup={...group,relationId:"r",conversationId:"direct:r"};
+const repairedStaleDirectGroup=resolveOfflineMemoryRepairScope(staleDirectGroup,characters,[relationship,second],"identity-1");
+assert.equal(repairedStaleDirectGroup.participants.length,2,"stale single relation must not collapse a multi story");
+assert.equal(repairedStaleDirectGroup.story.relationId,undefined,"multi repair removes stale direct relation");
+assert.equal(repairedStaleDirectGroup.story.conversationId,"group:group","multi repair restores group conversation scope");
 assert.throws(()=>resolveOfflineMemoryRepairScope(group,characters,[{...relationship,userIdentityId:"alias"},{...second,userIdentityId:"alias"}],"alias"),/所属身份/);
 console.log("PASS legacy repair scope: optional owner/conversation recovery from exact existing relation, no names, no cross-identity or ambiguous fallback");

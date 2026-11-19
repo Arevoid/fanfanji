@@ -121,7 +121,12 @@ export function useOfflineStoryGenerationActions({
     setIsGenerating(true);
 
     try {
-      const settings=resolveCharacterApiSettings(globalSettings,characters.find(c=>c.id===storyAtSend.characterId)||selectedChar,characters);
+      const storyOwner = characters.find(c => c.id === storyAtSend.characterId);
+      const storyParticipantIds = resolveOfflineStoryCharacterIds(storyAtSend, characters);
+      const generationCharacter = storyOwner?.isGroupChat
+        ? storyOwner
+        : characters.find(character => character.id === storyParticipantIds[0]) || storyOwner || selectedChar;
+      const settings=resolveCharacterApiSettings(globalSettings,generationCharacter,characters);
       // Assemble history context
       // If we added a user message in this turn, exclude it from historyContext because it will be passed as the separate 'message' parameter.
       const msgsForHistory = (text && !forceAIOnly && updatedStory.messages.length > 0 && updatedStory.messages[updatedStory.messages.length - 1].sender === "user")

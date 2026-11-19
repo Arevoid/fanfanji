@@ -25,11 +25,12 @@ import { OfflineStoryCard } from "./offline/OfflineStoryCard";
 import { OFFLINE_CSS_EXAMPLE_TEMPLATE, scopeOfflineCustomCss } from "./offline/offlineCustomCss";
 import { MessageList } from "../features/chat/components/MessageList";
 import { OfflineStoryEditor } from "./offline/OfflineStoryEditor";
-import { resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
+import { resolveCanonicalCharacterId, resolveOfflineStoryCharacterIds } from "../domain/character/characterIdentity";
 import { findRelationshipForCanonicalCharacter, getConversationId, getOfflineGroupModeStorageKey, getOfflineGroupStoryStorageKey, getOfflineModeStorageKey, getOfflineStoryStorageKey, type CharacterRelationship } from "../domain/relationship/characterRelationship";
 import { applyConfirmedOfflineRelationshipTransition } from "../domain/relationship/offlineRelationshipTransition";
 import type { KnowledgeClaim } from "../domain/characterKnowledge/characterKnowledgeTypes";
 import { countOfflineStoriesForRelation } from "../domain/relationship/offlineStoryScope";
+import { resolveOfflineStoryDirectoryCharacterIds, isGroupOfflineStory as isGroupOfflineStoryScope } from "../features/offline/services/offlineStoryWorkspaceScope";
 import { resolveOfflineChatNavigationTarget } from "../domain/relationship/offlineChatNavigation";
 import { captureOfflineStoryCompletedEvent } from "../features/characterLife/services/offlineStoryEventCaptureService";
 import { buildOfflineIdentityBinding, removeSingleActorSelfVocative } from "../domain/prompt/offlineIdentityBinding";
@@ -202,7 +203,16 @@ export default function AppOffline({
     newIfPrompt,
     newStartFromChat,
     newTimeAwareness,
-    onSaveStorySnapshot: saveActiveStorySnapshot,
+    onSaveStorySnapshot: story => {
+      const storyOwner = characters.find(character => character.id === story.characterId);
+      if (story.characterIds && story.characterIds.length > 1 && !storyOwner?.isGroupChat) {
+        const firstParticipantId = resolveOfflineStoryCharacterIds(story, characters).find(characterId =>
+          selectableCharacters.some(character => character.id === characterId),
+        );
+        if (firstParticipantId) setSelectedCharId(firstParticipantId);
+      }
+      saveActiveStorySnapshot(story);
+    },
     setShowCreateModal,
     setNewTitle,
     setNewMode,
@@ -268,8 +278,7 @@ export default function AppOffline({
   const selectedChar = selectableCharacters.find(c => c.id === selectedCharId) || selectableCharacters[0];
   const charStories = offlineStories.filter((story) =>
     canAccessStoryFromCurrentRelation(story)
-    && (resolveOfflineStoryCharacterId(story, characters) === selectedCharId
-      || resolveOfflineStoryCharacterIds(story, characters).includes(selectedCharId))
+    && resolveOfflineStoryDirectoryCharacterIds(story, characters).includes(selectedCharId)
   );
 
   // Keep an empty-state-safe actor projection for story views. This is also a
@@ -488,20 +497,17 @@ export default function AppOffline({
                     relation.userIdentityId === activeIdentityId
                     && resolveCanonicalCharacterId(relation.characterId, characters) === char.id,
                   );
-                  const charStoriesCount = char.isGroupChat
-                    ? offlineStories.filter((story) =>
-                        canAccessStoryFromCurrentRelation(story)
-                        && resolveOfflineStoryCharacterId(story, characters) === char.id,
-                      ).length
-                    : charRelation
-                    ? countOfflineStoriesForRelation({
-                        stories: offlineStories,
-                        relationId: charRelation.id,
-                        characterId: char.id,
-                        relationships,
-                        characters,
-                      })
-                    : 0;
+                  const charStoriesCount = offlineStories.filter((story) => {
+                    if (!resolveOfflineStoryDirectoryCharacterIds(story, characters).includes(char.id)) return false;
+                    if (isGroupOfflineStoryScope(story, characters)) return canAccessStoryFromCurrentRelation(story);
+                    return Boolean(charRelation && countOfflineStoriesForRelation({
+                      stories: [story],
+                      relationId: charRelation.id,
+                      characterId: char.id,
+                      relationships,
+                      characters,
+                    }) > 0);
+                  }).length;
                   return (
                     <button
                       key={char.id}

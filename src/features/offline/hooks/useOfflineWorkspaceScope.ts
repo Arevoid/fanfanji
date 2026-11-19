@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Character, OfflineStory } from "../../../types";
 import type { CharacterRelationship } from "../../../domain/relationship/characterRelationship";
-import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId } from "../../../domain/character/characterIdentity";
+import { getAvailableCanonicalCharacterIds, resolveCanonicalCharacterId, resolveOfflineStoryCharacterId, resolveOfflineStoryCharacterIds } from "../../../domain/character/characterIdentity";
 import { getOfflineGroupModeStorageKey, getOfflineGroupStoryStorageKey, getOfflineModeStorageKey, getOfflineStoryStorageKey } from "../../../domain/relationship/characterRelationship";
 import { canAccessOfflineStoryFromCurrentRelation, isGroupOfflineStory as isGroupOfflineStoryScope, resolveOfflineRelationChoices } from "../services/offlineStoryWorkspaceScope";
 import { remove as removeStoredValue, readString, writeString } from "../../../core/storage/storageAdapter";
@@ -101,9 +101,15 @@ export function useOfflineWorkspaceScope({
       return false;
     }
     const storyContainer = characters.find((character) => character.id === story.characterId);
-    if (storyContainer && selectableCharacters.some((character) => character.id === storyContainer.id)) {
-      setSelectedCharId(storyContainer.id);
-      if (isGroupOfflineStory(story)) setSelectedRelationId("");
+    const isGroupStory = isGroupOfflineStory(story);
+    const storyBucketId = isGroupStory
+      ? storyContainer?.isGroupChat
+        ? storyContainer.id
+        : resolveOfflineStoryCharacterIds(story, characters).find((characterId) => selectableCharacterIds.has(characterId))
+      : storyContainer?.id;
+    if (storyBucketId && selectableCharacters.some((character) => character.id === storyBucketId)) {
+      setSelectedCharId(storyBucketId);
+      if (isGroupStory) setSelectedRelationId("");
     }
     if (directRelation) setSelectedRelationId(directRelation.id);
     activeStoryRef.current = story;

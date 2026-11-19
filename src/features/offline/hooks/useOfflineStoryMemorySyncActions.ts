@@ -103,8 +103,16 @@ export function createOfflineStoryMemorySyncActions({
     const participantRelationships = participantCharacters.map((participant) =>
       findRelationshipForCanonicalCharacter([...relationships], activeIdentityId, participant.id, [...characters]),
     ).filter((relationship): relationship is CharacterRelationship => Boolean(relationship));
+    const isMultiStory = participantCharacters.length > 1;
+    // Older builds could persist a direct relation while the story already
+    // contained multiple participants. Treat that stale relation as a legacy
+    // container marker for the policy check; the participant relationships
+    // below remain the authoritative memory scopes.
+    const policyStory = isMultiStory && story.relationId
+      ? { ...story, relationId: undefined, conversationId: story.conversationId?.startsWith("group:") ? story.conversationId : `group:${story.characterId}` }
+      : story;
     const offlineStoryPolicyInput = {
-      story,
+      story: policyStory,
       userConfirmed: options.userConfirmed === true,
       syncIntent: options.syncIntent,
       // Confirmation applies to this participated story; the extractor still
@@ -125,7 +133,7 @@ export function createOfflineStoryMemorySyncActions({
     }
     let settings=globalSettings;
     const isGroupStory = Boolean(
-      (participantCharacters.length > 1 && !story.relationId)
+      isMultiStory
       || (character.isGroupChat && participantCharacters.length > 0),
     );
     const now = Date.now();
@@ -147,7 +155,11 @@ export function createOfflineStoryMemorySyncActions({
       ||sourceMessages.some(message=>!live.messages.some(candidate=>candidate.id===message.id&&offlineMemorySourceRevision(candidate)===offlineMemorySourceRevision(message))))throw Error("剧情来源已经修改，本次结果未提交，请重试");};
     const markSynced = (memoryIds: string[] = []): OfflineStory => {
       assertSourceLease();
-      const { lastMemorySyncError: _lastMemorySyncError, ...storyWithoutSyncError } = currentStory();
+      const liveStory = currentStory();
+      const normalizedLiveStory = isMultiStory && liveStory.relationId
+        ? { ...liveStory, relationId: undefined, conversationId: liveStory.conversationId?.startsWith("group:") ? liveStory.conversationId : `group:${liveStory.characterId}` }
+        : liveStory;
+      const { lastMemorySyncError: _lastMemorySyncError, ...storyWithoutSyncError } = normalizedLiveStory;
       const progress:OfflineStory = {
         ...storyWithoutSyncError,
         archivedAt: now,
