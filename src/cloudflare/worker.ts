@@ -206,20 +206,21 @@ export default {
         if (trackMatch && request.method === "POST") {
           const body = await requestBody(request);
           const level = body?.level === "higher" || body?.level === "exhigh" ? body.level : "standard";
-          return respond({ success: true, track: await adapter.getPlayableUrl(decodeURIComponent(trackMatch[1]), level) });
+          const resolution = await adapter.getPlayableUrlWithUpstream(decodeURIComponent(trackMatch[1]), level);
+          return respond({ success: true, track: resolution.track });
         }
         const streamMatch = url.pathname.match(/^\/api\/music\/netease\/tracks\/([^/]+)\/stream$/);
         if (streamMatch && request.method === "GET") {
           const requestedLevel = url.searchParams.get("level");
           const level: "standard" | "higher" | "exhigh" = requestedLevel === "higher" || requestedLevel === "exhigh" ? requestedLevel : "standard";
-          const playable = await adapter.getPlayableUrl(decodeURIComponent(streamMatch[1]), level);
-          const upstream = await fetch(playable.url, {
+          const upstreamCookie = getNeteaseUpstreamCookie(request.headers.get("Cookie"));
+          const streamed = await adapter.fetchPlayableStream(decodeURIComponent(streamMatch[1]), level, {
             headers: {
-              Referer: "https://music.163.com/",
-              "User-Agent": "Mozilla/5.0",
+              ...(upstreamCookie ? { Cookie: upstreamCookie } : {}),
               ...(request.headers.get("Range") ? { Range: request.headers.get("Range") as string } : {}),
             },
           });
+          const upstream = streamed.response;
           if (!upstream.ok && upstream.status !== 206) return json({ success: false, code: "netease_stream_failed", error: `网易云音频流请求失败（${upstream.status}）。` }, 502);
           const headers = new Headers({ "Content-Security-Policy": CONTENT_SECURITY_POLICY, "Cache-Control": "no-store" });
           for (const header of ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]) {

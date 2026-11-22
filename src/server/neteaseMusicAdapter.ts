@@ -36,6 +36,11 @@ export interface NeteaseMusicAdapterOptions {
   onUpstreamSelected?: (upstreamId: string) => void;
 }
 
+export interface NeteasePlayableResolution {
+  track: NeteasePlayableTrack;
+  upstreamId: string;
+}
+
 type NeteaseResponse = {
   code?: unknown;
   message?: unknown;
@@ -113,8 +118,14 @@ const capabilityRestrictionPattern = /(zmusic|仅限|只允许|不支持|forbidd
 
 export const isNeteaseUpstreamCapabilityError = (error: unknown): boolean => {
   if (!(error instanceof NeteaseMusicApiError)) return false;
-  if ([403, 404, 405].includes(error.status || 0)) return true;
+  if ([403, 404, 405].includes(error.status || 0) || [403, 404, 405].includes(error.code || 0)) return true;
   return capabilityRestrictionPattern.test(error.message);
+};
+
+const isNeteaseMethodMismatch = (error: unknown): boolean => {
+  if (!(error instanceof NeteaseMusicApiError)) return false;
+  return [404, 405].includes(error.status || 0) || [404, 405].includes(error.code || 0)
+    || /method not allowed|route|not found|浠ｇ悊璺緞|璺緞涓嶅瓨鍦?/iu.test(error.message);
 };
 
 const readJson = async (response: Response, timeoutMs: number): Promise<NeteaseResponse> => {
@@ -181,7 +192,7 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
 
   if (!configuredUrls.length && !pool.targets.length) throw new Error("网易云兼容 API 地址不能为空。");
 
-  const request = async (path: string, init: RequestInit = {}, requestOptions: { allowFailover?: boolean; preferredUpstreamId?: string } = {}): Promise<{ payload: NeteaseResponse; sessionCookie?: string; upstreamId: string }> => {
+  const request = async (path: string, init: RequestInit = {}, requestOptions: { allowFailover?: boolean; preferredUpstreamId?: string; suppressCapabilityClassification?: boolean } = {}): Promise<{ payload: NeteaseResponse; sessionCookie?: string; upstreamId: string }> => {
     const endpoint = path.split("?", 1)[0];
     const skipCapabilityProbe = endpoint.startsWith("/login/qr/");
     const candidates = await pool.getCandidates(requestOptions.preferredUpstreamId || options.preferredUpstreamId, { skipCapabilityProbe });
@@ -206,8 +217,10 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
         });
         lastError = typed;
         if (isNeteaseUpstreamCapabilityError(typed)) {
-          capabilityFailures += 1;
-          pool.markIncompatible(target, typed.message);
+          if (!requestOptions.suppressCapabilityClassification) {
+            capabilityFailures += 1;
+            pool.markIncompatible(target, typed.message);
+          }
           if (requestOptions.allowFailover === false) throw typed;
           continue;
         }
@@ -218,6 +231,45 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
     }
     if (capabilityFailures === candidates.length) throw new NeteaseMusicApiError("当前配置的网易云上游均不支持歌单等标准接口，请更换 NETEASE_API_BASE_URL。", { status: 502 });
     throw lastError instanceof Error ? lastError : new NeteaseMusicApiError(`网易云接口 ${endpoint} 暂时不可用。`);
+  };
+
+  const requestPlayablePayload = async (trackId: string, level: "standard" | "higher" | "exhigh") => {
+    const path = appendQuery("/song/url/v1", { id: trackId, level });
+    try {
+      // The public NeteaseCloudMusicApi contract documents GET for this route.
+      // Keep a POST fallback for older compatible deployments.
+      return await request(path, { method: "GET" }, { suppressCapabilityClassification: true });
+    } catch (error) {
+      if (!isNeteaseMethodMismatch(error)) throw error;
+      return request(path, { method: "POST" });
+    }
+  };
+
+  const resolvePlayableTrack = async (trackId: string, level: "standard" | "higher" | "exhigh"): Promise<NeteasePlayableResolution> => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < Math.max(1, pool.targets.length); attempt += 1) {
+      const response = await requestPlayablePayload(trackId, level);
+      const source = Array.isArray(response.payload.data) ? response.payload.data[0] : undefined;
+      const item = asRecord(source);
+      const url = asString(item.url) || asString(response.payload.dataUrl);
+      if (url) {
+        return {
+          upstreamId: response.upstreamId,
+          track: {
+            id: trackId,
+            url,
+            ...(asNumber(item.br) !== undefined ? { bitrate: asNumber(item.br) } : {}),
+            ...(asString(item.type) ? { format: asString(item.type) } : {}),
+            ...(asNumber(item.expi) ? { expiresAt: Date.now() + Number(item.expi) * 1000 } : {}),
+          },
+        };
+      }
+      const target = pool.targets.find((candidate) => candidate.id === response.upstreamId);
+      const error = new NeteaseMusicApiError("Netease upstream returned no playable audio URL.", { code: asNumber(response.payload.code) });
+      lastError = error;
+      if (target) pool.markIncompatible(target, error.message);
+    }
+    throw lastError instanceof Error ? lastError : new NeteaseMusicApiError("Netease playback URL lookup failed.", { status: 502 });
   };
 
   return {
@@ -357,21 +409,56 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
 
     async getPlayableUrl(trackId: string, level: "standard" | "higher" | "exhigh" = "standard"): Promise<NeteasePlayableTrack> {
       if (!trackId.trim()) throw new Error("网易云歌曲 ID 不能为空。");
-      const payload = (await request(appendQuery("/song/url/v1", { id: trackId, level }), { method: "POST" })).payload;
-      const source = Array.isArray(payload.data) ? payload.data[0] : undefined;
-      const item = asRecord(source);
-      const url = asString(item.url) || asString(payload.dataUrl);
-      if (!url) throw new NeteaseMusicApiError("这首网易云歌曲当前没有可用的播放地址。", { code: asNumber(payload.code) });
-      return {
-        id: trackId,
-        // Keep the provider's original protocol here. The browser consumes
-        // this through the same-origin stream proxy, while some NetEase CDN
-        // hosts do not serve the signed audio URL over HTTPS.
-        url,
-        ...(asNumber(item.br) !== undefined ? { bitrate: asNumber(item.br) } : {}),
-        ...(asString(item.type) ? { format: asString(item.type) } : {}),
-        ...(asNumber(item.expi) ? { expiresAt: Date.now() + Number(item.expi) * 1000 } : {}),
-      };
+      return (await resolvePlayableTrack(trackId, level)).track;
+    },
+
+    async getPlayableUrlWithUpstream(trackId: string, level: "standard" | "higher" | "exhigh" = "standard"): Promise<NeteasePlayableResolution> {
+      if (!trackId.trim()) throw new Error("缃戞槗浜戞瓕鏇?ID 涓嶈兘涓虹┖銆?");
+      return resolvePlayableTrack(trackId, level);
+    },
+
+    markUpstreamFailure(upstreamId: string, reason?: string): void {
+      const target = pool.targets.find((candidate) => candidate.id === upstreamId);
+      if (target) pool.markFailure(target);
+      if (target && reason) pool.markIncompatible(target, reason);
+    },
+
+    getUpstreamIds(): string[] {
+      return pool.targets.map((target) => target.id);
+    },
+
+    async fetchPlayableStream(trackId: string, level: "standard" | "higher" | "exhigh" = "standard", init: RequestInit = {}): Promise<{ response: Response; upstreamId: string; track: NeteasePlayableTrack }> {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < Math.max(1, pool.targets.length); attempt += 1) {
+        const resolution = await resolvePlayableTrack(trackId, level);
+        try {
+          const response = await fetchWithTimeout(resolution.track.url, {
+            ...init,
+            method: "GET",
+            redirect: "follow",
+            headers: {
+              Accept: "audio/*",
+              Referer: "https://music.163.com/",
+              "User-Agent": "Mozilla/5.0",
+              ...(init.headers || {}),
+            },
+          }, Math.min(timeoutMs, API_REQUEST_TIMEOUTS.remoteAsset), fetchImpl);
+          const contentType = response.headers.get("content-type") || "";
+          const isAudioResponse = !contentType || /^(audio\/|application\/octet-stream)/iu.test(contentType);
+          if ((!response.ok && response.status !== 206) || !isAudioResponse) {
+            await response.body?.cancel().catch(() => undefined);
+            lastError = new NeteaseMusicApiError(isAudioResponse ? `Netease audio stream failed (HTTP ${response.status}).` : `Netease returned non-audio content (HTTP ${response.status}).`, { status: response.status || 502 });
+            pool.markFailure(pool.targets.find((target) => target.id === resolution.upstreamId) || pool.targets[0]);
+            continue;
+          }
+          return { response, upstreamId: resolution.upstreamId, track: resolution.track };
+        } catch (error) {
+          lastError = error;
+          const target = pool.targets.find((candidate) => candidate.id === resolution.upstreamId);
+          if (target) pool.markFailure(target);
+        }
+      }
+      throw lastError instanceof Error ? lastError : new NeteaseMusicApiError("Netease audio stream is unavailable.", { status: 502 });
     },
 
     async getLyrics(trackId: string): Promise<NeteaseLyrics> {

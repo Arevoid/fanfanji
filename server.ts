@@ -251,7 +251,8 @@ async function startServer() {
       const adapter = requireNeteaseAdapter(req, res);
       if (!adapter) return;
       const level = req.body?.level === "higher" || req.body?.level === "exhigh" ? req.body.level : "standard";
-      return res.json({ success: true, track: await adapter.getPlayableUrl(req.params.trackId, level) });
+      const resolution = await adapter.getPlayableUrlWithUpstream(req.params.trackId, level);
+      return res.json({ success: true, track: resolution.track });
     } catch (error) { return neteaseError(res, error, "网易云歌曲播放地址获取失败。"); }
   });
 
@@ -260,14 +261,14 @@ async function startServer() {
       const adapter = requireNeteaseAdapter(req, res);
       if (!adapter) return;
       const level = req.query.level === "higher" || req.query.level === "exhigh" ? req.query.level : "standard";
-      const playable = await adapter.getPlayableUrl(req.params.trackId, level);
-      const upstream = await fetch(playable.url, {
+      const upstreamCookie = getNeteaseUpstreamCookie(req.headers.cookie);
+      const streamed = await adapter.fetchPlayableStream(req.params.trackId, level, {
         headers: {
-          Referer: "https://music.163.com/",
-          "User-Agent": "Mozilla/5.0",
+          ...(upstreamCookie ? { Cookie: upstreamCookie } : {}),
           ...(typeof req.headers.range === "string" ? { Range: req.headers.range } : {}),
         },
       });
+      const upstream = streamed.response;
       if (!upstream.ok && upstream.status !== 206) {
         return res.status(502).json({ success: false, code: "netease_stream_failed", error: `网易云音频流请求失败（${upstream.status}）。` });
       }

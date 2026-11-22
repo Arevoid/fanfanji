@@ -134,6 +134,42 @@ assert.equal(capabilityFailover.calls[2].url, "https://zmusic.example.test/user/
 assert.equal(capabilityFailover.calls[3].url, "https://compatible.example.test/user/account");
 assert.equal(isNeteaseUpstreamCapabilityError(new NeteaseMusicApiError("当前 API 仅限 ZMusic 使用", { status: 403 })), true);
 
+const methodFallback = createMockFetch([
+  { body: { code: 200, data: { unikey: "probe-method" } } },
+  { status: 405, body: { message: "Method Not Allowed" } },
+  { body: { code: 200, data: [{ id: 21, url: "https://audio.test/method-fallback.mp3", br: 128000, type: "mp3" }] } },
+]);
+const methodFallbackAdapter = createNeteaseMusicAdapter({ baseUrl: "https://method-fallback.example.test", fetchImpl: methodFallback.fetchMock });
+const methodFallbackResult = await methodFallbackAdapter.getPlayableUrlWithUpstream("21");
+assert.equal(methodFallbackResult.track.url, "https://audio.test/method-fallback.mp3");
+assert.equal(methodFallback.calls[1].init?.method, "GET");
+assert.equal(methodFallback.calls[2].init?.method, "POST");
+
+const streamFailoverCalls: Array<{ url: string; init?: RequestInit }> = [];
+const streamFailoverResponses = [
+  new Response(JSON.stringify({ code: 200, data: { unikey: "probe-stream-primary" } }), { headers: { "content-type": "application/json" } }),
+  new Response(JSON.stringify({ code: 200, data: { unikey: "probe-stream-backup" } }), { headers: { "content-type": "application/json" } }),
+  new Response(JSON.stringify({ code: 200, data: [{ id: 31, url: "https://audio.test/primary.mp3" }] }), { headers: { "content-type": "application/json" } }),
+  new Response("upstream denied", { status: 403, headers: { "content-type": "text/plain" } }),
+  new Response(JSON.stringify({ code: 200, data: [{ id: 31, url: "https://audio.test/backup.mp3" }] }), { headers: { "content-type": "application/json" } }),
+  new Response(new Uint8Array([0x49, 0x44, 0x33]), { status: 206, headers: { "content-type": "audio/mpeg", "content-range": "bytes 0-2/3" } }),
+];
+const streamFailoverFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  streamFailoverCalls.push({ url: String(input), init });
+  const response = streamFailoverResponses.shift();
+  if (!response) throw new Error("unexpected stream request");
+  return response;
+}) as typeof fetch;
+const streamFailoverAdapter = createNeteaseMusicAdapter({
+  baseUrls: ["https://stream-primary.example.test", "https://stream-backup.example.test"],
+  fetchImpl: streamFailoverFetch,
+});
+const streamed = await streamFailoverAdapter.fetchPlayableStream("31", "standard", { headers: { Range: "bytes=0-" } });
+assert.equal(streamed.upstreamId, "https://stream-backup.example.test");
+assert.equal(streamed.response.status, 206);
+assert.equal(streamFailoverCalls[3].url, "https://audio.test/primary.mp3");
+assert.equal(streamFailoverCalls[5].url, "https://audio.test/backup.mp3");
+
 const timeoutFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
   init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
 })) as typeof fetch;
