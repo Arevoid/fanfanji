@@ -506,7 +506,12 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
         const status = lastResponse?.status || 502;
         const contentType = lastResponse?.headers.get("content-type") || "";
         const isAudioResponse = !contentType || /^(audio\/|application\/octet-stream)/iu.test(contentType);
-        throw new NeteaseMusicApiError(isAudioResponse ? `Netease audio stream failed (HTTP ${status}).` : `Netease returned non-audio content (HTTP ${status}).`, { status });
+        const message = isAudioResponse
+          ? `Netease audio stream failed (HTTP ${status}).`
+          : status === 200
+            ? "网易云上游返回了网页而不是音频，通常是 VIP/版权地区限制或播放链接已失效。"
+            : `Netease returned non-audio content (HTTP ${status}).`;
+        throw new NeteaseMusicApiError(message, { status: status >= 400 ? status : 502 });
       };
 
       for (let attempt = 0; attempt < Math.max(1, pool.targets.length); attempt += 1) {
