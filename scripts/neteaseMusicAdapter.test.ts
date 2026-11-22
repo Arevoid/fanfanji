@@ -145,11 +145,23 @@ assert.equal(methodFallbackResult.track.url, "https://audio.test/method-fallback
 assert.equal(methodFallback.calls[1].init?.method, "GET");
 assert.equal(methodFallback.calls[2].init?.method, "POST");
 
+const legacyPlayable = createMockFetch([
+  { body: { code: 200, data: { unikey: "probe-legacy" } } },
+  { body: { code: 200, data: [{ id: 22, url: null, fee: 1 }] } },
+  { body: { code: 200, data: [{ id: 22, url: "https://audio.test/legacy.mp3", br: 128000, type: "mp3" }] } },
+]);
+const legacyPlayableAdapter = createNeteaseMusicAdapter({ baseUrl: "https://legacy-playable.example.test", fetchImpl: legacyPlayable.fetchMock });
+const legacyPlayableResult = await legacyPlayableAdapter.getPlayableUrlWithUpstream("22");
+assert.equal(legacyPlayableResult.track.url, "https://audio.test/legacy.mp3");
+assert.match(legacyPlayable.calls[1].url, /\/song\/url\/v1\?id=22&level=standard/);
+assert.match(legacyPlayable.calls[2].url, /\/song\/url\?id=22&br=128000/);
+
 const streamFailoverCalls: Array<{ url: string; init?: RequestInit }> = [];
 const streamFailoverResponses = [
   new Response(JSON.stringify({ code: 200, data: { unikey: "probe-stream-primary" } }), { headers: { "content-type": "application/json" } }),
   new Response(JSON.stringify({ code: 200, data: { unikey: "probe-stream-backup" } }), { headers: { "content-type": "application/json" } }),
   new Response(JSON.stringify({ code: 200, data: [{ id: 31, url: "https://audio.test/primary.mp3" }] }), { headers: { "content-type": "application/json" } }),
+  new Response("upstream denied", { status: 403, headers: { "content-type": "text/plain" } }),
   new Response("upstream denied", { status: 403, headers: { "content-type": "text/plain" } }),
   new Response(JSON.stringify({ code: 200, data: [{ id: 31, url: "https://audio.test/backup.mp3" }] }), { headers: { "content-type": "application/json" } }),
   new Response(new Uint8Array([0x49, 0x44, 0x33]), { status: 206, headers: { "content-type": "audio/mpeg", "content-range": "bytes 0-2/3" } }),
@@ -168,7 +180,40 @@ const streamed = await streamFailoverAdapter.fetchPlayableStream("31", "standard
 assert.equal(streamed.upstreamId, "https://stream-backup.example.test");
 assert.equal(streamed.response.status, 206);
 assert.equal(streamFailoverCalls[3].url, "https://audio.test/primary.mp3");
-assert.equal(streamFailoverCalls[5].url, "https://audio.test/backup.mp3");
+assert.equal(streamFailoverCalls[4].url, "https://audio.test/primary.mp3");
+assert.equal(streamFailoverCalls[6].url, "https://audio.test/backup.mp3");
+
+const officialFallbackCalls: Array<{ url: string; init?: RequestInit }> = [];
+const officialFallbackResponses = [
+  new Response(JSON.stringify({ code: 200, data: { unikey: "probe-official-fallback" } }), { headers: { "content-type": "application/json" } }),
+  new Response(JSON.stringify({ code: 200, data: [{ id: 32, url: null }] }), { headers: { "content-type": "application/json" } }),
+  new Response(JSON.stringify({ code: 200, data: [{ id: 32, url: null }] }), { headers: { "content-type": "application/json" } }),
+  new Response(new Uint8Array([0x49, 0x44, 0x33]), { status: 200, headers: { "content-type": "audio/mpeg" } }),
+];
+const officialFallbackFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  officialFallbackCalls.push({ url: String(input), init });
+  const response = officialFallbackResponses.shift();
+  if (!response) throw new Error("unexpected official fallback request");
+  return response;
+}) as typeof fetch;
+const officialFallbackAdapter = createNeteaseMusicAdapter({ baseUrl: "https://official-fallback.example.test", fetchImpl: officialFallbackFetch });
+const officialFallbackStream = await officialFallbackAdapter.fetchPlayableStream("32", "standard");
+assert.equal(officialFallbackStream.response.status, 200);
+assert.match(officialFallbackCalls[3].url, /music\.163\.com\/song\/media\/outer\/url\?id=32\.mp3/);
+
+const restrictedPlayable = createMockFetch([
+  { body: { code: 200, data: { unikey: "probe-restricted" } } },
+  { body: { code: 200, data: [{ id: 33, url: null, code: -110, fee: 1 }] } },
+  { body: { code: 200, data: [{ id: 33, url: null, code: -110, fee: 1 }] } },
+]);
+const restrictedPlayableAdapter = createNeteaseMusicAdapter({ baseUrl: "https://restricted-playable.example.test", fetchImpl: restrictedPlayable.fetchMock });
+await assert.rejects(
+  () => restrictedPlayableAdapter.fetchPlayableStream("33"),
+  (error: unknown) => error instanceof NeteaseMusicApiError
+    && error.status === 403
+    && error.code === -110
+    && error.message.includes("VIP"),
+);
 
 const timeoutFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
   init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });

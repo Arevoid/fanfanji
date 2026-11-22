@@ -233,16 +233,52 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
     throw lastError instanceof Error ? lastError : new NeteaseMusicApiError(`网易云接口 ${endpoint} 暂时不可用。`);
   };
 
-  const requestPlayablePayload = async (trackId: string, level: "standard" | "higher" | "exhigh") => {
-    const path = appendQuery("/song/url/v1", { id: trackId, level });
+  const hasPlayableUrl = (payload: NeteaseResponse): boolean => {
+    const source = Array.isArray(payload.data) ? payload.data[0] : undefined;
+    const item = asRecord(source);
+    return Boolean(asString(item.url) || asString(payload.dataUrl));
+  };
+
+  const requestWithMethodFallback = async (path: string) => {
     try {
-      // The public NeteaseCloudMusicApi contract documents GET for this route.
-      // Keep a POST fallback for older compatible deployments.
+      // The public NeteaseCloudMusicApi contract documents GET for these
+      // routes. Keep a POST fallback for older compatible deployments.
       return await request(path, { method: "GET" }, { suppressCapabilityClassification: true });
     } catch (error) {
       if (!isNeteaseMethodMismatch(error)) throw error;
-      return request(path, { method: "POST" });
+      return request(path, { method: "POST" }, { suppressCapabilityClassification: true });
     }
+  };
+
+  const requestPlayablePayload = async (trackId: string, level: "standard" | "higher" | "exhigh") => {
+    // Some deployed NeteaseCloudMusicApi versions expose only the legacy
+    // /song/url route, while newer versions expose /song/url/v1. Try the
+    // modern route first, then the legacy route on the same upstream before
+    // declaring that upstream unable to resolve this song.
+    const legacyBitrate = level === "exhigh" ? 320000 : level === "higher" ? 192000 : 128000;
+    const paths = [
+      appendQuery("/song/url/v1", { id: trackId, level }),
+      appendQuery("/song/url", { id: trackId, br: legacyBitrate }),
+    ];
+    let lastResponse: { payload: NeteaseResponse; sessionCookie?: string; upstreamId: string } | undefined;
+    let lastError: unknown;
+    for (const path of paths) {
+      try {
+        const response = await requestWithMethodFallback(path);
+        lastResponse = response;
+        if (hasPlayableUrl(response.payload)) return response;
+      } catch (error) {
+        lastError = error;
+        // A provider may reject only the modern route (403/404/405) while
+        // still serving the legacy route. Other failures should keep their
+        // original retry/auth/rate-limit semantics.
+        if (!(error instanceof NeteaseMusicApiError)
+          || ![403, 404, 405].includes(error.status || 0)
+          && ![403, 404, 405].includes(error.code || 0)) throw error;
+      }
+    }
+    if (lastResponse) return lastResponse;
+    throw lastError instanceof Error ? lastError : new NeteaseMusicApiError("Netease playback URL lookup failed.", { status: 502 });
   };
 
   const resolvePlayableTrack = async (trackId: string, level: "standard" | "higher" | "exhigh"): Promise<NeteasePlayableResolution> => {
@@ -265,9 +301,20 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
         };
       }
       const target = pool.targets.find((candidate) => candidate.id === response.upstreamId);
-      const error = new NeteaseMusicApiError("Netease upstream returned no playable audio URL.", { code: asNumber(response.payload.code) });
+      const itemCode = asNumber(item.code);
+      const fee = asNumber(item.fee);
+      const restricted = itemCode === -110 || fee === 1 || fee === 4 || Boolean(item.freeTrialInfo && item.freeTrialInfo !== "null");
+      const error = new NeteaseMusicApiError(
+        restricted
+          ? "这首网易云歌曲当前没有可用播放权限，可能需要 VIP 或受版权地区限制。请更换有播放权限的歌曲或账号。"
+          : "Netease upstream returned no playable audio URL.",
+        { code: itemCode ?? asNumber(response.payload.code), status: restricted ? 403 : 502 },
+      );
       lastError = error;
-      if (target) pool.markIncompatible(target, error.message);
+      // A missing URL is often a song-level VIP/region restriction, not a
+      // broken API. Only cool down this target briefly so one restricted song
+      // does not hide a healthy upstream for every later song.
+      if (target) pool.markFailure(target);
     }
     throw lastError instanceof Error ? lastError : new NeteaseMusicApiError("Netease playback URL lookup failed.", { status: 502 });
   };
@@ -429,34 +476,71 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
 
     async fetchPlayableStream(trackId: string, level: "standard" | "higher" | "exhigh" = "standard", init: RequestInit = {}): Promise<{ response: Response; upstreamId: string; track: NeteasePlayableTrack }> {
       let lastError: unknown;
-      for (let attempt = 0; attempt < Math.max(1, pool.targets.length); attempt += 1) {
-        const resolution = await resolvePlayableTrack(trackId, level);
-        try {
-          const response = await fetchWithTimeout(resolution.track.url, {
-            ...init,
+      const fetchAudioUrl = async (url: string, requestInit: RequestInit = init): Promise<Response> => {
+        const baseHeaders = Object.fromEntries(new Headers(requestInit.headers || {}).entries());
+        // A few CDN nodes reject a request with an unexpected Referer while
+        // others reject requests without the official music Referer. Try the
+        // normal provider header first, then retry the same signed URL without
+        // Referer before failing over to another upstream.
+        const headerVariants = [
+          { Accept: "audio/*", Referer: "https://music.163.com/", "User-Agent": "Mozilla/5.0", ...baseHeaders },
+          { Accept: "audio/*", "User-Agent": "Mozilla/5.0", ...baseHeaders },
+        ];
+        let lastResponse: Response | undefined;
+        for (let index = 0; index < headerVariants.length; index += 1) {
+          const response = await fetchWithTimeout(url, {
+            ...requestInit,
             method: "GET",
             redirect: "follow",
-            headers: {
-              Accept: "audio/*",
-              Referer: "https://music.163.com/",
-              "User-Agent": "Mozilla/5.0",
-              ...(init.headers || {}),
-            },
+            headers: headerVariants[index],
           }, Math.min(timeoutMs, API_REQUEST_TIMEOUTS.remoteAsset), fetchImpl);
           const contentType = response.headers.get("content-type") || "";
           const isAudioResponse = !contentType || /^(audio\/|application\/octet-stream)/iu.test(contentType);
-          if ((!response.ok && response.status !== 206) || !isAudioResponse) {
-            await response.body?.cancel().catch(() => undefined);
-            lastError = new NeteaseMusicApiError(isAudioResponse ? `Netease audio stream failed (HTTP ${response.status}).` : `Netease returned non-audio content (HTTP ${response.status}).`, { status: response.status || 502 });
-            pool.markFailure(pool.targets.find((target) => target.id === resolution.upstreamId) || pool.targets[0]);
-            continue;
-          }
+          if ((response.ok || response.status === 206) && isAudioResponse) return response;
+          await response.body?.cancel().catch(() => undefined);
+          lastResponse = response;
+          // Only the header-sensitive 403 case merits a second fetch. A 404,
+          // 5xx, HTML error page, or other status should go to pool failover.
+          if (index === 0 && response.status !== 403) break;
+        }
+        const status = lastResponse?.status || 502;
+        const contentType = lastResponse?.headers.get("content-type") || "";
+        const isAudioResponse = !contentType || /^(audio\/|application\/octet-stream)/iu.test(contentType);
+        throw new NeteaseMusicApiError(isAudioResponse ? `Netease audio stream failed (HTTP ${status}).` : `Netease returned non-audio content (HTTP ${status}).`, { status });
+      };
+
+      for (let attempt = 0; attempt < Math.max(1, pool.targets.length); attempt += 1) {
+        let resolution: NeteasePlayableResolution | undefined;
+        try {
+          resolution = await resolvePlayableTrack(trackId, level);
+          const response = await fetchAudioUrl(resolution.track.url);
           return { response, upstreamId: resolution.upstreamId, track: resolution.track };
         } catch (error) {
           lastError = error;
-          const target = pool.targets.find((candidate) => candidate.id === resolution.upstreamId);
+          if (error instanceof NeteaseMusicApiError && (error.status === 401 || error.status === 429 || error.code === 301 || error.code === 429)) throw error;
+          // A 403/-110 produced before a playable URL is resolved is a
+          // song-level VIP/region restriction. Do not waste time retrying the
+          // same song through the public outer-url fallback.
+          if (!resolution && error instanceof NeteaseMusicApiError && (error.status === 403 || error.code === -110)) throw error;
+          const target = pool.targets.find((candidate) => candidate.id === resolution?.upstreamId) || pool.targets[attempt];
           if (target) pool.markFailure(target);
         }
+      }
+
+      // Official outer-url is a final, non-authenticated fallback for public
+      // songs. It does not bypass VIP/region restrictions; it only helps when
+      // a compatible API returned no usable signed URL or its CDN node denied
+      // the proxy request.
+      try {
+        const fallbackUrl = `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(trackId)}.mp3`;
+        // The authenticated cookie belongs to the configured API upstream;
+        // never forward it to the official direct-download host.
+        const fallbackHeaders = new Headers(init.headers || {});
+        fallbackHeaders.delete("Cookie");
+        const response = await fetchAudioUrl(fallbackUrl, { ...init, headers: fallbackHeaders });
+        return { response, upstreamId: pool.targets[0]?.id || "official-direct", track: { id: trackId, url: fallbackUrl, format: "mp3" } };
+      } catch (error) {
+        lastError = error;
       }
       throw lastError instanceof Error ? lastError : new NeteaseMusicApiError("Netease audio stream is unavailable.", { status: 502 });
     },

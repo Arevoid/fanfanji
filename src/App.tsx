@@ -1848,8 +1848,34 @@ export default function App() {
       }
       handleNextTrack();
     };
-    const handleAudioError = () => {
+    const handleAudioError = async () => {
       setIsPlaying(false);
+      const failedTrack = currentTrack;
+      if (failedTrack && isNeteaseMusicTrack(failedTrack) && failedTrack.url.startsWith("/api/music/netease/")) {
+        try {
+          // Audio elements intentionally expose only a generic MediaError.
+          // Probe the same-origin stream once so provider/auth failures can
+          // be shown instead of making every failure look like a bad MP3.
+          const response = await fetch(failedTrack.url, {
+            credentials: "same-origin",
+            headers: { Range: "bytes=0-1" },
+          });
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+            const message = typeof payload?.error === "string" && payload.error.trim() ? payload.error.trim() : undefined;
+            await response.body?.cancel().catch(() => undefined);
+            if (message && currentTrack?.id === failedTrack.id) {
+              setMusicPlaybackError(message);
+              return;
+            }
+          } else {
+            await response.body?.cancel().catch(() => undefined);
+          }
+        } catch {
+          // Keep the stable user-facing fallback for network/decode errors.
+        }
+      }
       setMusicPlaybackError("无法播放这首歌，请检查音频格式、网络链接或重新导入文件。");
     };
 
