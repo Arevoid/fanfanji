@@ -120,10 +120,20 @@ async function startServer() {
   const getNeteaseBaseUrls = () => parseNeteaseUpstreamUrls(process.env.NETEASE_API_BASE_URL, process.env.NETEASE_API_BASE_URLS);
   const getNeteasePool = () => getNeteaseUpstreamPool(getNeteaseBaseUrls());
   const neteaseNotConfiguredMessage = "网易云连接服务尚未配置。管理员需要设置 NETEASE_API_BASE_URL 或 NETEASE_API_BASE_URLS（逗号/换行分隔的网易云兼容 API 地址）后才能扫码登录和读取云端内容。";
-  const getNeteaseAdapter = (req: express.Request) => {
+  const getNeteaseAdapter = (req: express.Request, res?: express.Response) => {
     const baseUrls = getNeteaseBaseUrls();
     if (!baseUrls.length) return null;
-    return createNeteaseMusicAdapter({ baseUrls, upstreamPool: getNeteasePool(), preferredUpstreamId: getNeteaseUpstreamId(req.headers.cookie), cookie: getNeteaseUpstreamCookie(req.headers.cookie) });
+    const preferredUpstreamId = getNeteaseUpstreamId(req.headers.cookie);
+    return createNeteaseMusicAdapter({
+      baseUrls,
+      upstreamPool: getNeteasePool(),
+      preferredUpstreamId,
+      cookie: getNeteaseUpstreamCookie(req.headers.cookie),
+      onUpstreamSelected: (upstreamId) => {
+        const cookie = buildNeteaseUpstreamCookie(upstreamId, neteaseSecureCookies);
+        if (cookie && res) res.setHeader("Set-Cookie", cookie);
+      },
+    });
   };
   const neteaseError = (res: express.Response, error: unknown, fallback = "网易云服务暂时不可用。") => {
     if (isNeteaseAuthenticationError(error)) {
@@ -135,7 +145,14 @@ async function startServer() {
     return res.status(status).json({ success: false, code: status === 429 ? "netease_rate_limited" : typed?.code || "netease-provider", error: error instanceof Error ? error.message : fallback });
   };
   const requireNeteaseAdapter = (req: express.Request, res: express.Response) => {
-    const adapter = getNeteaseAdapter(req);
+    const baseUrls = getNeteaseBaseUrls();
+    const preferredUpstreamId = getNeteaseUpstreamId(req.headers.cookie);
+    if (baseUrls.length && preferredUpstreamId && !baseUrls.includes(preferredUpstreamId)) {
+      res.setHeader("Set-Cookie", [clearNeteaseSessionCookie(neteaseSecureCookies), clearNeteaseUpstreamCookie(neteaseSecureCookies)]);
+      res.status(401).json({ success: false, code: "netease_session_rebind_required", error: "网易云接口地址已更换，请重新扫码连接。" });
+      return null;
+    }
+    const adapter = getNeteaseAdapter(req, res);
     if (!adapter) {
       res.status(503).json({ success: false, code: "netease_provider_not_configured", error: neteaseNotConfiguredMessage });
       return null;
@@ -165,6 +182,10 @@ async function startServer() {
       if (!baseUrls.length) return res.status(503).json({ success: false, code: "netease_provider_not_configured", error: neteaseNotConfiguredMessage });
       if (!key) return res.status(400).json({ success: false, code: "invalid_qr_key", error: "二维码 key 不能为空。" });
       const providerId = getNeteaseUpstreamId(req.headers.cookie);
+      if (providerId && !baseUrls.includes(providerId)) {
+        res.setHeader("Set-Cookie", [clearNeteaseSessionCookie(neteaseSecureCookies), clearNeteaseUpstreamCookie(neteaseSecureCookies)]);
+        return res.status(401).json({ success: false, code: "netease_session_rebind_required", error: "网易云接口地址已更换，请重新生成二维码。" });
+      }
       const session = await createNeteaseMusicAdapter({ baseUrls, upstreamPool: getNeteasePool(), preferredUpstreamId: providerId }).checkQrSession(key, { upstreamId: providerId });
       const cookies = [buildNeteaseUpstreamCookie(session.upstreamId, neteaseSecureCookies)];
       if (session.status === "authorized" && session.sessionCookie) cookies.push(buildNeteaseSessionCookie(session.sessionCookie, neteaseSecureCookies));

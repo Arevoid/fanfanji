@@ -1,6 +1,6 @@
 import { API_REQUEST_TIMEOUTS, describeApiRequestError, fetchWithTimeout, isApiRequestError, readResponseTextWithTimeout } from "../utils/fetchWithTimeout";
 import type { NeteaseAccount, NeteaseLyrics, NeteasePlayableTrack, NeteasePlaylist, NeteasePlaylistTracksPage, NeteaseQrSession as PublicNeteaseQrSession, NeteaseQrStatus, NeteaseTrack } from "../features/music/neteaseTypes";
-import { getNeteaseUpstreamPool, isNeteaseUpstreamRetryable, NeteaseUpstreamPool, parseNeteaseUpstreamUrls } from "./neteaseUpstreamPool";
+import { getNeteaseUpstreamPool, isNeteaseUpstreamRetryable, NeteaseUpstreamPool, parseNeteaseUpstreamUrls, type NeteaseUpstreamProbeResult, type NeteaseUpstreamTarget } from "./neteaseUpstreamPool";
 export type { NeteaseAccount, NeteaseLyrics, NeteasePlayableTrack, NeteasePlaylist, NeteasePlaylistTracksPage, NeteaseTrack } from "../features/music/neteaseTypes";
 export type NeteaseQrSession = PublicNeteaseQrSession & { /** Server-only upstream cookie captured after QR authorization. */ sessionCookie?: string };
 export type NeteaseServerQrSession = NeteaseQrSession & { /** Upstream that owns the QR key; QR checks must stay pinned to it. */ upstreamId?: string };
@@ -33,6 +33,7 @@ export interface NeteaseMusicAdapterOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   cookie?: string;
+  onUpstreamSelected?: (upstreamId: string) => void;
 }
 
 type NeteaseResponse = {
@@ -108,6 +109,14 @@ const appendQuery = (path: string, query: Record<string, string | number | undef
   return queryString ? `${path}?${queryString}` : path;
 };
 
+const capabilityRestrictionPattern = /(zmusic|仅限|只允许|不支持|forbidden|not found|method not allowed|route)/iu;
+
+export const isNeteaseUpstreamCapabilityError = (error: unknown): boolean => {
+  if (!(error instanceof NeteaseMusicApiError)) return false;
+  if ([403, 404, 405].includes(error.status || 0)) return true;
+  return capabilityRestrictionPattern.test(error.message);
+};
+
 const readJson = async (response: Response, timeoutMs: number): Promise<NeteaseResponse> => {
   const retryAfterSeconds = response.status === 429 ? readRetryAfterSeconds(response) : undefined;
   const raw = await readResponseTextWithTimeout(response, timeoutMs);
@@ -150,12 +159,35 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
   const timeoutMs = options.timeoutMs || API_REQUEST_TIMEOUTS.modelList;
   const cookie = options.cookie?.trim();
 
+  const probeCapability = async (target: NeteaseUpstreamTarget): Promise<NeteaseUpstreamProbeResult> => {
+    try {
+      const probeTimeoutMs = Math.min(timeoutMs, 10_000);
+      const response = await fetchWithTimeout(`${target.baseUrl}/login/qr/key`, { method: "POST", headers: { Accept: "application/json" } }, probeTimeoutMs, fetchImpl);
+      const raw = await readResponseTextWithTimeout(response, probeTimeoutMs);
+      let parsed: unknown;
+      try { parsed = JSON.parse(raw); } catch { return response.status >= 500 || response.status === 429 ? { status: "unavailable", reason: `HTTP ${response.status}` } : { status: "incompatible", reason: `二维码接口返回了非 JSON 响应（HTTP ${response.status}）` }; }
+      const payload = asRecord(parsed);
+      if (response.status === 429 || response.status >= 500) return { status: "unavailable", reason: `HTTP ${response.status}` };
+      const code = asNumber(payload.code);
+      const key = asString(getNested(payload, "data", "unikey"));
+      if (response.ok && (code === 200 || code === 801) && key) return { status: "compatible" };
+      return { status: "incompatible", reason: asString(payload.message) || asString(payload.msg) || `二维码接口不兼容（HTTP ${response.status}）` };
+    } catch (error) {
+      if (isApiRequestError(error, "timeout") || isApiRequestError(error, "network")) return { status: "unavailable", reason: describeApiRequestError(error, "网易云上游能力检查") };
+      return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
+    }
+  };
+  pool.setCapabilityProbe(probeCapability);
+
   if (!configuredUrls.length && !pool.targets.length) throw new Error("网易云兼容 API 地址不能为空。");
 
   const request = async (path: string, init: RequestInit = {}, requestOptions: { allowFailover?: boolean; preferredUpstreamId?: string } = {}): Promise<{ payload: NeteaseResponse; sessionCookie?: string; upstreamId: string }> => {
     const endpoint = path.split("?", 1)[0];
-    const candidates = await pool.getCandidates(requestOptions.preferredUpstreamId || options.preferredUpstreamId);
+    const skipCapabilityProbe = endpoint.startsWith("/login/qr/");
+    const candidates = await pool.getCandidates(requestOptions.preferredUpstreamId || options.preferredUpstreamId, { skipCapabilityProbe });
+    if (!candidates.length) throw new NeteaseMusicApiError("当前配置的网易云上游均不可用或不兼容标准网易云接口，请更换 NETEASE_API_BASE_URL。", { status: 502 });
     let lastError: unknown;
+    let capabilityFailures = 0;
     for (const target of candidates) {
       try {
         const response = await fetchWithTimeout(`${target.baseUrl}${path}`, { ...init, headers: {
@@ -165,17 +197,26 @@ export function createNeteaseMusicAdapter(options: NeteaseMusicAdapterOptions) {
         } }, timeoutMs, fetchImpl);
         const result = { payload: await readJson(response, timeoutMs), sessionCookie: response.headers.get("set-cookie") || undefined, upstreamId: target.id };
         pool.markSuccess(target);
+        if (!skipCapabilityProbe) pool.markCompatible(target);
+        options.onUpstreamSelected?.(target.id);
         return result;
       } catch (error) {
         const typed = error instanceof NeteaseMusicApiError ? error : new NeteaseMusicApiError(describeApiRequestError(error, `网易云接口 ${endpoint} `), {
           status: isApiRequestError(error, "timeout") ? 504 : isApiRequestError(error, "network") ? 502 : undefined,
         });
         lastError = typed;
+        if (isNeteaseUpstreamCapabilityError(typed)) {
+          capabilityFailures += 1;
+          pool.markIncompatible(target, typed.message);
+          if (requestOptions.allowFailover === false) throw typed;
+          continue;
+        }
         if (!isNeteaseUpstreamRetryable(typed)) throw typed;
         pool.markFailure(target);
         if (requestOptions.allowFailover === false) throw typed;
       }
     }
+    if (capabilityFailures === candidates.length) throw new NeteaseMusicApiError("当前配置的网易云上游均不支持歌单等标准接口，请更换 NETEASE_API_BASE_URL。", { status: 502 });
     throw lastError instanceof Error ? lastError : new NeteaseMusicApiError(`网易云接口 ${endpoint} 暂时不可用。`);
   };
 

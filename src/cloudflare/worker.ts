@@ -141,6 +141,14 @@ export default {
       const secureCookies = url.protocol === "https:";
       const upstreamCookie = getNeteaseUpstreamCookie(request.headers.get("Cookie"));
       const preferredUpstreamId = getNeteaseUpstreamId(request.headers.get("Cookie"));
+      let selectedUpstreamId = preferredUpstreamId;
+      const selectedCookies = (selectedUpstreamId: string | undefined): string[] => {
+        const cookie = buildNeteaseUpstreamCookie(selectedUpstreamId, secureCookies);
+        return cookie ? [cookie] : [];
+      };
+      if (baseUrls.length && preferredUpstreamId && !baseUrls.includes(preferredUpstreamId) && url.pathname !== "/api/music/netease/qr/create" && url.pathname !== "/api/music/netease/qr/check" && url.pathname !== "/api/music/netease/logout") {
+        return jsonWithCookies({ success: false, code: "netease_session_rebind_required", error: "网易云接口地址已更换，请重新扫码连接。" }, 401, [clearNeteaseSessionCookie(secureCookies), clearNeteaseUpstreamCookie(secureCookies)]);
+      }
       try {
         if (url.pathname === "/api/music/netease/qr/create" && request.method === "POST") {
           const session = await createNeteaseMusicAdapter({ baseUrls, upstreamPool }).createQrSession();
@@ -151,6 +159,9 @@ export default {
           const body = await requestBody(request);
           const key = typeof body?.key === "string" ? body.key.trim() : "";
           if (!key) return json({ success: false, code: "invalid_qr_key", error: "二维码 key 不能为空。" }, 400);
+          if (preferredUpstreamId && !baseUrls.includes(preferredUpstreamId)) {
+            return jsonWithCookies({ success: false, code: "netease_session_rebind_required", error: "网易云接口地址已更换，请重新生成二维码。" }, 401, [clearNeteaseSessionCookie(secureCookies), clearNeteaseUpstreamCookie(secureCookies)]);
+          }
           const session = await createNeteaseMusicAdapter({ baseUrls, upstreamPool, preferredUpstreamId }).checkQrSession(key, { upstreamId: preferredUpstreamId });
           const cookies = [buildNeteaseUpstreamCookie(session.upstreamId, secureCookies)];
           if (session.status === "authorized") cookies.push(buildNeteaseSessionCookie(session.sessionCookie, secureCookies));
@@ -160,34 +171,42 @@ export default {
           return jsonWithCookies({ success: true }, 200, [clearNeteaseSessionCookie(secureCookies), clearNeteaseUpstreamCookie(secureCookies)]);
         }
         if (!upstreamCookie) return json({ success: false, code: "netease_not_authenticated", error: "请先连接网易云账号。" }, 401);
-        const adapter = createNeteaseMusicAdapter({ baseUrls, upstreamPool, preferredUpstreamId, cookie: upstreamCookie });
+        const adapter = createNeteaseMusicAdapter({ baseUrls, upstreamPool, preferredUpstreamId, cookie: upstreamCookie, onUpstreamSelected: (upstreamId) => { selectedUpstreamId = upstreamId; } });
+        const respond = (body: unknown, status = 200) => jsonWithCookies(body, status, selectedCookies(selectedUpstreamId));
+        const withSelectedCookie = (response: Response): Response => {
+          const cookies = selectedCookies(selectedUpstreamId);
+          if (!cookies.length) return response;
+          const headers = new Headers(response.headers);
+          cookies.forEach((cookie) => headers.append("Set-Cookie", cookie));
+          return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+        };
         if (url.pathname === "/api/music/netease/account" && request.method === "GET") {
-          return json({ success: true, account: await adapter.getAccount() });
+          return respond({ success: true, account: await adapter.getAccount() });
         }
         if (url.pathname === "/api/music/netease/playlists" && request.method === "GET") {
           const account = await adapter.getAccount();
-          return json({ success: true, account, playlists: await adapter.getPlaylists(account.userId) });
+          return respond({ success: true, account, playlists: await adapter.getPlaylists(account.userId) });
         }
         const playlistMatch = url.pathname.match(/^\/api\/music\/netease\/playlists\/([^/]+)\/tracks$/);
         if (playlistMatch && request.method === "GET") {
           const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") || 200) || 200));
           const offset = Math.max(0, Number(url.searchParams.get("offset") || 0) || 0);
           const page = await adapter.getPlaylistTracksPage(decodeURIComponent(playlistMatch[1]), { limit, offset });
-          return json({ success: true, tracks: page.tracks, nextOffset: page.nextOffset, hasMore: page.hasMore });
+          return respond({ success: true, tracks: page.tracks, nextOffset: page.nextOffset, hasMore: page.hasMore });
         }
         if (url.pathname === "/api/music/netease/search" && request.method === "GET") {
           const keywords = url.searchParams.get("keywords")?.trim() || "";
           if (!keywords) return json({ success: false, code: "invalid_keywords", error: "搜索关键词不能为空。" }, 400);
-          return json({ success: true, tracks: await adapter.searchTracks(keywords) });
+          return respond({ success: true, tracks: await adapter.searchTracks(keywords) });
         }
         if (url.pathname === "/api/music/netease/recommendations/daily" && request.method === "GET") {
-          return json({ success: true, tracks: await adapter.getDailyRecommendations() });
+          return respond({ success: true, tracks: await adapter.getDailyRecommendations() });
         }
         const trackMatch = url.pathname.match(/^\/api\/music\/netease\/tracks\/([^/]+)\/url$/);
         if (trackMatch && request.method === "POST") {
           const body = await requestBody(request);
           const level = body?.level === "higher" || body?.level === "exhigh" ? body.level : "standard";
-          return json({ success: true, track: await adapter.getPlayableUrl(decodeURIComponent(trackMatch[1]), level) });
+          return respond({ success: true, track: await adapter.getPlayableUrl(decodeURIComponent(trackMatch[1]), level) });
         }
         const streamMatch = url.pathname.match(/^\/api\/music\/netease\/tracks\/([^/]+)\/stream$/);
         if (streamMatch && request.method === "GET") {
@@ -208,13 +227,13 @@ export default {
             if (value) headers.set(header, value);
           }
           if (!headers.has("Content-Type")) headers.set("Content-Type", "audio/mpeg");
-          return new Response(upstream.body, { status: upstream.status, headers });
+          return withSelectedCookie(new Response(upstream.body, { status: upstream.status, headers }));
         }
         const lyricsMatch = url.pathname.match(/^\/api\/music\/netease\/tracks\/([^/]+)\/lyrics$/);
         if (lyricsMatch && request.method === "GET") {
-          return json({ success: true, lyrics: await adapter.getLyrics(decodeURIComponent(lyricsMatch[1])) });
+          return respond({ success: true, lyrics: await adapter.getLyrics(decodeURIComponent(lyricsMatch[1])) });
         }
-        return json({ success: false, code: "netease_route_not_found", error: "未知网易云代理路径。" }, 404);
+        return respond({ success: false, code: "netease_route_not_found", error: "未知网易云代理路径。" }, 404);
       } catch (error) {
         return neteaseErrorResponse(error, "网易云服务暂时不可用。");
       }

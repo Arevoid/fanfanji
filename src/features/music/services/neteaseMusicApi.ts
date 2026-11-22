@@ -55,7 +55,7 @@ export class NeteaseMusicClientError extends Error {
  */
 export const isNeteaseAuthenticationError = (error: unknown): boolean => {
   if (!(error instanceof NeteaseMusicClientError)) return false;
-  return error.status === 401 || error.code === "netease_not_authenticated";
+  return error.status === 401 || error.code === "netease_not_authenticated" || error.code === "netease_session_rebind_required";
 };
 
 type ApiPayload = Record<string, unknown>;
