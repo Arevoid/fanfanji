@@ -73,6 +73,11 @@ assert.deepEqual(
   ["收好，别客气。", "[红包]|8.88|恭喜发财，万事如意"],
   "validated payment cards survive quoted-dialogue normalization",
 );
+assert.deepEqual(
+  createDirectReplyCandidates(candidateContext("收好。\n【转账】｜200｜买菜｜true")).messages.map((message) => message.content),
+  ["收好。", "[转账]|200|买菜|true"],
+  "full-width transfer markup is normalized before attachment extraction",
+);
 
 // M-R: regeneration retains its legacy parse path and only returns candidates for AppChat to send/save.
 const regenerated = createRegeneratedReplyCandidates(candidateContext("第一句。第二句。"));

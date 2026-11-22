@@ -8,7 +8,10 @@ import { sanitizeCharacterActionText } from "./characterActionProtocol";
 import { splitModelDirectBubbles } from "./modelDirectBubbles";
 
 export function createDirectReplyCandidates(context: ReplyCandidateContext): ReplyCandidatesResult {
-  const replyText = sanitizeCharacterActionText(ensureExplicitStickerDelivery(context.rawText, context.requestedStickerMessage));
+  const replyText = sanitizeCharacterActionText(ensureExplicitStickerDelivery(context.rawText, context.requestedStickerMessage))
+    .split(/\r?\n/u)
+    .map(normalizePaymentMarkup)
+    .join("\n");
   // Attachment cards are executable message metadata, not dialogue. Keep
   // their complete lines out of quote/narration cleanup so a Chinese-quoted
   // reply cannot accidentally erase an already validated red packet,

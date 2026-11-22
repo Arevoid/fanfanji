@@ -179,11 +179,16 @@ export function normalizeRedPacketMarkup(content: string): string {
   return `[红包]|${amount}|${greeting}`;
 }
 
-export const normalizePaymentMarkup = (content: string): string => normalizeRedPacketMarkup(content)
+const normalizePaymentPrefix = (content: string): string => content.trim()
+  .replace(/｜/gu, "|")
+  .replace(/^[【「『（(]\s*(?:微信)?红包\s*[】」』）)]/u, "[红包]")
+  .replace(/^[【「『（(]\s*(?:微信)?转账\s*[】」』）)]/u, "[转账]");
+
+export const normalizePaymentMarkup = (content: string): string => normalizeRedPacketMarkup(normalizePaymentPrefix(content))
   .replace(/^\[微信转账\]/u, "[转账]");
 
 export const isRedPacketMarkup = (content: string): boolean => /^\[(?:红包|微信红包)\]/.test(content.trim());
-export const isTransferMarkup = (content: string): boolean => /^\[(?:转账|微信转账)\]/.test(content);
+export const isTransferMarkup = (content: string): boolean => /^\[(?:转账|微信转账)\]/.test(content.trim());
 export const isCallRecordMarkup = (content: string): boolean => /^\[通话记录\]\|/.test(content);
 
 export interface RedPacketClaimNotice {

@@ -130,13 +130,106 @@ function optionalAmount(value: unknown): number | undefined {
   return Number(amount.toFixed(2));
 }
 
+const CHINESE_AMOUNT_DIGITS: Record<string, number> = {
+  零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4,
+  五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+};
+
+/** Parse the compact Chinese numerals people commonly use in chat amounts. */
+function parseChineseAmount(value: string): number | undefined {
+  const normalized = value.trim().replace(/整$/u, "");
+  if (!normalized || !/^[零〇一二两三四五六七八九十百千万]+$/u.test(normalized)) return undefined;
+  const colloquial = normalized.match(/^([零〇一二两三四五六七八九])([百千万])([零〇一二两三四五六七八九])$/u);
+  if (colloquial) {
+    const leading = CHINESE_AMOUNT_DIGITS[colloquial[1]];
+    const trailing = CHINESE_AMOUNT_DIGITS[colloquial[3]];
+    const unit = colloquial[2] === "百" ? 100 : colloquial[2] === "千" ? 1_000 : 10_000;
+    const result = leading * unit + trailing * (unit / 10);
+    return result >= 0.01 && result <= 10_000 ? Number(result.toFixed(2)) : undefined;
+  }
+  let total = 0;
+  let section = 0;
+  let number = 0;
+  for (const character of normalized) {
+    const digit = CHINESE_AMOUNT_DIGITS[character];
+    if (digit !== undefined) {
+      number = digit;
+      continue;
+    }
+    const unit = character === "十" ? 10
+      : character === "百" ? 100
+        : character === "千" ? 1_000
+          : 10_000;
+    if (unit === 10_000) {
+      section = (section + number || 1) * unit;
+      total += section;
+      section = 0;
+    } else {
+      section += (number || 1) * unit;
+    }
+    number = 0;
+  }
+  const result = total + section + number;
+  return Number.isFinite(result) && result >= 0.01 && result <= 10_000
+    ? Number(result.toFixed(2))
+    : undefined;
+}
+
+function parseAmountToken(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const arabic = value.match(/^\d+(?:\.\d{1,2})?$/u)?.[0];
+  if (arabic) {
+    const amount = Number(arabic);
+    return Number.isFinite(amount) && amount >= 0.01 && amount <= 10_000
+      ? Number(amount.toFixed(2))
+      : undefined;
+  }
+  return parseChineseAmount(value);
+}
+
+const TRANSFER_CUES = /(?:转账|转钱|转给我|给我转|帮我转|打钱|发钱|打款|汇款|打给我|发给我|汇给我|转入我|给我打|给我发|给我汇|给我来|转[^，。！？\n]{0,6}给我)/u;
+const TRANSFER_AMOUNT_CUES = /(?:转账|转钱|转给我|给我转|帮我转|给你转|给你打|给你发|给你汇|打钱|发钱|打款|汇款|打给我|发给我|汇给我|转入我|给我打|给我发|给我汇|给我来)/u;
+const OUTBOUND_TRANSFER = /(?:我|咱们?|本人)\s*(?:给你|转给你|发给你|打给你|汇给你|给你转|给你发|给你打|给你汇)/u;
+const TRANSFER_REQUEST_REFUSAL = /(?:不要|别|不用|无需|不必|不想|拒绝|禁止|别再)\s*(?:给我)?(?:转|打|发|汇|钱)/u;
+
 function extractExplicitAmount(text: string): number | undefined {
   const currency = text.match(/(?:¥|￥)\s*(\d+(?:\.\d{1,2})?)/u);
-  if (currency) return Number(Number(currency[1]).toFixed(2));
-  const split = text.match(/(\d+)\s*块\s*(\d{1,2})(?:分)?/u);
-  if (split) return Number((Number(split[1]) + Number(split[2]) / (split[2].length === 1 ? 10 : 100)).toFixed(2));
-  const yuan = text.match(/(\d+(?:\.\d{1,2})?)\s*(?:元|块钱|块)/u);
-  return yuan ? Number(Number(yuan[1]).toFixed(2)) : undefined;
+  if (currency) return parseAmountToken(currency[1]);
+
+  const arabicSplit = text.match(/(\d+(?:\.\d{1,2})?)\s*块\s*(\d{1,2})(?:分)?/u);
+  if (arabicSplit) {
+    return Number((Number(arabicSplit[1]) + Number(arabicSplit[2]) / (arabicSplit[2].length === 1 ? 10 : 100)).toFixed(2));
+  }
+  const chineseSplit = text.match(/([零〇一二两三四五六七八九十百千万\d]+)\s*块\s*([零〇一二两三四五六七八九十百千万\d]{1,2})(?:分)?/u);
+  if (chineseSplit) {
+    const whole = parseAmountToken(chineseSplit[1]);
+    const fraction = parseAmountToken(chineseSplit[2]);
+    if (whole !== undefined && fraction !== undefined && fraction < 100) {
+      return Number((whole + fraction / (chineseSplit[2].length === 1 ? 10 : 100)).toFixed(2));
+    }
+  }
+
+  const unit = text.match(/(\d+(?:\.\d{1,2})?)\s*(?:元|块钱|块)/u);
+  if (unit) return parseAmountToken(unit[1]);
+  const chineseUnit = text.match(/([零〇一二两三四五六七八九十百千万]+)\s*(?:元|块钱|块)/u);
+  if (chineseUnit) return parseAmountToken(chineseUnit[1]);
+
+  // Amounts without a currency suffix are accepted only immediately after a
+  // transfer cue. This covers “给我转200” without treating unrelated numbers
+  // elsewhere in the message as money.
+  const recipient = text.match(/转(?:账|钱)?\s*([0-9零〇一二两三四五六七八九十百千万]+)\s*给我/u);
+  if (recipient) return parseAmountToken(recipient[1]);
+
+  const amountPrefix = `${TRANSFER_AMOUNT_CUES.source}(?:一下|一点|一笔|一个)?[^0-9零〇一二两三四五六七八九十百千万]{0,8}`;
+  const cue = text.match(new RegExp(`${amountPrefix}([0-9]+(?:\\.[0-9]{1,2})?)`, "u"));
+  if (cue) return parseAmountToken(cue[1]);
+  const chineseCue = text.match(new RegExp(`${amountPrefix}([零〇一二两三四五六七八九十百千万]+)`, "u"));
+  if (!chineseCue) return undefined;
+  const cueTail = text.slice((chineseCue.index || 0) + chineseCue[0].length);
+  // “转一下” is a common filler, not a one-yuan amount. Keep the guard
+  // narrow so a real “转一百” request remains valid.
+  if (chineseCue[1] === "一" && /^\s*下/u.test(cueTail)) return undefined;
+  return parseAmountToken(chineseCue[1]);
 }
 
 function extractTail(text: string, patterns: readonly RegExp[]): string | undefined {
@@ -152,11 +245,23 @@ function hasExplicitActionRefusal(reply: string): boolean {
   return /(?:不发|不转|不给|不能|不行|拒绝|不想|不愿|没钱|算了|别想|无法|不可以|不方便|不支持)/u.test(reply);
 }
 
+function extractCharacterTransferClaimAmount(reply: string): number | undefined {
+  const normalized = reply.trim();
+  if (!normalized || hasExplicitActionRefusal(normalized)) return undefined;
+  // Do not turn a future plan, hypothetical, or question into a completed
+  // payment. The claim must describe an immediate/past transfer to the user.
+  if (/(?:等会|晚点|下次|以后|准备|想给|可能|应该|要不要|怎么给)/u.test(normalized)) return undefined;
+  const claim = /(?:我\s*(?:已经|已|这就|现在|马上)?\s*(?:给你|转给你|发给你|打给你|汇给你)|给你\s*(?:转|发|打|汇)|(?:转账|转钱|打钱|发钱|打款|汇款)(?:给你)?)/u;
+  return claim.test(normalized) ? extractExplicitAmount(normalized) : undefined;
+}
+
 /**
  * Recover an explicit action request when a provider returns ordinary prose
  * instead of the private action marker. This is intentionally conservative:
  * it only accepts direct imperatives from the latest user turn and refuses to
- * infer actions from quoted text, role narration, or a character refusal.
+ * infer actions from quoted text, role narration, or a character refusal. For
+ * transfers, an explicit request without an amount may use the amount from an
+ * immediate character transfer claim (for example “给我转一下” → “给你转200”).
  */
 export function parseExplicitCharacterActionIntent(
   input: ExplicitCharacterActionIntentInput,
@@ -220,8 +325,12 @@ export function parseExplicitCharacterActionIntent(
       reason: "用户明确要求角色发送好友申请",
     };
   }
-  if (/(?:转账|转给我|给我转|打钱|发钱)/u.test(userText)) {
-    const amount = extractExplicitAmount(userText);
+  const characterTransferClaimAmount = extractCharacterTransferClaimAmount(input.characterReply || "");
+  const userRequestedTransfer = TRANSFER_CUES.test(userText);
+  if ((userRequestedTransfer || characterTransferClaimAmount !== undefined)
+    && !OUTBOUND_TRANSFER.test(userText)
+    && !TRANSFER_REQUEST_REFUSAL.test(userText)) {
+    const amount = extractExplicitAmount(userText) ?? characterTransferClaimAmount;
     if (amount === undefined) return undefined;
     return {
       type: "send_transfer",
@@ -229,7 +338,7 @@ export function parseExplicitCharacterActionIntent(
       amount,
       memo: extractTail(userText, [/(?:备注|说明|说)[：:]?(.+)$/u]) || "转账",
       confirmed: true,
-      reason: "用户明确要求角色转账",
+      reason: userRequestedTransfer ? "用户明确要求角色转账" : "角色明确宣称已完成转账",
     };
   }
   if (/(?:发朋友圈|发动态|发条动态|发布动态)/u.test(userText)) {

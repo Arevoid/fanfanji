@@ -75,8 +75,10 @@ assert.deepEqual(createUserTextMessage({ id: "snapshot-1", characterId: "c1", co
 assert.equal(normalizePaymentMarkup("[微信红包]|1|x"), "[红包]|1.00|x");
 assert.equal(normalizePaymentMarkup("[红包]|金额|x"), "[红包]|8.88|x");
 assert.equal(normalizePaymentMarkup("[红包]|¥168|x"), "[红包]|168.00|x");
+assert.equal(normalizePaymentMarkup("【转账】｜200｜买菜｜true"), "[转账]|200|买菜|true");
 assert.equal(isRedPacketMarkup("[微信红包]|1|x"), true);
 assert.equal(isTransferMarkup("[微信转账]|1|x"), true);
+assert.equal(isTransferMarkup("  [转账]|1|x"), true);
 assert.deepEqual(parseCallRecord("[通话记录]|语音通话|00:02|%5B%5D"), { callType: "语音通话", status: "completed", direction: "outgoing", duration: "00:02", transcript: [] });
 const cancelledCall = createCallRecordMarkup({ callType: "语音通话", status: "cancelled", direction: "incoming", duration: "00:00", transcript: [] });
 assert.deepEqual(parseCallRecord(cancelledCall), { callType: "语音通话", status: "cancelled", direction: "incoming", duration: "00:00", transcript: [] });

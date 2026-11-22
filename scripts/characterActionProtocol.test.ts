@@ -182,6 +182,38 @@ const inferredTransfer = parseExplicitCharacterActionIntent({
 });
 assert.equal(inferredTransfer?.type, "send_transfer");
 assert.equal(inferredTransfer?.amount, 5.21);
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "给我转200",
+  characterReply: "好，给你转了。",
+})?.amount, 200);
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "转两百给我",
+  characterReply: "已经给你转好了。",
+})?.amount, 200);
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "转两百五给我",
+  characterReply: "已经给你转好了。",
+})?.amount, 250);
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "给我转一下",
+  characterReply: "我已经给你转200了。",
+})?.amount, 200, "an explicit transfer request may recover the amount from an immediate claim");
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "好，那我等你消息。",
+  characterReply: "我已经给你转200了，拿去花。",
+})?.amount, 200, "a completed character transfer claim should become a card even when the user did not repeat the request");
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "我给你转200",
+  characterReply: "收到。",
+}), undefined, "a user-authored outbound transfer must not make the character send money back");
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "不要给我转200",
+  characterReply: "好。",
+}), undefined, "a transfer prohibition must not create an action");
+assert.equal(parseExplicitCharacterActionIntent({
+  userText: "给我转一下",
+  characterReply: "晚点给你转200。",
+}), undefined, "a future plan is not a completed transfer");
 
 assert.equal(parseExplicitCharacterActionIntent({
   userText: "发一张图片给我",
