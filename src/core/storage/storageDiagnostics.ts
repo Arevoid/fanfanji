@@ -325,7 +325,7 @@ function collectNestedImageAssetIds(value: unknown, referenced: Set<string>): vo
     return;
   }
   for (const [key, nested] of Object.entries(value)) {
-    if (/^(?:image|avatar).*AssetId$/i.test(key) && typeof nested === "string" && nested.length > 0) {
+    if (/^(?:image|avatar|backgroundImage).*AssetId$/i.test(key) && typeof nested === "string" && nested.length > 0) {
       referenced.add(nested);
     }
     collectNestedImageAssetIds(nested, referenced);
@@ -341,6 +341,7 @@ async function collectReferencedAssetIds(storage: Storage, existingNames: Set<st
     [storageKeys.messages, "imageAssetId"],
     [storageKeys.imageGenerationRecords, "imageAssetId"],
     [storageKeys.forumProfiles, "avatarAssetId"],
+    [storageKeys.offlineStories, "backgroundImageAssetId"],
   ];
   for (const [key, field] of fieldsByKey) {
     const raw = storage.getItem(key);
@@ -402,9 +403,12 @@ async function collectReferencedAssetIds(storage: Storage, existingNames: Set<st
   if (isOfflineStoryEntryStoreEnabled() && typeof indexedDB !== "undefined") {
     try {
       const stories = await offlineStoryDb.loadAll();
-      stories.forEach((story) => story.messages.forEach((message) => {
-        if (message.imageAssetId) referenced.add(message.imageAssetId);
-      }));
+      stories.forEach((story) => {
+        if (story.backgroundImageAssetId) referenced.add(story.backgroundImageAssetId);
+        story.messages.forEach((message) => {
+          if (message.imageAssetId) referenced.add(message.imageAssetId);
+        });
+      });
     } catch {
       complete = false;
     }

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { OfflineStory } from "../../../types";
 import { readString, writeJson } from "../../../core/storage/storageAdapter";
+import { imageAssetDb } from "../../../utils/imageAssetDb";
 
 export interface OfflineStylePreset {
   id: string;
@@ -51,9 +52,32 @@ export function useOfflineStorySettings({ activeStory, saveStory, showToast }: U
   const [settingsStylePromptName, setSettingsStylePromptName] = useState("");
   const [settingsStylePromptContent, setSettingsStylePromptContent] = useState("");
   const [settingsCustomCss, setSettingsCustomCss] = useState("");
+  const [settingsBackgroundImageAssetId, setSettingsBackgroundImageAssetId] = useState<string | undefined>();
+  const [settingsBackgroundImageMimeType, setSettingsBackgroundImageMimeType] = useState<string | undefined>();
+  const [settingsBackgroundImagePreviewUrl, setSettingsBackgroundImagePreviewUrl] = useState<string | null>(null);
+  const [pendingBackgroundImageAssetId, setPendingBackgroundImageAssetId] = useState<string | undefined>();
+  const [backgroundImageCleared, setBackgroundImageCleared] = useState(false);
+  const previewUrlRef = useRef<string | null>(null);
+
+  const replacePreviewUrl = (nextUrl: string | null) => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = nextUrl;
+    setSettingsBackgroundImagePreviewUrl(nextUrl);
+  };
+
+  useEffect(() => () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+  }, []);
 
   useEffect(() => {
-    if (!activeStory || !isSettingsOpen) return;
+    if (!activeStory) {
+      setSettingsBackgroundImageAssetId(undefined);
+      setSettingsBackgroundImageMimeType(undefined);
+      setPendingBackgroundImageAssetId(undefined);
+      setBackgroundImageCleared(false);
+      replacePreviewUrl(null);
+      return;
+    }
     setSettingsWordLimit(activeStory.wordLimit ? String(activeStory.wordLimit) : "");
     setSettingsPartnerP(activeStory.partnerPerspective || "third");
     setSettingsUserP(activeStory.userPerspective || "first");
@@ -62,13 +86,81 @@ export function useOfflineStorySettings({ activeStory, saveStory, showToast }: U
     setSettingsStylePromptName(activeStory.stylePromptName || "");
     setSettingsStylePromptContent(activeStory.stylePromptContent || "");
     setSettingsCustomCss(activeStory.customCss || "");
-  }, [activeStory, isSettingsOpen]);
+    setSettingsBackgroundImageAssetId(activeStory.backgroundImageAssetId);
+    setSettingsBackgroundImageMimeType(activeStory.backgroundImageMimeType);
+    setPendingBackgroundImageAssetId(undefined);
+    setBackgroundImageCleared(false);
+
+    let cancelled = false;
+    if (!activeStory.backgroundImageAssetId) {
+      replacePreviewUrl(null);
+    } else {
+      void imageAssetDb.getImage(activeStory.backgroundImageAssetId).then((blob) => {
+        if (cancelled) return;
+        replacePreviewUrl(blob ? URL.createObjectURL(blob) : null);
+      }).catch(() => {
+        if (!cancelled) replacePreviewUrl(null);
+      });
+    }
+    return () => { cancelled = true; };
+  }, [activeStory?.id, activeStory?.backgroundImageAssetId, isSettingsOpen]);
 
   const hasSelectedCustomPreset = customPresets.some((preset) => preset.id === settingsStylePresetId);
 
-  const handleSaveSettings = () => {
+  const handleBackgroundImageUpload = async (file: File) => {
+    if (!activeStory) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("背景图片仅支持图片文件。");
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      showToast("背景图片不能超过 12MB。");
+      return;
+    }
+    const assetId = `offline-story-background-${activeStory.id}-${Date.now()}`;
+    try {
+      if (pendingBackgroundImageAssetId) await imageAssetDb.deleteImage(pendingBackgroundImageAssetId);
+      await imageAssetDb.saveImage(assetId, file);
+      setPendingBackgroundImageAssetId(assetId);
+      setSettingsBackgroundImageMimeType(file.type || "image/jpeg");
+      setBackgroundImageCleared(false);
+      replacePreviewUrl(URL.createObjectURL(file));
+      showToast("背景图片已载入，保存设置后生效。");
+    } catch {
+      showToast("背景图片保存失败，请重试。");
+    }
+  };
+
+  const handleClearBackgroundImage = async () => {
+    if (pendingBackgroundImageAssetId) {
+      await imageAssetDb.deleteImage(pendingBackgroundImageAssetId).catch(() => undefined);
+      setPendingBackgroundImageAssetId(undefined);
+    }
+    setBackgroundImageCleared(true);
+    replacePreviewUrl(null);
+    showToast("已清除独立背景，保存后恢复 CSS 背景。");
+  };
+
+  const handleCancelSettings = async () => {
+    if (pendingBackgroundImageAssetId) await imageAssetDb.deleteImage(pendingBackgroundImageAssetId).catch(() => undefined);
+    setPendingBackgroundImageAssetId(undefined);
+    setBackgroundImageCleared(false);
+    setIsSettingsOpen(false);
+  };
+
+  const handleSaveSettings = async () => {
     if (!activeStory) return;
     const limit = parseInt(settingsWordLimit.trim(), 10);
+    let backgroundImageAssetId = settingsBackgroundImageAssetId;
+    if (backgroundImageCleared) {
+      if (backgroundImageAssetId) await imageAssetDb.deleteImage(backgroundImageAssetId).catch(() => undefined);
+      backgroundImageAssetId = undefined;
+    } else if (pendingBackgroundImageAssetId) {
+      if (backgroundImageAssetId && backgroundImageAssetId !== pendingBackgroundImageAssetId) {
+        await imageAssetDb.deleteImage(backgroundImageAssetId).catch(() => undefined);
+      }
+      backgroundImageAssetId = pendingBackgroundImageAssetId;
+    }
     saveStory({
       ...activeStory,
       wordLimit: Number.isNaN(limit) || limit <= 0 ? undefined : limit,
@@ -79,8 +171,13 @@ export function useOfflineStorySettings({ activeStory, saveStory, showToast }: U
       stylePromptName: settingsStylePromptName,
       stylePromptContent: settingsStylePromptContent,
       customCss: settingsCustomCss,
+      backgroundImageAssetId,
+      backgroundImageMimeType: backgroundImageAssetId ? settingsBackgroundImageMimeType : undefined,
       updatedAt: Date.now(),
     });
+    setSettingsBackgroundImageAssetId(backgroundImageAssetId);
+    setPendingBackgroundImageAssetId(undefined);
+    setBackgroundImageCleared(false);
     setIsSettingsOpen(false);
     showToast("剧本配置已保存！");
   };
@@ -117,6 +214,7 @@ export function useOfflineStorySettings({ activeStory, saveStory, showToast }: U
     settingsUserP, setSettingsUserP, settingsAllowCharacterToSpeakForUser, setSettingsAllowCharacterToSpeakForUser,
     settingsStylePresetId, setSettingsStylePresetId, settingsStylePromptName, setSettingsStylePromptName,
     settingsStylePromptContent, setSettingsStylePromptContent, settingsCustomCss, setSettingsCustomCss,
-    hasSelectedCustomPreset, handleSaveSettings, handleCreateCustomPreset, handleDeleteCustomPreset,
+    settingsBackgroundImagePreviewUrl, handleBackgroundImageUpload, handleClearBackgroundImage,
+    hasSelectedCustomPreset, handleSaveSettings, handleCancelSettings, handleCreateCustomPreset, handleDeleteCustomPreset,
   };
 }

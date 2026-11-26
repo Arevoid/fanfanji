@@ -118,7 +118,10 @@ assert.ok(linkedStatusStart > workspaceHeaderEnd, "linked status must render out
 assert.match(workspaceHeaderSource.slice(workspaceHeaderStart, workspaceHeaderEnd), /aria-label="返回线下故事列表"/);
 assert.match(workspaceHeaderSource.slice(workspaceHeaderStart, workspaceHeaderEnd), /offline-workspace-menu-anchor/);
 assert.match(workspaceExitSource, /onNavigateToChat\(target\.characterId, target\.relationId, target\.conversationId\)/);
-assert.match(cssSource, /\.offline-workspace-nav\s*\{[\s\S]*grid-template-columns:\s*40px minmax\(0, 1fr\) 40px/);
+assert.match(cssSource, /\.offline-workspace-nav\s*\{[\s\S]*grid-template-columns:\s*44px minmax\(0, 1fr\) 44px/);
+assert.match(cssSource, /background-repeat:\s*no-repeat/);
+assert.match(componentSource, /data-offline-scope=/);
+assert.match(componentSource, /data-offline-card="directory-story"/);
 assert.match(cssSource, /\.offline-chat-link-copy\s*\{[\s\S]*min-width:\s*0/);
 assert.match(cssSource, /\.offline-chat-link-action\s*\{[\s\S]*flex:\s*0 0 auto/);
 assert.match(appSource, /candidate\.userIdentityId === ownerIdentityId/);

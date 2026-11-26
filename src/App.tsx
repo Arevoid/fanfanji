@@ -1429,6 +1429,10 @@ export default function App() {
     deletedOfflineStoryIdsRef.current.add(storyId);
     void offlineStoryDb.delete(storyId).catch((error) => console.warn("Unable to delete the durable offline story.", error));
     const deletedStory = offlineStoriesRef.current.find((story) => story.id === storyId);
+    if (deletedStory?.backgroundImageAssetId) {
+      void imageAssetDb.deleteImage(deletedStory.backgroundImageAssetId)
+        .catch((error) => console.warn("Failed to delete offline story background asset:", error));
+    }
     retractBySourceStoryIds([storyId]);
     retractByOfflineStoryIds([storyId]);
     if (deletedStory) {

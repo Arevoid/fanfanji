@@ -1148,6 +1148,9 @@ export interface OfflineStory {
   stylePromptContent?: string;
   showAvatars?: boolean;
   customCss?: string;
+  /** Optional local wallpaper asset; when present it overrides custom CSS backgrounds. */
+  backgroundImageAssetId?: string;
+  backgroundImageMimeType?: string;
   /** Continue-mode stories inherit this from the source chat; other modes choose it at creation. */
   enableTimeAwareness?: boolean;
   /** Confirmed Truth/manual-memory snapshot captured for this isolated story. */

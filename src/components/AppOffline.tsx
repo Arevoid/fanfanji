@@ -252,7 +252,8 @@ export default function AppOffline({
     settingsUserP, setSettingsUserP, settingsAllowCharacterToSpeakForUser, setSettingsAllowCharacterToSpeakForUser,
     settingsStylePresetId, setSettingsStylePresetId, settingsStylePromptName, setSettingsStylePromptName,
     settingsStylePromptContent, setSettingsStylePromptContent, settingsCustomCss, setSettingsCustomCss,
-    hasSelectedCustomPreset, handleSaveSettings, handleCreateCustomPreset, handleDeleteCustomPreset,
+    settingsBackgroundImagePreviewUrl, handleBackgroundImageUpload, handleClearBackgroundImage,
+    hasSelectedCustomPreset, handleSaveSettings, handleCancelSettings, handleCreateCustomPreset, handleDeleteCustomPreset,
   } = offlineStorySettings;
   const [offlineCssTemplateCopied, setOfflineCssTemplateCopied] = useState(false);
   const [confirmMemoryRepair,setConfirmMemoryRepair]=useState(false);
@@ -304,6 +305,9 @@ export default function AppOffline({
     "--offline-reading-text": readingPreferences.textColor.toUpperCase() === "#1D1D1F" ? "var(--text-primary)" : readingPreferences.textColor,
     "--offline-reading-card": readingPreferences.cardBackground.toUpperCase() === "#FFFFFF" ? "var(--surface)" : readingPreferences.cardBackground,
   } as React.CSSProperties;
+  const uploadedBackgroundOverrideCss = settingsBackgroundImagePreviewUrl
+    ? `.offline-page[data-offline-background="uploaded"], .offline-page[data-offline-background="uploaded"] .offline-story-directory, .offline-page[data-offline-background="uploaded"] .offline-story-workspace, .offline-page[data-offline-background="uploaded"] .offline-story-scroll { background-image: url(${JSON.stringify(settingsBackgroundImagePreviewUrl)}) !important; }`
+    : "";
   const linkedChatTarget = activeStory
     ? resolveOfflineChatNavigationTarget({
         story: activeStory,
@@ -434,6 +438,10 @@ export default function AppOffline({
       data-theme-page="offline"
       className={`offline-page ${activeStory ? "is-workspace" : "is-directory"} ${isSettingsOpen ? "is-settings" : ""} w-full h-full min-h-0 flex flex-col relative overflow-hidden font-sans select-none`}
       data-offline-view={activeStory ? (isSettingsOpen ? "settings" : "workspace") : "directory"}
+      data-offline-mode={activeStory?.mode || "directory"}
+      data-offline-scope={activeStory ? (activeStory.characterIds && activeStory.characterIds.length > 1 ? "multi" : "single") : "directory"}
+      data-offline-background={settingsBackgroundImagePreviewUrl ? "uploaded" : "css"}
+      data-offline-theme="default"
       style={readingStyle}
     >
       
@@ -460,6 +468,7 @@ export default function AppOffline({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="offline-story-directory flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50"
+            data-offline-surface="directory"
           >
             {/* Header */}
             <div className="offline-directory-header relative flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0">
@@ -515,6 +524,8 @@ export default function AppOffline({
                       className={`offline-character-filter-item ${isSel ? "is-active" : ""} group relative flex w-12 shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-0.5 transition-all ${
                         isSel ? "text-slate-900" : "text-slate-600 hover:bg-slate-50"
                       }`}
+                      data-offline-role="character"
+                      data-offline-selected={isSel ? "true" : "false"}
                     >
                       <span className={`relative rounded-full p-0.5 transition-all ${isSel ? "bg-rose-300" : "bg-transparent"}`}>
                         <img src={char.avatar} alt="" className="offline-character-filter-avatar h-8 w-8 rounded-full object-cover border border-slate-200" />
@@ -609,6 +620,9 @@ export default function AppOffline({
                         key={story.id}
                         onClick={() => handleOpenStory(story)}
                         className="p-4 rounded-2xl bg-white border border-slate-150 hover:border-slate-250 hover:bg-slate-50/50 cursor-pointer transition-all flex items-start justify-between group shadow-sm hover:shadow-md"
+                        data-offline-card="directory-story"
+                        data-offline-mode={story.mode}
+                        data-offline-scope={isMultiplayerStory ? "multi" : "single"}
                       >
                         <div className="space-y-2 flex-1 min-w-0 pr-4">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -701,6 +715,9 @@ export default function AppOffline({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className={`offline-story-workspace flex-1 min-h-0 flex flex-col h-full overflow-hidden bg-slate-50 ${activeStory ? `is-mode-${activeStory.mode}` : ""}`}
+            data-offline-surface="workspace"
+            data-offline-mode={activeStory?.mode || "continue"}
+            data-offline-scope={activeStory?.characterIds && activeStory.characterIds.length > 1 ? "multi" : "single"}
           >
             {isSettingsOpen ? (
               /* ================= STORY SETTINGS PAGE ================= */
@@ -708,7 +725,7 @@ export default function AppOffline({
                 {/* Header */}
                 <div className="relative flex items-center justify-between px-4 py-1.5 bg-transparent z-10 shrink-0">
                   <button 
-                    onClick={() => setIsSettingsOpen(false)}
+                    onClick={() => void handleCancelSettings()}
                     className="app-nav-icon-button w-8 h-8 flex items-center justify-center text-slate-500 transition-colors shrink-0"
                     title="返回剧本空间"
                   >
@@ -721,7 +738,7 @@ export default function AppOffline({
                 </div>
 
                 {/* Settings Body */}
-                <div className="flex-1 overflow-y-auto px-4 pb-[calc(34px+16px)] pt-4 space-y-5">
+                <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4 space-y-5">
                   {/* Sync memory button is now placed at the top of settings as requested */}
                   <section className="space-y-2">
                     <h4 className="text-sm font-medium text-[#999999]">同步设置</h4>
@@ -949,27 +966,60 @@ export default function AppOffline({
                     <p className="text-[10px] text-slate-400">保存剧本设置后，样式会在当前线下页面中生效。</p>
                   </div>
                   </section>
-                </div>
 
-                {/* Footer buttons */}
-                <div className="p-4 bg-white border-t border-[#F0F0F0] shrink-0 space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsSettingsOpen(false)}
-                    className="w-full rounded-xl border border-[#F0F0F0] bg-white py-3 text-xs font-semibold text-[#111111] transition-colors hover:bg-[#F7F7F9]"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleSaveSettings();
-                      setIsSettingsOpen(false);
-                    }}
-                    className="w-full rounded-xl bg-[#111111] py-3 text-xs font-semibold text-white transition-colors hover:bg-black"
-                  >
-                    保存设置
-                  </button>
+                  {/* Independent background wallpaper */}
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-medium text-[#999999]">背景壁纸</h4>
+                    <div className="rounded-2xl border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)] space-y-3 text-left">
+                      {settingsBackgroundImagePreviewUrl ? (
+                        <div className="space-y-3">
+                          <div className="relative overflow-hidden rounded-[14px] border border-[#F0F0F0] bg-[#F7F7F9]">
+                            <img src={settingsBackgroundImagePreviewUrl} alt="当前线下背景壁纸预览" className="block h-28 w-full object-cover" />
+                            <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/45 px-3 py-2 text-[10px] text-white">
+                              <span>已设置独立背景</span>
+                              <button type="button" onClick={() => void handleClearBackgroundImage()} className="rounded-md bg-white/20 px-2 py-1 hover:bg-white/30">清除</button>
+                            </div>
+                          </div>
+                          <label className="flex cursor-pointer items-center justify-center rounded-[12px] border border-dashed border-[#D9D9DE] bg-[#FAFAFB] py-2.5 text-[11px] text-[#6E6E73] transition-colors hover:bg-[#F3F3F5]">
+                            更换背景图片
+                            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (file) void handleBackgroundImageUpload(file);
+                              event.currentTarget.value = "";
+                            }} />
+                          </label>
+                        </div>
+                      ) : (
+                        <label className="flex cursor-pointer items-center justify-center rounded-[12px] border border-dashed border-[#D9D9DE] bg-[#FAFAFB] py-4 text-[11px] text-[#6E6E73] transition-colors hover:bg-[#F3F3F5]">
+                          点击上传背景图片
+                          <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (file) void handleBackgroundImageUpload(file);
+                            event.currentTarget.value = "";
+                          }} />
+                        </label>
+                      )}
+                      <p className="text-[10px] leading-relaxed text-[#999999]">独立背景优先于线下 CSS 中设置的壁纸；清除后恢复 CSS 背景。图片仅保存于本机。</p>
+                    </div>
+                  </section>
+
+                  {/* Footer buttons stay in the settings scroll flow. */}
+                  <div className="space-y-2 pb-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleCancelSettings()}
+                      className="w-full rounded-xl border border-[#F0F0F0] bg-white py-3 text-xs font-semibold text-[#111111] transition-colors hover:bg-[#F7F7F9]"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveSettings()}
+                      className="w-full rounded-xl bg-[#111111] py-3 text-xs font-semibold text-white transition-colors hover:bg-black"
+                    >
+                      保存设置
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1020,6 +1070,7 @@ export default function AppOffline({
               header={(
                 <>
                   {activeStory.customCss && <style data-offline-custom-css dangerouslySetInnerHTML={{ __html: scopeOfflineCustomCss(activeStory.customCss) }} />}
+                  {uploadedBackgroundOverrideCss && <style data-offline-uploaded-background dangerouslySetInnerHTML={{ __html: uploadedBackgroundOverrideCss }} />}
                   {visibleStoryMessages.length > 0 && <div className="offline-story-session"><span>{new Date(activeStory.createdAt).toLocaleDateString()} · 剧情记录</span><span>{visibleStoryMessages.length} 段</span></div>}
                   {visibleStoryMessages.length === 0 && (
                     <div className="offline-empty-state">

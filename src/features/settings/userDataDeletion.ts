@@ -170,7 +170,10 @@ const USER_DATA_MANIFEST: Record<UserDataAppId, DataManifest> = {
   },
   offline: {
     keys: [storageKeys.offlineStories, "offline_custom_style_presets"],
-    clearBinary: () => offlineStoryDb.clearAll(),
+    clearBinary: async () => {
+      await offlineStoryDb.clearAll();
+      await clearOrphanedSharedAssets();
+    },
   },
   forum: {
     prefixes: ["phone_forum_"],
